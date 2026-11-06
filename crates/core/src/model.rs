@@ -1,6 +1,7 @@
 //! The compact document model: flat arrays, one text buffer, ranges instead of owned strings.
 
-use crate::limits::Oversize;
+use crate::limits::{MAX_FILE_BYTES, Oversize};
+use std::collections::HashMap;
 use std::fmt;
 
 pub const NONE: u32 = u32::MAX;
@@ -72,6 +73,8 @@ pub enum ListMarker {
     Disc,
     Circle,
     Square,
+    /// No marker: an item the parser added around stray content in a list, as in `<ul>text</ul>`.
+    None,
 }
 
 /// `Left` and `Right` float the image with text around it; the others align it within its line.
@@ -107,6 +110,13 @@ impl AlertKind {
     }
 }
 
+/// What kind of block sits where is guaranteed whatever the input, so a renderer need not check:
+/// - A `Table` holds only `TableRow`s, a `TableRow` only `TableCell`s, and those have no other parent.
+///   Stray content goes into an implied cell, so its text stays in document order.
+/// - A `List` holds only `ListItem`s, and those have no other parent. Stray content gets an item with
+///   `ListMarker::None`, and a lone `<li>` an implied list.
+/// - `colspan` is within 1 to `MAX_COLSPAN`, and `rowspan` within 1 to `MAX_ROWSPAN`.
+/// - Nesting stays within a few levels of `MAX_BLOCK_DEPTH`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockKind {
     Paragraph {
@@ -221,6 +231,7 @@ pub struct LinkInfo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Length {
+    /// At most `MAX_HTML_LENGTH_PX`.
     Px(u32),
     Percent(u16),
 }
@@ -405,8 +416,9 @@ impl Document {
             .collect()
     }
 
-    /// The block a URL fragment points at. GitHub's `user-content-` prefix and percent-encoding are
-    /// accepted, and an exact match wins over a case-insensitive one.
+    /// The block a URL fragment points at. This is the one place a fragment is percent-decoded, so
+    /// pass it as the link wrote it. GitHub's `user-content-` prefix is accepted, and an exact match
+    /// wins over a case-insensitive one.
     pub fn resolve_fragment(&self, fragment: &str) -> Option<u32> {
         let decoded = crate::links::percent_decode(fragment);
         let f = decoded.strip_prefix("user-content-").unwrap_or(&decoded);
@@ -544,7 +556,7 @@ impl Document {
     /// Stable keys for details blocks: a hash of the summary text plus its occurrence, so an edit
     /// elsewhere in the file does not change which block a saved open state refers to.
     pub fn details_keys(&self) -> Vec<(u32, u64)> {
-        let mut seen: Vec<(u64, u32)> = Vec::new();
+        let mut seen: HashMap<u64, u32> = HashMap::new();
         let mut out = Vec::new();
         for (i, b) in self.blocks.iter().enumerate() {
             if !matches!(b.kind, BlockKind::Details { .. }) {
@@ -556,16 +568,9 @@ impl Document {
                 .find(|&c| matches!(self.blocks[c as usize].kind, BlockKind::Summary))
                 .map_or("", |c| self.block_text(c).trim_end());
             let hash = fnv1a(summary.as_bytes());
-            let nth = match seen.iter_mut().find(|(h, _)| *h == hash) {
-                Some((_, n)) => {
-                    *n += 1;
-                    *n
-                }
-                None => {
-                    seen.push((hash, 0));
-                    0
-                }
-            };
+            let count = seen.entry(hash).or_insert(0);
+            let nth = *count;
+            *count += 1;
             out.push((
                 block,
                 hash ^ u64::from(nth).wrapping_mul(0x9E37_79B9_7F4A_7C15),
@@ -622,8 +627,15 @@ pub struct ScrollPos {
     pub offset: f32,
 }
 
-/// Parses raw file bytes: strips a BOM, decodes UTF-16 files, replaces invalid UTF-8.
+/// Parses raw file bytes: strips a BOM, decodes UTF-16 files, replaces invalid UTF-8. The file limit
+/// applies to these bytes, however much text they decode to.
 pub fn parse_bytes(bytes: &[u8]) -> Document {
+    if bytes.len() > MAX_FILE_BYTES {
+        return Document {
+            warnings: vec![Warning::FileTooLarge],
+            ..Document::default()
+        };
+    }
     let (text, invalid) = crate::files::decode(bytes);
     let mut doc = crate::parse(&text);
     if invalid {

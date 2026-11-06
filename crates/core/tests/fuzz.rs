@@ -7,6 +7,7 @@ use common::Rng;
 use mdview_core::autolink::find_links;
 use mdview_core::find::find_in_text;
 use mdview_core::html::{self, Token, Tokenizer};
+use mdview_core::limits::{MAX_BLOCK_DEPTH, MAX_COLSPAN, MAX_HTML_LENGTH_PX, MAX_ROWSPAN};
 use mdview_core::model::*;
 use mdview_core::parse;
 use std::time::{Duration, Instant};
@@ -73,7 +74,12 @@ const HTML_PARTS: &[&str] = &[
     "</table>",
     "<ul>",
     "<li>",
+    "</li>",
     "</ul>",
+    "</tr>",
+    "</td>",
+    "<th colspan=0 rowspan=99999>",
+    "<img src=a width=inf height=1e30>",
     "<pre>",
     "</pre>",
     "<code>",
@@ -254,6 +260,14 @@ const MD_PARTS: &[&str] = &[
     "\\",
     "  \n",
     "> [!NOTE]\n",
+    "> > [!TIP]\n",
+    "- > [!tip]\n",
+    "<div>\n\n",
+    "<table>\n\n",
+    "<ul>\n\n",
+    "<li>\n\n",
+    "[^1]: x\n\n",
+    "\r\n",
     "text",
     " ",
     "http://a.b/_c_",
@@ -363,12 +377,49 @@ fn check_doc(s: &str) {
 fn check_invariants(d: &Document, src: &str) {
     let tl = d.text.len() as u32;
     let boundary = |p: u32| d.text.is_char_boundary(p as usize);
-    let swapped = ['\u{E000}', '\u{E001}', '\u{E002}', '\u{E003}'];
+    let swapped = ['\u{E000}', '\u{E001}', '\u{E002}', '\u{E003}', '\u{E004}'];
     assert!(
         !(d.text.contains(swapped) || d.strings.contains(swapped)) || src.contains(swapped),
         "protection leaked: {src:?}"
     );
+    assert!(d.spans.len() <= 2 * src.len() + 64, "{src:?}");
+    let parent_kind = |b: &Block| (b.parent != NONE).then(|| d.blocks[b.parent as usize].kind);
+    let mut depth = vec![0; d.blocks.len()];
     for (i, b) in d.blocks.iter().enumerate() {
+        // The shape `BlockKind` promises.
+        let parent = parent_kind(b);
+        match b.kind {
+            BlockKind::TableRow { .. } => {
+                assert!(matches!(parent, Some(BlockKind::Table)), "{src:?}")
+            }
+            BlockKind::TableCell {
+                colspan, rowspan, ..
+            } => {
+                assert!(
+                    matches!(parent, Some(BlockKind::TableRow { .. })),
+                    "{src:?}"
+                );
+                assert!((1..=MAX_COLSPAN).contains(&colspan), "{src:?}");
+                assert!((1..=MAX_ROWSPAN).contains(&rowspan), "{src:?}");
+            }
+            BlockKind::ListItem { .. } => {
+                assert!(matches!(parent, Some(BlockKind::List { .. })), "{src:?}")
+            }
+            _ => assert!(
+                !matches!(
+                    parent,
+                    Some(BlockKind::Table | BlockKind::TableRow { .. } | BlockKind::List { .. })
+                ),
+                "{:?} directly under {parent:?}: {src:?}",
+                b.kind
+            ),
+        }
+        depth[i] = if b.parent == NONE {
+            1
+        } else {
+            depth[b.parent as usize] + 1
+        };
+        assert!(depth[i] <= MAX_BLOCK_DEPTH + 4, "{src:?}");
         let i = i as u32;
         assert!(b.end > i && b.end as usize <= d.blocks.len(), "{src:?}");
         assert!(b.text.start <= b.text.end && b.text.end <= tl, "{src:?}");
@@ -424,6 +475,17 @@ fn check_invariants(d: &Document, src: &str) {
     for a in &d.block_attrs {
         assert!((a.block as usize) < d.blocks.len(), "{src:?}");
     }
+    let px_ok = |l: Option<Length>| !matches!(l, Some(Length::Px(n)) if n > MAX_HTML_LENGTH_PX);
+    assert!(
+        d.block_attrs
+            .iter()
+            .all(|a| px_ok(a.width) && px_ok(a.height)),
+        "{src:?}"
+    );
+    assert!(
+        d.images.iter().all(|i| px_ok(i.width) && px_ok(i.height)),
+        "{src:?}"
+    );
     for f in &d.footnotes {
         assert!(f.block == NONE || (f.block as usize) < d.blocks.len());
         assert!(f.number == 0 || f.block != NONE, "{src:?}");
@@ -512,8 +574,38 @@ fn random_bytes_do_not_panic() {
     println!("random bytes: {n} inputs");
 }
 
-/// Inputs built to make naive scanning quadratic. Each is 2 MiB and must finish well inside a second
-/// per megabyte, or the 16 MiB limit would mean a hang.
+/// The fastest of `runs` calls. A busy machine only ever adds time, so this is the figure to compare.
+fn min_time(best: &mut Duration, runs: usize, mut f: impl FnMut()) {
+    for _ in 0..runs {
+        let t = Instant::now();
+        f();
+        *best = (*best).min(t.elapsed());
+    }
+}
+
+/// Checks that 4x the input takes under 8x the time, where linear code gives about 4x and quadratic
+/// about 16x. Comparing the two sizes needs no absolute limit, so a slow machine can't fail it. The
+/// sizes take turns so a burst of other work hits both, and each round lowers the minimums further, so
+/// a false alarm would need the large input alone to be delayed in every run of every round.
+fn assert_scales(what: &str, name: &str, mut f: impl FnMut(usize)) {
+    const SMALL: usize = 256 * 1024;
+    const ROUNDS: usize = 8;
+    // Below this the clock and the allocator's mood matter more than the code.
+    const FLOOR: Duration = Duration::from_millis(2);
+    let (mut small, mut large) = (Duration::MAX, Duration::MAX);
+    for _ in 0..ROUNDS {
+        for _ in 0..3 {
+            min_time(&mut small, 1, || f(SMALL));
+            min_time(&mut large, 1, || f(4 * SMALL));
+        }
+        if large < small * 8 + FLOOR {
+            return;
+        }
+    }
+    panic!("{name}: {what} grew from {small:?} to {large:?} on 4x the input");
+}
+
+/// Inputs built to make naive scanning quadratic, and to make a document far larger than its source.
 #[test]
 fn pathological_inputs_stay_linear() {
     let cases: &[(&str, &str)] = &[
@@ -524,6 +616,7 @@ fn pathological_inputs_stay_linear() {
         ("lone lt", "< "),
         ("close no gt", "</a "),
         ("entities", "&x"),
+        ("named entities in a url", "http://a.b/&amp;)"),
         ("www under", "_www.a"),
         ("url then lt", "http://a.b<"),
         ("at", "a@"),
@@ -532,6 +625,7 @@ fn pathological_inputs_stay_linear() {
         ("colons", "://"),
         ("underscored urls", "http://a.b/_c_ "),
         ("backslashes", "\\"),
+        ("backslash pairs", "\\\\*"),
         ("rejected math", "$a/$b "),
         ("dollars", "a$ "),
         ("bad display math", "x$$y$$z "),
@@ -539,31 +633,77 @@ fn pathological_inputs_stay_linear() {
         ("block tag in paragraph", "x <p>a</p> "),
         ("closers", "</p>"),
         ("span closers", "</b>"),
-        ("headings", "# a\n"),
+        ("closers in one paragraph", "a</div></li></td> "),
+        ("unmatched emphasis closers", "a* b_ "),
+        ("unmatched brackets", "]"),
+        ("duplicate headings", "# a\n"),
+        ("carried tags", "<b>\n\nx\n\n"),
+        (
+            "carried tags of each kind",
+            "<i>\n<u>\n<s>\n<a href=x>\n\nx\n\n",
+        ),
+        ("duplicate footnotes", "[^a]: x\n\n"),
+        ("misplaced alerts", "- > [!NOTE]\n  > x\n\n"),
+        ("empty alerts", "> [!NOTE]\n\n"),
+        ("orphan cells", "<td>x</td>"),
+        ("stray table text", "<table>x"),
+        ("lone items", "<li>x</li>\n\n"),
+        ("quote markers", ">"),
+        ("divs", "<div>"),
+        ("many details", "<details><summary>s</summary></details>\n"),
     ];
     for (name, unit) in cases {
-        let s = unit.repeat(2 * 1024 * 1024 / unit.len());
-        let t = Instant::now();
-        let n = Tokenizer::new(&s).count();
-        let links = find_links(&s).len();
-        let elapsed = t.elapsed();
-        let t = Instant::now();
-        // Wrapped in an HTML block and a paragraph, to cover both paths through the builder.
-        let d = parse(&s);
-        let parsed = t.elapsed();
-        println!(
-            "{name}: scan {elapsed:?} ({n} tokens, {links} links), parse {parsed:?} ({} blocks)",
+        let doc = |len: usize| unit.repeat(len / unit.len());
+        let (small, large) = (doc(256 * 1024), doc(1024 * 1024));
+        assert_scales("scanning", name, |len| {
+            let s = pick_size(&small, &large, len);
+            std::hint::black_box((Tokenizer::new(s).count(), find_links(s).len()));
+        });
+        assert_scales("parsing", name, |len| {
+            std::hint::black_box(parse(pick_size(&small, &large, len)));
+        });
+        let d = parse(&large);
+        println!("{name}: {} blocks, {} spans", d.blocks.len(), d.spans.len());
+        assert!(
+            d.spans.len() <= 2 * large.len(),
+            "{name}: {} spans",
+            d.spans.len()
+        );
+        assert!(
+            d.blocks.len() <= 2 * large.len(),
+            "{name}: {} blocks",
             d.blocks.len()
         );
-        assert!(
-            elapsed < Duration::from_secs(5),
-            "{name} scan took {elapsed:?}"
-        );
-        assert!(
-            parsed < Duration::from_secs(20),
-            "{name} parse took {parsed:?}"
-        );
     }
+}
+
+fn pick_size<'a>(small: &'a str, large: &'a str, len: usize) -> &'a str {
+    if len <= 256 * 1024 { small } else { large }
+}
+
+/// Keys are built on every load that has details, and find runs on every keystroke, so they count too.
+#[test]
+fn details_keys_and_find_stay_linear() {
+    let doc = |len: usize| {
+        let mut s = String::with_capacity(len);
+        let mut i = 0;
+        while s.len() < len {
+            s.push_str(&format!("<details><summary>s{i}</summary></details>\n"));
+            i += 1;
+        }
+        parse(&s)
+    };
+    let (small, large) = (doc(256 * 1024), doc(1024 * 1024));
+    assert_scales("details_keys", "unique summaries", |len| {
+        let d = if len <= 256 * 1024 { &small } else { &large };
+        std::hint::black_box(d.details_keys());
+    });
+    let (small, large) = ("a".repeat(256 * 1024), "a".repeat(1024 * 1024));
+    let query = format!("{}b", "a".repeat(5000));
+    assert_scales("find", "long query on repeated text", |len| {
+        let t = if len <= 256 * 1024 { &small } else { &large };
+        std::hint::black_box(find_in_text(t, &query, 10_000));
+    });
 }
 
 #[test]

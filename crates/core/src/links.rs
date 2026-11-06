@@ -14,7 +14,9 @@ pub fn is_markdown_path(path: &Path) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkAction {
-    /// Scroll within the current document.
+    /// Scroll within the current document. Every fragment here is as the link wrote it, still
+    /// percent-encoded: `Document::resolve_fragment` is the one place that decodes it, because
+    /// decoding twice would make an anchor with a literal `%` unreachable.
     Fragment(String),
     /// Open in a tab, or switch to it, then go to the fragment.
     OpenMarkdown {
@@ -50,14 +52,14 @@ pub fn classify_link(href: &str, doc_dir: &Path) -> LinkAction {
         None => {
             let (path, fragment) = split_url(href);
             if path.is_empty() {
-                return LinkAction::Fragment(percent_decode(fragment.unwrap_or("")));
+                return LinkAction::Fragment(fragment.unwrap_or("").to_string());
             }
             let decoded = percent_decode(path);
             if names_a_host(&decoded) {
                 return LinkAction::Ignored;
             }
             let target = doc_dir.join(decoded);
-            local_target(normalize(&target), fragment.map(percent_decode))
+            local_target(normalize(&target), fragment.map(str::to_string))
         }
     }
 }
@@ -108,7 +110,7 @@ fn file_url_path(after_scheme: &str) -> Option<(PathBuf, Option<String>)> {
         [b'/', d, b':', ..] if d.is_ascii_alphabetic() && cfg!(windows) => decoded[1..].to_string(),
         _ => decoded,
     };
-    Some((PathBuf::from(trimmed), fragment.map(percent_decode)))
+    Some((PathBuf::from(trimmed), fragment.map(str::to_string)))
 }
 
 /// True for `//host/x`, `\\host\x` and mixes of them. On Windows these are UNC or device paths, and

@@ -1,9 +1,10 @@
 //! Streams pulldown-cmark events into the document model. No event is kept after it is handled.
 
-use crate::autolink::{self, HIDDEN_DOLLAR_UTF8, LinkKind};
+use crate::autolink::{self, Entities, HIDDEN_BRACKET_UTF8, HIDDEN_DOLLAR_UTF8, LinkKind};
 use crate::html::{self, Tag, Token, Tokenizer};
 use crate::limits::{
-    MAX_DIAGRAM_BYTES, MAX_EQUATION_BYTES, MAX_FILE_BYTES, MAX_HTML_DEPTH, Oversize,
+    MAX_BLOCK_DEPTH, MAX_COLSPAN, MAX_DECODED_BYTES, MAX_DIAGRAM_BYTES, MAX_EQUATION_BYTES,
+    MAX_HTML_DEPTH, MAX_HTML_LENGTH_PX, MAX_ROWSPAN, Oversize,
 };
 use crate::model::*;
 use crate::slug::Slugger;
@@ -25,11 +26,11 @@ fn options() -> Options {
         | Options::ENABLE_MATH
 }
 
-/// Parses Markdown into a document. A leading BOM is ignored. Input over the file limit yields an
-/// empty document with a warning, which also keeps every offset within `u32`.
+/// Parses Markdown into a document. A leading BOM is ignored. Text over what any file within the limit
+/// can decode to yields an empty document with a warning, which also keeps every offset within `u32`.
 pub fn parse(src: &str) -> Document {
     let src = src.strip_prefix('\u{FEFF}').unwrap_or(src);
-    if src.len() > MAX_FILE_BYTES {
+    if src.len() > MAX_DECODED_BYTES {
         return Document {
             warnings: vec![Warning::FileTooLarge],
             ..Document::default()
@@ -46,30 +47,41 @@ pub fn parse(src: &str) -> Document {
     let protected = autolink::protect_url_delimiters(src);
     let restore = matches!(protected, Cow::Owned(_));
     if memchr::memchr(b'$', protected.as_bytes()).is_none() {
-        let mut b = Builder::new(&protected, restore);
+        let mut b = Builder::new(&protected, restore, false);
         for (event, range) in Parser::new_ext(&protected, options()).into_offset_iter() {
             b.event(event, range);
         }
-        return b.into_document();
+        if b.rejected_alerts.is_empty() {
+            return b.into_document();
+        }
+        let rejected = std::mem::take(&mut b.rejected_alerts);
+        drop(b);
+        return parse_with_checks(protected, restore, rejected);
     }
-    parse_with_math_checks(protected, restore)
+    parse_with_checks(protected, restore, Vec::new())
 }
 
-/// Passes that may hide rejected `$` delimiters before the rest are shown as literal text. The first
+/// Passes that may hide rejected delimiters before the rest are shown as literal text. The first
 /// usually settles everything, so only a hostile input reaches the limit.
 const MATH_PASSES: usize = 4;
 
 /// pulldown-cmark pairs `$` with no regard for what surrounds it, and whatever Markdown sits between
-/// a bad pair is already lost by the time the event arrives. So rejected delimiters are hidden from
-/// the parser and the source is parsed again.
-fn parse_with_math_checks(mut src: Cow<'_, str>, mut restore: bool) -> Document {
-    let can_hide = memchr::memmem::find(src.as_bytes(), HIDDEN_DOLLAR_UTF8).is_none();
+/// a bad pair is already lost by the time the event arrives. It also takes an alert marker wherever
+/// it finds one, and the line it takes may have belonged to a paragraph. So rejected delimiters are
+/// hidden from the parser and the source is parsed again. `rejected` holds those already known.
+fn parse_with_checks(mut src: Cow<'_, str>, mut restore: bool, rejected: Vec<usize>) -> Document {
+    let can_hide = memchr::memmem::find(src.as_bytes(), HIDDEN_DOLLAR_UTF8).is_none()
+        && memchr::memmem::find(src.as_bytes(), HIDDEN_BRACKET_UTF8).is_none();
+    if can_hide && !rejected.is_empty() {
+        src = Cow::Owned(hide_delimiters(&src, &rejected));
+        restore = true;
+    }
     let passes = if can_hide { MATH_PASSES } else { 0 };
     for _ in 0..passes {
         match build_checked(&src, restore, false) {
             Ok(doc) => return doc,
             Err(rejected) => {
-                src = Cow::Owned(hide_dollars(&src, &rejected));
+                src = Cow::Owned(hide_delimiters(&src, &rejected));
                 restore = true;
             }
         }
@@ -80,10 +92,10 @@ fn parse_with_math_checks(mut src: Cow<'_, str>, mut restore: bool) -> Document 
     }
 }
 
-/// With `literal`, a rejected span becomes plain text. Otherwise the first rejection stops the build,
-/// and the rest of the walk only collects the `$` offsets to hide.
+/// With `literal`, a rejected span or alert becomes plain text. Otherwise the first rejected span stops
+/// the build, and the rest of the walk only collects the `$` offsets to hide.
 fn build_checked(src: &str, restore: bool, literal: bool) -> Result<Document, Vec<usize>> {
-    let mut b = Builder::new(src, restore);
+    let mut b = Builder::new(src, restore, literal);
     let mut gate = MathGate {
         boundary: true,
         inline: 0..src.len(),
@@ -108,7 +120,8 @@ fn build_checked(src: &str, restore: bool, literal: bool) -> Result<Document, Ve
             settled_until = gate.inline.end;
         }
     }
-    if rejected.is_empty() {
+    rejected.append(&mut b.rejected_alerts);
+    if rejected.is_empty() || literal {
         Ok(b.into_document())
     } else {
         rejected.sort_unstable();
@@ -117,12 +130,17 @@ fn build_checked(src: &str, restore: bool, literal: bool) -> Result<Document, Ve
     }
 }
 
-fn hide_dollars(src: &str, offsets: &[usize]) -> String {
+/// Each offset is at a `$` or at the `[` of an alert marker.
+fn hide_delimiters(src: &str, offsets: &[usize]) -> String {
     let mut out = String::with_capacity(src.len() + offsets.len() * 2);
     let mut pos = 0;
     for &at in offsets {
         out.push_str(&src[pos..at]);
-        out.push(autolink::HIDDEN_DOLLAR);
+        out.push(if src.as_bytes()[at] == b'[' {
+            autolink::HIDDEN_BRACKET
+        } else {
+            autolink::HIDDEN_DOLLAR
+        });
         pos = at + 1;
     }
     out.push_str(&src[pos..]);
@@ -364,6 +382,7 @@ struct Builder<'a> {
     image_depth: u32,
     image_alt_start: usize,
     image_idx: u32,
+    in_picture: bool,
     picture_dark: StrRef,
     picture_light: StrRef,
     aligns: Vec<Alignment>,
@@ -380,10 +399,20 @@ struct Builder<'a> {
     text_floor: usize,
     footnote_ids: HashMap<UniCase<String>, u32>,
     next_footnote_number: u32,
+    // Events to ignore until a repeated footnote definition ends. The first definition wins.
+    skip_depth: u32,
+    // Text ranges of named entities in the current run, which a bare URL can't end on.
+    entities: Vec<(usize, usize)>,
+    block_depth: usize,
+    // At most one: an alert can't nest. The block, and where its marker's `[` is in the source.
+    open_alert: Option<(u32, usize)>,
+    rejected_alerts: Vec<usize>,
+    // The last pass, or a document that can't hide a marker: a rejected one is written out instead.
+    literal_alerts: bool,
 }
 
 impl<'a> Builder<'a> {
-    fn new(src: &'a str, restore: bool) -> Self {
+    fn new(src: &'a str, restore: bool, literal_alerts: bool) -> Self {
         Builder {
             src,
             restore,
@@ -417,6 +446,7 @@ impl<'a> Builder<'a> {
             image_depth: 0,
             image_alt_start: 0,
             image_idx: 0,
+            in_picture: false,
             picture_dark: StrRef::default(),
             picture_light: StrRef::default(),
             aligns: Vec::new(),
@@ -432,12 +462,26 @@ impl<'a> Builder<'a> {
             text_floor: 0,
             footnote_ids: HashMap::new(),
             next_footnote_number: 0,
+            skip_depth: 0,
+            entities: Vec::new(),
+            block_depth: 0,
+            open_alert: None,
+            rejected_alerts: Vec::new(),
+            literal_alerts,
         }
     }
 
     fn event(&mut self, event: Event<'a>, range: Range<usize>) {
         if self.image_depth > 0 {
             return self.image_event(event);
+        }
+        if self.skip_depth > 0 {
+            match event {
+                Event::Start(_) => self.skip_depth += 1,
+                Event::End(_) => self.skip_depth -= 1,
+                _ => {}
+            }
+            return;
         }
         if self.pending.is_some() {
             return self.pending_event(event, range);
@@ -497,6 +541,12 @@ impl<'a> Builder<'a> {
             Event::HardBreak => self.line_break('\n'),
             Event::Rule => {
                 self.close_inline_for_block();
+                // Under a marker line, `---` makes that line a setext heading, so no alert.
+                if self.first_in_open_alert()
+                    && self.src[range].trim_end().bytes().all(|c| c == b'-')
+                {
+                    self.reject_open_alert();
+                }
                 let b = self.open_block(BlockKind::ThematicBreak, Origin::Md);
                 self.pop_open();
                 self.finish_block(b);
@@ -523,12 +573,11 @@ impl<'a> Builder<'a> {
                 }
             }
             Event::Text(t) | Event::Code(t) | Event::InlineMath(t) | Event::DisplayMath(t) => {
-                let t = if self.restore {
-                    autolink::restore(&t).into_owned()
+                if self.restore {
+                    self.doc.strings.push_str(&autolink::restore(&t));
                 } else {
-                    t.into_string()
-                };
-                self.doc.strings.push_str(&t);
+                    self.doc.strings.push_str(&t);
+                }
             }
             Event::SoftBreak | Event::HardBreak => self.doc.strings.push(' '),
             _ => {}
@@ -659,6 +708,10 @@ impl<'a> Builder<'a> {
                 self.md_block(BlockKind::Paragraph { align: Align::None }, true, range)
             }
             MdTag::Heading { level, .. } => {
+                // A setext underline turns what is above it into the heading, marker line included.
+                if self.first_in_open_alert() && self.src.as_bytes()[range.start] != b'#' {
+                    self.reject_open_alert();
+                }
                 self.md_block(
                     BlockKind::Heading {
                         level: level as u8,
@@ -670,15 +723,14 @@ impl<'a> Builder<'a> {
                 );
             }
             MdTag::BlockQuote(kind) => {
-                let kind = match kind {
-                    None => BlockKind::BlockQuote,
-                    Some(BlockQuoteKind::Note) => BlockKind::Alert(AlertKind::Note),
-                    Some(BlockQuoteKind::Tip) => BlockKind::Alert(AlertKind::Tip),
-                    Some(BlockQuoteKind::Important) => BlockKind::Alert(AlertKind::Important),
-                    Some(BlockQuoteKind::Warning) => BlockKind::Alert(AlertKind::Warning),
-                    Some(BlockQuoteKind::Caution) => BlockKind::Alert(AlertKind::Caution),
-                };
-                self.md_block(kind, false, range);
+                let kind = kind.map(|k| match k {
+                    BlockQuoteKind::Note => AlertKind::Note,
+                    BlockQuoteKind::Tip => AlertKind::Tip,
+                    BlockQuoteKind::Important => AlertKind::Important,
+                    BlockQuoteKind::Warning => AlertKind::Warning,
+                    BlockQuoteKind::Caution => AlertKind::Caution,
+                });
+                self.block_quote(kind, range);
             }
             MdTag::CodeBlock(kind) => {
                 let info = match &kind {
@@ -715,6 +767,11 @@ impl<'a> Builder<'a> {
             MdTag::Item => self.md_block(BlockKind::ListItem { task: false }, false, range),
             MdTag::FootnoteDefinition(label) => {
                 let id = self.footnote(&label);
+                if self.doc.footnotes[id as usize].block != NONE {
+                    self.close_inline_for_block();
+                    self.skip_depth = 1;
+                    return;
+                }
                 self.md_block(BlockKind::FootnoteDefinition { footnote: id }, false, range);
                 self.doc.footnotes[id as usize].block = self.cur_block;
             }
@@ -778,10 +835,177 @@ impl<'a> Builder<'a> {
     fn md_block(&mut self, kind: BlockKind, inline: bool, range: Range<usize>) {
         self.close_inline_for_block();
         self.inline_limit = range.end;
+        // A cell whose table was flattened away still has inline content to hold.
+        let kind = match kind {
+            BlockKind::TableCell { .. } if !self.parent_is(Tag::Tr) => BlockKind::Plain,
+            _ => kind,
+        };
+        if self.flattened(kind) {
+            return self.push_open(Open {
+                node: Node::Nothing,
+                origin: Origin::Md,
+            });
+        }
         self.open_block(kind, Origin::Md);
         if inline {
             self.enter_inline();
         }
+    }
+
+    /// GitHub turns a marked quote into an alert only if it holds something, and only outside a
+    /// quote, list item, `<div>` or `<details>`, as measured with `gh api markdown`. That includes a
+    /// footnote, since GitHub draws one as a list item.
+    fn block_quote(&mut self, alert: Option<AlertKind>, range: Range<usize>) {
+        let marker = alert.and_then(|_| {
+            let b = self.src.as_bytes();
+            let at = range.start + memchr::memchr(b'[', &b[range.start..range.end])?;
+            b[at..].starts_with(b"[!").then_some(at)
+        });
+        let (Some(alert), Some(marker)) = (alert, marker) else {
+            let kind = alert.map_or(BlockKind::BlockQuote, BlockKind::Alert);
+            return self.md_block(kind, false, range);
+        };
+        self.close_inline_for_block();
+        if self.alert_allowed_here() {
+            self.md_block(BlockKind::Alert(alert), false, range);
+            // Unless it was flattened, deep inside tags that don't rule out an alert.
+            if matches!(self.doc.blocks.last(), Some(b) if matches!(b.kind, BlockKind::Alert(_))) {
+                self.open_alert = Some((self.cur_block, marker));
+            }
+        } else {
+            self.rejected_alerts.push(marker);
+            self.md_block(BlockKind::BlockQuote, false, range);
+            if self.literal_alerts {
+                self.push_marker_paragraph(marker);
+            }
+        }
+    }
+
+    /// Bottom-up, because the first Markdown container ends this: it stays short on any input.
+    fn alert_allowed_here(&self) -> bool {
+        !self.stack.iter().any(|o| match (o.origin, o.node) {
+            (Origin::Html(tag), _) => {
+                matches!(tag, Tag::Div | Tag::Blockquote | Tag::Li | Tag::Details)
+            }
+            (Origin::Md, Node::Block(b)) => matches!(
+                self.doc.blocks[b as usize].kind,
+                BlockKind::BlockQuote
+                    | BlockKind::Alert(_)
+                    | BlockKind::ListItem { .. }
+                    | BlockKind::FootnoteDefinition { .. }
+            ),
+            (Origin::Md, Node::Nothing) => true,
+            _ => false,
+        })
+    }
+
+    fn first_in_open_alert(&self) -> bool {
+        matches!(self.open_alert, Some((b, _)) if b as usize + 1 == self.doc.blocks.len())
+    }
+
+    fn reject_open_alert(&mut self) {
+        let Some((b, marker)) = self.open_alert.take() else {
+            return;
+        };
+        self.rejected_alerts.push(marker);
+        if self.literal_alerts {
+            self.doc.blocks[b as usize].kind = BlockKind::BlockQuote;
+            self.push_marker_paragraph(marker);
+        }
+    }
+
+    /// Only for a document that is keeping its result, since hiding the marker reads better: this
+    /// can't join the marker to a paragraph that follows it.
+    fn push_marker_paragraph(&mut self, marker: usize) {
+        let tail = &self.src[marker..];
+        let text = &tail[..tail.find(']').map_or(0, |i| i + 1)];
+        let p = self.open_block(BlockKind::Paragraph { align: Align::None }, Origin::Md);
+        self.doc.text.push_str(text);
+        self.pop_open();
+        self.finish_block(p);
+    }
+
+    fn parent_is(&self, tag: Tag) -> bool {
+        self.cur_block != NONE
+            && match self.doc.blocks[self.cur_block as usize].kind {
+                BlockKind::Table => tag == Tag::Table,
+                BlockKind::TableRow { .. } => tag == Tag::Tr,
+                BlockKind::List { .. } => tag == Tag::Ul,
+                _ => false,
+            }
+    }
+
+    /// Whether a container goes without a block of its own. Rows, cells and items follow their
+    /// parent, so a table or list either fits whole or leaves no part of itself behind.
+    fn flattened(&self, kind: BlockKind) -> bool {
+        match kind {
+            BlockKind::Paragraph { .. }
+            | BlockKind::Plain
+            | BlockKind::Heading { .. }
+            | BlockKind::CodeBlock { .. }
+            | BlockKind::Diagram { .. }
+            | BlockKind::Math { .. }
+            | BlockKind::ThematicBreak => false,
+            BlockKind::ListItem { .. } => !self.parent_is(Tag::Ul),
+            BlockKind::TableRow { .. } => !self.parent_is(Tag::Table),
+            BlockKind::TableCell { .. } => !self.parent_is(Tag::Tr),
+            _ => self.block_depth >= MAX_BLOCK_DEPTH,
+        }
+    }
+
+    /// Keeps the shape `BlockKind` promises when content arrives where a table or list has no room
+    /// for it. The implied parents count as real tags, so a later `<tr>` or `</table>` ends them.
+    fn fit_parent(&mut self, kind: BlockKind) {
+        if self.cur_block == NONE
+            || matches!(
+                kind,
+                BlockKind::TableRow { .. }
+                    | BlockKind::TableCell { .. }
+                    | BlockKind::ListItem { .. }
+            )
+        {
+            return;
+        }
+        match self.doc.blocks[self.cur_block as usize].kind {
+            BlockKind::Table => {
+                self.open_implied_row();
+                self.open_implied_cell();
+            }
+            BlockKind::TableRow { .. } => self.open_implied_cell(),
+            BlockKind::List { .. } => {
+                let list = Node::Block(self.cur_block);
+                let at = self.stack.iter().rposition(|o| o.node == list);
+                match at {
+                    // A list that only stood in for a missing one ends at the first thing that isn't
+                    // an item, because in a browser there was no list to stay inside.
+                    Some(i) if self.stack[i].origin == Origin::Auto => self.pop_to(i),
+                    _ => {
+                        let b = self
+                            .open_block(BlockKind::ListItem { task: false }, Origin::Html(Tag::Li));
+                        self.doc.block_attrs.push(BlockAttrs {
+                            block: b,
+                            marker: Some(ListMarker::None),
+                            ..BlockAttrs::default()
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn open_implied_row(&mut self) {
+        self.open_block(BlockKind::TableRow { header: false }, Origin::Html(Tag::Tr));
+    }
+
+    fn open_implied_cell(&mut self) {
+        let cell = BlockKind::TableCell {
+            align: Align::None,
+            header: false,
+            colspan: 1,
+            rowspan: 1,
+        };
+        self.open_block(cell, Origin::Html(Tag::Td));
     }
 
     /// Closes everything down to and including the innermost entry a Markdown event opened. A
@@ -847,6 +1071,8 @@ impl<'a> Builder<'a> {
     }
 
     fn open_block(&mut self, kind: BlockKind, origin: Origin) -> u32 {
+        self.fit_parent(kind);
+        self.block_depth += 1;
         let idx = self.doc.blocks.len() as u32;
         let text = self.doc.text.len() as u32;
         let spans = self.doc.spans.len() as u32;
@@ -872,6 +1098,13 @@ impl<'a> Builder<'a> {
     }
 
     fn finish_block(&mut self, b: u32) {
+        if matches!(self.open_alert, Some((a, _)) if a == b) {
+            if self.doc.blocks.len() == b as usize + 1 {
+                self.reject_open_alert();
+            }
+            self.open_alert = None;
+        }
+        self.block_depth -= 1;
         let text_end = self.doc.text.len();
         let spans_end = self.doc.spans.len() as u32;
         let blocks_end = self.doc.blocks.len() as u32;
@@ -1269,6 +1502,14 @@ impl<'a> Builder<'a> {
     }
 
     fn math(&mut self, t: &str, display: bool) {
+        // Unlike code, math reaches here with the file's line endings.
+        let normalized;
+        let t = if memchr::memchr(b'\r', t.as_bytes()).is_some() {
+            normalized = t.replace("\r\n", "\n").replace('\r', "\n");
+            normalized.as_str()
+        } else {
+            t
+        };
         self.begin_inline();
         self.flush_run();
         self.note_heading_text(t);
@@ -1310,6 +1551,9 @@ impl<'a> Builder<'a> {
             self.escapes.push((at, at + c.len_utf8()));
         }
         self.push_inline_text(t);
+        if self.src.as_bytes()[range.start] == b'&' && is_named_entity(&self.src[range]) {
+            self.entities.push((at, self.doc.text.len()));
+        }
     }
 
     /// Appends inline text with whitespace runs collapsed as HTML would show them, so the renderer
@@ -1382,6 +1626,7 @@ impl<'a> Builder<'a> {
             return;
         };
         let mut escapes = std::mem::take(&mut self.escapes);
+        let mut named = std::mem::take(&mut self.entities);
         if self.link_depth == 0 && autolink::may_contain_link(&self.doc.text[start..]) {
             let mut hits = std::mem::take(&mut self.link_hits);
             hits.clear();
@@ -1389,10 +1634,12 @@ impl<'a> Builder<'a> {
             // An escaped character is a wall: nothing links across it or through it, as in cmark-gfm
             // where the escape splits the text node.
             for &(a, b) in &escapes {
-                autolink::find_links_into(&self.doc.text[pos..a], pos, &mut hits);
+                let entities = Entities::new(&named, pos);
+                autolink::find_links_into(&self.doc.text[pos..a], pos, entities, &mut hits);
                 pos = b;
             }
-            autolink::find_links_into(&self.doc.text[pos..], pos, &mut hits);
+            let entities = Entities::new(&named, pos);
+            autolink::find_links_into(&self.doc.text[pos..], pos, entities, &mut hits);
             for &(s, e, kind) in &hits {
                 let dest_text = kind.destination(&self.doc.text[s..e]);
                 let dest = self.pool(&dest_text);
@@ -1412,6 +1659,8 @@ impl<'a> Builder<'a> {
         }
         escapes.clear();
         self.escapes = escapes;
+        named.clear();
+        self.entities = named;
     }
 
     fn pool(&mut self, s: &str) -> StrRef {
@@ -1428,8 +1677,8 @@ impl<'a> Builder<'a> {
 
     fn pool_restored(&mut self, s: &str) -> StrRef {
         if self.restore {
-            let owned = autolink::restore(s).into_owned();
-            self.pool(&owned)
+            let restored = autolink::restore(s);
+            self.pool(&restored)
         } else {
             self.pool(s)
         }
@@ -1619,10 +1868,12 @@ impl<'a> Builder<'a> {
             }
             Tag::Input => self.html_input(attrs),
             Tag::Picture => {
+                self.in_picture = true;
                 self.picture_dark = StrRef::default();
                 self.picture_light = StrRef::default();
             }
-            Tag::Source => self.html_source(attrs),
+            Tag::Source if self.in_picture => self.html_source(attrs),
+            Tag::Source => {}
             _ => self.html_open_block(tag, attrs),
         }
         if let Some(a) = anchor
@@ -1640,6 +1891,10 @@ impl<'a> Builder<'a> {
     }
 
     fn html_open_block(&mut self, tag: Tag, attrs: &str) {
+        // A browser drops these with no table open, text kept, and does not end the paragraph.
+        if matches!(tag, Tag::Tr | Tag::Td | Tag::Th) && self.open_html[Tag::Table.slot()] == 0 {
+            return;
+        }
         let align = html_align(attrs);
         self.flush_run();
         if self.inline_open && !self.make_room_for_html_block(tag) {
@@ -1675,25 +1930,33 @@ impl<'a> Builder<'a> {
             }
             Tag::Li => {
                 self.close_implied(&[Tag::Li], &[Tag::Ul, Tag::Ol]);
+                let list = BlockKind::List { start: None };
+                if !self.parent_is(Tag::Ul) && !self.flattened(list) {
+                    self.open_block(list, Origin::Auto);
+                }
                 BlockKind::ListItem { task: false }
             }
             Tag::Table => BlockKind::Table,
             Tag::Tr => {
                 self.close_implied(&[Tag::Tr], &[Tag::Table]);
+                if !self.parent_is(Tag::Table) {
+                    return;
+                }
                 BlockKind::TableRow { header: false }
             }
             Tag::Td | Tag::Th => {
                 self.close_implied(&[Tag::Td, Tag::Th], &[Tag::Tr, Tag::Table]);
-                let span = |key: &str| {
-                    html::attr(attrs, key)
-                        .and_then(|s| s.trim().parse().ok())
-                        .unwrap_or(1)
-                };
+                if self.parent_is(Tag::Table) {
+                    self.open_implied_row();
+                }
+                if !self.parent_is(Tag::Tr) {
+                    return;
+                }
                 BlockKind::TableCell {
                     align,
                     header: tag == Tag::Th,
-                    colspan: span("colspan"),
-                    rowspan: span("rowspan"),
+                    colspan: parse_span(attrs, "colspan", MAX_COLSPAN),
+                    rowspan: parse_span(attrs, "rowspan", MAX_ROWSPAN),
                 }
             }
             Tag::Details => BlockKind::Details {
@@ -1711,6 +1974,12 @@ impl<'a> Builder<'a> {
             }
             _ => return,
         };
+        if self.flattened(kind) {
+            return self.push_open(Open {
+                node: Node::Nothing,
+                origin,
+            });
+        }
         let b = self.open_block(kind, origin);
         self.note_block_attrs(b, tag, attrs);
         if matches!(tag, Tag::P | Tag::H(_)) {
@@ -1847,8 +2116,7 @@ impl<'a> Builder<'a> {
                 literal_if_unclosed: true,
             } => return self.collapsed_text(raw),
             Tag::Picture => {
-                self.picture_dark = StrRef::default();
-                self.picture_light = StrRef::default();
+                self.leave_picture();
                 return;
             }
             Tag::Unknown
@@ -1950,6 +2218,14 @@ impl<'a> Builder<'a> {
             align: html::attr(attrs, "align").map_or(ImageAlign::None, |v| parse_image_align(&v)),
         });
         self.push_atom(SpanKind::Image(idx));
+        self.leave_picture();
+    }
+
+    /// A `<picture>` shows one image, and a `<source>` means nothing outside one.
+    fn leave_picture(&mut self) {
+        self.in_picture = false;
+        self.picture_dark = StrRef::default();
+        self.picture_light = StrRef::default();
     }
 
     fn html_source(&mut self, attrs: &str) {
@@ -2118,20 +2394,41 @@ fn md_span_tag(kind: SpanKind) -> Tag {
     }
 }
 
-fn parse_length(v: &str) -> Option<Length> {
+/// `colspan` or `rowspan` under the HTML rules: leading digits count, zero or nothing means 1, and a
+/// value over the limit is clamped. Layout can then divide by it and size from it.
+fn parse_span(attrs: &str, key: &str, max: u16) -> u16 {
+    let Some(v) = html::attr(attrs, key) else {
+        return 1;
+    };
     let v = v.trim();
-    if let Some(p) = v.strip_suffix('%') {
-        return p
-            .trim()
+    let digits = v.bytes().take_while(u8::is_ascii_digit).count();
+    let n = match v[..digits].parse::<u64>() {
+        Ok(n) => n,
+        Err(_) if digits > 0 => u64::MAX,
+        Err(_) => 1,
+    };
+    n.clamp(1, u64::from(max)) as u16
+}
+
+fn parse_length(v: &str) -> Option<Length> {
+    let number = |s: &str| {
+        s.trim()
             .parse::<f32>()
             .ok()
-            .map(|n| Length::Percent(n.clamp(0.0, 1000.0) as u16));
+            .filter(|n| n.is_finite() && *n >= 0.0)
+    };
+    let v = v.trim();
+    if let Some(p) = v.strip_suffix('%') {
+        return number(p).map(|n| Length::Percent(n.min(1000.0) as u16));
     }
-    v.strip_suffix("px")
-        .unwrap_or(v)
-        .trim()
-        .parse::<f32>()
-        .ok()
-        .filter(|n| *n >= 0.0)
-        .map(|n| Length::Px(n as u32))
+    number(v.strip_suffix("px").unwrap_or(v))
+        .map(|n| Length::Px((n as u32).min(MAX_HTML_LENGTH_PX)))
+}
+
+/// `&name;` with letters only. GitHub's URL trimming, working on the source, stops at anything else.
+fn is_named_entity(source: &str) -> bool {
+    source
+        .strip_prefix('&')
+        .and_then(|s| s.strip_suffix(';'))
+        .is_some_and(|name| !name.is_empty() && name.bytes().all(|c| c.is_ascii_alphabetic()))
 }

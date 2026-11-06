@@ -45,17 +45,58 @@ fn domain_len(s: &str, allow_short: bool) -> Option<usize> {
     (end > 0 && !us1 && !us2 && (allow_short || dots > 0)).then_some(end)
 }
 
+/// Named entities in a run of text that has been decoded, as text ranges. GitHub autolinks the raw
+/// source, so such a URL still ends where the entity's `&name;` spelling would have been trimmed.
+#[derive(Clone, Copy)]
+pub(crate) struct Entities<'a> {
+    ranges: &'a [(usize, usize)],
+    /// Where the slice being trimmed starts in the same coordinates.
+    base: usize,
+}
+
+impl<'a> Entities<'a> {
+    const NONE: Entities<'static> = Entities {
+        ranges: &[],
+        base: 0,
+    };
+
+    pub(crate) fn new(ranges: &'a [(usize, usize)], base: usize) -> Self {
+        Entities { ranges, base }
+    }
+
+    fn shifted(self, by: usize) -> Self {
+        Entities {
+            base: self.base + by,
+            ..self
+        }
+    }
+
+    /// The start of an entity that ends at `end`.
+    fn ending_at(self, end: usize) -> Option<usize> {
+        if self.ranges.is_empty() {
+            return None;
+        }
+        let at = end + self.base;
+        let i = self.ranges.binary_search_by_key(&at, |r| r.1).ok()?;
+        self.ranges[i].0.checked_sub(self.base)
+    }
+}
+
 /// GFM trailing-punctuation rules: returns the trimmed byte length.
-fn trim_end(s: &str) -> usize {
+fn trim_end(s: &str, entities: Entities<'_>) -> usize {
     let b = s.as_bytes();
     let mut end = b.len();
     let mut excess = None;
     while end > 0 {
+        if let Some(start) = entities.ending_at(end) {
+            end = start;
+            continue;
+        }
         match b[end - 1] {
             b'?' | b'!' | b'.' | b',' | b':' | b'*' | b'_' | b'~' | b'\'' | b'"' => end -= 1,
             b';' => {
                 let mut i = end - 1;
-                while i > 0 && b[i - 1].is_ascii_alphanumeric() {
+                while i > 0 && b[i - 1].is_ascii_alphabetic() {
                     i -= 1;
                 }
                 if i > 0 && i < end - 1 && b[i - 1] == b'&' {
@@ -84,37 +125,46 @@ fn trim_end(s: &str) -> usize {
     end
 }
 
-fn url_tail(s: &str, domain: usize) -> usize {
+fn url_tail(s: &str, domain: usize, entities: Entities<'_>) -> usize {
     let rest = &s[domain..];
     let stop = rest
         .find(|c: char| c.is_whitespace() || c == '<')
         .map_or(s.len(), |i| domain + i);
-    trim_end(&s[..stop])
+    trim_end(&s[..stop], entities)
 }
 
 /// Finds extended autolinks in one run of text.
 pub fn find_links(t: &str) -> Vec<(usize, usize, LinkKind)> {
     let mut out = Vec::new();
-    find_links_into(t, 0, &mut out);
+    find_links_into(t, 0, Entities::NONE, &mut out);
     out
 }
 
-pub(crate) fn find_links_into(t: &str, base: usize, out: &mut Vec<(usize, usize, LinkKind)>) {
+pub(crate) fn find_links_into(
+    t: &str,
+    base: usize,
+    entities: Entities<'_>,
+    out: &mut Vec<(usize, usize, LinkKind)>,
+) {
     let b = t.as_bytes();
     let (mut i, mut floor) = (0, 0);
     while i < b.len() {
         let hit = match b[i] {
-            b'w' if b[i..].starts_with(b"www.") && www_boundary(t, i) => {
-                domain_len(&t[i..], false).map(|d| (i, i + url_tail(&t[i..], d), LinkKind::Www))
-            }
+            b'w' if b[i..].starts_with(b"www.") && www_boundary(t, i) => domain_len(&t[i..], false)
+                .map(|d| {
+                    let tail = url_tail(&t[i..], d, entities.shifted(i));
+                    (i, i + tail, LinkKind::Www)
+                }),
             b':' if b[i..].starts_with(b"://") => {
                 let mut st = i;
                 while st > floor && b[st - 1].is_ascii_alphabetic() {
                     st -= 1;
                 }
                 if is_url_scheme(&b[st..i]) {
-                    domain_len(&t[i + 3..], true)
-                        .map(|d| (st, i + 3 + url_tail(&t[i + 3..], d), LinkKind::Url))
+                    domain_len(&t[i + 3..], true).map(|d| {
+                        let tail = url_tail(&t[i + 3..], d, entities.shifted(i + 3));
+                        (st, i + 3 + tail, LinkKind::Url)
+                    })
                 } else {
                     None
                 }
@@ -201,7 +251,8 @@ const SWAPS: [(u8, char); 3] = [(b'_', '\u{E000}'), (b'*', '\u{E001}'), (b'~', '
 const SWAP_PREFIX: &[u8] = b"\xEE\x80";
 
 /// Returns the source with delimiters inside bare URLs protected. Borrowed when there is nothing to
-/// do, which includes a document that already uses these private-use characters.
+/// do, which includes a document that already uses private-use characters from this block, since
+/// `restore` would change those too.
 pub(crate) fn protect_url_delimiters(src: &str) -> Cow<'_, str> {
     let b = src.as_bytes();
     let mut ranges: Vec<(usize, usize)> = Vec::new();
@@ -236,7 +287,7 @@ pub(crate) fn protect_url_delimiters(src: &str) -> Cow<'_, str> {
             cursor = end;
         }
     }
-    if ranges.is_empty() || SWAPS.iter().any(|(_, to)| src.contains(*to)) {
+    if ranges.is_empty() || memmem::find(b, SWAP_PREFIX).is_some() {
         return Cow::Borrowed(src);
     }
     ranges.sort_unstable();
@@ -290,15 +341,18 @@ fn url_extent(s: &str) -> usize {
             _ => {}
         }
     }
-    trim_end(&s[..stop])
+    trim_end(&s[..stop], Entities::NONE)
 }
 
-/// Undoes `protect_url_delimiters` on text coming back from the parser.
 /// Stands in for a `$` the parser must not take as a math delimiter. It shares the swaps' prefix, so
 /// `restore` brings it back along with them.
 pub(crate) const HIDDEN_DOLLAR: char = '\u{E003}';
 pub(crate) const HIDDEN_DOLLAR_UTF8: &[u8] = "\u{E003}".as_bytes();
+/// The same for the `[` of an alert marker that GitHub would not treat as one.
+pub(crate) const HIDDEN_BRACKET: char = '\u{E004}';
+pub(crate) const HIDDEN_BRACKET_UTF8: &[u8] = "\u{E004}".as_bytes();
 
+/// Undoes `protect_url_delimiters` and the hidden delimiters on text coming back from the parser.
 pub(crate) fn restore(s: &str) -> Cow<'_, str> {
     if memmem::find(s.as_bytes(), SWAP_PREFIX).is_none() {
         return Cow::Borrowed(s);
@@ -308,6 +362,9 @@ pub(crate) fn restore(s: &str) -> Cow<'_, str> {
             .map(|c| {
                 if c == HIDDEN_DOLLAR {
                     return '$';
+                }
+                if c == HIDDEN_BRACKET {
+                    return '[';
                 }
                 SWAPS
                     .iter()

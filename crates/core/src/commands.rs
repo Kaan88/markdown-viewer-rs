@@ -15,6 +15,7 @@ pub enum CommandId {
     FindNext,
     FindPrevious,
     ClearSearch,
+    Theme,
     ThemeSystem,
     ThemeLight,
     ThemeDark,
@@ -40,9 +41,24 @@ pub enum Menu {
     Edit,
     View,
     Help,
+    /// The submenu `CommandId::Theme` opens in View.
+    Theme,
     TabContext,
     /// Keyboard only.
     None,
+}
+
+impl Menu {
+    /// The menu bar title for a top-level menu, with `&` marking its access key, as Qt takes it.
+    pub const fn title(self) -> Option<&'static str> {
+        match self {
+            Menu::File => Some("&File"),
+            Menu::Edit => Some("&Edit"),
+            Menu::View => Some("&View"),
+            Menu::Help => Some("&Help"),
+            Menu::Theme | Menu::TabContext | Menu::None => None,
+        }
+    }
 }
 
 /// A key the platform defines, so each shell maps it to its native sequence.
@@ -75,7 +91,6 @@ pub struct Command {
     pub label: &'static str,
     pub shortcuts: &'static [Shortcut],
     pub style: CommandStyle,
-    pub on_toolbar: bool,
     /// Draw a separator before this item.
     pub separator_before: bool,
 }
@@ -92,14 +107,8 @@ const fn cmd(
         label,
         shortcuts,
         style: CommandStyle::Action,
-        on_toolbar: false,
         separator_before: false,
     }
-}
-
-const fn toolbar(mut c: Command) -> Command {
-    c.on_toolbar = true;
-    c
 }
 
 const fn styled(mut c: Command, style: CommandStyle) -> Command {
@@ -115,16 +124,22 @@ const fn sep(mut c: Command) -> Command {
 use CommandId as C;
 use Shortcut::{Keys as K, Standard as S};
 
+const SHOW_IN_FILE_MANAGER: &str = if cfg!(windows) {
+    "Show in File Explorer"
+} else {
+    "Show in file manager"
+};
+
 /// In menu order. Items of one menu appear in the order shown to the user.
 pub const COMMANDS: &[Command] = &[
-    toolbar(cmd(C::OpenFiles, Menu::File, "Open files…", &[K("Ctrl+O")])),
-    toolbar(cmd(
+    cmd(C::OpenFiles, Menu::File, "Open files…", &[K("Ctrl+O")]),
+    cmd(
         C::OpenFolder,
         Menu::File,
         "Open folder…",
         &[K("Ctrl+Shift+O")],
-    )),
-    toolbar(cmd(C::Refresh, Menu::File, "Refresh", &[K("F5")])),
+    ),
+    cmd(C::Refresh, Menu::File, "Refresh", &[K("F5")]),
     sep(styled(
         cmd(C::OpenRecent, Menu::File, "Open recent", &[]),
         CommandStyle::Submenu,
@@ -145,24 +160,28 @@ pub const COMMANDS: &[Command] = &[
     ),
     sep(cmd(C::Exit, Menu::File, "Exit", &[S(StandardKey::Quit)])),
     cmd(C::Find, Menu::Edit, "Find", &[K("Ctrl+F")]),
-    toolbar(cmd(C::FindNext, Menu::Edit, "Find next", &[K("F3")])),
-    toolbar(cmd(
+    cmd(C::FindNext, Menu::Edit, "Find next", &[K("F3")]),
+    cmd(
         C::FindPrevious,
         Menu::Edit,
         "Find previous",
         &[K("Shift+F3")],
-    )),
+    ),
     cmd(C::ClearSearch, Menu::Edit, "Clear search", &[]),
     styled(
-        cmd(C::ThemeSystem, Menu::View, "System", &[]),
+        cmd(C::Theme, Menu::View, "Theme", &[]),
+        CommandStyle::Submenu,
+    ),
+    styled(
+        cmd(C::ThemeSystem, Menu::Theme, "System", &[]),
         CommandStyle::Radio,
     ),
     styled(
-        cmd(C::ThemeLight, Menu::View, "Light", &[]),
+        cmd(C::ThemeLight, Menu::Theme, "Light", &[]),
         CommandStyle::Radio,
     ),
     styled(
-        cmd(C::ThemeDark, Menu::View, "Dark", &[]),
+        cmd(C::ThemeDark, Menu::Theme, "Dark", &[]),
         CommandStyle::Radio,
     ),
     sep(cmd(
@@ -183,10 +202,10 @@ pub const COMMANDS: &[Command] = &[
         "Reset zoom to 100%",
         &[K("Ctrl+0")],
     ),
-    sep(styled(
+    styled(
         cmd(C::ToggleFiles, Menu::View, "FILES", &[K("Ctrl+Shift+1")]),
         CommandStyle::Checkable,
-    )),
+    ),
     styled(
         cmd(
             C::ToggleOutline,
@@ -196,7 +215,7 @@ pub const COMMANDS: &[Command] = &[
         ),
         CommandStyle::Checkable,
     ),
-    styled(
+    sep(styled(
         cmd(
             C::FocusMode,
             Menu::View,
@@ -204,7 +223,7 @@ pub const COMMANDS: &[Command] = &[
             &[K("Ctrl+Shift+F")],
         ),
         CommandStyle::Checkable,
-    ),
+    )),
     cmd(C::ShowShortcuts, Menu::Help, "Keyboard shortcuts", &[]),
     cmd(C::About, Menu::Help, "About Markdown Viewer", &[]),
     cmd(C::CloseTab, Menu::TabContext, "Close tab", &[]),
@@ -213,7 +232,7 @@ pub const COMMANDS: &[Command] = &[
     cmd(
         C::ShowInFileManager,
         Menu::TabContext,
-        "Show in file manager",
+        SHOW_IN_FILE_MANAGER,
         &[],
     ),
     cmd(C::NextTab, Menu::None, "Next tab", &[K("Ctrl+Tab")]),
@@ -229,6 +248,41 @@ pub const COMMANDS: &[Command] = &[
         "Leave focus mode or search",
         &[K("Escape")],
     ),
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolbarItem {
+    /// Runs the command. The label and tooltip may differ from its menu item's.
+    Button {
+        id: CommandId,
+        label: &'static str,
+        tooltip: Option<&'static str>,
+    },
+    Separator,
+    /// The find box, `strings::FIND_PLACEHOLDER`.
+    FindBox,
+    /// The match counter beside it, `strings::find_label`.
+    MatchCount,
+}
+
+const fn button(id: CommandId, label: &'static str, tooltip: Option<&'static str>) -> ToolbarItem {
+    ToolbarItem::Button { id, label, tooltip }
+}
+
+/// In the order shown, titled `strings::TOOLBAR_TITLE`.
+pub const TOOLBAR: &[ToolbarItem] = &[
+    button(C::OpenFiles, "Open files…", None),
+    button(C::OpenFolder, "Open folder…", None),
+    button(C::Refresh, "Refresh", None),
+    ToolbarItem::Separator,
+    ToolbarItem::FindBox,
+    ToolbarItem::MatchCount,
+    button(
+        C::FindPrevious,
+        "Previous",
+        Some("Previous match (Shift+F3)"),
+    ),
+    button(C::FindNext, "Next", Some("Next match (F3)")),
 ];
 
 pub fn command(id: CommandId) -> &'static Command {
@@ -268,6 +322,12 @@ pub mod strings {
     pub const APP_NAME: &str = "Markdown Viewer";
     pub const ABOUT: &str = "A native, read-only Markdown reader.";
     pub const TRANSIENT_MS: u32 = 2500;
+
+    pub const TOOLBAR_TITLE: &str = "Reader";
+    pub const MANAGE_RECENT_TITLE: &str = "Manage recent files";
+    pub const SHORTCUTS_TITLE: &str = "Keyboard shortcuts";
+    pub const ABOUT_TITLE: &str = "About Markdown Viewer";
+    pub const MATCH_COUNT_NAME: &str = "Search result count";
 
     pub const EMPTY_HINT: &str = "Open a Markdown file or drag one into this window.";
     pub const EMPTY_BUTTON: &str = "Open Markdown file…";

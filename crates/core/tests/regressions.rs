@@ -2,7 +2,7 @@
 
 mod common;
 
-use mdview_core::commands::{self, CommandId, Menu, Shortcut, strings};
+use mdview_core::commands::{self, CommandId, CommandStyle, Menu, Shortcut, ToolbarItem, strings};
 use mdview_core::files::{self, FileStamp, LoadError, tab_labels};
 use mdview_core::find::{find, find_in_text, find_visible};
 use mdview_core::limits::*;
@@ -88,6 +88,8 @@ fn refreshing_status_never_sticks() {
 #[test]
 fn refresh_success_is_transient_and_silent_when_automatic() {
     let mut t = ReloadTracker::default();
+    let (generation, _) = t.begin(false);
+    t.finished(generation, ReloadOutcome::Ok { warnings: vec![] });
     let (generation, shown) = t.begin(false);
     assert!(shown.is_none());
     let done = t
@@ -122,7 +124,7 @@ fn stale_generation_is_ignored() {
     let (new, _) = t.begin(false);
     assert_eq!(t.finished(old, ReloadOutcome::Failed("late".into())), None);
     assert!(
-        t.finished(new, ReloadOutcome::Ok { warnings: vec![] })
+        t.finished(new, ReloadOutcome::Failed("current".into()))
             .is_some()
     );
 }
@@ -741,7 +743,9 @@ fn file_limit_is_enforced() {
         LoadError::TooLarge.to_string(),
         "File exceeds the 16 MiB viewer limit"
     );
-    let d = parse(&"a".repeat(MAX_FILE_BYTES + 1));
+    let d = mdview_core::parse_bytes(&vec![b'a'; MAX_FILE_BYTES + 1]);
+    assert_eq!(d.warnings, [Warning::FileTooLarge]);
+    let d = parse(&"a".repeat(MAX_DECODED_BYTES + 1));
     assert_eq!(d.warnings, [Warning::FileTooLarge]);
     assert!(d.blocks.is_empty());
     std::fs::write(&path, vec![b'a'; MAX_FILE_BYTES]).unwrap();
@@ -1173,14 +1177,17 @@ fn command_table_matches_the_inventory() {
     assert_eq!(keys(CommandId::FocusMode), [Shortcut::Keys("Ctrl+Shift+F")]);
     assert_eq!(commands::menu_items(Menu::File).count(), 9);
     assert_eq!(commands::menu_items(Menu::Edit).count(), 4);
-    assert_eq!(commands::menu_items(Menu::View).count(), 9);
+    assert_eq!(commands::menu_items(Menu::View).count(), 7);
+    assert_eq!(commands::menu_items(Menu::Theme).count(), 3);
     assert_eq!(commands::menu_items(Menu::Help).count(), 2);
     assert_eq!(commands::menu_items(Menu::TabContext).count(), 4);
     assert!(commands::menu_items(Menu::File).any(|c| c.label == "Clear recent files"));
-    let toolbar: Vec<_> = commands::COMMANDS
+    let toolbar: Vec<_> = commands::TOOLBAR
         .iter()
-        .filter(|c| c.on_toolbar)
-        .map(|c| c.id)
+        .filter_map(|item| match item {
+            ToolbarItem::Button { id, .. } => Some(*id),
+            _ => None,
+        })
         .collect();
     assert_eq!(
         toolbar,
@@ -1188,8 +1195,8 @@ fn command_table_matches_the_inventory() {
             CommandId::OpenFiles,
             CommandId::OpenFolder,
             CommandId::Refresh,
+            CommandId::FindPrevious,
             CommandId::FindNext,
-            CommandId::FindPrevious
         ]
     );
 }
@@ -2027,4 +2034,647 @@ fn canonical_paths_have_one_identity_on_windows() {
     );
     std::fs::remove_file(&path).unwrap();
     assert_eq!(files::canonical_or_absolute(&path), present);
+}
+
+// Review findings: minor
+
+fn kinds(d: &Document) -> Vec<BlockKind> {
+    d.blocks.iter().map(|b| b.kind).collect()
+}
+
+fn has_alert(d: &Document) -> bool {
+    d.blocks
+        .iter()
+        .any(|b| matches!(b.kind, BlockKind::Alert(_)))
+}
+
+/// Each expected text is what `gh api markdown -f mode=gfm -f context=cli/cli` showed, with the line
+/// break that mode adds read as the soft break it is in a file.
+#[test]
+fn misplaced_or_empty_alerts_stay_plain_quotes_with_their_marker() {
+    for (src, para) in [
+        ("> [!TIP]", "[!TIP]"),
+        ("> [!tip]\n>\n", "[!tip]"),
+        ("> [!NOTE]\n\nafter", "[!NOTE]"),
+        ("> [!NOTE]\n> <!-- c -->", "[!NOTE]"),
+        ("- > [!NOTE]\n  > in list", "[!NOTE] in list"),
+        ("> > [!NOTE]\n> > nested", "[!NOTE] nested"),
+        ("<div>\n\n> [!NOTE]\n> x\n\n</div>", "[!NOTE] x"),
+        ("<details>\n\n> [!NOTE]\n> x\n\n</details>", "[!NOTE] x"),
+        (
+            "<blockquote>\n\n> [!NOTE]\n> x\n\n</blockquote>",
+            "[!NOTE] x",
+        ),
+        ("<ul><li>\n\n> [!NOTE]\n> x\n\n</li></ul>", "[!NOTE] x"),
+        (
+            "<table><tr><td><div>\n\n> [!NOTE]\n> x\n\n</div></td></tr></table>",
+            "[!NOTE] x",
+        ),
+        ("x[^a]\n\n[^a]: > [!NOTE]\n    > in note", "[!NOTE] in note"),
+        ("> [!NOTE]\n> > [!TIP]\n> > inner", "[!TIP] inner"),
+    ] {
+        let d = parse(src);
+        let paragraph = d
+            .blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| matches!(b.kind, BlockKind::Paragraph { .. }))
+            .map(|(i, _)| d.block_text(i as u32).trim_end())
+            .any(|t| t == para);
+        assert!(paragraph, "{src:?}: {:?}", d.text);
+        assert!(
+            d.blocks.iter().any(|b| b.kind == BlockKind::BlockQuote),
+            "{src:?}"
+        );
+        assert!(!d.text.contains('\u{E004}'), "{src:?}");
+    }
+    // The one nested marker above stays plain inside an alert that is a real one.
+    assert!(has_alert(&parse("> [!NOTE]\n> > [!TIP]\n> > inner")));
+    for src in [
+        "> [!TIP]",
+        "- > [!NOTE]\n  > x",
+        "> > [!NOTE]\n> > x",
+        "<div>\n\n> [!NOTE]\n> x\n\n</div>",
+    ] {
+        assert!(!has_alert(&parse(src)), "{src:?}");
+    }
+    // With `$` in the document, the same pass that checks math checks this too.
+    let d = parse("- > [!NOTE]\n  > costs $5 or $6 today\n\n$x$\n");
+    assert!(!has_alert(&d));
+    assert!(d.text.contains("[!NOTE] costs $5"), "{:?}", d.text);
+}
+
+#[test]
+fn a_setext_underline_takes_the_marker_line_as_on_github() {
+    let d = parse("> [!NOTE]\n> ---\n");
+    assert!(!has_alert(&d));
+    assert_eq!(d.str(d.headings[0].title), "[!NOTE]");
+    let d = parse("> [!NOTE]\n> text\n> ---\n");
+    assert!(!has_alert(&d));
+    assert_eq!(d.str(d.headings[0].title), "[!NOTE] text");
+    assert!(has_alert(&parse("> [!NOTE]\n> # real heading\n")));
+    assert!(has_alert(&parse("> [!NOTE]\n> * * *\n")));
+}
+
+#[test]
+fn real_alerts_are_kept_where_github_keeps_them() {
+    for src in [
+        "> [!NOTE]\n> body",
+        "> [!tip]\n> lower",
+        "> [!TIP]  \n> trailing spaces",
+        "> [!NOTE]\n>\n> after a blank",
+        "> [!NOTE]\n> - a",
+        "> [!NOTE]\n> ```\n> code\n> ```",
+        "<table><tr><td>\n\n> [!NOTE]\n> in td\n\n</td></tr></table>",
+        "<table><tr><th>\n\n> [!NOTE]\n> in th\n\n</th></tr></table>",
+        "<center>\n\n> [!NOTE]\n> x\n\n</center>",
+        "<section>\n\n> [!NOTE]\n> x\n\n</section>",
+    ] {
+        assert!(has_alert(&parse(src)), "{src:?}");
+    }
+    assert_eq!(
+        parse("> [!NOTE] title\n> body").text,
+        "[!NOTE] title body\n"
+    );
+}
+
+#[test]
+fn rejected_alert_is_still_kept_in_a_document_that_cannot_hide_it() {
+    let d = parse("\u{E004}\n\n- > [!NOTE]\n  > x\n\n> [!TIP]\n");
+    assert!(!has_alert(&d));
+    assert!(
+        d.text.contains("[!NOTE]") && d.text.contains("[!TIP]"),
+        "{:?}",
+        d.text
+    );
+    assert!(
+        d.text.contains('\u{E004}'),
+        "the document's own character stays"
+    );
+    let d = parse("> [!NOTE]\n> ---\n\n\u{E004}");
+    assert!(!has_alert(&d) && d.text.contains("[!NOTE]"), "{:?}", d.text);
+    // Nor does a character from that block change because a URL elsewhere was protected.
+    let d = parse("\u{E004} \u{E003} http://a.b/c_d");
+    assert!(d.text.contains("\u{E004} \u{E003}"), "{:?}", d.text);
+}
+
+#[test]
+fn first_footnote_definition_wins_and_the_later_subtree_goes() {
+    let d = parse("[^a]: first\n\n[^a]: second *x* http://a.b/ [l](u)\n\n# h\n\nx[^a]\n");
+    assert_eq!(d.footnotes.len(), 1);
+    assert_eq!(d.block_text(d.footnotes[0].block).trim_end(), "first");
+    let defs = d
+        .blocks
+        .iter()
+        .filter(|b| matches!(b.kind, BlockKind::FootnoteDefinition { .. }))
+        .count();
+    assert_eq!(defs, 1);
+    assert!(!d.text.contains("second"), "{:?}", d.text);
+    assert!(d.links.is_empty());
+    // Any label case is the same footnote, and what follows is untouched.
+    let d = parse("x[^a]\n\n[^A]: first\n\n[^a]:\n    > second\n\n    more\n\nafter\n");
+    assert_eq!(d.footnotes.len(), 1);
+    assert!(d.text.contains("first") && d.text.contains("after"));
+    assert!(!d.text.contains("second") && !d.text.contains("more"));
+}
+
+fn cell(d: &Document, n: usize) -> (u16, u16) {
+    d.blocks
+        .iter()
+        .filter_map(|b| match b.kind {
+            BlockKind::TableCell {
+                colspan, rowspan, ..
+            } => Some((colspan, rowspan)),
+            _ => None,
+        })
+        .nth(n)
+        .expect("a cell")
+}
+
+#[test]
+fn html_spans_and_lengths_are_clamped() {
+    for (attrs, want) in [
+        (r#"colspan="0" rowspan="0""#, (1, 1)),
+        ("colspan=1000 rowspan=65534", (1000, 65534)),
+        ("colspan=1001 rowspan=65535", (1000, 65534)),
+        (
+            "colspan=99999999999999999999999 rowspan=70000",
+            (1000, 65534),
+        ),
+        ("colspan=x rowspan=-1", (1, 1)),
+        ("colspan='2x' rowspan=' 3 '", (2, 3)),
+    ] {
+        let d = parse(&format!("<table><tr><td {attrs}>a</td></tr></table>"));
+        assert_eq!(cell(&d, 0), want, "{attrs}");
+    }
+    for (attrs, width, height) in [
+        ("width=inf height=NaN", None, None),
+        ("width=infinity height=-1", None, None),
+        ("width=99999999999999 height=1e30", Some(12000), Some(12000)),
+        ("width=12001px height=11999", Some(12000), Some(11999)),
+    ] {
+        let d = parse(&format!("<img src=a {attrs}>"));
+        let px = |l: Option<Length>| {
+            l.map(|l| match l {
+                Length::Px(n) => n,
+                other => panic!("{other:?}"),
+            })
+        };
+        assert_eq!(px(d.images[0].width), width, "{attrs}");
+        assert_eq!(px(d.images[0].height), height, "{attrs}");
+    }
+    let d = parse("<img src=a width=inf% height=5000%>");
+    assert_eq!(d.images[0].width, None);
+    assert_eq!(d.images[0].height, Some(Length::Percent(1000)));
+    let d = parse("<table width=inf height=20000><tr><td>a</td></tr></table>");
+    let attrs = d.attrs_of(0).unwrap();
+    assert_eq!((attrs.width, attrs.height), (None, Some(Length::Px(12000))));
+}
+
+#[test]
+fn orphan_cells_and_rows_keep_their_text() {
+    for src in ["<td>raw</td>", "<tr><td>raw</td></tr>", "<th>raw</th>"] {
+        let d = parse(src);
+        assert_eq!(kinds(&d), [BlockKind::Plain], "{src}");
+        assert_eq!(d.text, "raw\n", "{src}");
+    }
+    let d = parse("a <td>b</td> c");
+    assert_eq!(d.blocks.len(), 1, "a browser does not end the paragraph");
+    assert!(d.text.contains('a') && d.text.contains('b') && d.text.contains('c'));
+    let d = parse("| h |\n|---|\n| a <tr>b<td>c |\n");
+    assert_eq!(d.block_text(d.blocks.len() as u32 - 1).trim_end(), "a bc");
+}
+
+#[test]
+fn table_content_always_has_a_row_and_a_cell() {
+    let is_row =
+        |d: &Document, b: u32| matches!(d.blocks[b as usize].kind, BlockKind::TableRow { .. });
+    let d = parse("<table><td>direct</td></table>");
+    let row = d.children(0).next().unwrap();
+    assert!(is_row(&d, row));
+    assert!(matches!(
+        d.blocks[d.children(row).next().unwrap() as usize].kind,
+        BlockKind::TableCell { .. }
+    ));
+
+    let d = parse("<table><tr>\n\nStray\n\n</tr><td>no row</td>text in table</table>\n\nout");
+    assert_eq!(d.text, "Stray\nno row\ntext in table\nout\n");
+    let rows: Vec<u32> = d.children(0).collect();
+    assert_eq!(rows.len(), 2, "{:?}", kinds(&d));
+    assert!(rows.iter().all(|&r| is_row(&d, r)));
+    assert_eq!(d.children(rows[0]).count(), 1);
+    assert_eq!(d.children(rows[1]).count(), 2);
+    assert!(
+        matches!(d.blocks.last().unwrap().kind, BlockKind::Paragraph { .. })
+            && d.blocks.last().unwrap().parent == NONE,
+        "the table ended"
+    );
+
+    let d = parse("<table>x<tr><td>a</td></tr>y</table>z");
+    assert_eq!(d.text, "x\na\ny\nz\n");
+    assert_eq!(d.children(0).count(), 3);
+    assert!(d.children(0).all(|r| is_row(&d, r)));
+}
+
+#[test]
+fn list_content_always_has_an_item() {
+    let d = parse("<ul>x<li>a</li>y</ul>");
+    assert_eq!(d.text, "x\na\ny\n");
+    let items: Vec<u32> = d.children(0).collect();
+    assert_eq!(items.len(), 3);
+    assert!(
+        items
+            .iter()
+            .all(|&i| matches!(d.blocks[i as usize].kind, BlockKind::ListItem { .. }))
+    );
+    let marker = |b: u32| d.attrs_of(b).and_then(|a| a.marker);
+    assert_eq!(marker(items[0]), Some(ListMarker::None));
+    assert_eq!(marker(items[1]), None, "a real item keeps its marker");
+
+    let d = parse("<ul><ul><li>a</li></ul></ul>");
+    let outer_item = d.children(0).next().unwrap();
+    assert!(matches!(
+        d.blocks[outer_item as usize].kind,
+        BlockKind::ListItem { .. }
+    ));
+    assert_eq!(
+        d.attrs_of(outer_item).unwrap().marker,
+        Some(ListMarker::None)
+    );
+
+    // A lone item is kept, as on GitHub, in a list that lasts only while items keep coming.
+    let d = parse("<li>a</li><li>b</li>text\n\npara");
+    assert_eq!(
+        kinds(&d)[..3],
+        [
+            BlockKind::List { start: None },
+            BlockKind::ListItem { task: false },
+            BlockKind::Plain
+        ]
+    );
+    assert_eq!(d.children(NONE).count(), 3, "{:?}", kinds(&d));
+    assert_eq!(d.text, "a\nb\ntext \npara\n");
+}
+
+#[test]
+fn display_math_has_no_carriage_returns() {
+    for src in ["$$\r\nm\r\nn\r\n$$\r\n", "$$\rm\rn\r$$\r"] {
+        let d = parse(src);
+        assert!(matches!(d.blocks[0].kind, BlockKind::Math { .. }));
+        assert_eq!(d.block_text(0), "\nm\nn\n", "{src:?}");
+        assert!(!d.text.contains('\r'));
+    }
+    assert!(!parse("a $x\r\ny$ b\r\n").text.contains('\r'));
+}
+
+#[test]
+fn bare_url_ending_in_an_entity_trims_as_on_github() {
+    for (src, link, text) in [
+        ("http://a.b/c&amp; x", "http://a.b/c", "http://a.b/c& x\n"),
+        ("http://a.b/c&gt; x", "http://a.b/c", "http://a.b/c> x\n"),
+        ("http://a.b/c&lt; x", "http://a.b/c", "http://a.b/c< x\n"),
+        ("http://a.b/c&quot; x", "http://a.b/c", "http://a.b/c\" x\n"),
+        ("http://a.b/c&copy; x", "http://a.b/c", "http://a.b/c© x\n"),
+        ("http://a.b/c&x; x", "http://a.b/c", "http://a.b/c&x; x\n"),
+        ("http://a.b/c&amp;.", "http://a.b/c", "http://a.b/c&.\n"),
+        (
+            "http://a.b/c.&amp;, x",
+            "http://a.b/c",
+            "http://a.b/c.&, x\n",
+        ),
+        ("http://a.b/c&amp;) x", "http://a.b/c", "http://a.b/c&) x\n"),
+        ("(http://a.b/c&amp;)", "http://a.b/c", "(http://a.b/c&)\n"),
+        ("www.a.b/c&amp; x", "www.a.b/c", "www.a.b/c& x\n"),
+        // No entity: these stay in, and so does a numeric or digit-bearing form's `&`.
+        ("http://a.b/c& x", "http://a.b/c&", "http://a.b/c& x\n"),
+        (
+            "http://a.b/c&x1; x",
+            "http://a.b/c&x1",
+            "http://a.b/c&x1; x\n",
+        ),
+    ] {
+        let d = parse(src);
+        assert_eq!(links(&d)[0].0, link, "{src}");
+        assert_eq!(d.text, text, "{src}");
+    }
+    // Only a URL's end is affected.
+    assert_eq!(links(&parse("http://a.b/c&amp;d x"))[0].0, "http://a.b/c&d");
+    let d = parse("http://a.b/c&amp; http://d.e/f&amp; x");
+    let got: Vec<_> = links(&d).into_iter().map(|l| l.0).collect();
+    assert_eq!(got, ["http://a.b/c", "http://d.e/f"]);
+}
+
+#[test]
+fn find_matches_a_typed_space_against_a_non_breaking_one() {
+    assert_eq!(find_in_text("a\u{a0}b", "a b", 100).hits.len(), 1);
+    assert_eq!(find_in_text("a\u{a0}b", "a\u{a0}b", 100).hits.len(), 1);
+    assert_eq!(find_in_text("a b", "a\u{a0}b", 100).hits.len(), 1);
+    // The query's first character takes the byte-search shortcut, which must see it too.
+    let hits = find_in_text("x\u{a0}y z", " ", 100).hits;
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].usize(), 1..3);
+    assert_eq!(find_in_text("©\u{a0}y", " y", 100).hits.len(), 1);
+    let d = parse("a&nbsp;b");
+    assert_eq!(find(&d, "a b").hits.len(), 1);
+}
+
+#[test]
+fn files_under_the_limit_never_load_blank() {
+    let mut utf16 = vec![0xFF, 0xFE];
+    while utf16.len() < MAX_FILE_BYTES {
+        utf16.extend_from_slice(&[0xE5, 0x65]); // 日 in UTF-16LE
+    }
+    utf16.truncate(MAX_FILE_BYTES);
+    let d = mdview_core::parse_bytes(&utf16);
+    assert!(d.warnings.is_empty(), "{:?}", d.warnings);
+    assert!(d.text.len() > MAX_FILE_BYTES);
+
+    let d = mdview_core::parse_bytes(&vec![0xFF; 6 * 1024 * 1024]);
+    assert_eq!(d.warnings, [Warning::InvalidUtf8]);
+    assert!(d.text.len() > 6 * 1024 * 1024);
+
+    let d = mdview_core::parse_bytes(&vec![0xFF; MAX_FILE_BYTES]);
+    assert_eq!(d.warnings, [Warning::InvalidUtf8]);
+    assert!(!d.text.is_empty());
+}
+
+#[test]
+fn details_keys_count_repeats_and_stay_fast_on_many_summaries() {
+    let d = parse(
+        "<details><summary>s</summary></details>\n\n<details><summary>s</summary></details>\n\n<details><summary>t</summary></details>\n",
+    );
+    let keys = d.details_keys();
+    assert_eq!(keys.len(), 3);
+    assert_ne!(keys[0].1, keys[1].1);
+    assert_ne!(keys[0].1, keys[2].1);
+    let many: String = (0..200_000)
+        .map(|i| format!("<details><summary>s{i}</summary></details>\n"))
+        .collect();
+    let d = parse(&many);
+    let t = Instant::now();
+    assert_eq!(d.details_keys().len(), 200_000);
+    // The list this replaced took over 4 s here. Far from the limit, so load can't fail it.
+    assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+}
+
+#[test]
+fn picture_sources_only_count_inside_a_picture_until_its_image() {
+    let dark = r#"media="(prefers-color-scheme: dark)" srcset=d.png"#;
+    let d = parse(&format!("<source {dark}>\n\n<p>x</p>\n\n<img src=a>\n"));
+    assert_eq!(d.images[0].dark_src, StrRef::default());
+    let d = parse(&format!("<picture><source {dark}><img src=a></picture>"));
+    assert_eq!(d.str(d.images[0].dark_src), "d.png");
+    // Unclosed, it still ends with its image.
+    let d = parse(&format!(
+        "<picture><source {dark}><img src=a><img src=b>\n\n<img src=c>\n"
+    ));
+    assert_eq!(d.str(d.images[0].dark_src), "d.png");
+    assert_eq!(d.images[1].dark_src, StrRef::default());
+    assert_eq!(d.images[2].dark_src, StrRef::default());
+    // And a later source without a new picture does nothing.
+    let d = parse(&format!(
+        "<picture><img src=a></picture><source {dark}><img src=b>"
+    ));
+    assert_eq!(d.images[1].dark_src, StrRef::default());
+}
+
+#[test]
+fn first_load_is_not_announced_as_a_refresh() {
+    let ok = || ReloadOutcome::Ok { warnings: vec![] };
+    let mut t = ReloadTracker::default();
+    let (g, _) = t.begin(false);
+    assert_eq!(t.finished(g, ok()), None);
+    assert!(!t.is_running());
+    let (g, _) = t.begin(false);
+    assert_eq!(t.finished(g, ok()).unwrap().text, strings::REFRESHED);
+
+    // Nothing can stay stuck: a first load clears what was showing, without saying "refreshed".
+    let mut t = ReloadTracker::default();
+    let (g, _) = t.begin(true);
+    let done = t.finished(g, ok()).unwrap();
+    assert_eq!(done.text, "");
+    let (g, _) = t.begin(false);
+    assert_eq!(t.finished(g, ok()).unwrap().text, strings::REFRESHED);
+
+    let mut t = ReloadTracker::default();
+    let (g, _) = t.begin(false);
+    let missing = ReloadOutcome::Missing { had_content: false };
+    assert_eq!(
+        t.finished(g, missing).unwrap().text,
+        strings::FILE_NOT_FOUND
+    );
+    let (g, _) = t.begin(false);
+    assert_eq!(t.finished(g, ok()).unwrap().text, "");
+
+    // Warnings are shown on a first load too, and a later failure doesn't make it first again.
+    let mut t = ReloadTracker::default();
+    let (g, _) = t.begin(false);
+    let warned = ReloadOutcome::Ok {
+        warnings: vec!["w".into()],
+    };
+    assert_eq!(t.finished(g, warned).unwrap().text, "w");
+    let (g, _) = t.begin(false);
+    t.finished(g, ReloadOutcome::Failed("bad".into()));
+    let (g, _) = t.begin(false);
+    assert_eq!(t.finished(g, ok()).unwrap().text, strings::REFRESHED);
+}
+
+#[test]
+fn command_table_matches_the_old_toolbar_and_view_menu() {
+    assert_eq!(
+        commands::TOOLBAR,
+        [
+            ToolbarItem::Button {
+                id: CommandId::OpenFiles,
+                label: "Open files…",
+                tooltip: None
+            },
+            ToolbarItem::Button {
+                id: CommandId::OpenFolder,
+                label: "Open folder…",
+                tooltip: None
+            },
+            ToolbarItem::Button {
+                id: CommandId::Refresh,
+                label: "Refresh",
+                tooltip: None
+            },
+            ToolbarItem::Separator,
+            ToolbarItem::FindBox,
+            ToolbarItem::MatchCount,
+            ToolbarItem::Button {
+                id: CommandId::FindPrevious,
+                label: "Previous",
+                tooltip: Some("Previous match (Shift+F3)")
+            },
+            ToolbarItem::Button {
+                id: CommandId::FindNext,
+                label: "Next",
+                tooltip: Some("Next match (F3)")
+            },
+        ]
+    );
+    let theme = commands::command(CommandId::Theme);
+    assert_eq!(
+        (theme.menu, theme.label, theme.style),
+        (Menu::View, "Theme", CommandStyle::Submenu)
+    );
+    let radios: Vec<_> = commands::menu_items(Menu::Theme).map(|c| c.label).collect();
+    assert_eq!(radios, ["System", "Light", "Dark"]);
+    assert!(commands::menu_items(Menu::Theme).all(|c| c.style == CommandStyle::Radio));
+    let view: Vec<_> = commands::menu_items(Menu::View)
+        .map(|c| (c.label, c.separator_before))
+        .collect();
+    assert_eq!(
+        view,
+        [
+            ("Theme", false),
+            ("Zoom in", true),
+            ("Zoom out", false),
+            ("Reset zoom to 100%", false),
+            ("FILES", false),
+            ("ON THIS PAGE", false),
+            ("Focus reading mode", true),
+        ]
+    );
+    let titles = [Menu::File, Menu::Edit, Menu::View, Menu::Help].map(|m| m.title().unwrap());
+    assert_eq!(titles, ["&File", "&Edit", "&View", "&Help"]);
+    assert_eq!(Menu::TabContext.title(), None);
+    assert_eq!(strings::TOOLBAR_TITLE, "Reader");
+    assert_eq!(strings::MANAGE_RECENT_TITLE, "Manage recent files");
+    let show = commands::command(CommandId::ShowInFileManager).label;
+    assert_eq!(
+        show,
+        if cfg!(windows) {
+            "Show in File Explorer"
+        } else {
+            "Show in file manager"
+        }
+    );
+}
+
+#[test]
+fn find_work_is_bounded_on_a_long_query_against_repetitive_text() {
+    // Took 3.5 s before.
+    let text = "a".repeat(1 << 20);
+    let long = format!("{}b", "a".repeat(5000));
+    let r = find_in_text(&text, &long, 10_000);
+    assert!(r.hits.is_empty() && r.capped);
+
+    // Up to the limit nothing is lost, even at the worst place in the text.
+    let query = format!("{}b", "a".repeat(FIND_WORK_PER_BYTE - 1));
+    let haystack = format!("{}b", "a".repeat(1 << 16));
+    let r = find_in_text(&haystack, &query, 10_000);
+    assert_eq!(r.hits.len(), 1);
+    assert!(!r.capped);
+
+    // A long query on ordinary text is exact: it fails early almost everywhere.
+    let line = "The quick brown fox jumps over the lazy dog. ";
+    let page = line.repeat(10_000);
+    let query = format!("{} {}", line.repeat(40), "tail");
+    let r = find_in_text(&format!("{page}{query}"), &query, 10_000);
+    assert_eq!(r.hits.len(), 1);
+    assert!(!r.capped);
+}
+
+#[test]
+fn a_fragment_is_decoded_once() {
+    let dir = Path::new("/d");
+    let d = parse("<a id=\"a%41\"></a>\n\nx\n\n# Bü\n");
+    let fragment = match classify_link("#a%2541", dir) {
+        LinkAction::Fragment(f) => f,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(fragment, "a%2541");
+    assert!(d.resolve_fragment(&fragment).is_some());
+    assert_eq!(d.resolve_fragment("a%41"), None, "means the anchor aA");
+    let fragment = match classify_link("#b%C3%BC", dir) {
+        LinkAction::Fragment(f) => f,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(d.resolve_fragment(&fragment), Some(d.headings[0].block));
+    for href in ["o.md#a%2541", "file:///abs/o.md#a%2541"] {
+        match classify_link(href, dir) {
+            LinkAction::OpenMarkdown { fragment, .. } => {
+                assert_eq!(fragment.as_deref(), Some("a%2541"), "{href}")
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+#[test]
+fn protected_urls_give_the_same_strings_as_unprotected_ones() {
+    let plain = parse("![al*t `c` $m$](u.png \"t\") [a](/u_v \"w_x\") [^f]\n\n[^f]: n\n");
+    let protected =
+        parse("![al*t `c` $m$](u.png \"t\") [a](/u_v \"w_x\") [^f]\n\n[^f]: n\n\nhttp://a.b/c_d\n");
+    let image = |d: &Document, r: StrRef| d.str(r).to_string();
+    assert_eq!(
+        image(&protected, protected.images[0].alt),
+        image(&plain, plain.images[0].alt)
+    );
+    assert_eq!(image(&protected, protected.links[0].dest), "/u_v");
+    assert_eq!(image(&protected, protected.links[0].title), "w_x");
+    assert_eq!(links(&protected)[1].1, "http://a.b/c_d");
+}
+
+fn block_depth(d: &Document) -> usize {
+    let mut depth = vec![0usize; d.blocks.len()];
+    let mut max = 0;
+    for (i, b) in d.blocks.iter().enumerate() {
+        depth[i] = if b.parent == NONE {
+            1
+        } else {
+            depth[b.parent as usize] + 1
+        };
+        max = max.max(depth[i]);
+    }
+    max
+}
+
+#[test]
+fn nesting_stops_at_a_fixed_depth_with_the_text_kept() {
+    let n = 100_000;
+    for (src, text) in [
+        (format!("{} a", ">".repeat(n)), "a\n".to_string()),
+        (format!("{}x", "<div>".repeat(n)), "x\n".to_string()),
+        (
+            (0..600)
+                .map(|i| format!("{}- l{i}\n", "  ".repeat(i)))
+                .collect(),
+            (0..600).map(|i| format!("l{i}\n")).collect(),
+        ),
+        (
+            format!(
+                "{}<table><tr><td>t</td><td>u</td></tr></table>",
+                ">".repeat(n)
+            ),
+            "t\nu\n".to_string(),
+        ),
+        (
+            format!("{}<ul><li>t</li><li>u</li></ul>", "<div>".repeat(300)),
+            "t\nu\n".to_string(),
+        ),
+        (
+            format!(
+                "{} | h |\n{} |---|\n{} | c |\n",
+                ">".repeat(300),
+                ">".repeat(300),
+                ">".repeat(300)
+            ),
+            "h\nc\n".to_string(),
+        ),
+    ] {
+        let d = parse(&src);
+        assert!(
+            block_depth(&d) <= MAX_BLOCK_DEPTH + 4,
+            "{}",
+            block_depth(&d)
+        );
+        assert_eq!(d.text, text, "{:.40}", src);
+        assert!(d.blocks.len() < 2000);
+    }
+    // At the limit nothing changes.
+    let d = parse(&format!("{} a", ">".repeat(MAX_BLOCK_DEPTH - 1)));
+    assert_eq!(block_depth(&d), MAX_BLOCK_DEPTH);
 }

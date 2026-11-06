@@ -117,9 +117,12 @@ const PRE_BLANK: &str =
     "a blank line ends the HTML block, so <pre> closes there; the text and its order are unchanged";
 const WRAPPER: &str = "looks the same: an inline tag alone in an HTML block wraps the next block's content from inside";
 
+const IMPLIED_CELL: &str = "code directly in a <tr> gets an implied cell, since the model promises rows hold only cells; a browser moves it before the table";
+
 const COMMONMARK_EXCEPTIONS: &[(usize, &str)] = &[
     (148, PRE_BLANK),
     (167, WRAPPER),
+    (191, IMPLIED_CELL),
     (602, BARE_URL),
     (608, BARE_URL),
     (611, BARE_URL),
@@ -128,6 +131,7 @@ const COMMONMARK_EXCEPTIONS: &[(usize, &str)] = &[
 const GFM_EXCEPTIONS: &[(usize, &str)] = &[
     (118, PRE_BLANK),
     (137, WRAPPER),
+    (160, IMPLIED_CELL),
     (610, BARE_URL),
     (616, BARE_URL),
     (619, BARE_URL),

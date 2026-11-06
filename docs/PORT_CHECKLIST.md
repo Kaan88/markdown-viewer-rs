@@ -419,20 +419,22 @@ The first and fourth tests rely on the render timing noted in the search quirk a
 
 Everything above is the old app's inventory, copied unchanged; nothing is checked off until a shell uses it. Core already carries these parts, with tests in `crates/core/tests/`:
 
-- Find: plain case-insensitive search, cap 10,000, label and tooltip text, Turkish İ/ı. Text in a closed `<details>` body has no hits, the same count as the old app: `find_visible` takes the shell's open state, and `find` uses the state as written. Highlighting, Enter/F3 and re-running on tab change or when a details block is toggled are shell work.
+- Find: plain case-insensitive search, cap 10,000, label and tooltip text, Turkish İ/ı, and a typed space finds a non-breaking one as Qt's did. Text in a closed `<details>` body has no hits, the same count as the old app: `find_visible` takes the shell's open state, and `find` uses the state as written. Highlighting, Enter/F3 and re-running on tab change or when a details block is toggled are shell work.
 - Zoom range and step, theme setting values, recents (15, order, missing marker), session file. The old `settings.ini` is not read; `geometry` and `layout` are opaque to core.
 - Link following rules and image source rules. The system handler call and fetching are shell work.
-- Limits: 16 MiB, 64 KiB diagram, 4 KiB equation, and the image limits as constants. Diagram line limits per family wait for Phase 4.
-- Command table: every menu item, shortcut and status string above, in `commands.rs`. The Help text and window title say "Markdown Viewer" instead of "Markdown Viewer C++", and About no longer says "for Windows".
+- Limits: 16 MiB on the bytes on disk, 64 KiB diagram, 4 KiB equation, and the image limits as constants. Diagram line limits per family wait for Phase 4.
+- Command table: every menu item, shortcut and status string above, in `commands.rs`, plus the menu titles (`Menu::title`), the Theme submenu (`Menu::Theme`), the toolbar in its old order with Previous before Next and its tooltips (`TOOLBAR`), and the toolbar and dialog titles. "Show in File Explorer" on Windows is "Show in file manager" elsewhere. Access keys on individual menu items (`Open &files…`, `E&xit`) are not carried yet, only those on the menu titles. The Help text and window title say "Markdown Viewer" instead of "Markdown Viewer C++", and About no longer says "for Windows".
 - Tab labels, including the fix for duplicate parents.
+- "Document refreshed from disk" only after an earlier successful load, as in the old app. A tab's first load says nothing, or clears what was showing with empty text.
 - Fixed state bugs: stuck "Refreshing…", timeout overwrite, failed images never retrying, snap to heading on reload (`remap_scroll`, which compares the two versions from both ends and never searches for matching text). Only the state logic exists; shells must call it.
 - Paths: `canonical_or_absolute` gives ordinary `C:\x` and `\\server\share` spellings on Windows, keeping `\\?\` only for a path that needs it. The logic is tested here; the real `canonicalize` call has a `cfg(windows)` test that needs a W checkpoint to run.
 
 **Deliberately different from the old app:**
 
 - `details` open state is view state and uses a key from the summary text and its occurrence (`details_keys`), instead of ordinal IDs and a reload.
-- A paired `<script>`, `<style>` or `<iframe>` still disappears with its content, as in the old `gfm` test. Unpaired ones and the other tagfilter names show as literal text, as GFM specifies. The old app dropped these silently.
+- A paired `<script>`, `<style>` or `<iframe>` still disappears with its content, as in the old `gfm` test. GitHub shows them as literal text instead, and this is pending the user's decision. Unpaired ones and the other tagfilter names show as literal text, as GFM specifies. The old app dropped these silently.
 - The find counter shows `10000+` when capped, where the old one stopped at 10000 and looked exact.
-- Invalid UTF-8 now loads with replacement characters and a warning, after the same retries. The old app refused the file. UTF-16 files with a BOM now load.
+- Invalid UTF-8 now loads with replacement characters and a warning, after the same retries. The old app refused the file. UTF-16 files with a BOM now load. Either can decode to more than 16 MiB of text, and only the bytes on disk count against the limit.
+- A very long query on text that nearly matches it everywhere stops early and shows a `+`, where the old find would block. Queries up to 64 characters are never affected.
 
 **Not in core yet:** the file watcher (Phase 3). The old `math` and `families` tests belong to engine integration (Phase 4).

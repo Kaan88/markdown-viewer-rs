@@ -46,6 +46,10 @@ pub enum ReloadOutcome {
 pub struct ReloadTracker {
     generation: u64,
     running: Option<u64>,
+    /// A first load has nothing to be refreshed from, so it does not announce itself.
+    loaded: bool,
+    /// The last message this tracker gave stays until replaced.
+    sticky_showing: bool,
 }
 
 impl ReloadTracker {
@@ -54,6 +58,7 @@ impl ReloadTracker {
     pub fn begin(&mut self, manual: bool) -> (u64, Option<StatusMessage>) {
         self.generation += 1;
         self.running = Some(self.generation);
+        self.sticky_showing |= manual;
         (
             self.generation,
             manual.then(|| StatusMessage::sticky(strings::REFRESHING)),
@@ -67,15 +72,25 @@ impl ReloadTracker {
     /// The deadline passed. Later `finished` calls for this generation change nothing.
     pub fn timed_out(&mut self, generation: u64) -> Option<StatusMessage> {
         self.take_current(generation)?;
+        self.sticky_showing = true;
         Some(StatusMessage::sticky(strings::RENDER_TIMEOUT))
     }
 
-    /// Always replaces "Refreshing document…" for the current generation, whatever the outcome.
+    /// Always replaces "Refreshing document…" for the current generation, whatever the outcome. A
+    /// tab's first successful load says nothing: `None`, or empty text if an earlier message has to go.
     pub fn finished(&mut self, generation: u64, outcome: ReloadOutcome) -> Option<StatusMessage> {
         self.take_current(generation)?;
-        Some(match outcome {
+        let first_load = !self.loaded && matches!(outcome, ReloadOutcome::Ok { .. });
+        self.loaded |= first_load;
+        let message = match outcome {
             ReloadOutcome::Ok { warnings } if !warnings.is_empty() => {
                 StatusMessage::sticky(warnings.join("\n"))
+            }
+            ReloadOutcome::Ok { .. } if first_load => {
+                if !self.sticky_showing {
+                    return None;
+                }
+                StatusMessage::sticky("")
             }
             ReloadOutcome::Ok { .. } => StatusMessage::transient(strings::REFRESHED),
             ReloadOutcome::Failed(e) => StatusMessage::sticky(e),
@@ -85,7 +100,9 @@ impl ReloadTracker {
             ReloadOutcome::Missing { had_content: false } => {
                 StatusMessage::sticky(strings::FILE_NOT_FOUND)
             }
-        })
+        };
+        self.sticky_showing = message.timeout_ms.is_none() && !message.text.is_empty();
+        Some(message)
     }
 
     fn take_current(&mut self, generation: u64) -> Option<u64> {

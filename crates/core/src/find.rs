@@ -1,12 +1,13 @@
 //! Plain case-insensitive find over the document text.
 
-use crate::limits::FIND_CAP;
+use crate::limits::{FIND_CAP, FIND_WORK_PER_BYTE};
 use crate::model::{Document, TextRange};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FindResult {
     pub hits: Vec<TextRange>,
-    /// True when the cap stopped the search, so the real count is higher.
+    /// True when a limit stopped the search, so the real count may be higher: `FIND_CAP` hits, or
+    /// `FIND_WORK_PER_BYTE` spent on a very long query against text that nearly matches it everywhere.
     pub capped: bool,
 }
 
@@ -43,6 +44,8 @@ fn find_with(text: &str, query: &str, cap: usize, hidden: impl Fn(u32) -> bool) 
     };
     let needles = ascii_needles(first);
     let bytes = text.as_bytes();
+    let budget = bytes.len().saturating_mul(FIND_WORK_PER_BYTE);
+    let mut work = 0;
     let mut pos = 0;
     while pos < bytes.len() {
         if let Some((a, b)) = needles {
@@ -51,9 +54,17 @@ fn find_with(text: &str, query: &str, cap: usize, hidden: impl Fn(u32) -> bool) 
                 None => break,
             }
         }
-        let Some(end) = match_at(text, pos, &query) else {
-            pos += utf8_len(bytes[pos]);
-            continue;
+        let end = match match_at(text, pos, &query) {
+            Ok(end) => end,
+            Err(compared) => {
+                work += compared;
+                if work > budget {
+                    result.capped = true;
+                    break;
+                }
+                pos += utf8_len(bytes[pos]);
+                continue;
+            }
         };
         if !hidden(pos as u32) {
             if result.hits.len() == cap {
@@ -68,8 +79,12 @@ fn find_with(text: &str, query: &str, cap: usize, hidden: impl Fn(u32) -> bool) 
 }
 
 /// Byte values a query's first character can start with, when that is a safe shortcut. Letters with
-/// non-ASCII case partners (Kelvin sign, long s, Turkish i forms) have to walk every character.
+/// non-ASCII case partners (Kelvin sign, long s, Turkish i forms) have to walk every character. A
+/// space also matches U+00A0, whose UTF-8 starts with 0xC2.
 fn ascii_needles(first: char) -> Option<(u8, u8)> {
+    if first == ' ' {
+        return Some((b' ', 0xC2));
+    }
     if !first.is_ascii() || matches!(first, 'i' | 'I' | 'k' | 's' | 'K' | 'S') {
         return None;
     }
@@ -86,20 +101,24 @@ fn utf8_len(b: u8) -> usize {
     }
 }
 
-fn match_at(text: &str, pos: usize, query: &[char]) -> Option<usize> {
+/// The end of a match at `pos`, or else how many characters were compared to find there is none.
+fn match_at(text: &str, pos: usize, query: &[char]) -> Result<usize, usize> {
     let mut chars = text[pos..].char_indices();
     let mut end = pos;
-    for &q in query {
-        let (i, c) = chars.next()?;
+    for (n, &q) in query.iter().enumerate() {
+        let Some((i, c)) = chars.next() else {
+            return Err(n);
+        };
         if !chars_match(q, fold(c)) {
-            return None;
+            return Err(n + 1);
         }
         end = pos + i + c.len_utf8();
     }
-    Some(end)
+    Ok(end)
 }
 
 /// Simple case folding, leaving the four Turkish i forms distinct so `chars_match` can compare them.
+/// A non-breaking space reads as a space, since nobody can tell them apart when typing a query.
 fn fold(c: char) -> char {
     if c.is_ascii() {
         return if c == 'I' {
@@ -112,6 +131,7 @@ fn fold(c: char) -> char {
         'İ' | 'ı' => c,
         'ς' => 'σ',
         'ſ' => 's',
+        '\u{A0}' => ' ',
         _ => {
             let mut lower = c.to_lowercase();
             match (lower.next(), lower.next()) {

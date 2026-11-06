@@ -1,5 +1,8 @@
 //! `parse_bench <file> [runs]`: parse time and heap use. Run with
 //! `cargo run --release -p mdview-core --example parse_bench -- spikes/parser/data/generated_1mib.md`.
+//!
+//! The file is measured as it is, then again with one bare URL holding an `_` added at the end. That
+//! URL makes the parser copy the source to protect it, so real documents can land on either figure.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
@@ -88,7 +91,13 @@ fn main() {
         "{path}: {} bytes, {runs} runs (source text not counted in heap figures)",
         src.len()
     );
+    report(&src, runs);
 
+    println!("\nwith a bare URL added: http://a.b/c_d");
+    report(&format!("{src}\n\nhttp://a.b/c_d\n"), runs);
+}
+
+fn report(src: &str, runs: usize) {
     let mut times = Vec::with_capacity(runs);
     let (mut peak, mut retained, mut allocs) = (0, 0, 0);
     for _ in 0..runs {
@@ -96,7 +105,7 @@ fn main() {
         PEAK.store(base, Relaxed);
         let c0 = COUNT.load(Relaxed);
         let t = Instant::now();
-        let doc = mdview_core::parse(&src);
+        let doc = mdview_core::parse(src);
         times.push(t.elapsed().as_secs_f64() * 1000.0);
         peak = PEAK.load(Relaxed) - base;
         retained = LIVE.load(Relaxed) - base;
@@ -116,7 +125,7 @@ fn main() {
         retained as f64 / 1048576.0
     );
 
-    let doc = mdview_core::parse(&src);
+    let doc = mdview_core::parse(src);
     println!(
         "{} blocks, {} spans, {} links, {} images, {} headings",
         doc.blocks.len(),
