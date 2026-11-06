@@ -2,11 +2,13 @@
 
 The aim is that anything that renders on GitHub also renders here, and anything we can't render shows its source and a reason.
 
+**See [Not implemented](#not-implemented) for the short list.**
+
 **Status of this list.** It comes from my knowledge of GitHub's "Basic writing and formatting syntax", "Working with advanced formatting" and GFM documents. I could not check it against github.com in this phase, and no document was compared with a real GitHub rendering.
 
 - **Supported:** in the document model today, with a test in `crates/core/tests/`. No renderer exists until Phase 2, so nothing here has been seen on screen.
 - **Planned:** the phase is named.
-- **Proposed exclusion:** a proposal for the user to approve or reject. Nothing is final until reviewed.
+- **Excluded:** the user reviewed and accepted these. We don't implement them.
 
 ## Spec suites
 
@@ -77,10 +79,10 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 | `<img>` with no usable `src` | Supported in model | Keeps its alt text, as on GitHub |
 | `<dl>`, `<figure>`, `<section>` and similar | Supported as plain blocks | No term or caption styling yet |
 | `<ruby>`, `<abbr>`, `<small>`, `<q>`, `<bdo>`, `<time>` and similar | Planned, Phase 2 | Text is kept without the styling. The corpus study decides priority |
-| Inline CSS `style=` | Proposed exclusion | GitHub strips it too |
-| `hspace` on images; `cellpadding`, `cellspacing` on tables; `nowrap` on cells | Proposed exclusion | GitHub keeps these and the model drops them. Spacing only. Worth adding if the Phase 2 corpus shows them |
-| `<li value>` | Proposed exclusion | GitHub keeps it; numbering here ignores it |
-| `align`, `valign` on `<thead>`, `<tbody>`, `<tfoot>`; `dir` on `<span>` | Proposed exclusion | GitHub keeps these, but those tags leave no node in the model to hold them. Text is kept. `<tr>` and cells do carry them |
+| Inline CSS `style=` | Excluded | GitHub strips it too |
+| `hspace` on images; `cellpadding`, `cellspacing` on tables; `nowrap` on cells | Excluded | GitHub keeps these and the model drops them. Spacing only. Worth adding if the Phase 2 corpus shows them |
+| `<li value>` | Excluded | GitHub keeps it; numbering here ignores it |
+| `align`, `valign` on `<thead>`, `<tbody>`, `<tfoot>`; `dir` on `<span>` | Excluded | GitHub keeps these, but those tags leave no node in the model to hold them. Text is kept. `<tr>` and cells do carry them |
 | Image `width`, `height` | Supported in model | |
 | Script, style, iframe, object | Never run | Removed when paired, which differs from GitHub: see the known gaps. Unpaired tagfilter names show as text |
 
@@ -88,13 +90,33 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 
 | Feature | Status | Reason |
 |---|---|---|
-| `@mentions`, `#123` issue refs, commit SHAs, custom autolink references | Proposed exclusion | They need a repository and network context. They read as plain text |
-| Issue and PR task-list state, sub-issue lists | Proposed exclusion | Read-only viewer with no server |
-| Code permalinks rendered as snippets | Proposed exclusion | Needs network and repository access. Stays a link |
-| Attached video and asset URLs as players | Proposed exclusion | No media engine, which would hurt launch and memory. Stays a link |
-| Colour chips for `#ffffff` in code | Proposed exclusion | GitHub shows these only in issues and PRs |
-| GeoJSON and TopoJSON maps | Proposed exclusion | Needs map tiles from the network. Shown as a code block |
-| ASCII STL 3D models | Proposed exclusion | Needs a 3D renderer. Shown as a code block |
+| `@mentions`, `#123` issue refs, commit SHAs, custom autolink references | Excluded | They need a repository and network context. They read as plain text |
+| Issue and PR task-list state, sub-issue lists | Excluded | Read-only viewer with no server |
+| Code permalinks rendered as snippets | Excluded | Needs network and repository access. Stays a link |
+| Attached video and asset URLs as players | Excluded | No media engine, which would hurt launch and memory. Stays a link |
+| Colour chips for `#ffffff` in code | Excluded | GitHub shows these only in issues and PRs |
+| GeoJSON and TopoJSON maps | Excluded | Needs map tiles from the network. Shown as a code block |
+| ASCII STL 3D models | Excluded | Needs a 3D renderer. Shown as a code block |
+
+## Not implemented
+
+**Accepted exclusions** (rows marked Excluded above):
+
+- GitHub-only features: `@mentions`, issue refs, commit SHAs, custom autolinks, issue and PR task state, code permalink snippets, video and asset players, colour chips, GeoJSON and TopoJSON maps, ASCII STL models.
+- Inline CSS `style=`, `hspace`, `cellpadding`, `cellspacing`, `nowrap`, `<li value>`, `align` and `valign` on table sections, `dir` on `<span>`.
+
+**Planned, not built yet:**
+
+- Phase 2: the renderer, so nothing has been seen on screen. Also front matter, emoji shortcodes, and `<ruby>`, `<abbr>`, `<small>`, `<q>`, `<bdo>`, `<time>` styling.
+- Phase 3: the Qt shell and file watcher.
+- Phase 4: math, Mermaid and SVG drawing, syntax highlighting, and the `` $`..`$ `` math form.
+- Phase 5: the WinUI shell. Only a test skeleton exists.
+
+**Decided, code not changed yet:**
+
+- A paired `<script>`, `<style>` or `<iframe>` must show as literal text, as on GitHub. The code still removes it.
+
+**Known defects:** the findings in [AUDIT_PHASE1.md](AUDIT_PHASE1.md) are unfixed. Several say this file overstates what works, so read it alongside them.
 
 ## Known gaps in what is claimed as supported
 

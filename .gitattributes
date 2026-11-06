@@ -1,0 +1,5 @@
+# Spec and regression data must stay byte-exact on Windows clones.
+crates/** text=auto eol=lf
+fixtures/** text=auto eol=lf
+docs/** text=auto eol=lf
+spikes/parser/data/** -text
