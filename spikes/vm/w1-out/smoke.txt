@@ -1,0 +1,53 @@
+07:39:03.084 started pid 12736
+07:39:08.144 inputDesktop=2444 GetDC0=-1727985576 fg=2818662 fgTitle=[mdview WinUI skeleton] h=2818662
+07:39:08.147 title=[mdview WinUI skeleton] foreground=True dpiWindow=96 dpiSystem=96
+07:39:08.155 rect L=430 T=188 R=3010 B=1214
+07:39:08.215 shot-screen saved
+07:39:08.268 screenshots saved
+UIA ControlType.Pane name=[] class=[Microsoft.UI.Content.DesktopChildSiteBridge] 438,219 2564x987
+UIA ControlType.Pane name=[] class=[InputSiteWindowClass] 438,219 2564x987
+UIA ControlType.Tab name=[] class=[Microsoft.UI.Xaml.Controls.TabView] 438,259 2564x40
+UIA ControlType.List name=[] class=[ListView] 440,259 490x40
+UIA ControlType.TabItem name=[showcase.md] class=[ListViewItem] 442,267 248x32
+UIA ControlType.Text name=[showcase.md] class=[TextBlock] 454,275 74x15
+UIA ControlType.Button name=[Sekmeyi Kapat] class=[Button] 650,271 32x24
+UIA ControlType.TabItem name=[linked.md] class=[ListViewItem] 686,267 240x32
+UIA ControlType.Text name=[linked.md] class=[TextBlock] 695,275 53x15
+UIA ControlType.Button name=[Sekmeyi Kapat] class=[Button] 889,271 32x24
+UIA ControlType.Button name=[Yeni Sekme Ekle] class=[Button] 933,272 32x24
+UIA ControlType.MenuBar name=[] class=[] 438,219 2564x40
+UIA ControlType.MenuItem name=[File] class=[Microsoft.UI.Xaml.Controls.MenuBarItem] 442,223 41x32
+UIA ControlType.Tree name=[] class=[ListView] 438,299 240x875
+UIA ControlType.TreeItem name=[fixtures (lazy)] class=[Microsoft.UI.Xaml.Controls.TreeViewItem] 442,301 232x28
+UIA ControlType.Text name=[fixtures (lazy)] class=[TextBlock] 482,304 81x19
+UIA ControlType.Edit name=[Find] class=[TextBox] 438,1174 2564x32
+07:39:08.369 wheel at 1840,701
+07:39:08.373 under 1840,701 = ControlType.Pane [] class=[Microsoft.UI.Content.DesktopChildSiteBridge]
+07:39:09.886 wheel lines in trace: 3
+      5660.6 ms  wheel delta=-120
+      5975.2 ms  wheel delta=-120
+      6292.2 ms  wheel delta=120
+07:39:09.943 shot-wheel saved
+07:39:09.957 tree expanded through UIA
+07:39:10.783 lazy lines in trace: 1; child showcase.md present: True
+07:39:10.787 node centre 558,315 fg=mdview WinUI skeleton
+07:39:10.789 under 558,315 = ControlType.Pane [] class=[Microsoft.UI.Content.DesktopChildSiteBridge]
+07:39:10.834 shot-before-right saved
+07:39:11.463 shot-hover saved
+07:39:12.850 shot-flyout saved
+07:39:12.856 flyout item found through UIA: True
+07:39:14.159 flyout clicked: trace lines 1; title=[mdview WinUI skeleton: context flyout clicked]
+07:39:14.165 find centre 1720,1190
+07:39:14.167 under 1720,1190 = ControlType.Pane [] class=[Microsoft.UI.Content.DesktopChildSiteBridge]
+07:39:15.040 textbox focused after click: True
+07:39:15.927 textbox value=[hello w0]
+07:39:15.976 shot-final saved
+07:39:16.039 file centre 462,239
+07:39:16.041 under 462,239 = ControlType.Pane [] class=[Microsoft.UI.Content.DesktopChildSiteBridge]
+07:39:17.685 shot-menu saved
+07:39:17.687 menu Close found: True
+07:39:17.689 close class=[MenuFlyoutItem] type=ControlType.MenuItem
+07:39:18.362 exited after File > Close, code=0
+
+07:39:18.465 SendInput ok=35 failed=0
+07:39:18.467 harness end

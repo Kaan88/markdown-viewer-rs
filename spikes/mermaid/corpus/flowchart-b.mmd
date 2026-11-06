@@ -1,0 +1,17 @@
+%% expect: Kullanıcı dosyayı açar|Önbellekte var mı|Dosya sistemi izleyicisi|HttpRequestDeserializationExceptionHandlerFactory|Markdown ayrıştırıcısı|Engine process|sonuç hazır|second line of the label|zaman aşımı
+flowchart TD
+    A(["Kullanıcı dosyayı açar"]) --> B{"Önbellekte var mı?"}
+    B -- evet --> C["Görünümü önbellekten çiz"]
+    B -- hayır --> D[["Markdown ayrıştırıcısı"]]
+    D --> E{{"Dosya sistemi izleyicisi"}}
+    E --> F[/"Mermaid and math jobs"/]
+    F --> G["A label with a forced break<br/>second line of the label"]
+    G --> H[("HttpRequestDeserializationExceptionHandlerFactory")]
+    subgraph P [Engine process]
+        H --> I((sonuç hazır))
+        H -. zaman aşımı .-> J>Show the source instead]
+    end
+    I ==> K["This is a deliberately long node label that goes well past the two hundred pixel wrap width that Mermaid uses by default"]
+    J --> K
+    classDef warm fill:#fde68a,stroke:#b45309,color:#111
+    class J warm

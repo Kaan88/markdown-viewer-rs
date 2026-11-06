@@ -1,0 +1,38 @@
+PS session id: 2  console session: 1
+OpenInputDesktop=2296 err=0
+Foreground=459426
+GetDC(0)=1224804236
+SetCursorPos=True err=0
+GetCursorPos=True value=429496729700 err=0
+Virtual screen: 0,0 3440x1440
+--- query session
+ SESSIONNAME               USERNAME                 ID  STATE   TYPE        DEVICE 
+ services                                            0  Disc                        
+ console                                             1  Conn                        
+>rdp-tcp#0                 kaan                      2  Active                      
+                           kaan                      3  Disc                        
+ rdp-tcp                                         65536  Listen                      
+--- logonui / lock
+
+Name      Id SessionId
+----      -- ---------
+LogonUI 1252         1
+LogonUI 5612         3
+
+
+
+--- whoami
+win-p2faeu2o5fh\kaan
+--- processes in this session of note
+
+Name       Id SessionId
+----       -- ---------
+dwm      1260         1
+dwm      5644         2
+dwm      6000         3
+explorer 1812         3
+rdpinit  7664         2
+rdpshell 7756         2
+
+
+

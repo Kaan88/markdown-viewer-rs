@@ -1,0 +1,11 @@
+run 0: pid 185377 alive after job: true
+  exit after 10000 ms idle (exit code 0); /proc/185377 exists: false; ticks=622 maxgap=16.2ms
+run 1: pid 185840 alive after job: true
+  exit after 10000 ms idle (exit code 0); /proc/185840 exists: false; ticks=622 maxgap=16.2ms
+job at 6 s: same engine, spawned=false
+  exit 10000 ms after the second job
+boundary offset -3 ms: ok=true spawned=true wall=1.4 ms
+boundary offset -1 ms: ok=true spawned=true wall=1.5 ms
+boundary offset 0 ms: ok=true spawned=true wall=1.8 ms
+boundary offset 1 ms: ok=true spawned=true wall=1.6 ms
+idle-race retries used: 0

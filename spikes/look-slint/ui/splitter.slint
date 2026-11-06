@@ -1,0 +1,30 @@
+import { Theme, VLine } from "theme.slint";
+
+// A hairline with an 8 px invisible grip. It takes no layout space, so the panes keep
+// their full widths and the document stays on whole device pixels.
+export component Splitter {
+    in-out property <length> value;      // pane width being resized
+    in property <length> minimum: 160px;
+    in property <length> maximum: 420px;
+    in property <bool> invert: false;    // true for a pane on the right
+    in property <length> line-offset: 4px;
+    property <length> start;
+    width: 8px;
+    VLine { x: line-offset; height: parent.height; }
+    if ta.has-hover || ta.pressed: Rectangle {
+        x: line-offset - 1px;
+        width: 2px;
+        background: Theme.accent;
+    }
+    ta := TouchArea {
+        mouse-cursor: col-resize;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down { start = value; }
+        }
+        moved => {
+            if self.pressed {
+                value = clamp(start + (invert ? -1 : 1) * (self.mouse-x - self.pressed-x), minimum, maximum);
+            }
+        }
+    }
+}

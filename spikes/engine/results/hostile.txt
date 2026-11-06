@@ -1,0 +1,48 @@
+case                          wall ms  ticks   maxgap  recover  result
+control: valid math               1.9      0    0.0ms  0.3ms    rendered 29x61, engine HWM 6608 KB
+TeX syntax error                  0.0      0    0.0ms  0.2ms    error: parse error: ParseError at position 6: Unexpected end of input in a macro argument
+TeX not UTF-8                     0.0      0    0.0ms  0.2ms    error: TeX is not UTF-8
+deep \frac x400                   1.0      0    0.0ms  0.2ms    error: parse error: ParseError: Recursion limit exceeded
+deep braces x2000                 0.0      0    0.0ms  0.2ms    error: parse error: ParseError: Recursion limit exceeded
+deep x^{ x1000                    0.0      0    0.0ms  0.2ms    error: parse error: ParseError: Recursion limit exceeded
+deep \sqrt x500                   0.1      0    0.0ms  0.2ms    error: parse error: ParseError: Recursion limit exceeded
+deep \left( x300                  0.1      0    0.0ms  0.2ms    error: parse error: ParseError: Recursion limit exceeded
+\def macro bomb 10^11             2.5      0    0.0ms  0.2ms    error: parse error: ParseError: Too many expansions: infinite loop or need to increase maxExpand 
+matrix 800 rows                   4.3      0    0.0ms  0.3ms    error: formula size 67 x 30724 px exceeds raster cap
+4096 glyphs                       2.1      0    0.0ms  0.3ms    error: formula size 74916 x 18 px exceeds raster cap
+\rule 100000em                    0.1      0    0.0ms  0.3ms    error: formula size 3200004 x 3200004 px exceeds raster cap
+\rule 1e300em                     0.1      0    0.0ms  0.2ms    error: formula size 32000000000000001680152328166541447958542994595461092957307331696377678655645
+\rule 1e400em (inf)               0.1      0    0.0ms  0.2ms    error: non-finite formula size inf x 36
+\rule 124em, 15.8 MP, fits       79.3      4   16.1ms  0.5ms    rendered 3972x3972, engine HWM 70516 KB
+\rule 126em, over 16 MP           0.1      0    0.0ms  0.4ms    error: formula size 4036 x 4036 px exceeds raster cap
+\left( around 1e5em rule          0.1      0    0.0ms  0.3ms    error: formula size 60 x 6399981 px exceeds raster cap
+\left( around 200em rule          0.1      0    0.0ms  0.3ms    error: formula size 60 x 12781 px exceeds raster cap
+\kern 1e6em                       0.1      0    0.0ms  0.3ms    error: formula size 32000039 x 24 px exceeds raster cap
+\raisebox 1e6em                   0.1      0    0.0ms  0.3ms    error: formula size 21 x 32000018 px exceeds raster cap
+array row gap 1e6em               0.1      0    0.0ms  0.3ms    error: formula size 21 x 32000081 px exceeds raster cap
+empty TeX                         0.0      0    0.0ms  0.3ms    rendered 4x4, engine HWM 69636 KB
+font size 1e9                     0.0      0    0.0ms  0.3ms    error: font size 1000000000 outside 1..=256
+oversized TeX 4097 B              0.0      0    0.0ms  0.4ms    error: TeX input 4097 bytes exceeds 4096
+oversized frame 10 MiB            5.2      0    0.0ms  0.3ms    error: request frame 10485765 bytes exceeds 1048576
+unknown job kind                  0.1      0    0.0ms  0.4ms    error: unknown job kind 77
+highlight 900 KB rust          2185.0    136   16.1ms  0.4ms    319000 colour runs, engine HWM 69636 KB
+highlight 900 KB one line      2819.6    175   16.1ms  0.3ms    500005 colour runs, engine HWM 120356 KB
+panic job                         0.0      0    0.0ms  0.3ms    error: engine panic: test panic job
+hang job (60 s sleep)          5001.3    311   16.2ms  2ms new  error: deadline, engine killed
+memory bomb, touched            163.8     10   16.1ms  2ms new  error: engine died, signal 6
+memory bomb, 1 TiB alloc         34.6      2   16.1ms  2ms new  error: engine died, signal 6
+stack overflow                   45.2      2   16.1ms  2ms new  error: engine died, signal 6
+largest RSS of any reaped engine (RUSAGE_CHILDREN): 442996 KB, RLIMIT_AS 524288 KB
+depth sweep frac: deepest ok Some((32, 145, 583, 1.7344769999999998, 7948)) (depth,w,h,wall ms,HWM KB); refused at 33
+depth sweep braces: deepest ok Some((32, 22, 18, 0.08027200000000001, 7544)) (depth,w,h,wall ms,HWM KB); refused at 33
+depth sweep sup: deepest ok Some((32, 370, 228, 1.366782, 7976)) (depth,w,h,wall ms,HWM KB); refused at 33
+depth sweep sqrt: deepest ok Some((32, 1041, 305, 3.1439150000000002, 8976)) (depth,w,h,wall ms,HWM KB); refused at 33
+depth sweep left: deepest ok Some((32, 819, 36, 1.489477, 7740)) (depth,w,h,wall ms,HWM KB); refused at 33
+depth sweep array: deepest ok Some((10, 22, 43, 0.155231, 7740)) (depth,w,h,wall ms,HWM KB); refused at 11
+queued behind hang: hang=true after 5000.4 ms; queued job ok=true 2.9 ms; ticks=311 maxgap=16.1ms
+engine exits seen by host: 3
+  pid 118970: signal 6
+  pid 118982: signal 6
+  pid 118991: signal 6
+recovery failures: 0
+rc=0

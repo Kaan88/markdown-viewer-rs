@@ -1,0 +1,2 @@
+pulldown_autolink_walk cold median 6.568 min 6.060 max 9.103
+comrak_parse_walk cold median 12.376 min 11.806 max 13.408

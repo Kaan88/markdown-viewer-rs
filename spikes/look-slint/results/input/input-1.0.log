@@ -1,0 +1,32 @@
+STATE find=false text="markdown" menu=false cmd= left=true right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+PRESENTED present_ms=195.97 first_paint_ms=156.41 t0=proc-starttime-10ms dpr=1 canvas_device_size=780x756 canvas_device_origin=230,40 page_x=0 window_phys=1220x820 window_logical=1220.0x820.0 page=780x2400
+STATE find=true text="markdown" menu=false cmd= left=true right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+STATE find=true text="a" menu=false cmd= left=true right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+STATE find=true text="ab" menu=false cmd= left=true right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+STATE find=true text="c" menu=false cmd= left=true right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd= left=true right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=true cmd= left=true right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=false right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=true cmd=left left=true right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=22 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=30 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=58 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=60 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=298 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=707 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=737 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=740 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=481 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=23 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=2 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=0 tab=0 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=230 scroll=0 tab=1 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=262 scroll=0 tab=1 tabs=3 rows=10
+STATE find=false text="c" menu=false cmd=left left=true right=true left_w=262 scroll=0 tab=1 tabs=3 rows=6
+STATE find=true text="c" menu=false cmd=find left=true right=true left_w=262 scroll=0 tab=1 tabs=3 rows=6
+STATE find=false text="c" menu=false cmd=find left=true right=true left_w=262 scroll=0 tab=1 tabs=3 rows=6
+STATE find=false text="c" menu=false cmd=about left=true right=true left_w=262 scroll=0 tab=1 tabs=3 rows=6
+STATE find=false text="c" menu=false cmd=close-tab left=true right=true left_w=262 scroll=0 tab=1 tabs=2 rows=6
+--- end

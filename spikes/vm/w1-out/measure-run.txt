@@ -1,0 +1,33 @@
+--- C:\mdview-w0, 10 runs, in process
+mode=self-contained result=ok first_frame_ms=146.4 full_ui_ms=199.3 private_bytes_first_frame=27533312 private_bytes_full_ui=29261824 working_set_full_ui=109846528
+mode=self-contained result=ok first_frame_ms=112.5 full_ui_ms=167.8 private_bytes_first_frame=26542080 private_bytes_full_ui=31686656 working_set_full_ui=122376192
+mode=self-contained result=ok first_frame_ms=126.2 full_ui_ms=170.6 private_bytes_first_frame=26923008 private_bytes_full_ui=31625216 working_set_full_ui=122298368
+mode=self-contained result=ok first_frame_ms=135.6 full_ui_ms=186.7 private_bytes_first_frame=26898432 private_bytes_full_ui=29245440 working_set_full_ui=110010368
+mode=self-contained result=ok first_frame_ms=139.2 full_ui_ms=200.1 private_bytes_first_frame=30330880 private_bytes_full_ui=31854592 working_set_full_ui=122712064
+mode=self-contained result=ok first_frame_ms=158.3 full_ui_ms=219.2 private_bytes_first_frame=30343168 private_bytes_full_ui=31875072 working_set_full_ui=122437632
+mode=self-contained result=ok first_frame_ms=110.6 full_ui_ms=170.6 private_bytes_first_frame=27897856 private_bytes_full_ui=31707136 working_set_full_ui=122404864
+mode=self-contained result=ok first_frame_ms=115.4 full_ui_ms=171.9 private_bytes_first_frame=26898432 private_bytes_full_ui=31584256 working_set_full_ui=122421248
+mode=self-contained result=ok first_frame_ms=123.8 full_ui_ms=170.4 private_bytes_first_frame=26705920 private_bytes_full_ui=31563776 working_set_full_ui=122396672
+mode=self-contained result=ok first_frame_ms=136.1 full_ui_ms=184.9 private_bytes_first_frame=27656192 private_bytes_full_ui=29118464 working_set_full_ui=110137344
+
+runs: 10  ok: 10  mode: self-contained
+first frame (warm)         min    110.6  median    126.2  max    158.3 ms
+full UI (warm)             min    167.8  median    171.9  max    219.2 ms
+private, first frame       min     25.3  median     25.7  max     28.9 MiB
+private, full UI           min     27.8  median     30.2  max     30.4 MiB
+working set, full UI       min    104.9  median    116.7  max    117.0 MiB
+first frame (cold, run 1)  146.4 ms
+--- C:\mdview-w0\with space, 3 runs, W0.md command form in a child powershell
+child exit= after 4216 ms
+mode=self-contained result=ok first_frame_ms=466.2 full_ui_ms=549.3 private_bytes_first_frame=27930624 private_bytes_full_ui=31903744 working_set_full_ui=116559872
+mode=self-contained result=ok first_frame_ms=126.0 full_ui_ms=197.0 private_bytes_first_frame=27844608 private_bytes_full_ui=31662080 working_set_full_ui=122376192
+mode=self-contained result=ok first_frame_ms=131.0 full_ui_ms=185.4 private_bytes_first_frame=27586560 private_bytes_full_ui=31592448 working_set_full_ui=122273792
+
+runs: 3  ok: 3  mode: self-contained
+first frame (warm)         min    126.0  median    131.0  max    131.0 ms
+full UI (warm)             min    185.4  median    197.0  max    197.0 ms
+private, first frame       min     26.3  median     26.6  max     26.6 MiB
+private, full UI           min     30.1  median     30.2  max     30.2 MiB
+working set, full UI       min    116.6  median    116.7  max    116.7 MiB
+first frame (cold, run 1)  466.2 ms
+--- leftovers

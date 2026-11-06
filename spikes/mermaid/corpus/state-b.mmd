@@ -1,0 +1,31 @@
+%% expect: Bekliyor|İşleniyor|Connected|Reconnecting with exponential backoff|Search index|Thumbnail cache|is the file larger than the limit|too large|Görüntülendi
+stateDiagram-v2
+    state "Bekliyor" as Waiting
+    state "İşleniyor" as Busy
+    state "Görüntülendi" as Shown
+    state "Reconnecting with exponential backoff" as Retry
+    state Size <<choice>>
+    state fork_state <<fork>>
+    state join_state <<join>>
+    [*] --> Waiting
+    Waiting --> Size : is the file larger than the limit
+    Size --> Busy : small enough
+    Size --> Shown : too large, show a placeholder
+    Busy --> fork_state
+    fork_state --> SearchIndex
+    fork_state --> ThumbnailCache
+    SearchIndex --> join_state
+    ThumbnailCache --> join_state
+    join_state --> Shown
+    state "Search index" as SearchIndex
+    state "Thumbnail cache" as ThumbnailCache
+    state Connected {
+        [*] --> Online
+        Online --> Retry : connection dropped unexpectedly
+        Retry --> Online : reconnected
+        --
+        [*] --> Syncing
+        Syncing --> Synced
+    }
+    Shown --> Connected
+    Connected --> [*]

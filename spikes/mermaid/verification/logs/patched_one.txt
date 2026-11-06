@@ -1,0 +1,54 @@
+showcase-flowchart	font_ms=6.58	svg_ms=2.77	png_ms=8.56	total_ms=17.93	png_bytes=7745	HWM_start_kb=5064	HWM_fonts_kb=14272	VmHWM_kb=22120
+showcase-flowchart	font_ms=2.49	svg_ms=2.79	png_ms=8.59	total_ms=13.88	png_bytes=7745	HWM_start_kb=5024	HWM_fonts_kb=14232	VmHWM_kb=21816
+showcase-flowchart	font_ms=2.32	svg_ms=2.75	png_ms=8.57	total_ms=13.65	png_bytes=7745	HWM_start_kb=4988	HWM_fonts_kb=14324	VmHWM_kb=22364
+showcase-sequence	font_ms=2.44	svg_ms=1.30	png_ms=16.80	total_ms=20.56	png_bytes=20361	HWM_start_kb=5060	HWM_fonts_kb=14268	VmHWM_kb=24988
+showcase-sequence	font_ms=2.40	svg_ms=1.29	png_ms=16.27	total_ms=19.97	png_bytes=20361	HWM_start_kb=5072	HWM_fonts_kb=14280	VmHWM_kb=25384
+showcase-sequence	font_ms=3.69	svg_ms=2.03	png_ms=16.82	total_ms=22.56	png_bytes=20361	HWM_start_kb=4852	HWM_fonts_kb=14268	VmHWM_kb=25144
+showcase-class	font_ms=3.49	svg_ms=3.53	png_ms=8.21	total_ms=15.26	png_bytes=6894	HWM_start_kb=4924	HWM_fonts_kb=14060	VmHWM_kb=22464
+showcase-class	font_ms=3.48	svg_ms=2.26	png_ms=7.06	total_ms=12.82	png_bytes=6894	HWM_start_kb=5008	HWM_fonts_kb=14344	VmHWM_kb=22156
+showcase-class	font_ms=3.77	svg_ms=3.53	png_ms=10.53	total_ms=17.85	png_bytes=6894	HWM_start_kb=4904	HWM_fonts_kb=13936	VmHWM_kb=22092
+showcase-state	font_ms=3.74	svg_ms=4.09	png_ms=6.75	total_ms=14.59	png_bytes=11837	HWM_start_kb=4844	HWM_fonts_kb=14196	VmHWM_kb=23012
+showcase-state	font_ms=2.34	svg_ms=2.61	png_ms=6.46	total_ms=11.43	png_bytes=11837	HWM_start_kb=5048	HWM_fonts_kb=14132	VmHWM_kb=22940
+showcase-state	font_ms=2.96	svg_ms=2.63	png_ms=6.45	total_ms=12.05	png_bytes=11837	HWM_start_kb=4884	HWM_fonts_kb=14112	VmHWM_kb=22348
+showcase-er	font_ms=3.60	svg_ms=2.37	png_ms=8.51	total_ms=14.50	png_bytes=7987	HWM_start_kb=4960	HWM_fonts_kb=14320	VmHWM_kb=22404
+showcase-er	font_ms=2.39	svg_ms=1.52	png_ms=6.79	total_ms=10.72	png_bytes=7987	HWM_start_kb=4868	HWM_fonts_kb=14204	VmHWM_kb=22084
+showcase-er	font_ms=3.61	svg_ms=2.37	png_ms=8.41	total_ms=14.41	png_bytes=7987	HWM_start_kb=4880	HWM_fonts_kb=14296	VmHWM_kb=22568
+showcase-gantt	font_ms=2.29	svg_ms=1.00	png_ms=7.72	total_ms=11.03	png_bytes=15325	HWM_start_kb=5060	HWM_fonts_kb=14340	VmHWM_kb=23220
+showcase-gantt	font_ms=3.75	svg_ms=1.57	png_ms=9.92	total_ms=15.27	png_bytes=15325	HWM_start_kb=4848	HWM_fonts_kb=14264	VmHWM_kb=24012
+showcase-gantt	font_ms=3.64	svg_ms=1.57	png_ms=13.00	total_ms=18.22	png_bytes=15325	HWM_start_kb=4864	HWM_fonts_kb=14028	VmHWM_kb=23136
+showcase-pie	font_ms=3.08	svg_ms=0.51	png_ms=14.07	total_ms=17.67	png_bytes=44963	HWM_start_kb=4856	HWM_fonts_kb=13896	VmHWM_kb=27588
+showcase-pie	font_ms=2.33	svg_ms=0.48	png_ms=13.88	total_ms=16.71	png_bytes=44963	HWM_start_kb=4944	HWM_fonts_kb=13752	VmHWM_kb=27720
+showcase-pie	font_ms=2.46	svg_ms=0.48	png_ms=14.95	total_ms=17.90	png_bytes=44963	HWM_start_kb=4860	HWM_fonts_kb=14280	VmHWM_kb=27756
+showcase-mindmap	font_ms=3.04	svg_ms=2.66	png_ms=6.35	total_ms=12.06	png_bytes=16939	HWM_start_kb=4844	HWM_fonts_kb=14008	VmHWM_kb=23636
+showcase-mindmap	font_ms=3.48	svg_ms=4.71	png_ms=7.20	total_ms=15.41	png_bytes=16939	HWM_start_kb=4968	HWM_fonts_kb=13960	VmHWM_kb=24188
+showcase-mindmap	font_ms=2.48	svg_ms=2.66	png_ms=6.21	total_ms=11.36	png_bytes=16939	HWM_start_kb=5028	HWM_fonts_kb=14120	VmHWM_kb=24340
+hard-flowchart-a	font_ms=3.69	svg_ms=13.91	png_ms=210.72	total_ms=228.34	png_bytes=127473	HWM_start_kb=4880	HWM_fonts_kb=14364	VmHWM_kb=72368
+hard-flowchart-a	font_ms=2.36	svg_ms=11.67	png_ms=211.11	total_ms=225.15	png_bytes=127473	HWM_start_kb=4864	HWM_fonts_kb=14264	VmHWM_kb=71688
+hard-flowchart-a	font_ms=3.59	svg_ms=13.84	png_ms=207.31	total_ms=224.77	png_bytes=127473	HWM_start_kb=4908	HWM_fonts_kb=14252	VmHWM_kb=71676
+hard-flowchart-b	font_ms=2.35	svg_ms=11.86	png_ms=137.83	total_ms=152.05	png_bytes=148371	HWM_start_kb=4840	HWM_fonts_kb=14320	VmHWM_kb=59532
+hard-flowchart-b	font_ms=2.28	svg_ms=11.98	png_ms=138.77	total_ms=153.05	png_bytes=148371	HWM_start_kb=4864	HWM_fonts_kb=14040	VmHWM_kb=59328
+hard-flowchart-b	font_ms=3.55	svg_ms=13.35	png_ms=138.46	total_ms=155.38	png_bytes=148371	HWM_start_kb=4932	HWM_fonts_kb=13928	VmHWM_kb=59656
+hard-state-b	font_ms=3.57	svg_ms=7.62	png_ms=125.86	total_ms=137.07	png_bytes=118567	HWM_start_kb=4916	HWM_fonts_kb=14184	VmHWM_kb=70612
+hard-state-b	font_ms=2.29	svg_ms=7.30	png_ms=125.71	total_ms=135.31	png_bytes=118567	HWM_start_kb=4968	HWM_fonts_kb=14332	VmHWM_kb=70676
+hard-state-b	font_ms=2.32	svg_ms=7.38	png_ms=130.01	total_ms=139.72	png_bytes=118567	HWM_start_kb=4876	HWM_fonts_kb=13856	VmHWM_kb=70292
+hard-er-a	font_ms=2.61	svg_ms=8.04	png_ms=83.59	total_ms=94.25	png_bytes=109517	HWM_start_kb=4904	HWM_fonts_kb=14064	VmHWM_kb=49692
+hard-er-a	font_ms=2.56	svg_ms=8.10	png_ms=85.15	total_ms=95.82	png_bytes=109517	HWM_start_kb=4868	HWM_fonts_kb=14284	VmHWM_kb=49596
+hard-er-a	font_ms=3.13	svg_ms=8.44	png_ms=83.76	total_ms=95.34	png_bytes=109517	HWM_start_kb=4912	HWM_fonts_kb=14048	VmHWM_kb=50200
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 4391x34964"
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 4391x34964"
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 4391x34964"
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 4344x21190"
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 4344x21190"
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 4344x21190"
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 2195.5x17482 at 2x"
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 2195.5x17482 at 2x"
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 2195.5x17482 at 2x"
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 2172x10595 at 2x"
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 2172x10595 at 2x"
+called `Result::unwrap()` on an `Err` value: "raster over pixel cap: 2172x10595 at 2x"
+probe-flow-150	font_ms=2.39	svg_ms=135.89	png_ms=210.21	total_ms=348.50	png_bytes=426751	HWM_start_kb=5112	HWM_fonts_kb=14280	VmHWM_kb=154100
+probe-flow-150	font_ms=2.50	svg_ms=136.22	png_ms=213.48	total_ms=352.22	png_bytes=426751	HWM_start_kb=5028	HWM_fonts_kb=14416	VmHWM_kb=153976
+probe-flow-150	font_ms=2.33	svg_ms=136.30	png_ms=212.97	total_ms=351.61	png_bytes=426751	HWM_start_kb=5020	HWM_fonts_kb=14344	VmHWM_kb=154332
+probe-seq-200	font_ms=3.02	svg_ms=14.27	png_ms=199.42	total_ms=216.73	png_bytes=727160	HWM_start_kb=4952	HWM_fonts_kb=14088	VmHWM_kb=152744
+probe-seq-200	font_ms=2.25	svg_ms=14.09	png_ms=199.50	total_ms=215.85	png_bytes=727160	HWM_start_kb=5192	HWM_fonts_kb=14448	VmHWM_kb=153116
+probe-seq-200	font_ms=2.68	svg_ms=14.13	png_ms=198.13	total_ms=214.96	png_bytes=727160	HWM_start_kb=5008	HWM_fonts_kb=14264	VmHWM_kb=153120

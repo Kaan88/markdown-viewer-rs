@@ -1,0 +1,61 @@
+qt dark@1.0 plain-odd: canvas=778x754 PASS differing=0 of 571532 at=275,112
+qt dark@1.0 plain: canvas=778x754 PASS differing=0 of 571532 at=274,109
+  control, page shifted 1 row at same place: differing=51751 (must be large)
+qt dark@1.0 scrolled-odd: canvas=778x754 PASS differing=0 of 571532 at=275,112
+qt dark@1.0 scrolled: canvas=778x754 PASS differing=0 of 571532 at=274,109
+qt dark@1.5 plain-odd: canvas=1167x1131 PASS differing=0 of 1290471 at=411,169
+qt dark@1.5 plain: canvas=1167x1131 PASS differing=0 of 1290471 at=409,164
+  control, page shifted 1 row at same place: differing=85700 (must be large)
+qt dark@1.5 scrolled-odd: canvas=1167x1131 PASS differing=0 of 1290471 at=411,169
+qt dark@1.5 scrolled: canvas=1167x1131 PASS differing=0 of 1290471 at=409,164
+qt dark@2.2 plain-odd: canvas=1712x1659 PASS differing=0 of 2783802 at=600,247
+qt dark@2.2 plain: canvas=1712x1659 PASS differing=0 of 2783802 at=598,240
+  control, page shifted 1 row at same place: differing=135581 (must be large)
+qt dark@2.2 scrolled-odd: canvas=1712x1659 PASS differing=0 of 2783802 at=600,247
+qt dark@2.2 scrolled: canvas=1712x1659 PASS differing=0 of 2783802 at=598,240
+qt light@1.0 plain-odd: canvas=778x754 PASS differing=0 of 571532 at=275,112
+qt light@1.0 plain: canvas=778x754 PASS differing=0 of 571532 at=274,109
+  control, page shifted 1 row at same place: differing=51742 (must be large)
+qt light@1.0 scrolled-odd: canvas=778x754 PASS differing=0 of 571532 at=275,112
+qt light@1.0 scrolled: canvas=778x754 PASS differing=0 of 571532 at=274,109
+qt light@1.5 plain-odd: canvas=1167x1131 PASS differing=0 of 1290471 at=411,169
+qt light@1.5 plain: canvas=1167x1131 PASS differing=0 of 1290471 at=409,164
+  control, page shifted 1 row at same place: differing=85748 (must be large)
+qt light@1.5 scrolled-odd: canvas=1167x1131 PASS differing=0 of 1290471 at=411,169
+qt light@1.5 scrolled: canvas=1167x1131 PASS differing=0 of 1290471 at=409,164
+qt light@2.2 plain-odd: canvas=1712x1659 PASS differing=0 of 2783802 at=600,247
+qt light@2.2 plain: canvas=1712x1659 PASS differing=0 of 2783802 at=598,240
+  control, page shifted 1 row at same place: differing=135598 (must be large)
+qt light@2.2 scrolled-odd: canvas=1712x1659 PASS differing=0 of 2783802 at=600,247
+qt light@2.2 scrolled: canvas=1712x1659 PASS differing=0 of 2783802 at=598,240
+slint dark@1.0 plain-odd: canvas=780x756 PASS differing=0 of 573048 at=275,111
+slint dark@1.0 plain: canvas=780x756 PASS differing=0 of 573048 at=274,108
+  control, page shifted 1 row at same place: differing=52340 (must be large)
+slint dark@1.0 scrolled-odd: canvas=780x756 PASS differing=0 of 573048 at=275,111
+slint dark@1.0 scrolled: canvas=780x756 PASS differing=0 of 573048 at=274,108
+slint dark@1.5 plain-odd: canvas=1170x1134 PASS differing=0 of 1293894 at=411,167
+slint dark@1.5 plain: canvas=1170x1134 PASS differing=0 of 1293894 at=409,162
+  control, page shifted 1 row at same place: differing=86872 (must be large)
+slint dark@1.5 scrolled-odd: canvas=1170x1134 PASS differing=0 of 1293894 at=411,167
+slint dark@1.5 scrolled: canvas=1170x1134 PASS differing=0 of 1293894 at=409,162
+slint dark@2.2 plain-odd: canvas=1718x1665 PASS differing=0 of 2793870 at=601,245
+slint dark@2.2 plain: canvas=1718x1665 PASS differing=0 of 2793870 at=599,238
+  control, page shifted 1 row at same place: differing=135658 (must be large)
+slint dark@2.2 scrolled-odd: canvas=1718x1665 PASS differing=0 of 2793870 at=601,245
+slint dark@2.2 scrolled: canvas=1718x1665 PASS differing=0 of 2793870 at=599,238
+slint light@1.0 plain-odd: canvas=780x756 PASS differing=0 of 573048 at=275,111
+slint light@1.0 plain: canvas=780x756 PASS differing=0 of 573048 at=274,108
+  control, page shifted 1 row at same place: differing=52329 (must be large)
+slint light@1.0 scrolled-odd: canvas=780x756 PASS differing=0 of 573048 at=275,111
+slint light@1.0 scrolled: canvas=780x756 PASS differing=0 of 573048 at=274,108
+slint light@1.5 plain-odd: canvas=1170x1134 PASS differing=0 of 1293894 at=411,167
+slint light@1.5 plain: canvas=1170x1134 PASS differing=0 of 1293894 at=409,162
+  control, page shifted 1 row at same place: differing=86920 (must be large)
+slint light@1.5 scrolled-odd: canvas=1170x1134 PASS differing=0 of 1293894 at=411,167
+slint light@1.5 scrolled: canvas=1170x1134 PASS differing=0 of 1293894 at=409,162
+slint light@2.2 plain-odd: canvas=1718x1665 PASS differing=0 of 2793870 at=601,245
+slint light@2.2 plain: canvas=1718x1665 PASS differing=0 of 2793870 at=599,238
+  control, page shifted 1 row at same place: differing=135675 (must be large)
+slint light@2.2 scrolled-odd: canvas=1718x1665 PASS differing=0 of 2793870 at=601,245
+slint light@2.2 scrolled: canvas=1718x1665 PASS differing=0 of 2793870 at=599,238
+TOTAL {'qt': [24, 24], 'slint': [24, 24]}

@@ -1,0 +1,29 @@
+[package]
+name = "mdview-winui-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "mdview-winui"
+path = "src/main.rs"
+
+# Isolates this spike from sibling spikes.
+[workspace]
+
+[features]
+# Reg-free deployment: embeds assets/self-contained.manifest and skips the framework bootstrap.
+self-contained = []
+
+[dependencies]
+windows-core = { version = "=0.100.0", default-features = false, features = ["std"] }
+windows-link = "=0.100.0"
+windows-collections = { version = "=0.100.0", features = ["std"] }
+windows-reference = { version = "=0.100.0", features = ["std"] }
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+codegen-units = 4
+strip = "debuginfo"
+panic = "abort"

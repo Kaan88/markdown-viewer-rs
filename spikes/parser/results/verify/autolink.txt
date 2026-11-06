@@ -1,0 +1,32 @@
+IN  http://a.b/_c_
+PD  <p><a href="http://a.b/">http://a.b/</a><em>c</em></p>
+CM  <p><a href="http://a.b/_c">http://a.b/_c</a>_</p>
+
+IN  see www.foo.com/a_b_c here
+PD  <p>see <a href="http://www.foo.com/a_b_c">www.foo.com/a_b_c</a> here</p>
+CM  <p>see <a href="http://www.foo.com/a_b_c">www.foo.com/a_b_c</a> here</p>
+
+IN  https://example.com/*x*
+PD  <p><a href="https://example.com/">https://example.com/</a><em>x</em></p>
+CM  <p><a href="https://example.com/*x">https://example.com/*x</a>*</p>
+
+IN  https://x.io/foo__bar__baz
+PD  <p><a href="https://x.io/foo__bar__baz">https://x.io/foo__bar__baz</a></p>
+CM  <p><a href="https://x.io/foo__bar__baz">https://x.io/foo__bar__baz</a></p>
+
+IN  https://x.y/~a~ z
+PD  <p><a href="https://x.y/">https://x.y/</a><del>a</del> z</p>
+CM  <p><a href="https://x.y/~a">https://x.y/~a</a>~ z</p>
+
+IN  mail me@ex.com, ok
+PD  <p>mail <a href="mailto:me@ex.com">me@ex.com</a>, ok</p>
+CM  <p>mail <a href="mailto:me@ex.com">me@ex.com</a>, ok</p>
+
+IN  (www.a.com/b)
+PD  <p>(<a href="http://www.a.com/b">www.a.com/b</a>)</p>
+CM  <p>(<a href="http://www.a.com/b">www.a.com/b</a>)</p>
+
+IN  https://tr.example.com/çığ
+PD  <p><a href="https://tr.example.com/%C3%A7%C4%B1%C4%9F">https://tr.example.com/çığ</a></p>
+CM  <p><a href="https://tr.example.com/%C3%A7%C4%B1%C4%9F">https://tr.example.com/çığ</a></p>
+

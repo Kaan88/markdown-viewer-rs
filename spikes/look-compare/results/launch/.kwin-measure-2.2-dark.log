@@ -1,0 +1,15 @@
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Activating service name='org.freedesktop.portal.Desktop' requested by ':1.1' (uid=1000 pid=396909 comm="/home/kaan/markdown_viewer/spikes/look-compare/tar")
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Activating service name='org.freedesktop.impl.portal.PermissionStore' requested by ':1.2' (uid=1000 pid=396912 comm="/usr/lib/xdg-desktop-portal")
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.PermissionStore'
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Activating service name='org.freedesktop.portal.Documents' requested by ':1.2' (uid=1000 pid=396912 comm="/usr/lib/xdg-desktop-portal")
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Successfully activated service 'org.freedesktop.portal.Documents'
+
+(/usr/lib/xdg-desktop-portal:396912): xdg-desktop-portal-WARNING **: 19:13:31.393: Choosing gtk.portal for org.freedesktop.impl.portal.Lockdown as a last-resort fallback
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Activating service name='org.freedesktop.impl.portal.desktop.gtk' requested by ':1.2' (uid=1000 pid=396912 comm="/usr/lib/xdg-desktop-portal")
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.desktop.gtk'
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Activating service name='org.freedesktop.impl.portal.desktop.kde' requested by ':1.2' (uid=1000 pid=396912 comm="/usr/lib/xdg-desktop-portal")
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.desktop.kde'
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Activating service name='org.freedesktop.impl.portal.desktop.kwallet' requested by ':1.2' (uid=1000 pid=396912 comm="/usr/lib/xdg-desktop-portal")
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Successfully activated service 'org.freedesktop.portal.Desktop'
+dbus-daemon[396829]: [session uid=1000 pid=396829 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.desktop.kwallet'
+Gdk-Message: 19:14:33.940: Error reading events from display: Broken pipe

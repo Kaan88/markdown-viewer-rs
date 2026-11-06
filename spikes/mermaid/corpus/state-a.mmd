@@ -1,0 +1,20 @@
+%% expect: Idle|Loading the document|Rendering the visible range|Parsing|Laying out|file opened by the user|parse finished without errors|Failed to load|retry after the user fixes the file|Only the visible blocks are rendered first
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> LoadingDoc : file opened by the user
+    state "Loading the document" as LoadingDoc
+    state "Rendering the visible range" as Rendering {
+        [*] --> Parsing
+        Parsing --> LayingOut : parse finished without errors
+        state "Laying out" as LayingOut
+        LayingOut --> [*]
+    }
+    LoadingDoc --> Rendering
+    LoadingDoc --> Failed : disk read failed or file is too large
+    state "Failed to load" as Failed
+    Failed --> Idle : retry after the user fixes the file
+    Rendering --> Idle : user closes the tab
+    note right of Rendering
+        Only the visible blocks are rendered first
+    end note
+    Rendering --> [*]

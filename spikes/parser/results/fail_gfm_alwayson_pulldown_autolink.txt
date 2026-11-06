@@ -1,0 +1,124 @@
+=== ex 398 line 6926 [Emphasis and strong emphasis] tags=[]
+--- md
+__foo, __bar__, baz__
+--- want
+<p><strong>foo, bar, baz</strong></p>
+--- got
+<p><strong>foo, <strong>bar</strong>, baz</strong></p>
+
+=== ex 426 line 7197 [Emphasis and strong emphasis] tags=[]
+--- md
+foo******bar*********baz
+--- want
+<p>foo<strong>bar</strong>***baz</p>
+--- got
+<p>foo<strong><strong><strong>bar</strong></strong></strong>***baz</p>
+
+=== ex 434 line 7268 [Emphasis and strong emphasis] tags=[]
+--- md
+__foo __bar__ baz__
+--- want
+<p><strong>foo bar baz</strong></p>
+--- got
+<p><strong>foo <strong>bar</strong> baz</strong></p>
+
+=== ex 435 line 7275 [Emphasis and strong emphasis] tags=[]
+--- md
+____foo__ bar__
+--- want
+<p><strong>foo bar</strong></p>
+--- got
+<p><strong><strong>foo</strong> bar</strong></p>
+
+=== ex 436 line 7282 [Emphasis and strong emphasis] tags=[]
+--- md
+**foo **bar****
+--- want
+<p><strong>foo bar</strong></p>
+--- got
+<p><strong>foo <strong>bar</strong></strong></p>
+
+=== ex 473 line 7567 [Emphasis and strong emphasis] tags=[]
+--- md
+****foo****
+--- want
+<p><strong>foo</strong></p>
+--- got
+<p><strong><strong>foo</strong></strong></p>
+
+=== ex 474 line 7574 [Emphasis and strong emphasis] tags=[]
+--- md
+____foo____
+--- want
+<p><strong>foo</strong></p>
+--- got
+<p><strong><strong>foo</strong></strong></p>
+
+=== ex 475 line 7585 [Emphasis and strong emphasis] tags=[]
+--- md
+******foo******
+--- want
+<p><strong>foo</strong></p>
+--- got
+<p><strong><strong><strong>foo</strong></strong></strong></p>
+
+=== ex 477 line 7601 [Emphasis and strong emphasis] tags=[]
+--- md
+_____foo_____
+--- want
+<p><em><strong>foo</strong></em></p>
+--- got
+<p><em><strong><strong>foo</strong></strong></em></p>
+
+=== ex 610 line 9093 [Autolinks] tags=[]
+--- md
+<http://foo.bar/baz bim>
+--- want
+<p>&lt;http://foo.bar/baz bim&gt;</p>
+--- got
+<p>&lt;<a href="http://foo.bar/baz">http://foo.bar/baz</a> bim&gt;</p>
+
+=== ex 614 line 9140 [Autolinks] tags=[]
+--- md
+<foo\+@bar.example.com>
+--- want
+<p>&lt;foo+@bar.example.com&gt;</p>
+--- got
+<p>&lt;<a href="mailto:foo+@bar.example.com">foo+@bar.example.com</a>&gt;</p>
+
+=== ex 616 line 9156 [Autolinks] tags=[]
+--- md
+< http://foo.bar >
+--- want
+<p>&lt; http://foo.bar &gt;</p>
+--- got
+<p>&lt; <a href="http://foo.bar">http://foo.bar</a> &gt;</p>
+
+=== ex 619 line 9177 [Autolinks] tags=[]
+--- md
+http://example.com
+--- want
+<p>http://example.com</p>
+--- got
+<p><a href="http://example.com">http://example.com</a></p>
+
+=== ex 620 line 9184 [Autolinks] tags=[]
+--- md
+foo@bar.example.com
+--- want
+<p>foo@bar.example.com</p>
+--- got
+<p><a href="mailto:foo@bar.example.com">foo@bar.example.com</a></p>
+
+=== ex 652 line 9647 [Disallowed Raw HTML (extension)] tags=[tagfilter]
+--- md
+<strong> <title> <style> <em>
+
+<blockquote>
+  <xmp> is disallowed.  <XMP> is also disallowed.
+</blockquote>
+--- want
+<p><strong> &lt;title> &lt;style> <em></p><blockquote>&lt;xmp> is disallowed. &lt;XMP> is also disallowed.</blockquote>
+--- got
+<p><strong> <title><style><em></p><blockquote><xmp> is disallowed. <xmp> is also disallowed.</blockquote>
+

@@ -1,0 +1,15 @@
+%% expect: Release plan for the first public version|Foundations|Native shell and window chrome|Spike the rendering engine|Design review with stakeholders|Beta|Fix the accessibility regressions|Ship
+gantt
+    title Release plan for the first public version
+    dateFormat YYYY-MM-DD
+    axisFormat %b %d
+    excludes weekends
+    section Foundations
+    Spike the rendering engine           :done, spike, 2026-11-02, 5d
+    Native shell and window chrome       :active, shell, after spike, 10d
+    Design review with stakeholders      :milestone, review, 2026-11-20, 0d
+    section Beta
+    Fix the accessibility regressions    :crit, fix, after shell, 7d
+    Private beta with early testers      :beta, after fix, 10d
+    section Launch
+    Ship                                 :milestone, after beta, 0d

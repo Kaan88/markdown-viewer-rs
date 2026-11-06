@@ -1,0 +1,69 @@
+s1.5-checker-base dpr=1.5 canvas_device_origin=345,60 window_phys=1830x1230 window_logical=1220.0x820.0  :: PASS image=3840x2400 region=(1350,666) 1170x1134 expected=1170x1134 pixels=1326780 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.5-checker-panes231x207 dpr=1.5 canvas_device_origin=347,60 window_phys=1830x1230 window_logical=1220.0x820.0  :: PASS image=3840x2400 region=(1352,666) 1173x1134 expected=1173x1134 pixels=1330182 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.5-checker-panes233x211 dpr=1.5 canvas_device_origin=350,60 window_phys=1830x1230 window_logical=1220.0x820.0  :: PASS image=3840x2400 region=(1355,666) 1164x1134 expected=1164x1134 pixels=1319976 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.5-checker-oddsize dpr=1.5 canvas_device_origin=345,60 window_phys=1832x1232 window_logical=1221.3x821.3  :: PASS image=3840x2400 region=(1349,665) 1172x1136 expected=1172x1136 pixels=1331392 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.5-checker-move101x57 dpr=1.5 canvas_device_origin=345,60 window_phys=1830x1230 window_logical=1220.0x820.0  :: PASS image=3840x2400 region=(497,188) 1170x1134 expected=1170x1134 pixels=1326780 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.5-checker-move333x211 dpr=1.5 canvas_device_origin=353,60 window_phys=1835x1226 window_logical=1223.3x817.3  :: PASS image=3840x2400 region=(853,419) 1175x1130 expected=1175x1130 pixels=1327750 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.5-checker-resized dpr=1.5 canvas_device_origin=345,60 window_phys=1830x1230 window_logical=1220.0x820.0  :: PASS image=3840x2400 region=(1350,666) 1181x1142 expected=1180x1142 pixels=1348702 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.5-checker-rgba dpr=1.5 canvas_device_origin=345,60 window_phys=1830x1230 window_logical=1220.0x820.0  :: PASS image=3840x2400 region=(1350,666) 1170x1134 expected=1170x1134 pixels=1326780 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.5-checker-nosnap dpr=1.5 canvas_device_origin=347,60 window_phys=1830x1230 window_logical=1220.0x820.0  :: PASS image=3840x2400 region=(1352,666) 1173x1134 expected=1173x1134 pixels=1330182 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.5-checker-smooth dpr=1.5 canvas_device_origin=347,60 window_phys=1830x1230 window_logical=1220.0x820.0  :: PASS image=3840x2400 region=(1352,666) 1173x1134 expected=1173x1134 pixels=1330182 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.5-page-light-top-viewport :: PASS at=(1350,666) region=1170x1134 scroll=0 page_x=0 pixels=1326780 differing=0
+s1.5-page-dark-mid-viewport :: PASS at=(1350,666) region=1170x1134 scroll=733 page_x=0 pixels=1326780 differing=0
+s1.5-page-dark-bottom-viewport :: PASS at=(1350,666) region=1170x1134 scroll=2466 page_x=0 pixels=1326780 differing=0
+s1.5-page-light-mid-odd-panes :: PASS at=(1355,666) region=1164x1134 scroll=1234 page_x=0 pixels=1319976 differing=0
+s1.5-page-light-mid-wide :: PASS at=(1350,606) region=1170x1254 scroll=500 page_x=135 pixels=1467180 differing=0
+s1.5-page-light-top-full :: PASS at=(1350,666) region=1170x1134 scroll=0 page_x=0 pixels=1326780 differing=0
+s1.5-page-light-mid-full :: PASS at=(1350,666) region=1170x1134 scroll=733 page_x=0 pixels=1326780 differing=0
+s1.5-page-light-deep-full :: PASS at=(1350,666) region=1170x1134 scroll=2466 page_x=0 pixels=1326780 differing=0
+s1.5-page-light-bottom-full :: PASS at=(1350,666) region=1170x1134 scroll=2466 page_x=0 pixels=1326780 differing=0
+s1.5-checker-control-naive dpr=1.5 canvas_device_origin=345,60 window_phys=1830x1230 window_logical=1220.0x820.0  :: FAIL image=3840x2400 region=(1351,667) 1169x1133 expected=1170x1134 pixels=1324477 non_bw=0 parity_errors=662237 top_non_bw=[]
+s1.5-checker-control-stretch1 dpr=1.5 canvas_device_origin=345,60 window_phys=1830x1230 window_logical=1220.0x820.0  :: FAIL image=3840x2400 region=(1351,666) 1169x1134 expected=1170x1134 pixels=1325646 non_bw=0 parity_errors=580608 top_non_bw=[]
+s1.5-checker-control-stretch1-smooth dpr=1.5 canvas_device_origin=345,60 window_phys=1830x1230 window_logical=1220.0x820.0  :: FAIL image=3840x2400 region=(1351,666) 1169x1134 expected=1170x1134 pixels=1325646 non_bw=0 parity_errors=580608 top_non_bw=[]
+s1.5-checker-info-forced-scale2 dpr=2 canvas_device_origin=460,80 window_phys=2441x1640 window_logical=1220.5x820.0  :: PASS image=3840x2400 region=(1159,481) 1561x1512 expected=1561x1512 pixels=2360232 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.7-checker-base dpr=1.7 canvas_device_origin=391,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: PASS image=3840x2400 region=(1272,594) 1328x1287 expected=1328x1287 pixels=1709136 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.7-checker-panes231x207 dpr=1.7 canvas_device_origin=393,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: PASS image=3840x2400 region=(1274,594) 1331x1287 expected=1331x1287 pixels=1712997 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.7-checker-panes233x211 dpr=1.7 canvas_device_origin=396,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: PASS image=3840x2400 region=(1277,594) 1321x1287 expected=1321x1287 pixels=1700127 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.7-checker-oddsize dpr=1.7 canvas_device_origin=391,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: PASS image=3840x2400 region=(1272,594) 1328x1287 expected=1328x1287 pixels=1709136 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.7-checker-move101x57 dpr=1.7 canvas_device_origin=391,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: PASS image=3840x2400 region=(563,213) 1328x1287 expected=1328x1287 pixels=1709136 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.7-checker-move333x211 dpr=1.7 canvas_device_origin=400,68 window_phys=2079x1389 window_logical=1222.9x817.1  :: PASS image=3840x2400 region=(966,475) 1331x1280 expected=1331x1280 pixels=1703680 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.7-checker-resized dpr=1.7 canvas_device_origin=391,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: PASS image=3840x2400 region=(1272,594) 1340x1295 expected=1340x1296 pixels=1735300 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.7-checker-rgba dpr=1.7 canvas_device_origin=391,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: PASS image=3840x2400 region=(1272,594) 1328x1287 expected=1328x1287 pixels=1709136 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.7-checker-nosnap dpr=1.7 canvas_device_origin=393,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: PASS image=3840x2400 region=(1274,594) 1331x1287 expected=1331x1287 pixels=1712997 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.7-checker-smooth dpr=1.7 canvas_device_origin=393,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: PASS image=3840x2400 region=(1274,594) 1331x1287 expected=1331x1287 pixels=1712997 non_bw=0 parity_errors=0 top_non_bw=[]
+s1.7-page-light-top-viewport :: PASS at=(1273,594) region=1326x1287 scroll=0 page_x=1 pixels=1706562 differing=0
+s1.7-page-dark-mid-viewport :: PASS at=(1273,594) region=1326x1287 scroll=733 page_x=1 pixels=1706562 differing=0
+s1.7-page-dark-bottom-viewport :: PASS at=(1273,594) region=1326x1287 scroll=2793 page_x=1 pixels=1706562 differing=0
+s1.7-page-light-mid-odd-panes :: PASS at=(1277,594) region=1321x1287 scroll=1234 page_x=0 pixels=1700127 differing=0
+s1.7-page-light-mid-wide :: PASS at=(1273,526) region=1326x1421 scroll=500 page_x=153 pixels=1884246 differing=0
+s1.7-page-light-top-full :: PASS at=(1273,594) region=1326x1287 scroll=0 page_x=1 pixels=1706562 differing=0
+s1.7-page-light-mid-full :: PASS at=(1273,594) region=1326x1287 scroll=733 page_x=1 pixels=1706562 differing=0
+s1.7-page-light-deep-full :: PASS at=(1273,594) region=1326x1287 scroll=2793 page_x=1 pixels=1706562 differing=0
+s1.7-page-light-bottom-full :: PASS at=(1273,594) region=1326x1287 scroll=2793 page_x=1 pixels=1706562 differing=0
+s1.7-checker-control-naive dpr=1.7 canvas_device_origin=391,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: FAIL image=3840x2400 region=(1273,595) 1327x1286 expected=1328x1287 pixels=1706522 non_bw=0 parity_errors=853258 top_non_bw=[]
+s1.7-checker-control-stretch1 dpr=1.7 canvas_device_origin=391,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: FAIL image=3840x2400 region=(1273,594) 1327x1287 expected=1328x1287 pixels=1707849 non_bw=0 parity_errors=719433 top_non_bw=[]
+s1.7-checker-control-stretch1-smooth dpr=1.7 canvas_device_origin=391,68 window_phys=2076x1396 window_logical=1221.2x821.2  :: FAIL image=3840x2400 region=(1273,594) 1327x1287 expected=1328x1287 pixels=1707849 non_bw=0 parity_errors=719433 top_non_bw=[]
+s1.7-checker-info-forced-scale2 dpr=2 canvas_device_origin=460,80 window_phys=2440x1641 window_logical=1220.0x820.5  :: PASS image=3840x2400 region=(1159,483) 1560x1513 expected=1560x1513 pixels=2360280 non_bw=0 parity_errors=0 top_non_bw=[]
+s2.2-checker-base dpr=2.2 canvas_device_origin=506,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: PASS image=3840x2400 region=(1082,414) 1718x1665 expected=1718x1665 pixels=2860470 non_bw=0 parity_errors=0 top_non_bw=[]
+s2.2-checker-panes231x207 dpr=2.2 canvas_device_origin=508,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: PASS image=3840x2400 region=(1084,414) 1723x1665 expected=1723x1665 pixels=2868795 non_bw=0 parity_errors=0 top_non_bw=[]
+s2.2-checker-panes233x211 dpr=2.2 canvas_device_origin=513,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: PASS image=3840x2400 region=(1089,414) 1709x1665 expected=1709x1665 pixels=2845485 non_bw=0 parity_errors=0 top_non_bw=[]
+s2.2-checker-oddsize dpr=2.2 canvas_device_origin=506,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: PASS image=3840x2400 region=(1082,414) 1718x1665 expected=1718x1665 pixels=2860470 non_bw=0 parity_errors=0 top_non_bw=[]
+s2.2-checker-move101x57 dpr=2.2 canvas_device_origin=506,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: PASS image=3840x2400 region=(728,275) 1718x1665 expected=1718x1665 pixels=2860470 non_bw=0 parity_errors=0 top_non_bw=[]
+s2.2-checker-move333x211 dpr=2.2 canvas_device_origin=517,88 window_phys=2691x1797 window_logical=1223.2x816.8  :: PASS image=3840x2400 region=(1250,614) 1723x1656 expected=1723x1656 pixels=2853288 non_bw=0 parity_errors=0 top_non_bw=[]
+s2.2-checker-resized dpr=2.2 canvas_device_origin=506,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: PASS image=3840x2400 region=(1082,414) 1734x1676 expected=1733x1676 pixels=2906184 non_bw=0 parity_errors=0 top_non_bw=[]
+s2.2-checker-rgba dpr=2.2 canvas_device_origin=506,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: PASS image=3840x2400 region=(1082,414) 1718x1665 expected=1718x1665 pixels=2860470 non_bw=0 parity_errors=0 top_non_bw=[]
+s2.2-checker-nosnap dpr=2.2 canvas_device_origin=508,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: PASS image=3840x2400 region=(1084,414) 1723x1665 expected=1723x1665 pixels=2868795 non_bw=0 parity_errors=0 top_non_bw=[]
+s2.2-checker-smooth dpr=2.2 canvas_device_origin=508,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: PASS image=3840x2400 region=(1084,414) 1723x1665 expected=1723x1665 pixels=2868795 non_bw=0 parity_errors=0 top_non_bw=[]
+s2.2-page-light-top-viewport :: PASS at=(1083,414) region=1716x1665 scroll=0 page_x=1 pixels=2857140 differing=0
+s2.2-page-dark-mid-viewport :: PASS at=(1083,414) region=1716x1665 scroll=733 page_x=1 pixels=2857140 differing=0
+s2.2-page-dark-bottom-viewport :: PASS at=(1083,414) region=1716x1665 scroll=3615 page_x=1 pixels=2857140 differing=0
+s2.2-page-light-mid-odd-panes :: PASS at=(1089,414) region=1709x1665 scroll=1234 page_x=0 pixels=2845485 differing=0
+s2.2-page-light-mid-wide :: PASS at=(1082,328) region=1716x1839 scroll=500 page_x=198 pixels=3155724 differing=0
+s2.2-page-light-top-full :: PASS at=(1083,414) region=1716x1665 scroll=0 page_x=1 pixels=2857140 differing=0
+s2.2-page-light-mid-full :: PASS at=(1083,414) region=1716x1665 scroll=733 page_x=1 pixels=2857140 differing=0
+s2.2-page-light-deep-full :: PASS at=(1083,414) region=1716x1665 scroll=3000 page_x=1 pixels=2857140 differing=0
+s2.2-page-light-bottom-full :: PASS at=(1083,414) region=1716x1665 scroll=3615 page_x=1 pixels=2857140 differing=0
+s2.2-checker-control-naive dpr=2.2 canvas_device_origin=506,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: FAIL image=3840x2400 region=(1084,416) 1716x1663 expected=1718x1665 pixels=2853708 non_bw=0 parity_errors=1426856 top_non_bw=[]
+s2.2-checker-control-stretch1 dpr=2.2 canvas_device_origin=506,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: FAIL image=3840x2400 region=(1083,414) 1717x1665 expected=1718x1665 pixels=2858805 non_bw=0 parity_errors=1278720 top_non_bw=[]
+s2.2-checker-control-stretch1-smooth dpr=2.2 canvas_device_origin=506,88 window_phys=2686x1806 window_logical=1220.9x820.9  :: FAIL image=3840x2400 region=(1083,414) 1717x1665 expected=1718x1665 pixels=2858805 non_bw=0 parity_errors=1278720 top_non_bw=[]
+s2.2-checker-info-forced-scale2 dpr=2 canvas_device_origin=460,80 window_phys=2440x1639 window_logical=1220.0x819.5  :: PASS image=3840x2400 region=(1160,490) 1560x1511 expected=1560x1511 pixels=2357160 non_bw=0 parity_errors=0 top_non_bw=[]

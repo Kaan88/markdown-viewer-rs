@@ -1,0 +1,12 @@
+run 0: fadvise_rc=0 evicted+spawn+math=9.35 ms ok=true then warm spawn+math=2.01 ms ok=true
+run 1: fadvise_rc=0 evicted+spawn+math=4.60 ms ok=true then warm spawn+math=1.97 ms ok=true
+run 2: fadvise_rc=0 evicted+spawn+math=4.73 ms ok=true then warm spawn+math=2.19 ms ok=true
+run 3: fadvise_rc=0 evicted+spawn+math=4.64 ms ok=true then warm spawn+math=1.92 ms ok=true
+run 4: fadvise_rc=0 evicted+spawn+math=4.41 ms ok=true then warm spawn+math=1.97 ms ok=true
+run 5: fadvise_rc=0 evicted+spawn+math=4.16 ms ok=true then warm spawn+math=1.95 ms ok=true
+run 6: fadvise_rc=0 evicted+spawn+math=4.11 ms ok=true then warm spawn+math=2.00 ms ok=true
+run 7: fadvise_rc=0 evicted+spawn+math=4.01 ms ok=true then warm spawn+math=1.88 ms ok=true
+run 8: fadvise_rc=0 evicted+spawn+math=4.24 ms ok=true then warm spawn+math=1.98 ms ok=true
+run 9: fadvise_rc=0 evicted+spawn+math=4.54 ms ok=true then warm spawn+math=1.84 ms ok=true
+evicted binary  n=10 min=4.0 median=4.5 p95=9.4 max=9.4 ms
+warm            n=10 min=1.8 median=2.0 p95=2.2 max=2.2 ms

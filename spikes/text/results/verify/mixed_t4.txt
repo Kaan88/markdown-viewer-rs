@@ -1,0 +1,39 @@
+=== run 1 load=1.57
+doc bytes=1045708 blocks=1744 ascii=false scale=1 content_w=900 threads=4
+font_context_new_ms=27.66
+height_pass[0] ms=241.0 total_height_px=267077 peak_extra_mb=2.65
+height_pass[1] ms=72.8 total_height_px=267077 peak_extra_mb=2.43
+height_pass[2] ms=66.0 total_height_px=267077 peak_extra_mb=2.44
+height table ys bytes=6980 live_after_pass_mb=2.15 rss_mb=21.3 rss_anon_mb=9.1
+visible_layouts[viewport_only] n=10 blocks=[5, 4, 5, 5, 6, 8, 8, 5, 7, 6] mb_median=0.248 mb_max=0.417 raw=[0.417, 0.326, 0.225, 0.246, 0.193, 0.195, 0.284, 0.239, 0.276, 0.248]
+visible_layouts[plus_1_viewport_each_side] n=10 blocks=[17, 13, 16, 14, 14, 20, 18, 14, 19, 19] mb_median=0.620 mb_max=0.701 raw=[0.661, 0.497, 0.642, 0.499, 0.499, 0.614, 0.620, 0.499, 0.701, 0.667]
+frame_first_cold raster_ms=2.43 layout_ms=0.67 stats=CacheStats { hits: 2859, misses: 254, evictions: 0, bytes: 93930, peak_bytes: 93930, entries: 254 }
+scroll_40px frames=600 raster_ms p50=1.27 p95=1.40 p99=1.42 max=1.47 | layout_ms p50=0.00 p99=0.27 max=0.54 | misses=487 hits=2036075 evictions=0 cache_bytes=306773 peak=306773 entries=741
+random_jump frames=200 raster_ms p50=1.25 p95=1.41 p99=1.43 max=1.45 | layout_ms p50=0.72 p99=1.03 max=1.04 | misses=230 hits=647371 evictions=0 cache_bytes=415347 peak=415347 entries=971
+end rss_mb=38.7 rss_anon_mb=13.5 live_mb=7.29
+=== run 2 load=1.53
+doc bytes=1045708 blocks=1744 ascii=false scale=1 content_w=900 threads=4
+font_context_new_ms=25.64
+height_pass[0] ms=236.3 total_height_px=267077 peak_extra_mb=2.63
+height_pass[1] ms=70.2 total_height_px=267077 peak_extra_mb=2.44
+height_pass[2] ms=70.4 total_height_px=267077 peak_extra_mb=2.44
+height table ys bytes=6980 live_after_pass_mb=2.15 rss_mb=21.8 rss_anon_mb=9.6
+visible_layouts[viewport_only] n=10 blocks=[5, 4, 5, 5, 6, 8, 8, 5, 7, 6] mb_median=0.248 mb_max=0.417 raw=[0.417, 0.326, 0.225, 0.246, 0.193, 0.195, 0.284, 0.239, 0.276, 0.248]
+visible_layouts[plus_1_viewport_each_side] n=10 blocks=[17, 13, 16, 14, 14, 20, 18, 14, 19, 19] mb_median=0.620 mb_max=0.701 raw=[0.661, 0.497, 0.642, 0.499, 0.499, 0.614, 0.620, 0.499, 0.701, 0.667]
+frame_first_cold raster_ms=2.45 layout_ms=0.65 stats=CacheStats { hits: 2859, misses: 254, evictions: 0, bytes: 93930, peak_bytes: 93930, entries: 254 }
+scroll_40px frames=600 raster_ms p50=1.27 p95=1.40 p99=1.42 max=1.46 | layout_ms p50=0.00 p99=0.26 max=0.53 | misses=487 hits=2036075 evictions=0 cache_bytes=306773 peak=306773 entries=741
+random_jump frames=200 raster_ms p50=1.25 p95=1.40 p99=1.44 max=1.46 | layout_ms p50=0.72 p99=1.00 max=1.05 | misses=230 hits=647371 evictions=0 cache_bytes=415347 peak=415347 entries=971
+end rss_mb=39.3 rss_anon_mb=14.0 live_mb=7.29
+=== run 3 load=1.53
+doc bytes=1045708 blocks=1744 ascii=false scale=1 content_w=900 threads=4
+font_context_new_ms=24.35
+height_pass[0] ms=238.9 total_height_px=267077 peak_extra_mb=2.63
+height_pass[1] ms=71.9 total_height_px=267077 peak_extra_mb=2.44
+height_pass[2] ms=72.0 total_height_px=267077 peak_extra_mb=2.43
+height table ys bytes=6980 live_after_pass_mb=2.15 rss_mb=21.3 rss_anon_mb=9.1
+visible_layouts[viewport_only] n=10 blocks=[5, 4, 5, 5, 6, 8, 8, 5, 7, 6] mb_median=0.248 mb_max=0.417 raw=[0.417, 0.326, 0.225, 0.246, 0.193, 0.195, 0.284, 0.239, 0.276, 0.248]
+visible_layouts[plus_1_viewport_each_side] n=10 blocks=[17, 13, 16, 14, 14, 20, 18, 14, 19, 19] mb_median=0.620 mb_max=0.701 raw=[0.661, 0.497, 0.642, 0.499, 0.499, 0.614, 0.620, 0.499, 0.701, 0.667]
+frame_first_cold raster_ms=2.46 layout_ms=0.65 stats=CacheStats { hits: 2859, misses: 254, evictions: 0, bytes: 93930, peak_bytes: 93930, entries: 254 }
+scroll_40px frames=600 raster_ms p50=1.27 p95=1.40 p99=1.42 max=1.46 | layout_ms p50=0.00 p99=0.26 max=0.53 | misses=487 hits=2036075 evictions=0 cache_bytes=306773 peak=306773 entries=741
+random_jump frames=200 raster_ms p50=1.26 p95=1.41 p99=1.45 max=1.46 | layout_ms p50=0.72 p99=1.01 max=1.05 | misses=230 hits=647371 evictions=0 cache_bytes=415347 peak=415347 entries=971
+end rss_mb=39.0 rss_anon_mb=13.5 live_mb=7.29

@@ -1,0 +1,2 @@
+running: 1
+pid 656 session 2 title=[mdview WinUI skeleton] handle=3211876 ws=135155712 private=33247232 started=11/06/2026 07:39:58

@@ -1,0 +1,28 @@
+%% expect: Belge|Başlık|içeriğiGetir|AbstractMarkdownRenderingPipelineBuilder|abstract|Renderable|renders to|Theme|enumeration|HighContrastDark|0..1|withSyntaxHighlightingEnabled
+classDiagram
+    class Belge {
+        +String Başlık
+        +String yol
+        +içeriğiGetir() String
+    }
+    class AbstractMarkdownRenderingPipelineBuilder {
+        <<abstract>>
+        #List~Renderable~ stages
+        +withSyntaxHighlightingEnabled(enabled: boolean) Self*
+        +build() Renderable$
+    }
+    class Renderable {
+        <<interface>>
+        +renderTo(surface: Surface, theme: Theme) void
+    }
+    class Theme {
+        <<enumeration>>
+        Light
+        Dark
+        HighContrastDark
+    }
+    Renderable <|-- Belge
+    AbstractMarkdownRenderingPipelineBuilder --> "many" Renderable : builds
+    Belge "1" --> "0..1" Theme : renders to
+    Belge <|-- SlideDeck
+    Belge <|-- Notebook

@@ -1,0 +1,18 @@
+%% expect: KULLANICI|BELGE|Etiket|sahip olduğu belgeler|yazar_kimliği|WORKSPACE_MEMBERSHIP_ASSIGNMENT|belongs to exactly one workspace|optional parent folder|FOLDER
+erDiagram
+    KULLANICI ||--o{ BELGE : "sahip olduğu belgeler"
+    BELGE }o--o{ Etiket : "etiketlenir"
+    KULLANICI ||--|| PROFIL : has
+    KULLANICI ||--o{ WORKSPACE_MEMBERSHIP_ASSIGNMENT : "belongs to exactly one workspace"
+    FOLDER |o--o{ FOLDER : "optional parent folder"
+    FOLDER ||--o{ BELGE : contains
+    BELGE {
+        uuid kimlik PK
+        string başlık
+        uuid yazar_kimliği FK
+    }
+    WORKSPACE_MEMBERSHIP_ASSIGNMENT {
+        uuid workspace_identifier PK, FK
+        uuid user_identifier PK, FK
+        string role_assigned_by_administrator
+    }

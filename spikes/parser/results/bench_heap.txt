@@ -1,0 +1,5 @@
+doc 1048757 bytes, 20 runs; bytes above the live baseline (document text excluded)
+pulldown_walk                peak median    9476608  min    9476608  max    9476608  in-place-realloc peak median    6576842  allocs median     1917
+pulldown_autolink_walk       peak median    9476608  min    9476608  max    9476608  in-place-realloc peak median    6578223  allocs median     3227
+pulldown_autolink_retained   peak median   22323481  min   22323481  max   22323481  in-place-realloc peak median   17087613  allocs median     3243
+comrak_parse_walk            peak median   18594831  min   18594831  max   18594831  in-place-realloc peak median   18545595  allocs median    95997

@@ -1,0 +1,8 @@
+.cache/
+target/
+gen/target/
+wine-smoke/target/
+stage/
+.wineprefix/
+*.log
+wine-smoke/run/

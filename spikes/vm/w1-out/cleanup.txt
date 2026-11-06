@@ -1,0 +1,32 @@
+run 1 waited=True ms=182 exit=0
+      93.8 ms  first frame at 93.8 ms
+      99.5 ms  deferred controls added
+     106.4 ms  panel 2324x875 scale 1x1
+     139.1 ms  measure: result=ok first_frame_ms=93.8 full_ui_ms=139.1 private_bytes_first_frame=27725824 private_bytes_full_ui=31539200 working_set_full_ui=122318848
+run 2 waited=True ms=141 exit=0
+      86.0 ms  first frame at 86.0 ms
+      91.1 ms  deferred controls added
+      99.8 ms  panel 2324x875 scale 1x1
+     123.3 ms  measure: result=ok first_frame_ms=86.0 full_ui_ms=123.3 private_bytes_first_frame=26865664 private_bytes_full_ui=32612352 working_set_full_ui=123822080
+run 3 waited=True ms=161 exit=0
+      90.2 ms  first frame at 90.2 ms
+      96.2 ms  deferred controls added
+     103.9 ms  panel 2324x875 scale 1x1
+     141.1 ms  measure: result=ok first_frame_ms=90.2 full_ui_ms=141.1 private_bytes_first_frame=27979776 private_bytes_full_ui=33095680 working_set_full_ui=123998208
+--- m.log
+mode=self-contained result=ok first_frame_ms=93.8 full_ui_ms=139.1 private_bytes_first_frame=27725824 private_bytes_full_ui=31539200 working_set_full_ui=122318848
+mode=self-contained result=ok first_frame_ms=86.0 full_ui_ms=123.3 private_bytes_first_frame=26865664 private_bytes_full_ui=32612352 working_set_full_ui=123822080
+mode=self-contained result=ok first_frame_ms=90.2 full_ui_ms=141.1 private_bytes_first_frame=27979776 private_bytes_full_ui=33095680 working_set_full_ui=123998208
+--- file measure.ps1
+mode=self-contained result=ok first_frame_ms=94.8 full_ui_ms=145.8 private_bytes_first_frame=26722304 private_bytes_full_ui=32616448 working_set_full_ui=123633664
+mode=self-contained result=ok first_frame_ms=112.6 full_ui_ms=149.8 private_bytes_first_frame=27959296 private_bytes_full_ui=32018432 working_set_full_ui=122503168
+mode=self-contained result=ok first_frame_ms=85.9 full_ui_ms=138.5 private_bytes_first_frame=28024832 private_bytes_full_ui=31674368 working_set_full_ui=122400768
+
+runs: 3  ok: 3  mode: self-contained
+first frame (warm)         min     85.9  median    112.6  max    112.6 ms
+full UI (warm)             min    138.5  median    149.8  max    149.8 ms
+private, first frame       min     26.7  median     26.7  max     26.7 MiB
+private, full UI           min     30.2  median     30.5  max     30.5 MiB
+working set, full UI       min    116.7  median    116.8  max    116.8 MiB
+first frame (cold, run 1)  94.8 ms
+direct: 2146 ms

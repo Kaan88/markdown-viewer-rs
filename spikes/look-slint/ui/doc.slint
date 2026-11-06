@@ -1,0 +1,79 @@
+import { Theme } from "theme.slint";
+
+// Thin overlay scrollbar. Positions are device pixels, kept by Rust.
+export component OverlayScrollbar {
+    in property <int> scroll;
+    in property <int> max-scroll;
+    in property <int> view;
+    callback request(int);
+    property <length> track: self.height - 8px;
+    property <float> ratio: view / max(1, max-scroll + view);
+    property <length> thumb: max(32px, track * ratio);
+    property <int> grab-scroll;
+    width: 12px;
+    visible: max-scroll > 0;
+    ta := TouchArea {
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down { grab-scroll = scroll; }
+        }
+        moved => {
+            if self.pressed && max-scroll > 0 {
+                root.request(grab-scroll + (self.mouse-y - self.pressed-y) / (track - thumb) * max-scroll);
+            }
+        }
+    }
+    Rectangle {
+        x: parent.width - self.width - 2px;
+        y: 4px + (track - thumb) * scroll / max(1, max-scroll);
+        width: ta.has-hover || ta.pressed ? 8px : 4px;
+        height: thumb;
+        border-radius: self.width / 2;
+        background: Theme.dark ? (ta.pressed ? #ffffffb0 : #ffffff66) : (ta.pressed ? #000000a0 : #00000059);
+        animate width { duration: 100ms; }
+    }
+}
+
+// Shows the document buffer 1:1. Everything here is in device pixels: the origin is snapped
+// to a whole device pixel and the size equals the buffer, so the renderer's scale is exactly 1.
+export component DocView inherits Rectangle {
+    in property <image> source;
+    in property <int> img-w;
+    in property <int> img-h;
+    in property <int> img-top;
+    in property <bool> snap: true;
+    in property <bool> smooth: false;
+    in property <bool> naive: false;
+    in property <int> extra-w: 0;
+    callback wheel(float);
+    callback context-menu(length, length);
+
+    out property <int> dev-left: round(self.absolute-position.x / 1phx);
+    out property <int> dev-top: round(self.absolute-position.y / 1phx);
+    out property <int> dev-w: round((self.absolute-position.x + self.width) / 1phx) - dev-left;
+    out property <int> dev-h: round((self.absolute-position.y + self.height) / 1phx) - dev-top;
+    out property <int> page-x: max(0, floor((dev-w - img-w) / 2));
+
+    clip: true;
+    background: Theme.page;
+    Image {
+        x: naive ? 0 : snap ? (dev-left + page-x) * 1phx - root.absolute-position.x : page-x * 1phx;
+        y: naive ? 0 : snap ? (dev-top + img-top) * 1phx - root.absolute-position.y : img-top * 1phx;
+        width: naive ? root.width : (img-w + extra-w) * 1phx;
+        height: naive ? root.height : img-h * 1phx;
+        source: root.source;
+        image-fit: fill;
+        image-rendering: smooth ? ImageRendering.smooth : ImageRendering.pixelated;
+    }
+    TouchArea {
+        scroll-event(e) => {
+            root.wheel(e.delta-y / 1phx);
+            accept
+        }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
+                root.context-menu(self.mouse-x, self.mouse-y);
+            }
+        }
+    }
+    @children
+}

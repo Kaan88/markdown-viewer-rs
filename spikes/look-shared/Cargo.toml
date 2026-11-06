@@ -1,0 +1,16 @@
+[package]
+name = "look-shared"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+text-spike = { path = "../text" }
+parley = "=0.12.0"
+swash = "=0.2.10"
+pulldown-cmark = { version = "=0.13.6", default-features = false }
+
+[profile.release]
+opt-level = 3

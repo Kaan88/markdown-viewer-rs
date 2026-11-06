@@ -1,0 +1,15 @@
+CoreMessagingXP.dll: ntdll.dll.NtAlpcQueryInformation
+CoreMessagingXP.dll: ntdll.dll.NtAssociateWaitCompletionPacket
+CoreMessagingXP.dll: ntdll.dll.NtCancelWaitCompletionPacket
+CoreMessagingXP.dll: ntdll.dll.NtCreateWaitCompletionPacket
+CoreMessagingXP.dll: SHCORE.dll.UnsubscribeFeatureStateChangeNotification
+Microsoft.Internal.FrameworkUdk.dll: api-ms-win-appmodel-runtime-internal-l1-1-1.dll.GetSystemMetadataPathForPackage
+Microsoft.Internal.FrameworkUdk.dll: api-ms-win-appmodel-runtime-internal-l1-1-4.dll.GetEffectivePackageStatusForUserSid
+Microsoft.Internal.FrameworkUdk.dll: ext-ms-win-ntuser-private-l1-1-1.dll.GetWindowBand
+Microsoft.Internal.FrameworkUdk.dll: KERNEL32.dll.PackageFamilyNameFromFullName
+Microsoft.UI.Windowing.Core.dll: api-ms-win-rtcore-ntuser-private-l1-1-0.dll.IsWindowInDestroy
+Microsoft.ui.xaml.dll: KERNEL32.dll.OfferVirtualMemory
+Microsoft.ui.xaml.dll: KERNEL32.dll.ReclaimVirtualMemory
+Microsoft.ui.xaml.dll: UxTheme.dll.GetThemeAnimationProperty
+Microsoft.ui.xaml.dll: UxTheme.dll.GetThemeAnimationTransform
+Microsoft.ui.xaml.dll: UxTheme.dll.GetThemeTimingFunction

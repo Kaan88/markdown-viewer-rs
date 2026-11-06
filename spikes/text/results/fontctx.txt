@@ -1,0 +1,10 @@
+fontctx new_ms=24.56 family_names_ms=0.00 first_layout_with_fallback_ms=13.88 families=2117 live_mb=0.53 rss_mb=16.5 rss_anon_mb=3.1
+fontctx new_ms=26.42 family_names_ms=0.00 first_layout_with_fallback_ms=14.57 families=2117 live_mb=0.53 rss_mb=16.4 rss_anon_mb=3.1
+fontctx new_ms=26.88 family_names_ms=0.00 first_layout_with_fallback_ms=13.87 families=2117 live_mb=0.53 rss_mb=16.4 rss_anon_mb=3.1
+fontctx new_ms=25.08 family_names_ms=0.00 first_layout_with_fallback_ms=13.11 families=2117 live_mb=0.53 rss_mb=16.5 rss_anon_mb=3.1
+fontctx new_ms=25.18 family_names_ms=0.00 first_layout_with_fallback_ms=13.25 families=2117 live_mb=0.53 rss_mb=16.4 rss_anon_mb=3.1
+fontctx new_ms=24.11 family_names_ms=0.00 first_layout_with_fallback_ms=13.19 families=2117 live_mb=0.53 rss_mb=16.4 rss_anon_mb=3.1
+fontctx new_ms=27.06 family_names_ms=0.00 first_layout_with_fallback_ms=13.55 families=2117 live_mb=0.53 rss_mb=16.3 rss_anon_mb=3.1
+fontctx new_ms=26.98 family_names_ms=0.00 first_layout_with_fallback_ms=13.67 families=2117 live_mb=0.53 rss_mb=16.4 rss_anon_mb=3.1
+fontctx new_ms=26.35 family_names_ms=0.00 first_layout_with_fallback_ms=13.22 families=2117 live_mb=0.53 rss_mb=16.4 rss_anon_mb=3.1
+fontctx new_ms=25.14 family_names_ms=0.00 first_layout_with_fallback_ms=13.83 families=2117 live_mb=0.53 rss_mb=16.4 rss_anon_mb=3.1

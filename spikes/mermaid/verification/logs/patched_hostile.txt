@@ -1,0 +1,32 @@
+# rc=124 means killed by the 8 s timeout. font=segoe. Each case one fresh process.
+empty	rc=0	2.4ms	VmHWM_kb=23912	ERR No Mermaid diagram type detected
+prose	rc=0	2.4ms	VmHWM_kb=23712	ERR No Mermaid diagram type detected
+garbage	rc=0	2.2ms	VmHWM_kb=23756	ERR No Mermaid diagram type detected
+bad_header	rc=0	2.5ms	VmHWM_kb=24240	ERR Diagram parse error (flowchart-v2): unexpected identifier; expected "graph", "flowchart", "flowchart elk", "sw
+flow_unterminated	rc=0	2.5ms	VmHWM_kb=24304	ERR Diagram parse error (flowchart-v2): Unterminated node label (missing `]`)
+flow_bad_arrow	rc=0	2.6ms	VmHWM_kb=24328	ERR Diagram parse error (flowchart-v2): unexpected node label; expected node identifier, edge label
+seq_bad	rc=0	2.5ms	VmHWM_kb=23924	ERR Diagram parse error (sequence): unexpected statement separator; expected plus, minus, central, num, actor
+class_bad	rc=0	2.5ms	VmHWM_kb=24024	ERR Diagram parse error (classDiagram): unexpected ext; expected newline, diagram direction, "class", "namespace",
+state_bad	rc=0	2.5ms	VmHWM_kb=24220	ERR Diagram parse error (stateDiagram): unexpected edge operator; expected newline, node identifier, styled id, ed
+er_bad	rc=0	2.4ms	VmHWM_kb=24024	ERR Diagram parse error (er): unexpected colon; expected name
+gantt_bad_date	rc=0	2.4ms	VmHWM_kb=24688	ERR Diagram parse error (gantt): Invalid date:9999-99-99
+gantt_cycle	rc=0	2.4ms	VmHWM_kb=24788	ERR Diagram parse error (gantt): task `a` has unresolved startTime
+pie_nonnum	rc=0	2.4ms	VmHWM_kb=23952	ERR Diagram parse error (pie): unexpected pie statement: "A" : abc
+pie_zero	rc=0	2.6ms	VmHWM_kb=32668	OK svg_bytes=2955 | png_ok 8484 bytes 2.6ms
+mindmap_bad	rc=0	2.5ms	VmHWM_kb=24024	ERR Diagram parse error (mindmap): unexpected trailing input
+init_bad_json	rc=0	4.8ms	VmHWM_kb=33088	OK svg_bytes=31346 | png_ok 1057 bytes 3.1ms
+over_source_3MiB	rc=0	3.3ms	VmHWM_kb=23936	ERR resource limit `max_source_bytes` exceeded during source: actual=3145751 maximum=2097152 cause=ceiling
+over_items_40k_edges	rc=0	151.0ms	VmHWM_kb=206732	ERR resource limit `max_model_items` exceeded during layout_model: actual=80001 maximum=32000 cause=ceiling
+over_depth_2000_subgraphs	rc=0	45.1ms	VmHWM_kb=27632	ERR resource limit `max_model_nesting_depth` exceeded during layout_model: actual=2000 maximum=256 cause=ceiling
+over_depth_2000_mindmap	rc=0	22.3ms	VmHWM_kb=28520	ERR resource limit `max_model_nesting_depth` exceeded during layout_model: actual=1999 maximum=256 cause=ceiling
+over_label_1p5MiB	rc=0	2.4ms	VmHWM_kb=23640	ERR source line of 1572874 bytes is over 4096
+label_16k	rc=0	2.4ms	VmHWM_kb=23444	ERR source line of 16394 bytes is over 4096
+label_64k	rc=0	2.3ms	VmHWM_kb=23396	ERR source line of 65546 bytes is over 4096
+label_256k	rc=0	2.3ms	VmHWM_kb=23552	ERR source line of 262154 bytes is over 4096
+words_16k	rc=0	2.3ms	VmHWM_kb=23572	ERR source line of 16390 bytes is over 4096
+words_64k	rc=0	2.3ms	VmHWM_kb=23420	ERR source line of 65545 bytes is over 4096
+words_256k	rc=0	2.3ms	VmHWM_kb=23364	ERR source line of 262150 bytes is over 4096
+label_multiline_64k	rc=0	71.9ms	VmHWM_kb=91724	OK svg_bytes=2105422 | png_err raster over pixel cap: 370x67240 214.9ms
+over_pie_40k	rc=0	16.7ms	VmHWM_kb=42224	ERR resource limit `max_model_items` exceeded during layout_model: actual=40000 maximum=32000 cause=ceiling
+over_seq_40k	rc=0	52.4ms	VmHWM_kb=86932	ERR resource limit `max_model_items` exceeded during layout_model: actual=40050 maximum=32000 cause=ceiling
+big_flow_2000	rc=0	2159.2ms	VmHWM_kb=57208	ERR resource limit `svg_fallback_selector_index` exceeded during svg_postprocess: actual=16790350 maximum=16777216

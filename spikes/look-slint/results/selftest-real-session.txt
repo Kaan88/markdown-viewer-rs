@@ -1,0 +1,26 @@
+PRESENTED present_ms=45.86 first_paint_ms=38.90 t0=proc-starttime-10ms dpr=1 canvas_device_size=780x756 canvas_device_origin=230,40 page_x=0 window_phys=1220x820 window_logical=1220.0x820.0 page=780x2400
+SELFTEST PASS ctrl-f-opens-find value=true
+SELFTEST PASS typing-replaces-selection value=xy
+SELFTEST PASS backspace-and-turkish value=xç
+SELFTEST PASS enter-next-match value=3
+SELFTEST PASS esc-closes-find value=false
+SELFTEST PASS ctrl-f-after-close value=true
+SELFTEST PASS ctrl-f-toggles-from-field value=false
+SELFTEST PASS menu-opens value=true
+SELFTEST PASS menu-view-toggles-sidebar value=left=false cmd=left
+SELFTEST PASS alt-v-opens value=true
+SELFTEST PASS menu-keyboard-activate value=right=false cmd=right
+SELFTEST PASS menu-esc-closes value=false
+SELFTEST PASS menu-outside-click-closes value=false
+SELFTEST PASS focus-returns-after-menu value=true
+SELFTEST PASS tab-select value=1
+SELFTEST PASS ctrl-w-closes-tab value=2
+SELFTEST PASS splitter-drag value=260
+SELFTEST PASS tree-collapse value=rows=6
+SELFTEST PASS tree-keyboard-expand value=rows=10
+SELFTEST PASS wheel-scrolls value=240
+SELFTEST PASS context-menu-find value=find=true cmd=find
+SELFTEST PASS find-field-focused-after-context-find value=q
+SELFTEST PASS esc-after-context-find value=false
+SELFTEST PASS context-menu-keyboard value=find=true last=find
+SELFTEST done fails=0

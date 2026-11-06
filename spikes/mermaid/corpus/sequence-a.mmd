@@ -1,0 +1,23 @@
+%% expect: Browser|Authorization Server|Resource API|Redirect to the login page with the client id|Authorization code exchange|Access token and refresh token|Token is valid|Token expired|Refresh the access token before retrying|retry up to three times|The token is cached in memory only and never written to disk
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant A as Authorization Server
+    participant R as Resource API
+    B->>A: Redirect to the login page with the client id
+    activate A
+    A-->>B: Authorization code exchange
+    deactivate A
+    B->>A: POST /token with the code and PKCE verifier
+    A-->>B: Access token and refresh token
+    Note over B,A: The token is cached in memory only and never written to disk
+    loop retry up to three times
+        B->>+R: GET /documents with bearer token
+        alt Token is valid
+            R-->>B: 200 with the list of documents
+        else Token expired
+            R-->>-B: 401 Unauthorized
+            B->>A: Refresh the access token before retrying
+            A--xB: Refresh rejected, sign in again
+        end
+    end

@@ -1,0 +1,14 @@
+%% expect: Dokümantasyon ve yerelleştirme|Türkçe çevirileri gözden geçir|A very long task name that cannot possibly fit inside its short bar|Infrastructure and continuous delivery|Tiny|Dec
+gantt
+    title Dokümantasyon ve yerelleştirme takvimi
+    dateFormat YYYY-MM-DD
+    axisFormat %d %b
+    section Dokümantasyon ve yerelleştirme
+    Türkçe çevirileri gözden geçir :t1, 2026-11-02, 6d
+    A very long task name that cannot possibly fit inside its short bar :t2, 2026-11-05, 1d
+    Tiny :t3, 2026-11-06, 1d
+    section Infrastructure and continuous delivery
+    Migrate the build machines to the new image :crit, i1, 2026-11-09, 14d
+    Long running soak test of the installer on clean virtual machines :active, i2, after i1, 21d
+    section Support
+    Triage reports :s1, 2026-12-01, 30d

@@ -1,0 +1,19 @@
+# renderer=merman fonts=embedded font_load_ms=1.76 iters=30
+set	family	cold_svg_ms	cold_png_ms	med_svg_ms	max_svg_ms	med_png_ms	max_png_ms	med_total_ms	svg_bytes	png_bytes
+showcase	flowchart	3.85	8.65	2.26	2.32	7.98	8.27	10.24	33761	7671
+showcase	sequence	0.92	15.37	0.92	0.95	14.56	14.60	15.48	21835	20422
+showcase	class	1.82	5.93	1.73	1.75	5.71	5.72	7.44	22578	6661
+showcase	state	2.16	5.96	2.13	2.17	5.94	5.99	8.06	38101	11901
+showcase	er	1.18	5.70	1.14	1.16	5.70	5.72	6.85	13875	8162
+showcase	gantt	0.46	6.69	0.46	0.47	6.76	6.83	7.21	9220	15698
+showcase	pie	0.23	13.34	0.26	0.28	13.20	13.34	13.47	3596	44955
+showcase	mindmap	2.21	5.70	2.13	2.16	5.20	5.26	7.33	29918	16066
+core	flowchart	2.02	5.60	2.01	2.04	5.58	5.62	7.59	31353	3347
+core	sequence	0.86	12.72	0.88	0.90	12.66	12.87	13.54	21399	12867
+core	class	1.71	3.73	1.63	1.65	3.72	3.74	5.35	21512	4290
+core	state	1.96	3.96	1.94	1.96	3.98	4.03	5.92	35703	7621
+core	er	1.15	5.68	1.15	1.17	5.65	5.68	6.81	13936	7958
+core	gantt	0.45	4.56	0.44	0.46	4.49	4.53	4.94	9269	7444
+core	pie	0.22	11.79	0.25	0.26	11.05	11.18	11.31	3564	40342
+core	mindmap	1.60	2.09	1.55	1.56	2.04	2.07	3.59	21991	4467
+# VmHWM_kb=28116

@@ -1,0 +1,3 @@
+
+	  *EXTRA File 		    1014	C:\mdview-w0\mdview-winui.trace.log
+	  *EXTRA File 		   10458	C:\mdview-w0\smoke.ps1

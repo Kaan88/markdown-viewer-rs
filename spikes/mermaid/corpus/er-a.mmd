@@ -1,0 +1,25 @@
+%% expect: CUSTOMER_ACCOUNT|ORDER_LINE_ITEM|PRODUCT_CATALOG_ENTRY|billing_address_identifier|places many orders|is contained in|string|PK|FK|UK|Primary contact email address
+erDiagram
+    CUSTOMER_ACCOUNT ||--o{ PURCHASE_ORDER : "places many orders"
+    PURCHASE_ORDER ||--|{ ORDER_LINE_ITEM : "contains"
+    PRODUCT_CATALOG_ENTRY ||--o{ ORDER_LINE_ITEM : "is contained in"
+    CUSTOMER_ACCOUNT }o--o| SHIPPING_ADDRESS : "ships to"
+    CUSTOMER_ACCOUNT {
+        uuid customer_identifier PK
+        string email_address UK "Primary contact email address"
+        uuid billing_address_identifier FK
+        timestamp created_at
+    }
+    PURCHASE_ORDER {
+        uuid order_identifier PK
+        uuid customer_identifier FK
+        decimal total_amount_including_tax
+    }
+    ORDER_LINE_ITEM {
+        uuid line_item_identifier PK
+        int quantity
+    }
+    PRODUCT_CATALOG_ENTRY {
+        string stock_keeping_unit PK
+        string human_readable_description
+    }

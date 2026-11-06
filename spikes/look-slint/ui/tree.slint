@@ -1,0 +1,133 @@
+import { Theme } from "theme.slint";
+import { Icons, Icon } from "icons.slint";
+
+export struct TreeRow { id: int, label: string, depth: int, expandable: bool, expanded: bool }
+
+component Row {
+    in property <TreeRow> node;
+    in property <bool> selected;
+    in property <bool> focused;
+    callback toggle;
+    callback activate;
+    height: 28px;
+    Rectangle {
+        x: 4px;
+        width: parent.width - 8px;
+        border-radius: 4px;
+        background: selected ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+        border-width: focused ? 1px : 0;
+        border-color: Theme.accent;
+    }
+    if selected: Rectangle {
+        x: 4px;
+        y: 7px;
+        width: 2px;
+        height: 14px;
+        border-radius: 1px;
+        background: Theme.accent;
+    }
+    ta := TouchArea {
+        clicked => {
+            if node.expandable { root.toggle(); }
+            root.activate();
+        }
+    }
+    if node.expandable: Icon {
+        x: 8px + node.depth * 16px;
+        y: 8px;
+        size: 12px;
+        d: node.expanded ? Icons.chevron-down : Icons.chevron-right;
+        color: Theme.text-dim;
+    }
+    Text {
+        x: 24px + node.depth * 16px;
+        width: parent.width - self.x - 8px;
+        y: (parent.height - self.height) / 2;
+        text: node.label;
+        overflow: elide;
+        color: Theme.text;
+    }
+}
+
+// A flat, keyboard-navigable tree. Rust holds the expansion state and supplies visible rows.
+export component Tree {
+    in property <[TreeRow]> rows;
+    in property <int> selected-id;
+    callback toggle(int);
+    callback activate(int);
+    callback changed-focus;
+    property <int> cursor: -1;
+    fs := FocusScope {
+        focus-on-click: true;
+        key-pressed(e) => {
+            if rows.length == 0 { return reject; }
+            if e.text == Key.DownArrow { cursor = min(cursor + 1, rows.length - 1); return accept; }
+            if e.text == Key.UpArrow { cursor = max(cursor - 1, 0); return accept; }
+            if cursor < 0 { return reject; }
+            if e.text == Key.RightArrow {
+                if rows[cursor].expandable && !rows[cursor].expanded { root.toggle(rows[cursor].id); }
+                return accept;
+            }
+            if e.text == Key.LeftArrow {
+                if rows[cursor].expandable && rows[cursor].expanded { root.toggle(rows[cursor].id); }
+                return accept;
+            }
+            if e.text == Key.Return || e.text == " " {
+                if rows[cursor].expandable { root.toggle(rows[cursor].id); } else { root.activate(rows[cursor].id); }
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            alignment: start;
+            for r[i] in rows: Row {
+                node: r;
+                selected: r.id == selected-id;
+                focused: fs.has-focus && i == cursor;
+                toggle => { cursor = i; fs.focus(); root.toggle(r.id); }
+                activate => { cursor = i; fs.focus(); root.activate(r.id); }
+            }
+        }
+    }
+}
+
+export struct OutlineRow { label: string, level: int }
+
+// Outline list. The current heading gets a tinted row and an accent rail.
+export component Outline {
+    in property <[OutlineRow]> rows;
+    in property <int> current;
+    callback activate(int);
+    VerticalLayout {
+        alignment: start;
+        for r[i] in rows: Rectangle {
+            height: 28px;
+            Rectangle {
+                x: 4px;
+                width: parent.width - 8px;
+                border-radius: 4px;
+                background: i == current ? Theme.selected : ta.has-hover ? Theme.hover : transparent;
+            }
+            if i == current: Rectangle {
+                x: 4px;
+                y: 7px;
+                width: 2px;
+                height: 14px;
+                border-radius: 1px;
+                background: Theme.accent;
+            }
+            Text {
+                x: 12px + (r.level - 1) * 12px;
+                width: parent.width - self.x - 8px;
+                y: (parent.height - self.height) / 2;
+                text: r.label;
+                overflow: elide;
+                color: i == current ? Theme.accent-text : r.level == 1 ? Theme.text : Theme.text-dim;
+                font-weight: i == current ? 500 : 400;
+            }
+            ta := TouchArea {
+                clicked => { root.activate(i); }
+            }
+        }
+    }
+}

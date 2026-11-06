@@ -1,0 +1,62 @@
+import { Theme } from "theme.slint";
+
+// Stroke icons on a 16-unit grid, drawn by the software renderer's path rasteriser.
+export global Icons {
+    out property <string> menu: "M2.5 4 H13.5 M2.5 8 H13.5 M2.5 12 H13.5";
+    out property <string> search: "M7 2.5 A4.5 4.5 0 1 1 7 11.5 A4.5 4.5 0 1 1 7 2.5 Z M10.3 10.3 L13.5 13.5";
+    out property <string> close: "M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5";
+    out property <string> left-panel: "M2.5 3.5 H13.5 V12.5 H2.5 Z M6.5 3.5 V12.5";
+    out property <string> right-panel: "M2.5 3.5 H13.5 V12.5 H2.5 Z M9.5 3.5 V12.5";
+    out property <string> chevron-right: "M6 4 L10 8 L6 12";
+    out property <string> chevron-down: "M4 6 L8 10 L12 6";
+    out property <string> chevron-up: "M4 10 L8 6 L12 10";
+    out property <string> check: "M3.5 8.5 L6.5 11.5 L12.5 5";
+}
+
+export component Icon {
+    in property <string> d;
+    in property <color> color: Theme.text;
+    in property <length> size: 16px;
+    width: size;
+    height: size;
+    Path {
+        width: size;
+        height: size;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        commands: d;
+        stroke: color;
+        stroke-width: 1.2px;
+        fill: transparent;
+    }
+}
+
+export component IconButton {
+    in property <string> icon;
+    in property <bool> toggled;
+    in property <length> size: 32px;
+    in property <length> icon-size: 16px;
+    callback clicked;
+    width: size;
+    height: size;
+    Rectangle {
+        border-radius: 4px;
+        background: ta.pressed ? Theme.pressed : ta.has-hover ? Theme.hover : transparent;
+    }
+    if toggled: Rectangle {
+        x: (parent.width - 12px) / 2;
+        y: parent.height - 4px;
+        width: 12px;
+        height: 2px;
+        border-radius: 1px;
+        background: Theme.accent;
+    }
+    Icon {
+        d: icon;
+        size: icon-size;
+        color: toggled ? Theme.accent-text : Theme.text;
+    }
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}

@@ -1,0 +1,116 @@
+Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread
+Microsoft::UI::Dispatching::DispatcherQueuePriority::{High, Low, Normal}
+Microsoft::UI::Dispatching::IDispatcherQueue::TryEnqueueWithPriority
+Microsoft::UI::Input::IPointerPoint::{get_Properties}
+Microsoft::UI::Input::IPointerPointProperties::{get_MouseWheelDelta}
+Microsoft::UI::Xaml::Application::{CreateInstance, Current, Exit, Start}
+Microsoft::UI::Xaml::ApplicationInitializationCallback
+Microsoft::UI::Xaml::IApplication::{get_Resources, add_UnhandledException}
+Microsoft::UI::Xaml::UnhandledExceptionEventArgs::{}
+Microsoft::UI::Xaml::IUnhandledExceptionEventArgs::{get_Message, get_Exception}
+Microsoft::UI::Xaml::IApplicationOverrides::{}
+Microsoft::UI::Xaml::LaunchActivatedEventArgs::{}
+Microsoft::UI::Xaml::ResourceDictionary::{}
+Microsoft::UI::Xaml::IResourceDictionary::get_MergedDictionaries
+Microsoft::UI::Xaml::Controls::XamlControlsResources::CreateInstance
+Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider::CreateInstance
+Microsoft::UI::Xaml::Markup::IXamlMetadataProvider
+Microsoft::UI::Xaml::Markup::IXamlType::{}
+Microsoft::UI::Xaml::Window::CreateInstance
+Microsoft::UI::Xaml::IWindow::{Activate, add_Closed, Close, put_Content, put_Title}
+Microsoft::UI::Xaml::WindowEventArgs::{}
+Microsoft::UI::Xaml::UIElement::{}
+Microsoft::UI::Xaml::IUIElement::{add_PointerWheelChanged, put_ContextFlyout}
+Microsoft::UI::Xaml::IFrameworkElement::{add_Loaded, add_SizeChanged, get_ActualHeight, get_ActualWidth}
+Microsoft::UI::Xaml::GridLength
+Microsoft::UI::Xaml::GridUnitType::{Auto, Pixel, Star}
+Microsoft::UI::Xaml::RoutedEventHandler
+Microsoft::UI::Xaml::SizeChangedEventHandler
+Microsoft::UI::Xaml::Input::IPointerRoutedEventArgs::{GetCurrentPoint, put_Handled}
+Microsoft::UI::Xaml::Input::PointerEventHandler
+Microsoft::UI::Xaml::Media::ICompositionTargetStatics::{add_Rendering, remove_Rendering}
+Microsoft::UI::Xaml::Controls::Grid::{CreateInstance, SetRow, SetColumn, SetColumnSpan}
+Microsoft::UI::Xaml::Controls::IGrid::{get_ColumnDefinitions, get_RowDefinitions}
+Microsoft::UI::Xaml::Controls::IGridStatics::{SetRow, SetColumn, SetColumnSpan}
+Microsoft::UI::Xaml::Controls::RowDefinition::CreateInstance
+Microsoft::UI::Xaml::Controls::ColumnDefinition::CreateInstance
+Microsoft::UI::Xaml::Controls::IRowDefinition::put_Height
+Microsoft::UI::Xaml::Controls::IColumnDefinition::put_Width
+Microsoft::UI::Xaml::Controls::RowDefinitionCollection::{}
+Microsoft::UI::Xaml::Controls::ColumnDefinitionCollection::{}
+Microsoft::UI::Xaml::Controls::UIElementCollection::{}
+Microsoft::UI::Xaml::Controls::IPanel::{get_Children, put_Background}
+Microsoft::UI::Xaml::Controls::IContentControl::put_Content
+Microsoft::UI::Xaml::Controls::TabView::CreateInstance
+Microsoft::UI::Xaml::Controls::ITabView::{get_TabItems}
+Microsoft::UI::Xaml::Controls::TabViewItem::CreateInstance
+Microsoft::UI::Xaml::Controls::ITabViewItem::{put_Header}
+Microsoft::UI::Xaml::Controls::MenuBar::CreateInstance
+Microsoft::UI::Xaml::Controls::IMenuBar::get_Items
+Microsoft::UI::Xaml::Controls::MenuBarItem::CreateInstance
+Microsoft::UI::Xaml::Controls::IMenuBarItem::{get_Items, put_Title}
+Microsoft::UI::Xaml::Controls::MenuFlyout::CreateInstance
+Microsoft::UI::Xaml::Controls::IMenuFlyout::get_Items
+Microsoft::UI::Xaml::Controls::MenuFlyoutItem::CreateInstance
+Microsoft::UI::Xaml::Controls::IMenuFlyoutItem::{add_Click, put_Text}
+Microsoft::UI::Xaml::Controls::MenuFlyoutItemBase::{}
+Microsoft::UI::Xaml::Controls::TreeView::CreateInstance
+Microsoft::UI::Xaml::Controls::ITreeView::{add_Expanding, get_RootNodes}
+Microsoft::UI::Xaml::Controls::TreeViewNode::CreateInstance
+Microsoft::UI::Xaml::Controls::ITreeViewNode::{get_Children, get_HasChildren, get_Content, put_Content, put_HasUnrealizedChildren, get_HasUnrealizedChildren, put_IsExpanded}
+Microsoft::UI::Xaml::Controls::ITreeViewExpandingEventArgs::{get_Node}
+Microsoft::UI::Xaml::Controls::TextBox::CreateInstance
+Microsoft::UI::Xaml::Controls::ITextBox::{put_PlaceholderText}
+Microsoft::UI::Xaml::Controls::SwapChainPanel::CreateInstance
+Microsoft::UI::Xaml::Controls::ISwapChainPanel::{add_CompositionScaleChanged, get_CompositionScaleX, get_CompositionScaleY}
+Windows::UI::Xaml::Interop::TypeKind::Metadata
+Windows::Win32::AddPackageDependency
+Windows::Win32::APPMODEL_ERROR_NO_PACKAGE
+Windows::Win32::COINIT_APARTMENTTHREADED
+Windows::Win32::CoInitializeEx
+Windows::Win32::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+Windows::Win32::ERROR_INSUFFICIENT_BUFFER
+Windows::Win32::GetCurrentPackageFullName
+Windows::Win32::GetProcessHeap
+Windows::Win32::HeapFree
+Windows::Win32::PackageDependencyProcessorArchitectures::{PackageDependencyProcessorArchitectures_Neutral, PackageDependencyProcessorArchitectures_X64}
+Windows::Win32::GetThreadDpiAwarenessContext
+Windows::Win32::GetAwarenessFromDpiAwarenessContext
+Windows::Win32::STATEREPOSITORY_E_DEPENDENCY_NOT_RESOLVED
+Windows::Win32::TryCreatePackageDependency
+Windows::Win32::GetCurrentProcess
+Windows::Win32::GetProcessTimes
+Windows::Win32::GetSystemTimePreciseAsFileTime
+Windows::Win32::GetProcessMemoryInfo
+Windows::Win32::PROCESS_MEMORY_COUNTERS_EX
+Windows::Win32::D3D11CreateDevice
+Windows::Win32::D3D11_SDK_VERSION
+Windows::Win32::D3D11_CREATE_DEVICE_BGRA_SUPPORT
+Windows::Win32::D3D_DRIVER_TYPE_HARDWARE
+Windows::Win32::D3D_DRIVER_TYPE_WARP
+Windows::Win32::D3D_FEATURE_LEVEL_11_0
+Windows::Win32::ID3D11Device::GetImmediateContext
+Windows::Win32::ID3D11DeviceContext::{UpdateSubresource, Flush}
+Windows::Win32::ID3D11Texture2D::{}
+Windows::Win32::IDXGIDevice::GetAdapter
+Windows::Win32::IDXGIAdapter::GetDesc
+Windows::Win32::DXGI_ADAPTER_DESC
+Windows::Win32::IDXGIObject::GetParent
+Windows::Win32::IDXGIFactory2::CreateSwapChainForComposition
+Windows::Win32::IDXGISwapChain::{GetBuffer, Present, ResizeBuffers}
+Windows::Win32::IDXGISwapChain1::{}
+Windows::Win32::IDXGISwapChain2::SetMatrixTransform
+Windows::Win32::DXGI_FORMAT_B8G8R8A8_UNORM
+Windows::Win32::DXGI_SWAP_CHAIN_DESC1
+Windows::Win32::DXGI_USAGE_RENDER_TARGET_OUTPUT
+Windows::Win32::DXGI_SCALING_STRETCH
+Windows::Win32::DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL
+Windows::Win32::DXGI_ALPHA_MODE_IGNORE
+Windows::Win32::DXGI_MATRIX_3X2_F
+Windows::Win32::IDXGISwapChain3::{}
+Microsoft::UI::Xaml::Media::CompositionTarget::Rendering
+Microsoft::UI::Xaml::Media::SolidColorBrush::CreateInstance
+Microsoft::UI::Xaml::Media::ISolidColorBrush::put_Color
+Windows::UI::Color
+Windows::Win32::MessageBoxW
+Windows::Win32::MB_ICONERROR

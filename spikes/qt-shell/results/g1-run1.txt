@@ -1,0 +1,75 @@
+load before: 5.35 4.66 3.97 18/3142 150897
+=== one-shot info
+PRESENTED present_ms=174.26 first_paint_ms=163.34 t0=proc-starttime-10ms dpr=1 canvas_in_window=204,106 canvas_logical=852x688 canvas_device_origin=204.00,106.00 canvas_device_size=852.00x688.00 window_logical=1220x820
+=== A direct-linked, default platform theme
+present_ms: median_after_drop=76.19 n=10 raw=[72.30 71.23 77.50 68.30 90.56 91.08 93.85 71.56 86.19 71.82 70.45 74.87]
+first_paint_ms: median_after_drop=67.28 n=10 raw=[59.67 66.79 69.11 59.19 80.91 81.67 87.24 65.44 78.10 63.41 64.37 65.04]
+Rss_MiB: median_after_drop=87.51 n=12 raw=[87.68 87.70 87.43 87.52 87.67 87.43 87.44 87.63 87.30 87.77 87.31 87.50]
+Pss_MiB: median_after_drop=36.65 n=12 raw=[36.38 36.65 36.42 38.41 36.49 38.36 36.42 36.65 38.39 38.44 36.52 38.38]
+Pss_Anon_MiB: median_after_drop=18.04 n=12 raw=[18.04 18.04 18.03 18.03 18.04 18.04 18.03 18.04 18.03 18.04 18.04 18.03]
+Pss_File_MiB: median_after_drop=10.48 n=12 raw=[10.46 10.60 10.39 10.50 10.57 10.44 10.38 10.60 10.47 10.52 10.48 10.47]
+Pss_Shmem_MiB: median_after_drop=8.01 n=12 raw=[7.88 8.01 8.01 9.88 7.88 9.88 8.01 8.01 9.88 9.88 8.01 9.88]
+Private_Clean_MiB: median_after_drop=3.02 n=12 raw=[2.96 3.12 2.92 3.07 3.11 2.98 2.95 3.16 3.07 3.00 3.02 3.02]
+Private_Dirty_MiB: median_after_drop=22.04 n=12 raw=[21.79 22.04 22.03 25.79 21.79 25.80 22.04 22.04 25.79 25.80 22.04 25.79]
+Shared_Clean_MiB: median_after_drop=54.44 n=12 raw=[54.66 54.53 54.48 54.42 54.51 54.40 54.45 54.42 54.19 54.71 54.24 54.44]
+Shared_Dirty_MiB: median_after_drop=8.01 n=12 raw=[8.26 8.01 8.01 4.25 8.26 4.25 8.01 8.01 4.25 4.25 8.01 4.25]
+Anonymous_MiB: median_after_drop=18.04 n=12 raw=[18.04 18.04 18.03 18.03 18.04 18.04 18.03 18.04 18.03 18.04 18.04 18.03]
+PrivateTotal_MiB: median_after_drop=25.18 n=12 raw=[24.75 25.16 24.95 28.85 24.90 28.77 24.98 25.20 28.86 28.80 25.07 28.80]
+=== B direct-linked, QT_QPA_PLATFORMTHEME=generic (Fusion)
+present_ms: median_after_drop=55.55 n=10 raw=[66.76 44.14 92.89 44.54 50.71 59.55 182.90 141.38 43.70 51.56 86.99 43.45]
+first_paint_ms: median_after_drop=47.76 n=10 raw=[62.11 35.90 83.65 39.80 41.65 53.82 171.73 131.51 35.44 41.70 80.37 37.14]
+Rss_MiB: median_after_drop=66.04 n=12 raw=[61.85 65.74 66.09 61.99 66.02 70.09 62.03 66.09 66.06 66.11 66.07 66.00]
+Pss_MiB: median_after_drop=28.89 n=12 raw=[24.63 28.65 28.80 26.78 28.88 32.89 24.91 29.00 28.98 29.00 28.99 28.90]
+Pss_Anon_MiB: median_after_drop=14.17 n=12 raw=[14.18 14.17 14.18 14.14 14.15 14.16 14.16 14.16 14.18 14.16 14.18 14.18]
+Pss_File_MiB: median_after_drop=6.76 n=12 raw=[6.44 6.48 6.68 6.70 6.72 6.78 6.75 6.84 6.79 6.83 6.80 6.78]
+Pss_Shmem_MiB: median_after_drop=8.01 n=12 raw=[4.00 8.01 7.95 5.94 8.01 11.95 4.00 8.01 8.01 8.01 8.01 7.95]
+Private_Clean_MiB: median_after_drop=3.31 n=12 raw=[3.06 3.12 3.31 3.32 3.30 3.32 3.31 3.37 3.32 3.33 3.29 3.21]
+Private_Dirty_MiB: median_after_drop=18.16 n=12 raw=[14.18 18.17 18.05 18.02 18.15 22.04 14.16 18.16 18.18 18.17 18.18 18.05]
+Shared_Clean_MiB: median_after_drop=36.57 n=12 raw=[36.60 36.44 36.59 36.52 36.55 36.59 36.55 36.55 36.55 36.60 36.59 36.61]
+Shared_Dirty_MiB: median_after_drop=8.01 n=12 raw=[8.01 8.01 8.13 4.13 8.01 8.13 8.01 8.01 8.01 8.01 8.01 8.13]
+Anonymous_MiB: median_after_drop=14.17 n=12 raw=[14.18 14.17 14.18 14.14 14.15 14.16 14.16 14.16 14.18 14.16 14.18 14.18]
+PrivateTotal_MiB: median_after_drop=21.41 n=12 raw=[17.25 21.29 21.36 21.34 21.46 25.36 17.47 21.53 21.50 21.50 21.47 21.26]
+=== C direct-linked, generic + QT_STYLE_OVERRIDE=Breeze
+present_ms: median_after_drop=53.05 n=10 raw=[56.30 58.49 64.97 57.70 78.69 53.09 50.09 51.02 50.46 51.15 53.00 56.72]
+first_paint_ms: median_after_drop=47.08 n=10 raw=[47.38 52.52 59.59 49.04 74.78 47.17 45.86 46.69 44.56 46.98 46.94 48.46]
+Rss_MiB: median_after_drop=80.03 n=12 raw=[80.16 80.19 79.80 79.95 80.32 80.24 79.98 80.07 79.76 76.27 80.19 76.36]
+Pss_MiB: median_after_drop=34.37 n=12 raw=[34.45 34.26 34.17 34.43 34.48 36.38 34.31 36.37 34.30 30.62 34.58 30.51]
+Pss_Anon_MiB: median_after_drop=17.47 n=12 raw=[17.49 17.48 17.47 17.48 17.47 17.46 17.47 17.47 17.46 17.47 17.47 17.47]
+Pss_File_MiB: median_after_drop=8.98 n=12 raw=[8.95 8.90 8.82 8.94 9.13 9.03 8.95 9.01 8.83 9.14 9.09 9.03]
+Pss_Shmem_MiB: median_after_drop=7.95 n=12 raw=[8.01 7.88 7.88 8.01 7.88 9.88 7.88 9.88 8.01 4.00 8.01 4.00]
+Private_Clean_MiB: median_after_drop=2.96 n=12 raw=[2.92 2.88 2.82 2.95 3.08 2.97 2.92 3.00 2.84 3.13 3.07 2.99]
+Private_Dirty_MiB: median_after_drop=21.35 n=12 raw=[21.50 21.23 21.23 21.48 21.23 25.22 21.23 25.23 21.46 17.47 21.48 17.47]
+Shared_Clean_MiB: median_after_drop=47.64 n=12 raw=[47.74 47.82 47.49 47.51 47.76 47.79 47.58 47.59 47.45 47.66 47.63 47.89]
+Shared_Dirty_MiB: median_after_drop=8.01 n=12 raw=[8.01 8.26 8.26 8.01 8.26 4.25 8.26 4.25 8.01 8.01 8.01 8.01]
+Anonymous_MiB: median_after_drop=17.47 n=12 raw=[17.49 17.48 17.47 17.48 17.47 17.46 17.47 17.47 17.46 17.47 17.47 17.47]
+PrivateTotal_MiB: median_after_drop=24.30 n=12 raw=[24.42 24.11 24.05 24.43 24.30 28.19 24.14 28.23 24.30 20.61 24.55 20.46]
+=== D Qt-free launcher + dlopen, default theme (socket miss first)
+present_ms: median_after_drop=54.41 n=10 raw=[62.64 65.03 50.92 57.39 58.25 50.71 51.06 51.78 57.04 141.87 71.53 51.75]
+first_paint_ms: median_after_drop=48.14 n=10 raw=[54.63 56.57 45.58 49.77 48.79 47.49 47.33 46.46 49.73 138.19 68.54 46.47]
+Rss_MiB: median_after_drop=87.96 n=12 raw=[88.00 87.70 87.91 87.84 88.28 88.00 88.02 87.42 84.10 87.93 88.23 88.05]
+Pss_MiB: median_after_drop=37.23 n=12 raw=[37.26 37.18 37.21 37.23 37.42 35.39 37.40 36.87 33.46 37.22 37.30 39.25]
+Pss_Anon_MiB: median_after_drop=18.04 n=12 raw=[18.04 18.05 18.03 18.05 18.05 18.04 18.04 18.05 18.04 18.05 18.04 18.05]
+Pss_File_MiB: median_after_drop=11.27 n=12 raw=[11.22 11.12 11.17 11.17 11.37 11.35 11.36 10.94 11.42 11.16 11.38 11.32]
+Pss_Shmem_MiB: median_after_drop=8.01 n=12 raw=[8.01 8.01 8.01 8.01 8.01 6.01 8.01 7.88 4.00 8.01 7.88 9.88]
+Private_Clean_MiB: median_after_drop=3.56 n=12 raw=[3.50 3.44 3.49 3.49 3.66 3.64 3.66 3.27 3.73 3.48 3.67 3.62]
+Private_Dirty_MiB: median_after_drop=22.04 n=12 raw=[22.04 22.05 22.04 22.05 22.05 18.04 22.04 21.81 18.04 22.05 21.79 25.80]
+Shared_Clean_MiB: median_after_drop=54.35 n=12 raw=[54.46 54.20 54.37 54.29 54.55 54.31 54.32 54.08 54.32 54.38 54.51 54.38]
+Shared_Dirty_MiB: median_after_drop=8.01 n=12 raw=[8.01 8.01 8.01 8.01 8.01 12.01 8.01 8.26 8.01 8.01 8.26 4.25]
+Anonymous_MiB: median_after_drop=18.04 n=12 raw=[18.04 18.05 18.03 18.05 18.05 18.04 18.04 18.05 18.04 18.05 18.04 18.05]
+PrivateTotal_MiB: median_after_drop=25.53 n=12 raw=[25.54 25.49 25.53 25.55 25.71 21.68 25.70 25.08 21.77 25.54 25.46 29.42]
+=== E second launch, Qt-free launcher, listener alive
+exit_ms: median_after_drop=0.40 n=10 raw=[0.37 0.27 0.38 0.50 0.42 0.45 0.43 0.35 0.36 0.30 0.34 0.42]
+=== F second launch, direct-linked binary (ld.so loads Qt first), listener alive
+exit_ms: median_after_drop=4.10 n=10 raw=[9.35 4.38 4.48 4.15 4.74 4.66 4.51 3.86 4.03 3.80 4.04 3.80]
+=== self-test on this session
+PRESENTED present_ms=79.27 first_paint_ms=72.27 t0=proc-starttime-10ms dpr=1 canvas_in_window=204,106 canvas_logical=852x688 canvas_device_origin=204.00,106.00 canvas_device_size=852.00x688.00 window_
+SELFTEST PASS paintEvent 4
+SELFTEST PASS mousePressEvent Some((426.0, 344.0))
+SELFTEST PASS mouseMoveEvent Some((429.0, 348.0))
+SELFTEST PASS wheelEvent Some((0, -240))
+SELFTEST PASS dragEnterEvent Some("file:///tmp/a.md") sent=true
+SELFTEST PASS dropEvent Some("file:///tmp/a.md") sent=true
+SELFTEST PASS QAction::triggered 
+SELFTEST PASS QLineEdit::textChanged Some("needle")
+SELFTEST ALL-PASS
+load after: 6.00 5.20 4.21 5/3050 153092

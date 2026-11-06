@@ -1,0 +1,4 @@
+  Max core file size        0                    0                    bytes     
+  Max address space         536870912            536870912            bytes     
+engine pid 121026, alive before host SIGKILL: true
+engine alive after: false (0.09 ms after host SIGKILL)

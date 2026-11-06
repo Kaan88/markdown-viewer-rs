@@ -1,0 +1,10 @@
+mode=self-contained result=ok first_frame_ms=146.4 full_ui_ms=199.3 private_bytes_first_frame=27533312 private_bytes_full_ui=29261824 working_set_full_ui=109846528
+mode=self-contained result=ok first_frame_ms=112.5 full_ui_ms=167.8 private_bytes_first_frame=26542080 private_bytes_full_ui=31686656 working_set_full_ui=122376192
+mode=self-contained result=ok first_frame_ms=126.2 full_ui_ms=170.6 private_bytes_first_frame=26923008 private_bytes_full_ui=31625216 working_set_full_ui=122298368
+mode=self-contained result=ok first_frame_ms=135.6 full_ui_ms=186.7 private_bytes_first_frame=26898432 private_bytes_full_ui=29245440 working_set_full_ui=110010368
+mode=self-contained result=ok first_frame_ms=139.2 full_ui_ms=200.1 private_bytes_first_frame=30330880 private_bytes_full_ui=31854592 working_set_full_ui=122712064
+mode=self-contained result=ok first_frame_ms=158.3 full_ui_ms=219.2 private_bytes_first_frame=30343168 private_bytes_full_ui=31875072 working_set_full_ui=122437632
+mode=self-contained result=ok first_frame_ms=110.6 full_ui_ms=170.6 private_bytes_first_frame=27897856 private_bytes_full_ui=31707136 working_set_full_ui=122404864
+mode=self-contained result=ok first_frame_ms=115.4 full_ui_ms=171.9 private_bytes_first_frame=26898432 private_bytes_full_ui=31584256 working_set_full_ui=122421248
+mode=self-contained result=ok first_frame_ms=123.8 full_ui_ms=170.4 private_bytes_first_frame=26705920 private_bytes_full_ui=31563776 working_set_full_ui=122396672
+mode=self-contained result=ok first_frame_ms=136.1 full_ui_ms=184.9 private_bytes_first_frame=27656192 private_bytes_full_ui=29118464 working_set_full_ui=110137344

@@ -1,0 +1,19 @@
+[package]
+name = "parser-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+pulldown-cmark = { version = "=0.13.6", default-features = false, features = ["html"] }
+comrak = { version = "=0.59.0", default-features = false }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+strip = "symbols"

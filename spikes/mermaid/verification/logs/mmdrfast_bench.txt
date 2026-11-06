@@ -1,0 +1,19 @@
+# renderer=mmdr-fast fonts=embedded font_load_ms=0.34 iters=30
+set	family	cold_svg_ms	cold_png_ms	med_svg_ms	max_svg_ms	med_png_ms	max_png_ms	med_total_ms	svg_bytes	png_bytes
+showcase	flowchart	1.62	3.54	0.17	0.25	2.08	3.33	2.25	2827	8996
+showcase	sequence	0.14	5.12	0.14	0.14	5.00	5.04	5.13	4745	15952
+showcase	class	0.09	2.09	0.07	0.08	1.87	1.88	1.94	3288	8239
+showcase	state	0.11	1.53	0.10	0.11	1.52	1.53	1.62	2964	8594
+showcase	er	0.82	1.86	0.82	0.83	1.80	1.85	2.63	2922	8911
+showcase	gantt	2.00	4.43	0.06	0.06	3.96	4.24	4.02	4741	15579
+showcase	pie	0.04	9.26	0.05	0.05	9.32	9.57	9.36	2710	33476
+showcase	mindmap	0.07	3.94	0.06	0.07	3.50	3.68	3.56	5343	15194
+core	flowchart	0.14	0.89	0.10	0.11	0.85	0.86	0.94	1963	4074
+core	sequence	0.09	2.95	0.08	0.09	2.90	3.00	2.98	3833	8791
+core	class	0.08	1.21	0.06	0.07	1.19	1.20	1.25	2887	5112
+core	state	0.09	0.96	0.08	0.08	0.96	0.97	1.04	2277	5318
+core	er	0.74	1.76	0.73	0.74	1.74	1.76	2.48	2913	9118
+core	gantt	0.05	2.01	0.04	0.04	1.99	2.02	2.03	3901	6921
+core	pie	0.04	7.24	0.04	0.05	7.18	7.22	7.22	2409	25499
+core	mindmap	0.05	0.66	0.03	0.03	0.60	0.63	0.62	1842	3579
+# VmHWM_kb=30584

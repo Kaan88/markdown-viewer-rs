@@ -1,0 +1,74 @@
+import { Theme, Panel } from "theme.slint";
+import { Icons, IconButton } from "icons.slint";
+
+export component FindBar {
+    in-out property <string> query;
+    in property <int> index: 2;
+    in property <int> total: 14;
+    callback next;
+    callback previous;
+    callback close;
+    public function grab() {
+        input.focus();
+        input.select-all();
+    }
+    width: 340px;
+    height: 44px;
+    Panel { x: 0; y: 0; width: parent.width; height: parent.height; radius: 8px; }
+    TouchArea { }  // Clicks on the bar must not reach the document.
+    FocusScope {
+        // Capture: a single-line TextInput would otherwise swallow Return.
+        capture-key-pressed(e) => {
+            if e.text == Key.Return {
+                if e.modifiers.shift { root.previous(); } else { root.next(); }
+                return accept;
+            }
+            reject
+        }
+        key-pressed(e) => {
+            if e.text == Key.Escape { root.close(); return accept; }
+            reject
+        }
+        HorizontalLayout {
+            padding: 6px;
+            padding-left: 8px;
+            spacing: 2px;
+            Rectangle {
+                horizontal-stretch: 1;
+                border-radius: 4px;
+                background: Theme.dark ? #ffffff0f : #0000000a;
+                border-width: 1px;
+                border-color: input.has-focus ? Theme.accent : Theme.hairline;
+                if input.text == "": Text {
+                    x: 8px;
+                    y: (parent.height - self.height) / 2;
+                    text: "Find in document";
+                    color: Theme.text-dim;
+                }
+                input := TextInput {
+                    x: 8px;
+                    width: parent.width - 16px;
+                    y: 0;
+                    height: parent.height;
+                    vertical-alignment: center;
+                    single-line: true;
+                    text <=> root.query;
+                    color: Theme.text;
+                    selection-background-color: Theme.selected;
+                    selection-foreground-color: Theme.text;
+                }
+            }
+            Text {
+                width: 56px;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                text: index + " of " + total;
+                color: Theme.text-dim;
+                font-size: 12px;
+            }
+            IconButton { size: 32px; icon: Icons.chevron-up; clicked => { root.previous(); } }
+            IconButton { size: 32px; icon: Icons.chevron-down; clicked => { root.next(); } }
+            IconButton { size: 32px; icon: Icons.close; clicked => { root.close(); } }
+        }
+    }
+}

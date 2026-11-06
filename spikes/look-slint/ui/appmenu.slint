@@ -1,0 +1,167 @@
+import { Theme, HLine, Panel } from "theme.slint";
+import { Icons, Icon, IconButton } from "icons.slint";
+
+export struct MenuEntry { label: string, shortcut: string, cmd: string, checked: bool, separator-after: bool }
+export struct MenuCat { label: string, items: [MenuEntry] }
+
+component MenuRow {
+    in property <string> label;
+    in property <string> shortcut;
+    in property <bool> checked;
+    in property <bool> arrow;
+    in property <bool> hot;
+    callback hovered;
+    callback activated;
+    height: 32px;
+    Rectangle {
+        x: 4px;
+        width: parent.width - 8px;
+        border-radius: 4px;
+        background: hot ? Theme.selected : transparent;
+    }
+    if checked: Icon { x: 12px; y: 8px; d: Icons.check; color: Theme.accent-text; }
+    Text {
+        x: 36px;
+        y: (parent.height - self.height) / 2;
+        text: label;
+        color: Theme.text;
+    }
+    Text {
+        x: parent.width - self.width - 16px;
+        y: (parent.height - self.height) / 2;
+        text: shortcut;
+        color: Theme.text-dim;
+        font-size: 12px;
+    }
+    if arrow: Icon {
+        x: parent.width - 24px;
+        y: 10px;
+        size: 12px;
+        d: Icons.chevron-right;
+        color: Theme.text-dim;
+    }
+    ta := TouchArea {
+        changed has-hover => { if self.has-hover { root.hovered(); } }
+        clicked => { root.activated(); }
+    }
+}
+
+// A hamburger button with a cascading popup: categories on the left, a flyout on the right.
+// Both panels live in one PopupWindow, because on the winit backend a PopupWindow is drawn
+// inside the parent window.
+export component AppMenu {
+    in property <[MenuCat]> cats;
+    in property <length> window-width;
+    in property <length> window-height;
+    out property <bool> is-open;
+    callback command(string);
+    callback closed;
+    property <int> cat: 0;
+    property <int> item: -1;
+    public function open(c: int) {
+        cat = c;
+        item = -1;
+        is-open = true;
+        pop.show();
+    }
+    public function dismiss() {
+        pop.close();
+        is-open = false;
+        root.closed();
+    }
+    width: 32px;
+    height: 32px;
+    IconButton {
+        icon: Icons.menu;
+        toggled: is-open;
+        clicked => { root.open(0); }
+    }
+    // The popup covers the whole window, so an outside click lands on its catcher. A PopupWindow
+    // has no "closed" callback, so auto-close would leave is-open stale.
+    pop := PopupWindow {
+        x: -root.absolute-position.x;
+        y: -root.absolute-position.y;
+        width: root.window-width;
+        height: root.window-height;
+        close-policy: no-auto-close;
+        TouchArea {
+            clicked => { root.dismiss(); }
+        }
+        fs := FocusScope {
+            width: 0;
+            height: 0;
+            init => { self.focus(); }
+            key-pressed(e) => {
+                if e.text == Key.Escape { root.dismiss(); return accept; }
+                if e.text == Key.DownArrow {
+                    if item < 0 { cat = mod(cat + 1, cats.length); }
+                    else { item = mod(item + 1, cats[cat].items.length); }
+                    return accept;
+                }
+                if e.text == Key.UpArrow {
+                    if item < 0 { cat = mod(cat - 1 + cats.length, cats.length); }
+                    else { item = mod(item - 1 + cats[cat].items.length, cats[cat].items.length); }
+                    return accept;
+                }
+                if e.text == Key.RightArrow { if item < 0 { item = 0; } return accept; }
+                if e.text == Key.LeftArrow { item = -1; return accept; }
+                if e.text == Key.Return || e.text == " " {
+                    if item < 0 { item = 0; } else {
+                        root.command(cats[cat].items[item].cmd);
+                        root.dismiss();
+                    }
+                    return accept;
+                }
+                reject
+            }
+        }
+        Panel {
+            x: root.absolute-position.x;
+            y: root.absolute-position.y + 36px;
+            width: 180px;
+            height: 8px + cats.length * 32px;
+            TouchArea { }
+            VerticalLayout {
+                padding-top: 4px;
+                padding-bottom: 4px;
+                for c[i] in cats: MenuRow {
+                    label: c.label;
+                    arrow: true;
+                    hot: i == cat;
+                    hovered => { cat = i; item = -1; }
+                    activated => { cat = i; item = 0; }
+                }
+            }
+        }
+        flyout := Panel {
+            x: root.absolute-position.x + 180px + 4px;
+            y: root.absolute-position.y + 36px + cat * 32px;
+            width: 300px;
+            height: list.preferred-height;
+            TouchArea { }
+            list := VerticalLayout {
+                padding-top: 4px;
+                padding-bottom: 4px;
+                for it[i] in cats[cat].items: VerticalLayout {
+                    MenuRow {
+                        label: it.label;
+                        shortcut: it.shortcut;
+                        checked: it.checked;
+                        hot: i == item;
+                        hovered => { item = i; }
+                        activated => {
+                            // Run first: dismissing destroys this row, and code after that
+                            // silently does nothing.
+                            root.command(it.cmd);
+                            root.dismiss();
+                        }
+                    }
+                    if it.separator-after: Rectangle {
+                        height: 9px;
+                        HLine { y: 4px; x: 12px; width: parent.width - 24px; }
+                    }
+                }
+            }
+        }
+    }
+}

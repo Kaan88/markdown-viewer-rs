@@ -1,0 +1,542 @@
+
+## launch light@1.0 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=88.72 min=64.92 max=102.11 first_paint=79.02 ext_read=88.79 raw_all=[92.3, 73.7, 64.9, 96.2, 71.5, 76.5, 71.0, 94.8, 100.7, 90.1, 102.1, 87.3]
+   Private_Dirty=19.96 19.95-23.96  Pss=43.36 43.25-45.45  USS(PrivClean+PrivDirty)=26.58 26.41-30.55  Shared_Dirty=8.02 Rss=90.13
+   owned(anon+shm+file-dirty)=27.83 27.82-27.83
+     anon         Rss=  11.53 Pss=  11.53 PrivClean=   0.00 PrivDirty=  11.53 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.40 PrivClean=   0.27 PrivDirty=   0.00 ShClean=   0.32 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.74 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.31 Pss=   5.41 PrivClean=   0.09 PrivDirty=   1.89 ShClean=  18.34 ShDirty=   0.00
+     own_binary   Rss=   0.82 Pss=   0.82 PrivClean=   0.78 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   2.25 Pss=   2.25 PrivClean=   2.25 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.09 Pss=  12.89 PrivClean=   3.16 PrivDirty=   2.35 ShClean=  29.58 ShDirty=   0.00
+     shm_buffers  Rss=  12.01 Pss=   8.01 PrivClean=   0.00 PrivDirty=   4.00 ShClean=   0.00 ShDirty=   8.01
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=65.41 min=54.13 max=75.78 first_paint=52.42 ext_read=65.42 raw_all=[71.2, 74.3, 69.4, 57.1, 70.8, 75.8, 54.1, 58.1, 67.3, 65.1, 65.8, 61.6]
+   Private_Dirty=5.33 5.33-5.33  Pss=19.54 19.43-19.76  USS(PrivClean+PrivDirty)=13.57 13.46-13.80  Shared_Dirty=7.64 Rss=32.50
+   owned(anon+shm+file-dirty)=12.83 12.83-12.83
+     anon         Rss=   4.66 Pss=   4.66 PrivClean=   0.00 PrivDirty=   4.66 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.66 Pss=   0.66 PrivClean=   0.66 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.68 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.83 Pss=   0.71 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.57 ShDirty=   0.00
+     own_binary   Rss=   7.87 Pss=   7.87 PrivClean=   7.59 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=   7.63 Pss=   3.82 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   7.63
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=87.46 Private_Dirty=19.96 Pss=43.32 PrivateTotal=26.47
+harness-check slint: present=66.47 Private_Dirty=5.33 Pss=19.68 PrivateTotal=13.70
+
+## launch light@1.5 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=90.92 min=58.89 max=132.96 first_paint=78.81 ext_read=90.97 raw_all=[86.4, 124.3, 97.7, 93.2, 133.0, 75.8, 96.2, 58.9, 86.7, 88.6, 84.7, 112.1]
+   Private_Dirty=24.52 15.79-33.23  Pss=55.33 46.53-59.51  USS(PrivClean+PrivDirty)=33.82 24.98-42.44  Shared_Dirty=17.43 Rss=106.82
+   owned(anon+shm+file-dirty)=41.80 33.08-41.83
+     anon         Rss=  11.39 Pss=  11.39 PrivClean=   0.00 PrivDirty=  11.39 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.41 PrivClean=   0.29 PrivDirty=   0.00 ShClean=   0.32 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.72 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.20 Pss=   5.39 PrivClean=   0.07 PrivDirty=   1.89 ShClean=  18.25 ShDirty=   0.00
+     own_binary   Rss=   0.80 Pss=   0.80 PrivClean=   0.76 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   5.06 Pss=   5.06 PrivClean=   5.06 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.07 Pss=  12.87 PrivClean=   3.12 PrivDirty=   2.35 ShClean=  29.62 ShDirty=   0.00
+     shm_buffers  Rss=  26.13 Pss=  17.42 PrivClean=   0.00 PrivDirty=   8.71 ShClean=   0.00 ShDirty=  17.42
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=73.23 min=54.87 max=82.43 first_paint=56.49 ext_read=73.26 raw_all=[58.9, 75.7, 70.7, 73.1, 73.3, 76.5, 80.6, 77.6, 70.3, 57.5, 82.4, 54.9]
+   Private_Dirty=7.45 7.45-7.45  Pss=26.51 26.43-26.68  USS(PrivClean+PrivDirty)=15.77 15.71-15.96  Shared_Dirty=17.19 Rss=44.26
+   owned(anon+shm+file-dirty)=24.49 24.49-24.50
+     anon         Rss=   6.77 Pss=   6.77 PrivClean=   0.00 PrivDirty=   6.77 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.66 Pss=   0.66 PrivClean=   0.66 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.68 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.82 Pss=   0.70 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.56 ShDirty=   0.00
+     own_binary   Rss=   7.90 Pss=   7.90 PrivClean=   7.62 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  17.18 Pss=   8.59 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  17.18
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=89.84 Private_Dirty=24.52 Pss=55.43 PrivateTotal=33.88
+harness-check slint: present=80.17 Private_Dirty=7.45 Pss=26.59 PrivateTotal=15.86
+
+## launch light@2.2 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=95.44 min=76.31 max=129.44 first_paint=77.95 ext_read=95.50 raw_all=[104.5, 93.1, 88.3, 94.4, 96.5, 105.8, 81.0, 76.4, 97.1, 120.7, 129.4, 76.3]
+   Private_Dirty=34.36 34.30-52.84  Pss=80.82 80.14-99.36  USS(PrivClean+PrivDirty)=49.56 49.34-68.10  Shared_Dirty=37.01 Rss=142.17
+   owned(anon+shm+file-dirty)=71.20 71.16-89.71
+     anon         Rss=  11.41 Pss=  11.41 PrivClean=   0.00 PrivDirty=  11.41 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.38 PrivClean=   0.24 PrivDirty=   0.00 ShClean=   0.34 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.72 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.25 Pss=   5.37 PrivClean=   0.11 PrivDirty=   1.89 ShClean=  18.22 ShDirty=   0.00
+     own_binary   Rss=   0.82 Pss=   0.82 PrivClean=   0.77 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=  10.88 Pss=  10.88 PrivClean=  10.88 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.09 Pss=  12.85 PrivClean=   3.11 PrivDirty=   2.35 ShClean=  29.62 ShDirty=   0.00
+     shm_buffers  Rss=  55.50 Pss=  37.00 PrivClean=   0.00 PrivDirty=  18.50 ShClean=   0.00 ShDirty=  37.00
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=73.26 min=64.71 max=89.48 first_paint=54.94 ext_read=73.30 raw_all=[63.5, 87.7, 79.6, 71.6, 82.6, 72.6, 70.3, 89.5, 64.7, 74.7, 70.8, 73.9]
+   Private_Dirty=11.97 11.96-11.98  Pss=40.93 40.79-41.26  USS(PrivClean+PrivDirty)=20.28 20.11-20.58  Shared_Dirty=37.02 Rss=68.54
+   owned(anon+shm+file-dirty)=48.85 48.85-48.86
+     anon         Rss=  11.30 Pss=  11.30 PrivClean=   0.00 PrivDirty=  11.30 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.72 Pss=   0.72 PrivClean=   0.72 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.68 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.78 Pss=   0.70 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.53 ShDirty=   0.00
+     own_binary   Rss=   7.90 Pss=   7.90 PrivClean=   7.62 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  37.02 Pss=  18.51 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  37.02
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=81.59 Private_Dirty=34.35 Pss=80.80 PrivateTotal=49.58
+harness-check slint: present=75.75 Private_Dirty=11.97 Pss=40.99 PrivateTotal=20.32
+
+## launch dark@1.0 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=88.03 min=60.64 max=99.69 first_paint=70.76 ext_read=88.07 raw_all=[86.9, 76.4, 86.1, 75.9, 60.6, 93.3, 73.2, 95.0, 99.7, 73.8, 90.0, 91.0]
+   Private_Dirty=19.96 19.95-19.96  Pss=43.42 43.10-43.53  USS(PrivClean+PrivDirty)=26.65 26.39-26.80  Shared_Dirty=8.02 Rss=90.24
+   owned(anon+shm+file-dirty)=27.83 27.82-27.83
+     anon         Rss=  11.53 Pss=  11.53 PrivClean=   0.00 PrivDirty=  11.53 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.40 PrivClean=   0.26 PrivDirty=   0.00 ShClean=   0.34 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.72 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.32 Pss=   5.48 PrivClean=   0.19 PrivDirty=   1.89 ShClean=  18.25 ShDirty=   0.00
+     own_binary   Rss=   0.88 Pss=   0.88 PrivClean=   0.83 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   2.25 Pss=   2.25 PrivClean=   2.25 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.05 Pss=  12.89 PrivClean=   3.17 PrivDirty=   2.35 ShClean=  29.55 ShDirty=   0.00
+     shm_buffers  Rss=  12.01 Pss=   8.01 PrivClean=   0.00 PrivDirty=   4.00 ShClean=   0.00 ShDirty=   8.01
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=62.97 min=57.68 max=71.02 first_paint=51.45 ext_read=62.98 raw_all=[113.8, 71.7, 70.8, 58.8, 71.0, 62.3, 69.2, 59.0, 63.6, 59.2, 66.6, 57.7]
+   Private_Dirty=5.33 5.33-5.33  Pss=19.59 19.49-19.85  USS(PrivClean+PrivDirty)=13.63 13.54-13.87  Shared_Dirty=7.64 Rss=32.52
+   owned(anon+shm+file-dirty)=12.83 12.82-12.83
+     anon         Rss=   4.66 Pss=   4.66 PrivClean=   0.00 PrivDirty=   4.66 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.72 Pss=   0.72 PrivClean=   0.72 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.68 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.80 Pss=   0.71 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.54 ShDirty=   0.00
+     own_binary   Rss=   7.89 Pss=   7.89 PrivClean=   7.61 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=   7.63 Pss=   3.82 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   7.63
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=84.62 Private_Dirty=19.95 Pss=43.37 PrivateTotal=26.59
+harness-check slint: present=73.44 Private_Dirty=5.33 Pss=19.63 PrivateTotal=13.68
+
+## launch dark@1.5 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=94.16 min=70.35 max=106.27 first_paint=84.31 ext_read=94.24 raw_all=[101.8, 88.5, 105.1, 76.4, 99.5, 76.8, 87.8, 106.3, 96.7, 91.6, 100.2, 70.3]
+   Private_Dirty=24.50 15.79-33.24  Pss=55.29 46.73-59.72  USS(PrivClean+PrivDirty)=33.74 25.12-42.48  Shared_Dirty=17.43 Rss=106.88
+   owned(anon+shm+file-dirty)=41.79 33.08-41.82
+     anon         Rss=  11.37 Pss=  11.37 PrivClean=   0.00 PrivDirty=  11.37 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.40 PrivClean=   0.27 PrivDirty=   0.00 ShClean=   0.33 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.72 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.29 Pss=   5.42 PrivClean=   0.05 PrivDirty=   1.89 ShClean=  18.34 ShDirty=   0.00
+     own_binary   Rss=   0.81 Pss=   0.81 PrivClean=   0.76 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   5.06 Pss=   5.06 PrivClean=   5.06 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.06 Pss=  12.84 PrivClean=   3.07 PrivDirty=   2.35 ShClean=  29.64 ShDirty=   0.00
+     shm_buffers  Rss=  26.13 Pss=  17.42 PrivClean=   0.00 PrivDirty=   8.71 ShClean=   0.00 ShDirty=  17.42
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=74.81 min=51.93 max=92.72 first_paint=57.18 ext_read=74.84 raw_all=[81.3, 66.4, 79.8, 74.3, 70.5, 75.3, 63.4, 78.0, 92.7, 69.3, 51.9, 75.8]
+   Private_Dirty=7.45 7.45-7.46  Pss=26.48 26.41-26.72  USS(PrivClean+PrivDirty)=15.73 15.66-15.97  Shared_Dirty=17.19 Rss=44.25
+   owned(anon+shm+file-dirty)=24.49 24.49-24.50
+     anon         Rss=   6.77 Pss=   6.77 PrivClean=   0.00 PrivDirty=   6.77 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.69 Pss=   0.69 PrivClean=   0.69 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.68 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.86 Pss=   0.71 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.60 ShDirty=   0.00
+     own_binary   Rss=   7.91 Pss=   7.91 PrivClean=   7.63 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  17.18 Pss=   8.59 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  17.18
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=85.85 Private_Dirty=24.52 Pss=55.30 PrivateTotal=33.74
+harness-check slint: present=73.02 Private_Dirty=7.45 Pss=26.46 PrivateTotal=15.73
+
+## launch dark@2.2 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=99.41 min=87.93 max=123.04 first_paint=79.65 ext_read=99.46 raw_all=[90.1, 90.9, 99.8, 91.3, 99.0, 87.9, 100.5, 89.6, 119.7, 89.2, 107.2, 123.0]
+   Private_Dirty=52.82 15.86-52.86  Pss=89.91 62.34-99.36  USS(PrivClean+PrivDirty)=67.85 31.10-68.07  Shared_Dirty=27.76 Rss=142.15
+   owned(anon+shm+file-dirty)=71.20 52.72-89.72
+     anon         Rss=  11.42 Pss=  11.42 PrivClean=   0.00 PrivDirty=  11.42 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.41 PrivClean=   0.29 PrivDirty=   0.00 ShClean=   0.31 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.72 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.28 Pss=   5.46 PrivClean=   0.17 PrivDirty=   1.89 ShClean=  18.29 ShDirty=   0.00
+     own_binary   Rss=   0.81 Pss=   0.81 PrivClean=   0.77 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=  10.88 Pss=  10.88 PrivClean=  10.88 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.08 Pss=  12.85 PrivClean=   3.08 PrivDirty=   2.35 ShClean=  29.65 ShDirty=   0.00
+     shm_buffers  Rss=  55.50 Pss=  46.25 PrivClean=   0.00 PrivDirty=  37.00 ShClean=   0.00 ShDirty=  27.75
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=75.45 min=65.55 max=103.25 first_paint=56.38 ext_read=75.47 raw_all=[72.1, 86.9, 83.9, 72.3, 65.5, 70.9, 103.2, 69.6, 96.8, 75.3, 76.1, 75.6]
+   Private_Dirty=11.97 11.96-12.00  Pss=41.00 40.74-41.13  USS(PrivClean+PrivDirty)=20.33 20.09-20.46  Shared_Dirty=37.02 Rss=68.59
+   owned(anon+shm+file-dirty)=48.85 48.85-48.88
+     anon         Rss=  11.30 Pss=  11.30 PrivClean=   0.00 PrivDirty=  11.30 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.66 Pss=   0.66 PrivClean=   0.66 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.68 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.78 Pss=   0.71 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.53 ShDirty=   0.00
+     own_binary   Rss=   7.97 Pss=   7.97 PrivClean=   7.69 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  37.02 Pss=  18.51 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  37.02
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=91.42 Private_Dirty=34.34 Pss=80.86 PrivateTotal=49.52
+harness-check slint: present=75.92 Private_Dirty=11.98 Pss=40.99 PrivateTotal=20.33
+
+## launch-b light@1.0 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=62.24 min=54.90 max=75.78 first_paint=54.11 ext_read=62.28 raw_all=[92.4, 61.2, 57.9, 63.8, 75.8, 64.7, 61.6, 65.6, 54.9, 60.8, 57.6, 62.9]
+   Private_Dirty=19.96 15.95-23.95  Pss=39.14 35.45-41.64  USS(PrivClean+PrivDirty)=24.71 20.76-28.73  Shared_Dirty=8.01 Rss=90.06
+   owned(anon+shm+file-dirty)=27.82 23.82-27.83
+     anon         Rss=  11.53 Pss=  11.53 PrivClean=   0.00 PrivDirty=  11.53 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.64 Pss=   0.23 PrivClean=   0.06 PrivDirty=   0.00 ShClean=   0.57 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.58 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.46 ShDirty=   0.00
+     other_libs   Rss=  20.38 Pss=   4.48 PrivClean=   0.03 PrivDirty=   1.89 ShClean=  18.46 ShDirty=   0.00
+     own_binary   Rss=   0.81 Pss=   0.81 PrivClean=   0.76 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   2.25 Pss=   2.25 PrivClean=   2.25 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  34.92 Pss=  10.08 PrivClean=   1.65 PrivDirty=   2.35 ShClean=  30.91 ShDirty=   0.00
+     shm_buffers  Rss=  12.01 Pss=   8.01 PrivClean=   0.00 PrivDirty=   4.00 ShClean=   0.00 ShDirty=   8.01
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=45.42 min=40.15 max=47.09 first_paint=33.80 ext_read=45.45 raw_all=[42.3, 45.3, 45.4, 45.2, 45.3, 47.1, 40.1, 46.5, 42.2, 46.9, 45.5, 46.9]
+   Private_Dirty=5.33 5.33-5.33  Pss=19.01 18.85-19.25  USS(PrivClean+PrivDirty)=13.00 12.86-13.23  Shared_Dirty=7.63 Rss=32.53
+   owned(anon+shm+file-dirty)=12.83 12.83-12.83
+     anon         Rss=   4.66 Pss=   4.66 PrivClean=   0.00 PrivDirty=   4.66 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.66 Pss=   0.37 PrivClean=   0.08 PrivDirty=   0.00 ShClean=   0.58 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.54 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.71 ShDirty=   0.00
+     other_libs   Rss=   4.83 Pss=   0.59 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.57 ShDirty=   0.00
+     own_binary   Rss=   7.87 Pss=   7.87 PrivClean=   7.59 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=   7.63 Pss=   3.82 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   7.63
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=60.19 Private_Dirty=19.96 Pss=39.18 PrivateTotal=24.68
+harness-check slint: present=44.75 Private_Dirty=5.33 Pss=19.02 PrivateTotal=13.02
+
+## launch-b light@1.5 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=62.93 min=57.51 max=73.94 first_paint=50.36 ext_read=62.97 raw_all=[84.4, 60.5, 61.8, 62.9, 59.0, 63.0, 73.9, 65.5, 57.5, 70.1, 60.3, 65.0]
+   Private_Dirty=24.52 24.50-33.21  Pss=51.26 50.77-55.16  USS(PrivClean+PrivDirty)=32.09 31.95-40.79  Shared_Dirty=17.42 Rss=106.77
+   owned(anon+shm+file-dirty)=41.79 41.78-41.81
+     anon         Rss=  11.38 Pss=  11.38 PrivClean=   0.00 PrivDirty=  11.38 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.19 PrivClean=   0.02 PrivDirty=   0.00 ShClean=   0.57 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.58 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.46 ShDirty=   0.00
+     other_libs   Rss=  20.24 Pss=   4.44 PrivClean=   0.03 PrivDirty=   1.89 ShClean=  18.32 ShDirty=   0.00
+     own_binary   Rss=   0.82 Pss=   0.82 PrivClean=   0.78 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   5.06 Pss=   5.06 PrivClean=   5.06 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.03 Pss=  10.01 PrivClean=   1.68 PrivDirty=   2.35 ShClean=  31.00 ShDirty=   0.00
+     shm_buffers  Rss=  26.13 Pss=  17.42 PrivClean=   0.00 PrivDirty=   8.71 ShClean=   0.00 ShDirty=  17.42
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=46.52 min=42.06 max=60.75 first_paint=33.41 ext_read=46.55 raw_all=[48.0, 44.5, 45.3, 46.1, 60.8, 45.3, 42.1, 47.3, 45.2, 51.2, 56.2, 46.9]
+   Private_Dirty=7.45 7.45-7.48  Pss=25.90 25.82-26.09  USS(PrivClean+PrivDirty)=15.10 15.04-15.31  Shared_Dirty=17.18 Rss=44.20
+   owned(anon+shm+file-dirty)=24.50 24.49-24.52
+     anon         Rss=   6.78 Pss=   6.78 PrivClean=   0.00 PrivDirty=   6.78 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.72 Pss=   0.41 PrivClean=   0.10 PrivDirty=   0.00 ShClean=   0.62 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.54 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.71 ShDirty=   0.00
+     other_libs   Rss=   4.80 Pss=   0.58 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.54 ShDirty=   0.00
+     own_binary   Rss=   7.82 Pss=   7.82 PrivClean=   7.54 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  17.18 Pss=   8.59 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  17.18
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=60.70 Private_Dirty=24.52 Pss=51.22 PrivateTotal=32.05
+harness-check slint: present=44.73 Private_Dirty=7.45 Pss=26.06 PrivateTotal=15.30
+
+## launch-b light@2.2 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=65.50 min=61.52 max=75.26 first_paint=51.29 ext_read=65.53 raw_all=[96.5, 64.7, 74.9, 64.4, 62.1, 63.0, 63.2, 66.6, 70.6, 75.3, 61.5, 67.2]
+   Private_Dirty=34.32 34.30-52.83  Pss=76.60 76.03-85.87  USS(PrivClean+PrivDirty)=47.64 47.56-66.12  Shared_Dirty=37.00 Rss=142.10
+   owned(anon+shm+file-dirty)=71.19 71.17-71.23
+     anon         Rss=  11.40 Pss=  11.40 PrivClean=   0.00 PrivDirty=  11.40 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.60 Pss=   0.18 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.60 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.58 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.46 ShDirty=   0.00
+     other_libs   Rss=  20.36 Pss=   4.47 PrivClean=   0.01 PrivDirty=   1.89 ShClean=  18.45 ShDirty=   0.00
+     own_binary   Rss=   0.81 Pss=   0.81 PrivClean=   0.77 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=  10.88 Pss=  10.88 PrivClean=  10.88 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  34.94 Pss=   9.95 PrivClean=   1.67 PrivDirty=   2.35 ShClean=  30.95 ShDirty=   0.00
+     shm_buffers  Rss=  55.50 Pss=  37.00 PrivClean=   0.00 PrivDirty=  18.50 ShClean=   0.00 ShDirty=  37.00
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=60.61 min=51.45 max=68.51 first_paint=36.39 ext_read=60.63 raw_all=[55.0, 61.0, 56.4, 60.5, 55.4, 63.3, 57.5, 63.3, 60.7, 62.6, 68.5, 51.5]
+   Private_Dirty=11.97 11.97-11.98  Pss=40.43 40.24-40.63  USS(PrivClean+PrivDirty)=19.72 19.54-19.89  Shared_Dirty=37.02 Rss=68.60
+   owned(anon+shm+file-dirty)=48.86 48.85-48.86
+     anon         Rss=  11.30 Pss=  11.30 PrivClean=   0.00 PrivDirty=  11.30 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.66 Pss=   0.37 PrivClean=   0.08 PrivDirty=   0.00 ShClean=   0.60 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.54 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.71 ShDirty=   0.00
+     other_libs   Rss=   4.79 Pss=   0.58 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.54 ShDirty=   0.00
+     own_binary   Rss=   7.95 Pss=   7.95 PrivClean=   7.67 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  37.02 Pss=  18.51 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  37.02
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=70.10 Private_Dirty=34.33 Pss=76.66 PrivateTotal=47.62
+harness-check slint: present=59.78 Private_Dirty=11.98 Pss=40.36 PrivateTotal=19.68
+
+## launch-b dark@1.0 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=62.78 min=59.29 max=92.97 first_paint=52.91 ext_read=62.81 raw_all=[85.3, 63.9, 59.3, 61.6, 63.2, 62.8, 63.1, 62.7, 62.8, 60.1, 93.0, 63.4]
+   Private_Dirty=19.96 19.95-23.96  Pss=39.25 39.10-41.26  USS(PrivClean+PrivDirty)=24.72 24.56-28.68  Shared_Dirty=8.02 Rss=90.22
+   owned(anon+shm+file-dirty)=27.83 27.82-27.83
+     anon         Rss=  11.53 Pss=  11.53 PrivClean=   0.00 PrivDirty=  11.53 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.18 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.57 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.58 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.33 Pss=   4.56 PrivClean=   0.07 PrivDirty=   1.89 ShClean=  18.36 ShDirty=   0.00
+     own_binary   Rss=   0.80 Pss=   0.80 PrivClean=   0.76 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   2.25 Pss=   2.25 PrivClean=   2.25 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.09 Pss=   9.98 PrivClean=   1.64 PrivDirty=   2.35 ShClean=  31.10 ShDirty=   0.00
+     shm_buffers  Rss=  12.01 Pss=   8.01 PrivClean=   0.00 PrivDirty=   4.00 ShClean=   0.00 ShDirty=   8.01
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=47.21 min=40.67 max=57.93 first_paint=32.14 ext_read=47.26 raw_all=[46.3, 47.2, 40.7, 43.6, 47.4, 48.5, 46.3, 47.0, 45.7, 51.0, 57.9, 55.0]
+   Private_Dirty=5.33 5.33-5.33  Pss=19.02 18.87-19.21  USS(PrivClean+PrivDirty)=13.00 12.88-13.21  Shared_Dirty=7.64 Rss=32.50
+   owned(anon+shm+file-dirty)=12.83 12.83-12.83
+     anon         Rss=   4.66 Pss=   4.66 PrivClean=   0.00 PrivDirty=   4.66 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.72 Pss=   0.40 PrivClean=   0.09 PrivDirty=   0.00 ShClean=   0.63 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.54 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.79 Pss=   0.59 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.53 ShDirty=   0.00
+     own_binary   Rss=   7.86 Pss=   7.86 PrivClean=   7.58 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=   7.63 Pss=   3.82 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   7.63
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=71.79 Private_Dirty=19.96 Pss=39.33 PrivateTotal=24.75
+harness-check slint: present=58.48 Private_Dirty=5.33 Pss=19.07 PrivateTotal=13.07
+
+## launch-b dark@1.5 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=69.16 min=59.21 max=76.92 first_paint=55.87 ext_read=69.22 raw_all=[70.3, 76.7, 73.6, 64.7, 59.2, 76.9, 76.4, 62.4, 74.0, 73.7, 62.8, 61.4]
+   Private_Dirty=24.51 24.49-24.52  Pss=51.30 50.67-51.41  USS(PrivClean+PrivDirty)=31.98 31.45-32.07  Shared_Dirty=17.43 Rss=106.85
+   owned(anon+shm+file-dirty)=41.79 41.78-41.80
+     anon         Rss=  11.38 Pss=  11.38 PrivClean=   0.00 PrivDirty=  11.38 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.18 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.57 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.58 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.33 Pss=   4.59 PrivClean=   0.05 PrivDirty=   1.89 ShClean=  18.39 ShDirty=   0.00
+     own_binary   Rss=   0.80 Pss=   0.80 PrivClean=   0.76 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   5.06 Pss=   5.06 PrivClean=   5.06 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.00 Pss=   9.98 PrivClean=   1.64 PrivDirty=   2.35 ShClean=  31.10 ShDirty=   0.00
+     shm_buffers  Rss=  26.13 Pss=  17.42 PrivClean=   0.00 PrivDirty=   8.71 ShClean=   0.00 ShDirty=  17.42
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=54.52 min=42.59 max=72.41 first_paint=38.77 ext_read=54.54 raw_all=[64.8, 56.9, 42.6, 45.6, 56.1, 44.0, 60.9, 59.0, 52.9, 48.9, 72.4, 62.1]
+   Private_Dirty=7.45 7.45-7.46  Pss=25.95 25.83-26.14  USS(PrivClean+PrivDirty)=15.16 15.07-15.36  Shared_Dirty=17.19 Rss=44.23
+   owned(anon+shm+file-dirty)=24.50 24.49-24.50
+     anon         Rss=   6.78 Pss=   6.78 PrivClean=   0.00 PrivDirty=   6.78 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.66 Pss=   0.37 PrivClean=   0.08 PrivDirty=   0.00 ShClean=   0.59 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.54 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.84 Pss=   0.59 PrivClean=   0.01 PrivDirty=   0.26 ShClean=   4.59 ShDirty=   0.00
+     own_binary   Rss=   7.90 Pss=   7.90 PrivClean=   7.62 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  17.18 Pss=   8.59 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  17.18
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=73.34 Private_Dirty=24.52 Pss=50.75 PrivateTotal=31.47
+harness-check slint: present=60.09 Private_Dirty=7.45 Pss=25.18 PrivateTotal=15.10
+
+## launch-b dark@2.2 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=76.71 min=71.23 max=91.48 first_paint=63.94 ext_read=76.74 raw_all=[85.0, 76.5, 76.9, 77.9, 84.0, 72.8, 89.0, 91.5, 76.5, 73.5, 71.2, 74.4]
+   Private_Dirty=34.34 15.80-52.80  Pss=73.45 54.99-91.86  USS(PrivClean+PrivDirty)=47.06 28.54-65.49  Shared_Dirty=37.01 Rss=142.07
+   owned(anon+shm+file-dirty)=71.20 52.67-89.67
+     anon         Rss=  11.41 Pss=  11.41 PrivClean=   0.00 PrivDirty=  11.41 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.15 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.57 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.08 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.28 Pss=   3.74 PrivClean=   0.02 PrivDirty=   1.89 ShClean=  18.36 ShDirty=   0.00
+     own_binary   Rss=   0.81 Pss=   0.81 PrivClean=   0.77 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=  10.88 Pss=  10.88 PrivClean=  10.88 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.07 Pss=   8.05 PrivClean=   1.04 PrivDirty=   2.35 ShClean=  31.68 ShDirty=   0.00
+     shm_buffers  Rss=  55.50 Pss=  37.00 PrivClean=   0.00 PrivDirty=  18.50 ShClean=   0.00 ShDirty=  37.00
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=72.23 min=61.07 max=79.45 first_paint=47.29 ext_read=72.27 raw_all=[63.4, 79.1, 72.2, 64.1, 75.4, 77.0, 72.3, 61.1, 72.8, 65.2, 68.6, 79.5]
+   Private_Dirty=11.97 11.97-11.99  Pss=39.58 39.44-39.62  USS(PrivClean+PrivDirty)=19.61 19.48-19.62  Shared_Dirty=37.02 Rss=68.53
+   owned(anon+shm+file-dirty)=48.86 48.85-48.87
+     anon         Rss=  11.30 Pss=  11.30 PrivClean=   0.00 PrivDirty=  11.30 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.66 Pss=   0.18 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.66 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.05 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.78 Pss=   0.46 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.52 ShDirty=   0.00
+     own_binary   Rss=   7.92 Pss=   7.92 PrivClean=   7.64 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  37.02 Pss=  18.51 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  37.02
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=83.44 Private_Dirty=34.32 Pss=73.42 PrivateTotal=47.04
+harness-check slint: present=61.62 Private_Dirty=11.98 Pss=39.54 PrivateTotal=19.57
+
+## launch-c light@1.0 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=64.25 min=58.49 max=78.90 first_paint=52.30 ext_read=64.27 raw_all=[83.5, 93.1, 59.8, 65.8, 62.7, 71.5, 58.5, 67.2, 78.9, 59.5, 62.0, 65.8]
+   Private_Dirty=19.96 19.95-23.96  Pss=36.00 35.92-37.98  USS(PrivClean+PrivDirty)=24.10 23.99-28.11  Shared_Dirty=8.02 Rss=90.17
+   owned(anon+shm+file-dirty)=27.83 27.82-27.83
+     anon         Rss=  11.53 Pss=  11.53 PrivClean=   0.00 PrivDirty=  11.53 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.57 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.07 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.28 Pss=   3.77 PrivClean=   0.05 PrivDirty=   1.89 ShClean=  18.33 ShDirty=   0.00
+     own_binary   Rss=   0.82 Pss=   0.82 PrivClean=   0.77 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   2.25 Pss=   2.25 PrivClean=   2.25 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.13 Pss=   8.08 PrivClean=   1.05 PrivDirty=   2.35 ShClean=  31.73 ShDirty=   0.00
+     shm_buffers  Rss=  12.01 Pss=   8.01 PrivClean=   0.00 PrivDirty=   4.00 ShClean=   0.00 ShDirty=   8.01
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=45.38 min=40.03 max=51.64 first_paint=32.64 ext_read=45.40 raw_all=[53.1, 42.3, 45.4, 47.4, 43.7, 48.0, 43.0, 45.4, 40.0, 51.6, 46.4, 44.9]
+   Private_Dirty=5.33 5.33-5.33  Pss=18.28 18.14-18.41  USS(PrivClean+PrivDirty)=13.00 12.84-13.13  Shared_Dirty=7.64 Rss=32.59
+   owned(anon+shm+file-dirty)=12.83 12.83-12.83
+     anon         Rss=   4.66 Pss=   4.66 PrivClean=   0.00 PrivDirty=   4.66 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.66 Pss=   0.18 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.66 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.05 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.80 Pss=   0.46 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.54 ShDirty=   0.00
+     own_binary   Rss=   7.96 Pss=   7.96 PrivClean=   7.67 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=   7.63 Pss=   3.82 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   7.63
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=59.89 Private_Dirty=19.96 Pss=36.00 PrivateTotal=24.08
+harness-check slint: present=45.92 Private_Dirty=5.33 Pss=18.25 PrivateTotal=12.95
+
+## launch-c light@1.5 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=61.73 min=58.20 max=63.69 first_paint=50.63 ext_read=61.75 raw_all=[89.1, 77.7, 58.2, 58.5, 60.5, 61.9, 60.6, 63.7, 61.7, 61.8, 61.8, 62.3]
+   Private_Dirty=24.52 24.49-33.23  Pss=48.09 47.95-56.59  USS(PrivClean+PrivDirty)=31.47 31.34-40.07  Shared_Dirty=17.43 Rss=106.90
+   owned(anon+shm+file-dirty)=41.80 41.78-50.52
+     anon         Rss=  11.39 Pss=  11.39 PrivClean=   0.00 PrivDirty=  11.39 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.15 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.57 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.07 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.36 Pss=   3.76 PrivClean=   0.02 PrivDirty=   1.89 ShClean=  18.44 ShDirty=   0.00
+     own_binary   Rss=   0.82 Pss=   0.82 PrivClean=   0.78 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   5.06 Pss=   5.06 PrivClean=   5.06 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  34.97 Pss=   8.03 PrivClean=   1.05 PrivDirty=   2.35 ShClean=  31.58 ShDirty=   0.00
+     shm_buffers  Rss=  26.13 Pss=  17.42 PrivClean=   0.00 PrivDirty=   8.71 ShClean=   0.00 ShDirty=  17.42
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=45.67 min=42.23 max=59.30 first_paint=34.51 ext_read=45.70 raw_all=[46.7, 54.9, 59.3, 45.2, 42.2, 44.8, 56.3, 46.6, 42.9, 48.1, 46.2, 45.2]
+   Private_Dirty=7.45 7.45-7.46  Pss=25.11 25.00-25.28  USS(PrivClean+PrivDirty)=15.06 14.91-15.18  Shared_Dirty=17.19 Rss=44.23
+   owned(anon+shm+file-dirty)=24.50 24.50-24.50
+     anon         Rss=   6.78 Pss=   6.78 PrivClean=   0.00 PrivDirty=   6.78 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.72 Pss=   0.20 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.72 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.05 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.86 Pss=   0.47 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.60 ShDirty=   0.00
+     own_binary   Rss=   7.89 Pss=   7.89 PrivClean=   7.61 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  17.18 Pss=   8.59 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  17.18
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=60.22 Private_Dirty=24.51 Pss=48.08 PrivateTotal=31.50
+harness-check slint: present=46.97 Private_Dirty=7.45 Pss=25.11 PrivateTotal=15.05
+
+## launch-c light@2.2 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=72.69 min=63.49 max=113.47 first_paint=53.91 ext_read=72.73 raw_all=[99.7, 95.8, 113.5, 98.4, 72.4, 63.5, 76.3, 66.4, 68.0, 73.0, 76.9, 66.0]
+   Private_Dirty=34.32 34.30-52.81  Pss=73.34 73.20-82.49  USS(PrivClean+PrivDirty)=47.05 46.99-65.44  Shared_Dirty=37.00 Rss=142.11
+   owned(anon+shm+file-dirty)=71.18 71.17-71.20
+     anon         Rss=  11.40 Pss=  11.40 PrivClean=   0.00 PrivDirty=  11.40 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.59 Pss=   0.15 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.59 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.07 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.46 ShDirty=   0.00
+     other_libs   Rss=  20.32 Pss=   3.75 PrivClean=   0.03 PrivDirty=   1.89 ShClean=  18.40 ShDirty=   0.00
+     own_binary   Rss=   0.81 Pss=   0.81 PrivClean=   0.76 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=  10.88 Pss=  10.88 PrivClean=  10.88 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.05 Pss=   7.95 PrivClean=   1.06 PrivDirty=   2.35 ShClean=  31.65 ShDirty=   0.00
+     shm_buffers  Rss=  55.50 Pss=  37.00 PrivClean=   0.00 PrivDirty=  18.50 ShClean=   0.00 ShDirty=  37.00
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=60.17 min=54.76 max=63.66 first_paint=37.45 ext_read=60.19 raw_all=[70.6, 60.6, 54.8, 59.5, 60.6, 59.8, 56.8, 60.7, 60.6, 63.7, 57.0, 62.0]
+   Private_Dirty=11.98 11.96-11.98  Pss=39.60 39.41-39.74  USS(PrivClean+PrivDirty)=19.61 19.42-19.75  Shared_Dirty=37.02 Rss=68.55
+   owned(anon+shm+file-dirty)=48.86 48.85-48.86
+     anon         Rss=  11.30 Pss=  11.30 PrivClean=   0.00 PrivDirty=  11.30 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.69 Pss=   0.19 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.69 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.05 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.71 ShDirty=   0.00
+     other_libs   Rss=   4.77 Pss=   0.46 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.51 ShDirty=   0.00
+     own_binary   Rss=   7.92 Pss=   7.92 PrivClean=   7.64 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  37.02 Pss=  18.51 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  37.02
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=72.88 Private_Dirty=34.32 Pss=73.28 PrivateTotal=46.98
+harness-check slint: present=60.41 Private_Dirty=11.98 Pss=39.60 PrivateTotal=19.62
+
+## launch-c dark@1.0 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=62.55 min=57.93 max=81.97 first_paint=54.59 ext_read=62.60 raw_all=[69.5, 62.5, 57.9, 65.4, 60.8, 65.4, 60.2, 82.0, 62.5, 65.5, 62.6, 62.3]
+   Private_Dirty=19.96 19.94-23.95  Pss=35.81 35.55-37.91  USS(PrivClean+PrivDirty)=24.09 23.99-28.13  Shared_Dirty=8.02 Rss=89.98
+   owned(anon+shm+file-dirty)=27.83 27.82-27.84
+     anon         Rss=  11.53 Pss=  11.53 PrivClean=   0.00 PrivDirty=  11.53 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.60 Pss=   0.15 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.60 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   1.07 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.21 Pss=   3.74 PrivClean=   0.03 PrivDirty=   1.89 ShClean=  18.30 ShDirty=   0.00
+     own_binary   Rss=   0.82 Pss=   0.82 PrivClean=   0.78 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   2.25 Pss=   2.25 PrivClean=   2.25 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.03 Pss=   7.92 PrivClean=   1.06 PrivDirty=   2.35 ShClean=  31.60 ShDirty=   0.00
+     shm_buffers  Rss=  12.01 Pss=   8.01 PrivClean=   0.00 PrivDirty=   4.00 ShClean=   0.00 ShDirty=   8.01
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=45.52 min=41.02 max=54.78 first_paint=34.31 ext_read=45.55 raw_all=[47.7, 44.9, 45.1, 46.7, 43.5, 44.1, 45.0, 48.7, 54.8, 46.0, 41.0, 46.2]
+   Private_Dirty=5.33 5.33-5.33  Pss=18.20 18.05-18.27  USS(PrivClean+PrivDirty)=12.91 12.79-12.99  Shared_Dirty=7.64 Rss=32.53
+   owned(anon+shm+file-dirty)=12.83 12.82-12.83
+     anon         Rss=   4.66 Pss=   4.66 PrivClean=   0.00 PrivDirty=   4.66 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.71 Pss=   0.19 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.71 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   1.05 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.80 Pss=   0.46 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.54 ShDirty=   0.00
+     own_binary   Rss=   7.86 Pss=   7.86 PrivClean=   7.58 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=   7.63 Pss=   3.82 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   7.63
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=59.97 Private_Dirty=19.95 Pss=36.21 PrivateTotal=24.09
+harness-check slint: present=44.17 Private_Dirty=5.33 Pss=18.15 PrivateTotal=12.95
+
+## launch-c dark@1.5 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=70.41 min=57.34 max=93.53 first_paint=57.89 ext_read=70.44 raw_all=[121.4, 65.8, 57.3, 64.9, 93.5, 75.4, 77.7, 64.8, 74.3, 66.5, 78.8, 64.5]
+   Private_Dirty=24.52 24.49-33.22  Pss=46.65 46.59-51.01  USS(PrivClean+PrivDirty)=31.46 31.40-40.12  Shared_Dirty=17.43 Rss=106.91
+   owned(anon+shm+file-dirty)=41.80 41.78-41.82
+     anon         Rss=  11.38 Pss=  11.38 PrivClean=   0.00 PrivDirty=  11.38 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.59 Pss=   0.09 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.59 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   0.82 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.45 ShDirty=   0.01
+     other_libs   Rss=  20.26 Pss=   3.48 PrivClean=   0.02 PrivDirty=   1.89 ShClean=  18.35 ShDirty=   0.00
+     own_binary   Rss=   0.83 Pss=   0.83 PrivClean=   0.79 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=   5.06 Pss=   5.06 PrivClean=   5.06 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.11 Pss=   7.24 PrivClean=   1.05 PrivDirty=   2.35 ShClean=  31.71 ShDirty=   0.00
+     shm_buffers  Rss=  26.13 Pss=  17.42 PrivClean=   0.00 PrivDirty=   8.71 ShClean=   0.00 ShDirty=  17.42
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=46.72 min=41.72 max=63.49 first_paint=34.95 ext_read=46.75 raw_all=[63.9, 56.5, 61.6, 45.6, 60.3, 44.2, 63.5, 47.4, 46.0, 41.7, 42.1, 49.0]
+   Private_Dirty=7.46 7.45-7.46  Pss=24.84 24.67-24.92  USS(PrivClean+PrivDirty)=15.09 14.87-15.16  Shared_Dirty=17.19 Rss=44.23
+   owned(anon+shm+file-dirty)=24.50 24.49-24.50
+     anon         Rss=   6.78 Pss=   6.78 PrivClean=   0.00 PrivDirty=   6.78 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.72 Pss=   0.20 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.72 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   0.80 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.70 ShDirty=   0.01
+     other_libs   Rss=   4.80 Pss=   0.41 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.54 ShDirty=   0.00
+     own_binary   Rss=   7.91 Pss=   7.91 PrivClean=   7.63 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  17.18 Pss=   8.59 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  17.18
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=60.09 Private_Dirty=24.51 Pss=46.62 PrivateTotal=31.42
+harness-check slint: present=46.87 Private_Dirty=7.45 Pss=24.76 PrivateTotal=15.01
+
+## launch-c dark@2.2 (12 rounds interleaved, first 2 dropped, n=10)
+qt: failed=0 present median=67.88 min=59.54 max=95.58 first_paint=52.66 ext_read=67.92 raw_all=[90.5, 79.8, 74.9, 95.6, 71.0, 77.6, 76.7, 63.2, 62.6, 63.4, 59.5, 64.8]
+   Private_Dirty=34.33 34.30-52.81  Pss=72.05 71.88-90.57  USS(PrivClean+PrivDirty)=47.12 46.90-65.61  Shared_Dirty=37.00 Rss=142.08
+   owned(anon+shm+file-dirty)=71.18 71.16-89.68
+     anon         Rss=  11.39 Pss=  11.39 PrivClean=   0.00 PrivDirty=  11.39 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.57 Pss=   0.07 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.57 ShDirty=   0.00
+     other_files  Rss=   7.46 Pss=   0.81 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   7.46 ShDirty=   0.00
+     other_libs   Rss=  20.31 Pss=   3.46 PrivClean=   0.02 PrivDirty=   1.89 ShClean=  18.39 ShDirty=   0.00
+     own_binary   Rss=   0.81 Pss=   0.81 PrivClean=   0.77 PrivDirty=   0.04 ShClean=   0.00 ShDirty=   0.00
+     page_file    Rss=  10.88 Pss=  10.88 PrivClean=  10.88 PrivDirty=   0.00 ShClean=   0.00 ShDirty=   0.00
+     qt_kde_libs  Rss=  35.05 Pss=   7.23 PrivClean=   1.05 PrivDirty=   2.35 ShClean=  31.66 ShDirty=   0.00
+     shm_buffers  Rss=  55.50 Pss=  37.00 PrivClean=   0.00 PrivDirty=  18.50 ShClean=   0.00 ShDirty=  37.00
+     stack_vdso   Rss=   0.15 Pss=   0.13 PrivClean=   0.00 PrivDirty=   0.13 ShClean=   0.02 ShDirty=   0.00
+slint: failed=0 present median=58.94 min=49.78 max=63.06 first_paint=35.65 ext_read=58.98 raw_all=[58.9, 57.9, 58.7, 49.8, 56.5, 61.3, 59.2, 62.3, 57.9, 63.1, 57.6, 61.2]
+   Private_Dirty=11.98 11.97-11.98  Pss=39.24 39.00-39.36  USS(PrivClean+PrivDirty)=19.60 19.35-19.71  Shared_Dirty=37.02 Rss=68.52
+   owned(anon+shm+file-dirty)=48.86 48.85-48.86
+     anon         Rss=  11.30 Pss=  11.30 PrivClean=   0.00 PrivDirty=  11.30 ShClean=   0.00 ShDirty=   0.00
+     fonts        Rss=   0.66 Pss=   0.17 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.66 ShDirty=   0.00
+     other_files  Rss=   6.71 Pss=   0.80 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   6.71 ShDirty=   0.00
+     other_libs   Rss=   4.79 Pss=   0.41 PrivClean=   0.00 PrivDirty=   0.26 ShClean=   4.54 ShDirty=   0.00
+     own_binary   Rss=   7.91 Pss=   7.91 PrivClean=   7.62 PrivDirty=   0.28 ShClean=   0.00 ShDirty=   0.00
+     shm_buffers  Rss=  37.02 Pss=  18.51 PrivClean=   0.00 PrivDirty=   0.00 ShClean=   0.00 ShDirty=  37.02
+     stack_vdso   Rss=   0.15 Pss=   0.14 PrivClean=   0.00 PrivDirty=   0.14 ShClean=   0.02 ShDirty=   0.00
+harness-check qt: present=71.63 Private_Dirty=34.32 Pss=71.95 PrivateTotal=47.04
+harness-check slint: present=59.90 Private_Dirty=11.98 Pss=39.25 PrivateTotal=19.61
+
+## T0 checks at light@1.0 (7 runs per row, first dropped, median)
+qt normal: present=87.00 ext_read_from_pipe=87.06 kernel_start_minus_t0=-4.55 t0_src=harness-spawn raw=[87.4, 103.5, 82.8, 70.8, 119.5, 86.6]
+qt sleep100_before_exec: present=196.85 ext_read_from_pipe=196.88 kernel_start_minus_t0=-2.80 t0_src=harness-spawn raw=[189.6, 220.2, 189.2, 187.9, 204.1, 223.8]
+qt no_env: present=99.03 ext_read_from_pipe=94.17 kernel_start_minus_t0=-4.39 t0_src=proc-starttime-10ms raw=[78.5, 72.4, 93.2, 108.8, 104.9, 112.2]
+slint normal: present=65.82 ext_read_from_pipe=65.83 kernel_start_minus_t0=-4.84 t0_src=harness-spawn raw=[59.3, 62.2, 69.4, 79.5, 58.4, 76.6]
+slint sleep100_before_exec: present=177.32 ext_read_from_pipe=177.42 kernel_start_minus_t0=-6.28 t0_src=harness-spawn raw=[189.8, 179.6, 171.5, 178.8, 172.4, 175.8]
+slint no_env: present=74.67 ext_read_from_pipe=73.95 kernel_start_minus_t0=-3.38 t0_src=proc-starttime-10ms raw=[58.7, 82.6, 66.9, 82.4, 72.4, 77.0]
+
+## idle light@1.0, 30 s window starting 5 s after present
+qt: n=3 cpu_ms=[0.04, 0.04, 0.13] pct=[0.0001, 0.0001, 0.0004] jiffies=[0, 0, 0] wakeups=[1, 1, 1] invol=[0, 0, 0] threads=8->4 exited=[4, 4, 4]
+     t=0.8s: Private_Dirty=19.96 Private_Clean=4.07 Shared_Dirty=8.02 Pss=34.53 Rss=90.52
+     t=5s: Private_Dirty=19.96 Private_Clean=4.07 Shared_Dirty=8.02 Pss=34.54 Rss=90.52
+     t=35s: Private_Dirty=19.93 Private_Clean=4.07 Shared_Dirty=8.02 Pss=34.51 Rss=90.55
+     t=35s shm_Rss=12.01 anon_Rss=11.50
+qt find-open: n=1 cpu_ms=[46.77] pct=[0.1559] jiffies=[5] wakeups=[725] invol=[24] threads=12->4 exited=[8]
+     t=0.8s: Private_Dirty=24.28 Private_Clean=4.13 Shared_Dirty=4.25 Pss=38.19 Rss=90.60
+     t=5s: Private_Dirty=24.28 Private_Clean=4.12 Shared_Dirty=4.25 Pss=37.95 Rss=90.60
+     t=35s: Private_Dirty=20.25 Private_Clean=4.13 Shared_Dirty=4.25 Pss=34.17 Rss=86.62
+     t=35s shm_Rss=8.01 anon_Rss=12.07
+slint: n=3 cpu_ms=[0.85, 0.74, 0.46] pct=[0.0028, 0.0025, 0.0015] jiffies=[0, 0, 0] wakeups=[60, 60, 60] invol=[0, 0, 0] threads=4->4 exited=[0, 0, 0]
+     t=0.8s: Private_Dirty=5.33 Private_Clean=7.47 Shared_Dirty=7.64 Pss=17.78 Rss=32.39
+     t=5s: Private_Dirty=5.33 Private_Clean=7.47 Shared_Dirty=7.64 Pss=17.78 Rss=32.39
+     t=35s: Private_Dirty=5.33 Private_Clean=7.47 Shared_Dirty=7.63 Pss=17.78 Rss=32.39
+     t=35s shm_Rss=7.63 anon_Rss=4.66
+slint find-open: n=1 cpu_ms=[17.21] pct=[0.0574] jiffies=[2] wakeups=[240] invol=[5] threads=4->4 exited=[0]
+     t=0.8s: Private_Dirty=5.33 Private_Clean=7.31 Shared_Dirty=7.63 Pss=17.85 Rss=32.17
+     t=5s: Private_Dirty=5.33 Private_Clean=7.31 Shared_Dirty=7.63 Pss=17.85 Rss=32.17
+     t=35s: Private_Dirty=5.33 Private_Clean=7.31 Shared_Dirty=7.63 Pss=17.86 Rss=32.17
+     t=35s shm_Rss=7.63 anon_Rss=4.66
+
+## idle light@1.5, 30 s window starting 5 s after present
+qt: n=3 cpu_ms=[0.03, 0.06, 0.03] pct=[0.0001, 0.0002, 0.0001] jiffies=[0, 0, 0] wakeups=[1, 1, 1] invol=[0, 0, 0] threads=8->4 exited=[4, 4, 4]
+     t=0.8s: Private_Dirty=24.49 Private_Clean=6.80 Shared_Dirty=17.43 Pss=47.69 Rss=106.89
+     t=5s: Private_Dirty=24.49 Private_Clean=6.80 Shared_Dirty=17.43 Pss=47.69 Rss=106.89
+     t=35s: Private_Dirty=24.46 Private_Clean=6.80 Shared_Dirty=17.42 Pss=47.65 Rss=106.93
+     t=35s shm_Rss=26.13 anon_Rss=11.33
+slint: n=3 cpu_ms=[0.4, 0.49, 0.46] pct=[0.0013, 0.0016, 0.0015] jiffies=[0, 0, 0] wakeups=[60, 60, 60] invol=[0, 0, 0] threads=4->4 exited=[0, 0, 0]
+     t=0.8s: Private_Dirty=7.46 Private_Clean=7.18 Shared_Dirty=17.18 Pss=24.65 Rss=43.83
+     t=5s: Private_Dirty=7.46 Private_Clean=7.18 Shared_Dirty=17.18 Pss=24.64 Rss=43.83
+     t=35s: Private_Dirty=7.46 Private_Clean=7.18 Shared_Dirty=17.18 Pss=24.65 Rss=43.83
+     t=35s shm_Rss=17.18 anon_Rss=6.78
+
+## idle light@2.2, 30 s window starting 5 s after present
+qt: n=3 cpu_ms=[0.06, 0.06, 0.02] pct=[0.0002, 0.0002, 0.0001] jiffies=[0, 0, 0] wakeups=[1, 1, 1] invol=[0, 0, 0] threads=8->4 exited=[4, 6, 6]
+     t=0.8s: Private_Dirty=34.31 Private_Clean=12.02 Shared_Dirty=37.01 Pss=69.80 Rss=142.23
+     t=5s: Private_Dirty=34.31 Private_Clean=12.46 Shared_Dirty=37.01 Pss=70.73 Rss=142.23
+     t=35s: Private_Dirty=34.28 Private_Clean=12.46 Shared_Dirty=37.00 Pss=70.72 Rss=142.26
+     t=35s shm_Rss=55.50 anon_Rss=11.36
+slint: n=3 cpu_ms=[0.74, 0.89, 0.94] pct=[0.0025, 0.003, 0.0031] jiffies=[0, 1, 0] wakeups=[60, 60, 60] invol=[0, 0, 0] threads=4->4 exited=[0, 0, 0]
+     t=0.8s: Private_Dirty=11.98 Private_Clean=7.11 Shared_Dirty=37.02 Pss=38.82 Rss=68.08
+     t=5s: Private_Dirty=11.98 Private_Clean=7.11 Shared_Dirty=37.02 Pss=38.82 Rss=68.08
+     t=35s: Private_Dirty=11.98 Private_Clean=7.11 Shared_Dirty=37.02 Pss=39.31 Rss=68.08
+     t=35s shm_Rss=37.02 anon_Rss=11.30
+
+## Wayland traces (WAYLAND_DEBUG inflates times; order and counts only)
+trace-qt-light@1.0-0.log: present=78.13 commits_before=3 buffers_before=3 sizes=['1220x820', '96x96'] frame_done_just_before=16:15:33.047449
+trace-qt-light@1.0-1.log: present=68.89 commits_before=5 buffers_before=4 sizes=['1220x820', '96x96'] frame_done_just_before=16:15:34.353795
+trace-qt-light@1.0-2.log: present=84.87 commits_before=5 buffers_before=4 sizes=['1220x820', '96x96'] frame_done_just_before=16:15:35.687080
+trace-qt-light@1.5-0.log: present=72.91 commits_before=3 buffers_before=3 sizes=['1830x1230', '96x96'] frame_done_just_before=16:15:43.566930
+trace-qt-light@1.5-1.log: present=79.53 commits_before=5 buffers_before=4 sizes=['1830x1230', '96x96'] frame_done_just_before=16:15:44.888476
+trace-qt-light@1.5-2.log: present=97.22 commits_before=5 buffers_before=4 sizes=['1830x1230', '96x96'] frame_done_just_before=16:15:46.221521
+trace-qt-light@2.2-0.log: present=106.89 commits_before=5 buffers_before=4 sizes=['2684x1804', '96x96'] frame_done_just_before=16:15:54.060094
+trace-qt-light@2.2-1.log: present=88.68 commits_before=3 buffers_before=3 sizes=['2684x1804', '96x96'] frame_done_just_before=16:15:55.405603
+trace-qt-light@2.2-2.log: present=88.49 commits_before=4 buffers_before=4 sizes=['2684x1804', '96x96'] frame_done_just_before=16:15:56.721976
+trace-slint-light@1.0-0.log: present=68.42 commits_before=2 buffers_before=2 sizes=['1220x820'] frame_done_just_before=16:15:36.988075
+trace-slint-light@1.0-1.log: present=73.55 commits_before=2 buffers_before=2 sizes=['1220x820'] frame_done_just_before=16:15:38.308594
+trace-slint-light@1.0-2.log: present=69.77 commits_before=2 buffers_before=2 sizes=['1220x820'] frame_done_just_before=16:15:39.620483
+trace-slint-light@1.5-0.log: present=83.22 commits_before=2 buffers_before=2 sizes=['1830x1230'] frame_done_just_before=16:15:47.524072
+trace-slint-light@1.5-1.log: present=47.18 commits_before=2 buffers_before=2 sizes=['1830x1230'] frame_done_just_before=16:15:48.804350
+trace-slint-light@1.5-2.log: present=84.06 commits_before=2 buffers_before=2 sizes=['1830x1230'] frame_done_just_before=16:15:50.106157
+trace-slint-light@2.2-0.log: present=92.1 commits_before=2 buffers_before=2 sizes=['2686x1806'] frame_done_just_before=16:15:58.046566
+trace-slint-light@2.2-1.log: present=84.63 commits_before=2 buffers_before=2 sizes=['2686x1806'] frame_done_just_before=16:15:59.355898
+trace-slint-light@2.2-2.log: present=68.92 commits_before=2 buffers_before=2 sizes=['2686x1806'] frame_done_just_before=16:16:00.655399

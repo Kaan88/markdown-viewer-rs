@@ -1,0 +1,9 @@
+light @1.0: 780x2400, content ends at 2319.0 logical px of 2400
+light @1.5: 1170x3600, content ends at 2316.0 logical px of 2400
+light @1.7: 1326x4080, content ends at 2309.4 logical px of 2400
+light @2.2: 1716x5280, content ends at 2308.6 logical px of 2400
+dark @1.0: 780x2400, content ends at 2319.0 logical px of 2400
+dark @1.5: 1170x3600, content ends at 2316.0 logical px of 2400
+dark @1.7: 1326x4080, content ends at 2309.4 logical px of 2400
+dark @2.2: 1716x5280, content ends at 2308.6 logical px of 2400
+fonts used: {"Consolas", "Segoe UI", "Segoe UI Bold", "Segoe UI Italic", "Segoe UI Semibold", "Yu Gothic UI Regular"}

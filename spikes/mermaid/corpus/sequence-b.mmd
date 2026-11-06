@@ -1,0 +1,23 @@
+%% expect: Görüntüleyici|Motor işlemi|Dosya izleyici|Dosya değişti, yeniden çiz|Render every Mermaid block in the visible range|Parallel work|Kill the process after five seconds|Wrap this long note|across several lines|show source
+sequenceDiagram
+    actor U as Kullanıcı
+    participant V as Görüntüleyici
+    participant E as Motor işlemi
+    participant W as Dosya izleyici
+    U->>V: Open a very large README from the recent files list
+    W-)V: Dosya değişti, yeniden çiz
+    rect rgb(230, 240, 255)
+        par Parallel work
+            V->>E: Render every Mermaid block in the visible range
+        and
+            V->>E: Highlight the code blocks
+        end
+    end
+    E-->>V: Finished images<br/>and measured sizes
+    Note right of E: Wrap this long note<br/>across several lines<br/>to see whether it fits
+    critical Hostile diagram
+        V->>E: Render a diagram that never finishes
+    option Timeout
+        V->>E: Kill the process after five seconds
+        V-->>U: show source
+    end

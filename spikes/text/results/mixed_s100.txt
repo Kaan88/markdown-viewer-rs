@@ -1,0 +1,75 @@
+=== run 1 load=6.55
+doc bytes=1045708 blocks=1744 ascii=false scale=1 content_w=900 threads=1
+font_context_new_ms=28.93
+height_pass[0] ms=360.4 total_height_px=267077 peak_extra_mb=0.99
+height_pass[1] ms=184.8 total_height_px=267077 peak_extra_mb=0.18
+height_pass[2] ms=207.7 total_height_px=267077 peak_extra_mb=0.18
+height_pass[3] ms=185.0 total_height_px=267077 peak_extra_mb=0.18
+height_pass[4] ms=184.4 total_height_px=267077 peak_extra_mb=0.18
+height table ys bytes=6980 live_after_pass_mb=2.74 rss_mb=29.8 rss_anon_mb=5.4
+visible_layouts[viewport_only] n=10 blocks=[5, 4, 5, 5, 6, 8, 8, 5, 7, 6] mb_median=0.225 mb_max=0.283 raw=[0.203, 0.265, 0.225, 0.184, 0.193, 0.194, 0.283, 0.208, 0.276, 0.248]
+visible_layouts[plus_1_viewport_each_side] n=10 blocks=[17, 13, 16, 14, 14, 20, 18, 14, 19, 19] mb_median=0.620 mb_max=0.701 raw=[0.652, 0.497, 0.636, 0.498, 0.499, 0.602, 0.620, 0.499, 0.701, 0.667]
+frame_first_cold raster_ms=2.49 layout_ms=0.63 stats=CacheStats { hits: 2859, misses: 254, evictions: 0, bytes: 93930, peak_bytes: 93930, entries: 254 }
+scroll_40px frames=600 raster_ms p50=1.32 p95=1.79 p99=1.90 max=1.97 | layout_ms p50=0.00 p99=0.33 max=0.55 | misses=487 hits=2036075 evictions=0 cache_bytes=306773 peak=306773 entries=741
+random_jump frames=200 raster_ms p50=1.28 p95=1.46 p99=1.90 max=2.03 | layout_ms p50=0.73 p99=1.23 max=1.30 | misses=230 hits=647371 evictions=0 cache_bytes=415347 peak=415347 entries=971
+end rss_mb=34.8 rss_anon_mb=9.3 live_mb=7.34
+=== run 2 load=6.55
+doc bytes=1045708 blocks=1744 ascii=false scale=1 content_w=900 threads=1
+font_context_new_ms=24.54
+height_pass[0] ms=348.4 total_height_px=267077 peak_extra_mb=0.99
+height_pass[1] ms=194.7 total_height_px=267077 peak_extra_mb=0.18
+height_pass[2] ms=181.9 total_height_px=267077 peak_extra_mb=0.18
+height_pass[3] ms=182.3 total_height_px=267077 peak_extra_mb=0.18
+height_pass[4] ms=250.1 total_height_px=267077 peak_extra_mb=0.18
+height table ys bytes=6980 live_after_pass_mb=2.74 rss_mb=29.7 rss_anon_mb=5.4
+visible_layouts[viewport_only] n=10 blocks=[5, 4, 5, 5, 6, 8, 8, 5, 7, 6] mb_median=0.225 mb_max=0.283 raw=[0.203, 0.265, 0.225, 0.184, 0.193, 0.194, 0.283, 0.208, 0.276, 0.248]
+visible_layouts[plus_1_viewport_each_side] n=10 blocks=[17, 13, 16, 14, 14, 20, 18, 14, 19, 19] mb_median=0.620 mb_max=0.701 raw=[0.652, 0.497, 0.636, 0.498, 0.499, 0.602, 0.620, 0.499, 0.701, 0.667]
+frame_first_cold raster_ms=2.47 layout_ms=0.64 stats=CacheStats { hits: 2859, misses: 254, evictions: 0, bytes: 93930, peak_bytes: 93930, entries: 254 }
+scroll_40px frames=600 raster_ms p50=1.29 p95=1.44 p99=2.01 max=2.11 | layout_ms p50=0.00 p99=0.28 max=0.52 | misses=487 hits=2036075 evictions=0 cache_bytes=306773 peak=306773 entries=741
+random_jump frames=200 raster_ms p50=1.27 p95=1.42 p99=1.47 max=1.47 | layout_ms p50=0.72 p99=1.02 max=1.07 | misses=230 hits=647371 evictions=0 cache_bytes=415347 peak=415347 entries=971
+end rss_mb=34.7 rss_anon_mb=9.3 live_mb=7.34
+=== run 3 load=6.59
+doc bytes=1045708 blocks=1744 ascii=false scale=1 content_w=900 threads=1
+font_context_new_ms=24.10
+height_pass[0] ms=351.1 total_height_px=267077 peak_extra_mb=0.99
+height_pass[1] ms=182.4 total_height_px=267077 peak_extra_mb=0.18
+height_pass[2] ms=182.2 total_height_px=267077 peak_extra_mb=0.18
+height_pass[3] ms=182.3 total_height_px=267077 peak_extra_mb=0.18
+height_pass[4] ms=214.7 total_height_px=267077 peak_extra_mb=0.18
+height table ys bytes=6980 live_after_pass_mb=2.74 rss_mb=29.8 rss_anon_mb=5.4
+visible_layouts[viewport_only] n=10 blocks=[5, 4, 5, 5, 6, 8, 8, 5, 7, 6] mb_median=0.225 mb_max=0.283 raw=[0.203, 0.265, 0.225, 0.184, 0.193, 0.194, 0.283, 0.208, 0.276, 0.248]
+visible_layouts[plus_1_viewport_each_side] n=10 blocks=[17, 13, 16, 14, 14, 20, 18, 14, 19, 19] mb_median=0.620 mb_max=0.701 raw=[0.652, 0.497, 0.636, 0.498, 0.499, 0.602, 0.620, 0.499, 0.701, 0.667]
+frame_first_cold raster_ms=2.52 layout_ms=0.64 stats=CacheStats { hits: 2859, misses: 254, evictions: 0, bytes: 93930, peak_bytes: 93930, entries: 254 }
+scroll_40px frames=600 raster_ms p50=1.31 p95=1.48 p99=1.89 max=1.99 | layout_ms p50=0.00 p99=0.29 max=0.58 | misses=487 hits=2036075 evictions=0 cache_bytes=306773 peak=306773 entries=741
+random_jump frames=200 raster_ms p50=1.28 p95=1.43 p99=1.51 max=1.56 | layout_ms p50=0.74 p99=1.03 max=1.08 | misses=230 hits=647371 evictions=0 cache_bytes=415347 peak=415347 entries=971
+end rss_mb=34.7 rss_anon_mb=9.3 live_mb=7.34
+=== run 4 load=6.59
+doc bytes=1045708 blocks=1744 ascii=false scale=1 content_w=900 threads=1
+font_context_new_ms=28.35
+height_pass[0] ms=358.7 total_height_px=267077 peak_extra_mb=0.99
+height_pass[1] ms=184.4 total_height_px=267077 peak_extra_mb=0.18
+height_pass[2] ms=203.2 total_height_px=267077 peak_extra_mb=0.18
+height_pass[3] ms=191.5 total_height_px=267077 peak_extra_mb=0.18
+height_pass[4] ms=184.6 total_height_px=267077 peak_extra_mb=0.18
+height table ys bytes=6980 live_after_pass_mb=2.74 rss_mb=29.7 rss_anon_mb=5.4
+visible_layouts[viewport_only] n=10 blocks=[5, 4, 5, 5, 6, 8, 8, 5, 7, 6] mb_median=0.225 mb_max=0.283 raw=[0.203, 0.265, 0.225, 0.184, 0.193, 0.194, 0.283, 0.208, 0.276, 0.248]
+visible_layouts[plus_1_viewport_each_side] n=10 blocks=[17, 13, 16, 14, 14, 20, 18, 14, 19, 19] mb_median=0.620 mb_max=0.701 raw=[0.652, 0.497, 0.636, 0.498, 0.499, 0.602, 0.620, 0.499, 0.701, 0.667]
+frame_first_cold raster_ms=2.49 layout_ms=0.65 stats=CacheStats { hits: 2859, misses: 254, evictions: 0, bytes: 93930, peak_bytes: 93930, entries: 254 }
+scroll_40px frames=600 raster_ms p50=1.29 p95=1.42 p99=1.45 max=1.56 | layout_ms p50=0.00 p99=0.28 max=0.56 | misses=487 hits=2036075 evictions=0 cache_bytes=306773 peak=306773 entries=741
+random_jump frames=200 raster_ms p50=1.30 p95=1.94 p99=2.24 max=2.81 | layout_ms p50=0.77 p99=1.45 max=1.48 | misses=230 hits=647371 evictions=0 cache_bytes=415347 peak=415347 entries=971
+end rss_mb=34.6 rss_anon_mb=9.3 live_mb=7.34
+=== run 5 load=7.34
+doc bytes=1045708 blocks=1744 ascii=false scale=1 content_w=900 threads=1
+font_context_new_ms=25.82
+height_pass[0] ms=367.5 total_height_px=267077 peak_extra_mb=0.99
+height_pass[1] ms=195.3 total_height_px=267077 peak_extra_mb=0.18
+height_pass[2] ms=182.6 total_height_px=267077 peak_extra_mb=0.18
+height_pass[3] ms=183.2 total_height_px=267077 peak_extra_mb=0.18
+height_pass[4] ms=182.3 total_height_px=267077 peak_extra_mb=0.18
+height table ys bytes=6980 live_after_pass_mb=2.74 rss_mb=29.7 rss_anon_mb=5.4
+visible_layouts[viewport_only] n=10 blocks=[5, 4, 5, 5, 6, 8, 8, 5, 7, 6] mb_median=0.225 mb_max=0.283 raw=[0.203, 0.265, 0.225, 0.184, 0.193, 0.194, 0.283, 0.208, 0.276, 0.248]
+visible_layouts[plus_1_viewport_each_side] n=10 blocks=[17, 13, 16, 14, 14, 20, 18, 14, 19, 19] mb_median=0.620 mb_max=0.701 raw=[0.652, 0.497, 0.636, 0.498, 0.499, 0.602, 0.620, 0.499, 0.701, 0.667]
+frame_first_cold raster_ms=2.46 layout_ms=0.64 stats=CacheStats { hits: 2859, misses: 254, evictions: 0, bytes: 93930, peak_bytes: 93930, entries: 254 }
+scroll_40px frames=600 raster_ms p50=1.29 p95=1.42 p99=1.99 max=2.10 | layout_ms p50=0.00 p99=0.29 max=0.50 | misses=487 hits=2036075 evictions=0 cache_bytes=306773 peak=306773 entries=741
+random_jump frames=200 raster_ms p50=1.28 p95=1.53 p99=1.86 max=2.00 | layout_ms p50=0.74 p99=1.14 max=1.43 | misses=230 hits=647371 evictions=0 cache_bytes=415347 peak=415347 entries=971
+end rss_mb=34.5 rss_anon_mb=9.3 live_mb=7.34

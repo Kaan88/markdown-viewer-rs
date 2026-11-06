@@ -1,0 +1,27 @@
+%% expect: DocumentRepository|interface|findByPath|PersistentDocumentRepository|List<Document>|WorkspaceIndexer|reindexChangedFiles|has many|1..*|ConnectionPoolConfiguration|maximumConcurrentConnections
+classDiagram
+    direction LR
+    class DocumentRepository {
+        <<interface>>
+        +findByPath(path: String) Document
+        +listRecentlyOpened(limit: int) List~Document~
+        +save(document: Document) void
+    }
+    class PersistentDocumentRepository {
+        -ConnectionPoolConfiguration pool
+        -Map~String, Document~ cache
+        +findByPath(path: String) Document
+        #evictLeastRecentlyUsed() void
+    }
+    class WorkspaceIndexer {
+        +reindexChangedFiles(since: Timestamp) int
+        -scheduler: BackgroundScheduler
+    }
+    class ConnectionPoolConfiguration {
+        +int maximumConcurrentConnections
+        +Duration idleTimeout
+    }
+    DocumentRepository <|.. PersistentDocumentRepository : implements
+    PersistentDocumentRepository *-- ConnectionPoolConfiguration : owns
+    WorkspaceIndexer o-- "1..*" DocumentRepository : has many
+    WorkspaceIndexer ..> ConnectionPoolConfiguration : reads settings from

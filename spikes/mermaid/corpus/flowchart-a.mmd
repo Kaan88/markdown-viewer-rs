@@ -1,0 +1,17 @@
+%% expect: Developer pushes a commit|Run the unit and integration tests|Did every check pass|Publish release artifacts|Notify the author on the pull request|Continuous integration|Deployment|no, tests failed|yes, promote the build|Roll back to the previous release
+flowchart LR
+    Push[Developer pushes a commit] --> Lint[Lint and format check]
+    subgraph CI [Continuous integration]
+        Lint --> Tests[Run the unit and integration tests]
+        Tests --> Gate{Did every check pass?}
+    end
+    Gate -- no, tests failed --> Notify[Notify the author on the pull request]
+    Notify --> Push
+    Gate -- yes, promote the build --> Build[Build the signed installer]
+    subgraph CD [Deployment]
+        Build --> Publish[(Publish release artifacts)]
+        Publish --> Canary([Canary rollout to five percent])
+        Canary --> Health{Error rate acceptable?}
+        Health -->|yes| Full[Full rollout to all users]
+        Health -->|no| Back[Roll back to the previous release]
+    end

@@ -1,0 +1,50 @@
+// Colours are set once from Rust (kdeglobals, or the built-in palette).
+export global Theme {
+    in property <bool> dark: false;
+    in property <color> window: #f3f3f3;
+    in property <color> page: #fbfbfb;
+    in property <color> text: #242424;
+    in property <color> text-dim: #6b6b6b;
+    in property <color> accent: #005fb8;
+    in property <color> accent-text: #005fb8;
+    in property <color> on-accent: #ffffff;
+    in property <color> hover: #0000000f;
+    in property <color> pressed: #0000001a;
+    in property <color> hairline: #e0e0e0;
+    in property <color> popup: #ffffff;
+    in property <color> shadow: #00000040;
+    in property <string> font: "Segoe UI";
+    out property <color> selected: accent.transparentize(0.82);
+}
+
+// A hairline that never lands on half a device pixel. It stays one device px up to scale 1.99.
+export component HLine inherits Rectangle {
+    height: max(1phx, floor(1px / 1phx) * 1phx);
+    background: Theme.hairline;
+}
+export component VLine inherits Rectangle {
+    width: max(1phx, floor(1px / 1phx) * 1phx);
+    background: Theme.hairline;
+}
+
+
+// faked with stacked translucent rounded rectangles.
+export component Panel {
+    in property <length> radius: 8px;
+    in property <length> lift: 3px;
+    for spread[i] in [14px, 11px, 9px, 7px, 5px, 3px, 1px]: Rectangle {
+        x: -spread;
+        y: -spread + lift;
+        width: root.width + 2 * spread;
+        height: root.height + 2 * spread;
+        border-radius: root.radius + spread;
+        background: Theme.shadow.transparentize(0.86);
+    }
+    Rectangle {
+        border-radius: root.radius;
+        background: Theme.popup;
+        border-width: 1px;
+        border-color: Theme.hairline;
+    }
+    @children
+}

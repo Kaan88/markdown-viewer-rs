@@ -1,0 +1,17 @@
+cm_pulldown                          /652 exact 630 | official-norm 631 miss 21 3.22% | semantic 652 miss  0 0.00%
+cm_comrak                            /652 exact 652 | official-norm 652 miss  0 0.00% | semantic 652 miss  0 0.00%
+gfm_tagged_pulldown_noautolink       /672 exact 620 | official-norm 628 miss 44 6.55% | semantic 651 miss 21 3.12%
+gfm_tagged_pulldown_autolink         /672 exact 631 | official-norm 639 miss 33 4.91% | semantic 662 miss 10 1.49%
+gfm_tagged_comrak                    /672 exact 660 | official-norm 662 miss 10 1.49% | semantic 662 miss 10 1.49%
+gfm_alwayson_pulldown_noautolink     /672 exact 620 | official-norm 628 miss 44 6.55% | semantic 651 miss 21 3.12%
+gfm_alwayson_pulldown_autolink       /672 exact 626 | official-norm 634 miss 38 5.65% | semantic 657 miss 15 2.23%
+gfm_alwayson_comrak                  /672 exact 656 | official-norm 658 miss 14 2.08% | semantic 658 miss 14 2.08%
+gfm_viewer_pulldown_autolink         /672 exact 626 | official-norm 634 miss 38 5.65% | semantic 657 miss 15 2.23%
+gfm_viewer_comrak                    /672 exact 656 | official-norm 658 miss 14 2.08% | semantic 658 miss 14 2.08%
+tagged: pulldown-only misses []
+tagged: comrak-only misses []
+tagged: both miss [398, 426, 434, 435, 436, 473, 474, 475, 477, 652]
+alwayson: pulldown-only misses [614]
+alwayson: comrak-only misses []
+alwayson: both miss [398, 426, 434, 435, 436, 473, 474, 475, 477, 610, 616, 619, 620, 652]
+1MiB doc, gfm options, multiset of chunks: pulldown 11453 comrak 11491 only-pulldown 247 only-comrak 285

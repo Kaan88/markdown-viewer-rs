@@ -1,0 +1,16 @@
+/target
+target/
+*.png.tmp
+/.cargo/config.local.toml
+
+# Spike outputs that can be regenerated or are superseded
+spikes/mermaid/out/
+spikes/look-compare/results/shots/
+spikes/look-compare/results/trace/
+spikes/look-compare/results/idle-invalid-first-run/
+spikes/look-compare/logs/
+spikes/look-compare/.xdg/
+spikes/look-qt/results/
+spikes/look-slint/results/bench/
+spikes/vm/w0-out/
+spikes/vm/w1-out/run*/

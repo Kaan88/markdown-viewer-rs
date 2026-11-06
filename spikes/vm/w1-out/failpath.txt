@@ -1,0 +1,5 @@
+window title=[mdview-winui] exited=False
+box shot saved; sending WM_CLOSE
+exit code after dismiss=1
+measure-mode exit code=1
+mode=self-contained result=failed reason=OnLaunched:_0x80004005_--test-fail-launch_(0x80004005)
