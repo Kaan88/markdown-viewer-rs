@@ -1,0 +1,21 @@
+       7.5 ms  main
+       7.6 ms  DPI awareness=2
+       7.7 ms  bootstrap skipped: self-contained build
+       7.7 ms  bootstrap done
+       9.8 ms  STA ready, calling Application::Start
+      24.7 ms  D3D11 device ready: driver=hardware adapter=Microsoft Basic Render Driver
+      26.6 ms  Start callback
+      26.6 ms  Application composed
+      29.1 ms  OnLaunched
+      32.6 ms  XamlControlsResources merged
+      42.7 ms  Window created
+      43.1 ms  window sized 1220x820 at dpi 96, ok=1
+      49.4 ms  Window activated
+      61.1 ms  panel 964x754 scale 1x1
+      61.5 ms  swap chain attached to SwapChainPanel
+      62.9 ms  first Present returned
+      68.0 ms  panel 964x741 scale 1x1
+      79.0 ms  first frame at 79.0 ms
+      83.6 ms  deferred controls added
+      91.0 ms  panel 964x669 scale 1x1
+     117.8 ms  measure: result=ok first_frame_ms=79.0 full_ui_ms=117.7 private_bytes_first_frame=21807104 private_bytes_full_ui=23179264 working_set_full_ui=79896576

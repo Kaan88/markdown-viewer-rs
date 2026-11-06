@@ -85,11 +85,14 @@ Working: tabs, menu, lazy tree, flyout, typing and wheel via synthetic input, an
 - The band moved one net notch, not two.
 - The 314.0 ms first-run figure has no retained log.
 
-### Fix before handing W0 to the user's PC
+### W0 fixes from the audit, then re-run in the VM
 
-1. A failure in the first draw only writes a trace line (`winui/src/ui.rs:108`). A swap chain failure on real hardware would show an empty panel and no message. This is the likeliest W0 failure.
-2. `measure.ps1`: the median formula takes the upper value on even counts, and "cold" is wrong for a warm first run.
-3. `W0.md`: add restoring the scale before measuring, AC power, and a fixed window size, which the app must also set.
+- A failed first draw now shows a message box and exits with code 1. It was forced with `--test-fail-draw` and checked both normally and in measure mode.
+- The window opens at 1220x820. `measure.ps1` now uses 12 runs with 2 warm-ups, a correct median and honest labels, and warns on battery. `W0.md` covers scale, power and how to run it.
+- Same VM, 10 warm samples at 1220x820: **first frame 94.0 ms** (79-111), **full UI 135.8 ms** (118-156), private 22.4 MiB, working set 76.5 MiB. These replace the larger-window figures above, and all the limits above still apply except window size and sample count.
+- Input test passed on this build: wheel, tree, flyout, typing and File > Close, one run.
+
+W0 on the user's PC is still to do. Everything under "Never run" above remains unrun.
 
 ## Plan changes these results call for
 

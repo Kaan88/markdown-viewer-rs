@@ -1,26 +1,27 @@
-       5.0 ms  main
-       5.1 ms  DPI awareness=2
-       5.1 ms  bootstrap skipped: self-contained build
-       5.2 ms  bootstrap done
-       6.8 ms  STA ready, calling Application::Start
-      17.8 ms  D3D11 device ready: driver=hardware adapter=Microsoft Basic Render Driver
-      19.9 ms  Start callback
-      20.0 ms  Application composed
+       4.9 ms  main
+       5.0 ms  DPI awareness=2
+       5.0 ms  bootstrap skipped: self-contained build
+       5.1 ms  bootstrap done
+       7.2 ms  STA ready, calling Application::Start
+      14.2 ms  D3D11 device ready: driver=hardware adapter=Microsoft Basic Render Driver
+      19.8 ms  Start callback
+      19.9 ms  Application composed
       22.5 ms  OnLaunched
-      26.3 ms  XamlControlsResources merged
-      37.4 ms  Window created
-      46.4 ms  Window activated
-      55.6 ms  panel 2324x960 scale 1x1
-      56.1 ms  swap chain attached to SwapChainPanel
-      60.6 ms  first Present returned
-      66.3 ms  panel 2324x947 scale 1x1
-      85.4 ms  first frame at 85.4 ms
-      90.2 ms  deferred controls added
-      96.7 ms  panel 2324x875 scale 1x1
-    5660.6 ms  wheel delta=-120
-    5975.2 ms  wheel delta=-120
-    6292.2 ms  wheel delta=120
-    6876.6 ms  lazy tree children added
-   10257.3 ms  context flyout item clicked
-   15184.9 ms  window closed
-   15269.5 ms  Application::Start returned
+      26.1 ms  XamlControlsResources merged
+      37.2 ms  Window created
+      37.7 ms  window sized 1220x820 at dpi 96, ok=1
+      45.0 ms  Window activated
+      53.1 ms  panel 964x754 scale 1x1
+      53.6 ms  swap chain attached to SwapChainPanel
+      55.5 ms  first Present returned
+      61.6 ms  panel 964x741 scale 1x1
+      72.9 ms  first frame at 72.9 ms
+      78.3 ms  deferred controls added
+      85.2 ms  panel 964x669 scale 1x1
+    5450.7 ms  wheel delta=-120
+    5750.5 ms  wheel delta=-120
+    6067.0 ms  wheel delta=120
+    6656.0 ms  lazy tree children added
+    9924.6 ms  context flyout item clicked
+   14792.1 ms  window closed
+   14878.0 ms  Application::Start returned

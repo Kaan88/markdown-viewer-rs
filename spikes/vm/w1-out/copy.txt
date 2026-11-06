@@ -1,3 +1,18 @@
 
-	  *EXTRA File 		    1014	C:\mdview-w0\mdview-winui.trace.log
-	  *EXTRA File 		   10458	C:\mdview-w0\smoke.ps1
+	  *EXTRA File 		     980	C:\mdview-w0\mdview-winui.trace.log
+	  *EXTRA File 		    1085	C:\mdview-w0\measure-run.ps1
+	  *EXTRA File 		    1947	C:\mdview-w0\measure.log
+	  *EXTRA File 		       0	C:\mdview-w0\space-err.txt
+	  *EXTRA File 		     983	C:\mdview-w0\space-out.txt
+	  *EXTRA File 		     980	C:\mdview-w0\trace-run1.log
+	  *EXTRA File 		     980	C:\mdview-w0\trace-run10.log
+	  *EXTRA File 		     982	C:\mdview-w0\trace-run11.log
+	  *EXTRA File 		     980	C:\mdview-w0\trace-run12.log
+	  *EXTRA File 		     980	C:\mdview-w0\trace-run2.log
+	  *EXTRA File 		     980	C:\mdview-w0\trace-run3.log
+	  *EXTRA File 		     980	C:\mdview-w0\trace-run4.log
+	  *EXTRA File 		     980	C:\mdview-w0\trace-run5.log
+	  *EXTRA File 		     980	C:\mdview-w0\trace-run6.log
+	  *EXTRA File 		     982	C:\mdview-w0\trace-run7.log
+	  *EXTRA File 		     982	C:\mdview-w0\trace-run8.log
+	  *EXTRA File 		     980	C:\mdview-w0\trace-run9.log

@@ -37,6 +37,33 @@ fn place(panel: &Grid, child: &impl Interface, row: i32, column: i32) -> Result<
     panel.cast::<IPanel>()?.Children()?.Append(&child.cast::<UIElement>()?)
 }
 
+windows_core::link!("kernel32.dll" "system" fn GetCurrentThreadId() -> u32);
+windows_core::link!("user32.dll" "system" fn EnumThreadWindows(thread: u32, callback: unsafe extern "system" fn(*mut core::ffi::c_void, isize) -> i32, param: isize) -> i32);
+windows_core::link!("user32.dll" "system" fn GetClassNameW(window: *mut core::ffi::c_void, name: *mut u16, capacity: i32) -> i32);
+windows_core::link!("user32.dll" "system" fn GetDpiForWindow(window: *mut core::ffi::c_void) -> u32);
+windows_core::link!("user32.dll" "system" fn SetWindowPos(window: *mut core::ffi::c_void, after: *mut core::ffi::c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32);
+
+unsafe extern "system" fn size_if_winui(window: *mut core::ffi::c_void, _: isize) -> i32 {
+    const SWP_NOMOVE_NOZORDER_NOACTIVATE: u32 = 0x0002 | 0x0004 | 0x0010;
+    let mut name = [0u16; 64];
+    let length = unsafe { GetClassNameW(window, name.as_mut_ptr(), name.len() as i32) };
+    if String::from_utf16_lossy(&name[..length.max(0) as usize]) != "WinUIDesktopWin32WindowClass" {
+        return 1;
+    }
+    let dpi = unsafe { GetDpiForWindow(window) } as i32;
+    let (width, height) = (1220 * dpi / 96, 820 * dpi / 96);
+    let moved = unsafe {
+        SetWindowPos(window, std::ptr::null_mut(), 0, 0, width, height, SWP_NOMOVE_NOZORDER_NOACTIVATE)
+    };
+    diag::trace(&format!("window sized {width}x{height} at dpi {dpi}, ok={moved}"));
+    0
+}
+
+/// Launch figures only compare between PCs at one window size, so this uses the budget's.
+fn set_budget_size() {
+    unsafe { EnumThreadWindows(GetCurrentThreadId(), size_if_winui, 0) };
+}
+
 struct Ui {
     window: Window,
     root: Grid,
@@ -48,6 +75,7 @@ pub fn build(gpu: JoinHandle<Result<Gpu>>) -> Result<()> {
     let window = Window::new()?;
     diag::trace("Window created");
     window.SetTitle("mdview WinUI skeleton")?;
+    set_budget_size();
 
     let root = Grid::new()?;
     add_row(&root, GridUnitType::Auto, 1.0)?; // menu
@@ -97,15 +125,25 @@ pub fn build(gpu: JoinHandle<Result<Gpu>>) -> Result<()> {
     let framework: FrameworkElement = panel.cast()?;
     let redraw = {
         let ui = ui.clone();
-        move || match ui.renderer.borrow_mut().draw() {
-            Ok(true) => {
-                if !ui.presented.replace(true) {
-                    diag::trace("first Present returned");
-                    watch_first_frame(ui.clone());
+        let fail_first_draw = std::env::args().any(|arg| arg == "--test-fail-draw");
+        move || {
+            let drawn = if fail_first_draw {
+                Err(Error::new(HRESULT(0x80004005u32 as i32), "--test-fail-draw"))
+            } else {
+                ui.renderer.borrow_mut().draw()
+            };
+            match drawn {
+                Ok(true) => {
+                    if !ui.presented.replace(true) {
+                        diag::trace("first Present returned");
+                        watch_first_frame(ui.clone());
+                    }
                 }
+                Ok(false) => {}
+                // Nothing has been shown yet, so without this the window stays empty with no message.
+                Err(e) if !ui.presented.get() => diag::fatal("first draw", &e),
+                Err(e) => diag::fail("draw", &e),
             }
-            Ok(false) => {}
-            Err(e) => diag::fail("draw", &e),
         }
     };
     {

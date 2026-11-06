@@ -1,7 +1,11 @@
 # Runs mdview-winui.exe --measure N times and prints first-frame and memory figures.
-# Usage, from the folder holding the exe:  powershell -ExecutionPolicy Bypass -File .\measure.ps1 [-Runs 10]
-# The first run is cold. It is logged but excluded from the warm summary.
-param([int]$Runs = 10)
+# Usage, from the folder holding the exe:  powershell -ExecutionPolicy Bypass -File .\measure.ps1 [-Runs 12]
+# The budget's measure is the median of 10 runs after 2 warm-ups, on AC power. The window is 1220x820.
+# Warm-ups are logged but left out of the summary. Neither is a true cold start: that needs a reboot.
+param([int]$Runs = 12, [int]$WarmUps = 2)
+
+$battery = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
+if ($battery -and $battery.BatteryStatus -eq 1) { Write-Warning "on battery: plug in, or these figures won't compare" }
 
 $exe = Join-Path $PSScriptRoot 'mdview-winui.exe'
 $log = Join-Path $PSScriptRoot 'measure.log'
@@ -30,18 +34,20 @@ $rows = @(Get-Content $log | ForEach-Object {
 Get-Content $log
 $ok = @($rows | Where-Object { $_.result -eq 'ok' })
 "`nruns: $Runs  ok: $($ok.Count)  mode: $($rows[0].mode)"
-if ($ok.Count -lt 2) { Write-Warning "too few successful runs to summarise; see trace-run*.log"; exit 1 }
+if ($ok.Count -le $WarmUps) { Write-Warning "too few successful runs to summarise; see trace-run*.log"; exit 1 }
 
 function Summary($name, $values, $scale, $unit) {
     $sorted = @($values | ForEach-Object { [double]$_ / $scale } | Sort-Object)
-    $median = $sorted[[int][math]::Floor($sorted.Count / 2)]
+    $mid = [int][math]::Floor($sorted.Count / 2)
+    $median = if ($sorted.Count % 2) { $sorted[$mid] } else { ($sorted[$mid - 1] + $sorted[$mid]) / 2 }
     '{0,-26} min {1,8:N1}  median {2,8:N1}  max {3,8:N1} {4}' -f $name, $sorted[0], $median, $sorted[-1], $unit
 }
 
-$warm = @($ok | Select-Object -Skip 1)
+$warm = @($ok | Select-Object -Skip $WarmUps)
+"warm samples: $($warm.Count)"
 Summary 'first frame (warm)' $warm.first_frame_ms 1 'ms'
 Summary 'full UI (warm)' $warm.full_ui_ms 1 'ms'
 Summary 'private, first frame' $warm.private_bytes_first_frame 1048576 'MiB'
 Summary 'private, full UI' $warm.private_bytes_full_ui 1048576 'MiB'
 Summary 'working set, full UI' $warm.working_set_full_ui 1048576 'MiB'
-"first frame (cold, run 1)  $($ok[0].first_frame_ms) ms"
+"first frame (run 1, warm-up, not a cold start)  $($ok[0].first_frame_ms) ms"

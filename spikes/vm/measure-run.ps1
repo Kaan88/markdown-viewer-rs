@@ -3,9 +3,9 @@ param([string]$Out)
 $D = 'C:\mdview-w0'
 Set-Location $D
 "--- $D, 10 runs, in process"
-& "$D\measure.ps1" -Runs 10
+& "$D\measure.ps1" -Runs 12
 Copy-Item "$D\measure.log" "$Out\measure.log"
-Copy-Item "$D\trace-run10.log" "$Out\measure-trace-run10.log"
+Copy-Item "$D\trace-run12.log" "$Out\measure-trace-run12.log"
 $S = "$D\with space"
 $null = robocopy $D $S /E /XD $S /XF *.log /NFL /NDL /NJH /NJS /NP
 "--- $S, 3 runs, W0.md command form in a child powershell"
