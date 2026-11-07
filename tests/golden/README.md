@@ -32,11 +32,14 @@ baseline, centred display math, a matrix, a heading formula and formulas inside 
 came from one shared engine process.
 `shell-qt-mermaid.png` and `shell-winui-mermaid.png` are the showcase at scroll 1100: flowchart,
 sequence and class diagrams drawn by merman in both shells, again from the one engine process.
+`shell-qt-highlight.png` and `shell-winui-highlight.png` are the showcase at scroll 500, where the
+Rust fence is coloured by syntect in both shells.
 
 Math and Mermaid changed the showcase: the page is now 4085 px at 100% (taller formula lines and
 diagram images instead of code boxes) and the Mathematics and Diagrams sections show rendered output,
 so the four `showcase-*` images were regenerated. The engine must be built (or `MDV_ENGINE` set) when
-regenerating, because SVG, math and Mermaid go through it.
+regenerating, because SVG, math and Mermaid go through it. Syntax highlighting changed only the Rust
+block's glyph colours, so the page height stayed 4085 px.
 
 `images-light.png` is `fixtures/images.md` through `mdv-bench`: a real PNG drawn as a block and
 inline, a missing file's placeholder, and the SVG badge that the engine now draws in the last line.
@@ -47,7 +50,8 @@ They are **not** a pixel test baseline yet:
 
 - They use this host's system fonts (Segoe UI, Consolas), so a render on Linux or another Windows
   build will differ. The plan calls for bundled fonts and a small tolerance; that is still open.
-- Syntax highlighting is still source text; SVG, math and Mermaid already render.
+- Fenced code is coloured from syntect's bundled syntaxes and two themes; unknown languages, inline
+  code and blocks over 256 KiB stay plain.
 - The window captures include the 31 px title bar, which follows Windows; compare the client area.
 
 To regenerate:

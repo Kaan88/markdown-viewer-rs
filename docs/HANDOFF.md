@@ -39,16 +39,16 @@ Phase 2, the headless renderer, and it is nearly done.**
 | `<details>` toggling | done: a summary click flips it in both shells; view state lives in the renderer |
 | exit gate: goldens approved by the user | **open**: the images in `tests/golden/` have not been approved yet |
 
-Phase 4 has three slices: SVG files render through `mdview-engine` (resvg), TeX math renders through
-RaTeX into the same rasterizer, and Mermaid diagrams render through merman (flowchart, sequence,
-class, state, ER, gantt, pie, mindmap). The showcase's badge, formulas, diagrams and
-`fixtures/math.md` / `fixtures/diagrams.md` all draw; syntax highlighting still shows its source.
+Phase 4 is complete. Three slices run through `mdview-engine`: SVG through resvg, TeX math through
+RaTeX and Mermaid through merman (flowchart, sequence, class, state, ER, gantt, pie, mindmap). The
+fourth, syntax highlighting, is in-process: syntect colours fenced code in the renderer. The
+showcase's badge, formulas, diagrams and coloured Rust block all draw, as do `fixtures/math.md` and
+`fixtures/diagrams.md`.
 
-So the immediate queue is the golden approval, which is the Phase 2 exit gate; then Phase 3 (Qt shell parity),
-Phase 4 (engine: syntax highlighting), Phase 5 (WinUI parity, W1-W3), Phase 6 (polish,
-installer). The shells already exist and run, which is ahead of the plan's order - the user asked for
-the UIs early - so Phase 3 and 5 become "make the existing shells match the checklist" rather than
-"build them".
+So the immediate queue is the golden approval, which is the Phase 2 exit gate; then Phase 3 (Qt shell
+parity), Phase 5 (WinUI parity, W1-W3), Phase 6 (polish, installer). The shells already exist and run,
+which is ahead of the plan's order - the user asked for the UIs early - so Phase 3 and 5 become "make
+the existing shells match the checklist" rather than "build them".
 
 ## 2. Repository
 
@@ -69,8 +69,8 @@ Toolchain here: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msv
 ```powershell
 cd C:\Users\kaank\Desktop\mv
 cargo test --release --offline --workspace     # 7 core, 11 fuzz, 113 regression, 3 spec,
-                                               # 10 engine, 7 engine-proto, 6 render unit
-                                               # (6 + 2 ignored deadline waits), 18 render integration
+                                               # 10 engine, 7 engine-proto, 10 render unit
+                                               # (10 + 2 ignored deadline waits), 18 render integration
 cargo fmt --all --check
 cargo build --release --offline --workspace    # includes target/release/mdview-engine.exe
 cargo build --release --offline -p mdview-winui
@@ -208,7 +208,7 @@ cd ~/mdview/bins/mdv-qt && export QMAKE=/usr/lib/qt6/bin/qmake6 && cargo build -
 cd ~/mdview && cargo build --release -p mdview-engine      # for SVG, math and Mermaid
 cd ~/mdview && cargo test --release -p mdview-core -p mdview-render -p mdview-engine -p mdview-engine-proto
                                                                       # 7 core, 11 fuzz, 113 regression,
-                                                                      # 3 spec, 10 engine, 7 proto, 6+18 render
+                                                                      # 3 spec, 10 engine, 7 proto, 10+18 render
 cd ~/mdview && xvfb-run -a /mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt \
     --drop-test fixtures/linked.md                                   # prints "drop test ok: ..."
 cd ~/mdview && BIN=/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt
@@ -365,6 +365,20 @@ The renderer turns a Mermaid block into a **centred image**, shrunk to the conte
 or unparseable diagram falls back to the labelled source box. Diagrams keep Mermaid's own light
 palette in both themes; the dark theme still draws them over its background.
 
+### Syntax highlighting (in-process)
+
+Fenced code is highlighted **in the renderer**, not the engine, because it is text: syntect 5.3 with
+its bundled syntax and theme dumps (`default-fancy`, so no Oniguruma C build) turns the block into
+byte ranges and foreground colours. The sets load once per process through `OnceLock`; the light
+theme is `InspiredGitHub` and the dark theme `base16-ocean.dark`. `highlight::tokens` covers every
+source byte, including newlines, so the renderer can push one styled run per token at its real
+document offset: selection, find and hit-testing keep working across the coloured block. Unknown or
+missing languages stay plain, and a block over 256 KiB is not parsed. Inline code keeps the theme
+text colour; only fenced blocks are tokenized.
+
+`Style` grew an optional token colour, applied as a parley brush after the theme's own colours. The
+code box, line height and page geometry are unchanged; only the glyph colours differ.
+
 The renderer never links it: `crates/render/src/engine.rs` keeps **one shared process** in a global
 slot. The first SVG, formula or diagram starts it and a worker thread owns its pipes; later jobs
 reuse it, so the font database is loaded once. Each job has a 5 s deadline. A pipe error (the engine's 10 s idle
@@ -380,8 +394,10 @@ own `bins/mdv-qt/target/release`.
 
 **Offline build note.** The local registry index lists `bit-set` 0.10 and `bit-vec` 0.9, but
 `ratex-parser`'s `fancy-regex` needs 0.8; their 0.8 crates were in the cache. merman also needs
-`quick-xml` 0.42, which the index only lists as 0.41. The three crates are extracted under `vendor/`
-and pinned with `[patch.crates-io]` in the workspace `Cargo.toml` so `--offline` resolves.
+`quick-xml` 0.42, which the index only lists as 0.41, and syntect needs `bincode` 1.3, listed only as
+2.0. The crates are extracted under `vendor/` and pinned with `[patch.crates-io]` in the workspace
+`Cargo.toml` so `--offline` resolves. `bins/mdv-qt` is a separate workspace and carries the same four
+pins.
 
 Measured on this PC: two consecutive 180x28 badge jobs took **13.2 ms then 2.4 ms with one engine
 start**; a deliberately stalled engine was killed at **5003.9 ms** and the next job started in
@@ -390,7 +406,7 @@ start**; a deliberately stalled engine was killed at **5003.9 ms** and the next 
 formulas including a matrix, a table and a heading) draws in **18.7 ms** on Windows and **14.7 ms**
 on the VM, with one engine process for all of them; the shells show the same page. `fixtures/diagrams.md`
 (flowchart, class, ER, mindmap and state) draws in **80.0 ms** on Windows and **59.9 ms** on the VM;
-the full showcase with all eight diagram families takes about **144 ms** here. On the VM the
+the full showcase with all eight diagram families takes about **161 ms** here (the first page pays syntect's one-time dump load). On the VM the
 sharing checks report **5.2 ms then 0.8 ms**, a stalled job killed at **5003.0 ms** with a **3.6 ms**
 respawn, and **3.7 ms** after 11 s idle. The idle and stalled cases are `#[ignore]`d tests, because
 they wait out the real deadlines.
@@ -550,13 +566,16 @@ and are not errors.
 | `shell-winui-math.png` | the same page in WinUI, one engine process for all seven formulas |
 | `shell-qt-mermaid.png` | the Qt shell at scroll 1100: flowchart, sequence and class diagrams |
 | `shell-winui-mermaid.png` | the same view in WinUI, one engine process for every Mermaid block |
+| `shell-qt-highlight.png` | the Qt shell at scroll 500: the Rust block with syntect token colours |
+| `shell-winui-highlight.png` | the same view in WinUI |
 
 **These are for review, not a pixel baseline yet.** They use this host's system fonts (Segoe UI,
 Consolas), so another machine or Linux will differ; the plan calls for bundled fonts and a tolerance
 before they become a suite. The four review images still have **not been approved by the user**.
 Math and Mermaid changed the showcase page from 3020 to **4085 px** here (taller inline formulas and
 diagram images instead of code boxes), so the four `showcase-*` files were regenerated with the
-engine built; they are the current review copies.
+engine built; they are the current review copies. Syntax highlighting changed only the glyph colours
+in the Rust block, so the page height stayed the same and the four images were regenerated again.
 
 Renderer goldens regenerate byte-identically when `mdview-engine` is built beside the bench (SVG and
 math need it):
@@ -619,19 +638,22 @@ light, dark and 150% and in both shells (`fixtures/math.md`: inline, display, ma
 table formulas; one engine process for all seven), and falls back to source text or the labelled math
 box with `MDV_ENGINE` missing. The table-cell image path that `cell_inline` used to drop is covered by
 `a_table_cell_draws_its_inline_image`. Mermaid renders all eight showcase families through the same
-engine process; `fixtures/diagrams.md` takes 80.0 ms and the full showcase 144 ms, both shells show
+engine process; `fixtures/diagrams.md` takes 80.0 ms and the full showcase 161 ms, both shells show
 the flowchart/sequence/class captures above, and with `MDV_ENGINE` missing every diagram keeps its
-source box.
+source box. The fenced Rust block is tokenized in both themes in `mdv-bench` and both shells
+(`shell-{qt,winui}-highlight.png`); unknown languages and blocks over 256 KiB stay plain.
 
 **Linux:** the Qt shell built with Qt 6.8.2 on the VM, run and captured under Xvfb, `--drop-test`,
 `--select-test` (7..15 = "Markdown"), `--link-test` (scrolled to 1266 px) and `--details-test`
 (4109 -> 4163 px) passing, and `cargo test --release -p mdview-core -p mdview-render` passing
-(18 render tests included). `mdv-bench fixtures/images.md` renders the SVG badge at 780x413 in
+(18 render integration tests and the 10 render unit tests included). `mdv-bench fixtures/images.md`
+renders the SVG badge at 780x413 in
 11.4 ms with its text: the engine's font query now falls through Noto Sans, DejaVu Sans and the
 other names in the renderer's stack because fontdb reports no generic `sans-serif` face there.
 `mdv-bench fixtures/math.md` draws all seven formulas at 780x631 in 14.7 ms, `fixtures/diagrams.md`
-draws the five families at 780x1722 in 59.9 ms, and the engine and protocol test binaries pass on the
-VM (10 and 7).
+draws the five families at 780x1722 in 59.9 ms, the full showcase with highlighted code and all
+eight diagrams renders at 780x4109 in 132.1 ms, and the engine and protocol test binaries pass on
+the VM (10 and 7).
 
 **Not run:** the Qt View/Help menu items; the Qt scrollbar and keys on Linux (Windows only); DPI scales
 other than 100% (zoom is tested, DPI scaling is not); a real OLE drag from Explorer (the drop test drives
@@ -644,7 +666,8 @@ Qt's event path instead).
   light/dark sources and `width`/`height` attributes are ignored, and any other format keeps its
   placeholder. A blocked image is retried on every render.
 - No find, tabs, folder tree, outline or recent files in either shell; no bundled fonts.
-- Table `colspan`/`rowspan` ignored; syntax highlighting is not applied to code blocks yet.
+- Table `colspan`/`rowspan` ignored. Highlighting covers fenced blocks only: inline code keeps the
+  theme text colour, and unknown languages or blocks over 256 KiB stay plain.
 - Math blocks are images: dragging across a display equation selects nothing, and there is no
   equation numbering or copy-as-TeX.
 - Mermaid diagrams keep Mermaid's own light palette in the dark theme, and a long mindmap root can
@@ -658,18 +681,18 @@ Qt's event path instead).
 ## 12. What to do next
 
 1. **Get the `tests/golden/` images approved by the user** - it is the Phase 2 exit gate. Show
-   `showcase-{light,dark}@{1.0,1.5}.png` plus the shell captures (including the new selection,
-   anchor and details shots) and ask for a yes or a list of changes.
-2. **Phase 4, the rest**: syntax highlighting (syntect/two-face) joins the engine, reusing the
-   job/reply format, the shared process and the 5 s deadline. SVG, math and Mermaid are done. The
-   client keeps the process warm; its idle exit and the kill-and-respawn path are tested.
-3. **Then the Qt/WinUI parity items** from `docs/PORT_CHECKLIST.md`: tabs, folder tree, outline, find,
-   recents, zoom limits, themes, focus mode, session restore. Selection and `<details>` are done in
-   both shells; copy to the clipboard and a link context menu are the obvious next shell features.
-4. **Bundled fonts**, then turn the goldens into a real pixel suite (the plan's Phase 6).
+   `showcase-{light,dark}@{1.0,1.5}.png` plus the shell captures (including the selection,
+   anchor, details, math, Mermaid and highlighting shots) and ask for a yes or a list of changes.
+2. **Phase 3/5 parity**: the Qt and WinUI items from `docs/PORT_CHECKLIST.md` - tabs, folder tree,
+   outline, find, recents, zoom limits, themes, focus mode, session restore. Selection, links,
+   `<details>`, math, diagrams and highlighting are done in both shells; copy to the clipboard and a
+   link context menu are the obvious next shell features.
+3. **Bundled fonts**, then turn the goldens into a real pixel suite (the plan's Phase 6).
 
 Every Qt/Linux change is tested on the VM as well as on Windows, and nothing counts as working on
 Windows until it has run on Windows.
+
+
 
 
 
