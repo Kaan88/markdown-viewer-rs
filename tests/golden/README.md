@@ -16,6 +16,13 @@ built against Qt 6.9.3 for MSVC) at the same size, at the top and after a click 
 the test VM. `shell-qt-1mb.png` is the Qt shell showing `spikes/parser/data/generated_1mib.md`, the
 virtualization test document. They are evidence that both shells run, not a baseline.
 
+`shell-qt-selection.png` and `shell-winui-selection.png` show the word "Markdown" selected in the
+showcase heading. The Qt one is from `--select-hold`, which drags through the real Qt mouse path and
+keeps the window open; the WinUI one is after a real press-drag-release on the running window. The
+selection is drawn over the frame in both shells and is not part of the frame delta.
+`shell-winui-anchor.png` is the WinUI window after a click on the `#diagrams` link, scrolled so the
+Diagrams heading sits just below the top edge.
+
 `images-light.png` is `fixtures/images.md` through `mdv-bench`: a real PNG drawn as a block and
 inline, next to the placeholders for a missing file and an SVG. `shell-winui-images.png` and
 `shell-qt-images.png` show the same file in both shells, with the badge drawn both ways.
@@ -25,7 +32,6 @@ They are **not** a pixel test baseline yet:
 - They use this host's system fonts (Segoe UI, Consolas), so a render on Linux or another Windows
   build will differ. The plan calls for bundled fonts and a small tolerance; that is still open.
 - Math and diagrams are still source text until Phase 4.
-- The shells virtualize, but the renderer still has no selection or anchors.
 - The window captures include the 31 px title bar, which follows Windows; compare the client area.
 
 To regenerate:

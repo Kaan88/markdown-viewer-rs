@@ -35,11 +35,11 @@ Phase 2, the headless renderer, and it is nearly done.**
 | themes, zoom, DPI scaling | done |
 | images (PNG/JPEG, limits, inline) | done; SVG is Phase 4 |
 | virtualized viewport, scroll budget | done: 0.2-2.6 ms per scroll frame (budget 4 ms at 150%, 8 ms at 4K) |
-| selection, link/anchor hit-testing | **not started** |
+| selection, link/anchor hit-testing | done in the renderer and both shells; no clipboard copy yet |
 | `<details>` toggling | **not started** |
 | exit gate: goldens approved by the user | **open**: the images in `tests/golden/` have not been approved yet |
 
-So the immediate queue is the two "not started" rows and the approval; then Phase 3 (Qt shell parity),
+So the immediate queue is `<details>` toggling and the approval; then Phase 3 (Qt shell parity),
 Phase 4 (engine: math, Mermaid, highlighting, SVG), Phase 5 (WinUI parity, W1-W3), Phase 6 (polish,
 installer). The shells already exist and run, which is ahead of the plan's order - the user asked for
 the UIs early - so Phase 3 and 5 become "make the existing shells match the checklist" rather than
@@ -64,7 +64,7 @@ Toolchain here: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msv
 ```powershell
 cd C:\Users\kaank\Desktop\mv
 cargo test --release --offline --workspace     # 7 core, 11 fuzz, 113 regression, 3 spec,
-                                               # 2 render unit, 11 render integration
+                                               # 2 render unit, 16 render integration
 cargo fmt --all --check
 cargo build --release --offline -p mdview-winui
 ```
@@ -103,6 +103,7 @@ The Qt shell builds separately (section 8).
 | `--no-shift` | send every frame whole instead of using the shifted frame |
 | `--scroll <device px>` | start partway down the page |
 | `--scroll-steps <n>` | after the first frame, walk down `n` 40 px steps, one frame each |
+| `--select-test` | after the first frame, select the word "Markdown" and log the range and first rect to the trace |
 | `--size <w>x<h>` | logical window size (default 1100x900) |
 
 `--no-shift`, `--scroll`, `--scroll-steps` and `--size` exist so a capture or a measurement needs no
@@ -132,7 +133,10 @@ cargo build --release --offline
 Run it with Qt's `bin` on `PATH` so the DLLs resolve. Flags: `<file>`, `--light`/`--dark`,
 `--zoom <x>`, `--drop-test <path>` (sends one `QDragEnterEvent` and `QDropEvent` through the window
 and exits 0 when the dropped path was loaded; it exists because Qt uses OLE drag and drop on Windows,
-so a posted `WM_DROPFILES` from another process is ignored).
+so a posted `WM_DROPFILES` from another process is ignored), `--select-test` (drags over "Markdown"
+through the real mouse path, prints the selection and rect count, exits), `--select-hold` (the same
+but leaves the window open for a screenshot) and `--link-test` (clicks the `#diagrams` link and
+compares the scroll row with what `y_of` says).
 
 ## 5. Linux: the test VM
 
@@ -218,6 +222,8 @@ Headless: no window system, BGRA bitmaps, parley for layout, swash for raster.
 | `.view_frame(...)-> &Frame` | draws into the frame kept between calls (this is what the shells use) |
 | `.frame() -> Option<&Frame>` | the frame `view_frame` drew last |
 | `.page(doc, &Options) -> Rendered` | the whole page in one bitmap; for tests and small documents |
+| `.hit_test(doc, &Options, &PageLayout, x, y) -> Option<Hit>` | the document offset under a point, plus the link or footnote there; lays out one block on demand |
+| `.selection_rects(doc, &Options, &PageLayout, from, to) -> Vec<Rect>` | one page rectangle per selected line, for the shell to draw |
 | `render`, `render_slice`, `render_view`, `layout` | one-shot forms |
 
 `Options { width, scale, theme, max_height, base_dir }`; `base_dir` is where relative image paths
@@ -235,12 +241,34 @@ Scrolling keeps the bitmap, moves the surviving rows with one `copy_within`, and
 that came into view. The band is painted on its own small bitmap and copied in, because a block can
 reach past the band and would otherwise be blended twice on the overlap.
 
-Tests that pin this down (`crates/render/tests/render.rs`, 11 tests):
+**Hit testing and selection live beside the frame, not in it.** Every laid-out text layout keeps one
+`LineGeom` per line (top/bottom, its x range, the layout, the page origin and the `Inline` origin
+map), cached per top-level block with the paints. `PageLayout` exposes `blocks()`, `block_at(y)`,
+`index_at(y)`, `y_of(doc, block)` (walks up to the top-level block, so an anchor inside a quote
+works) and `footnote_y(number)`. A hit finds the line under `y`, asks parley's
+`Cluster::from_point` for the cluster and side, and maps the inline offset back to `Document::text`
+through the origins; atoms (a footnote mark, an image placeholder) map every offset in their
+generated text to the atom's single position. A selection asks `Cluster::from_byte_index` for the x
+of the range boundaries, one rectangle per line. The frame bitmap is never modified by selection, so
+`band`/`shift` still describe the document alone; a test checks that a frame after hit testing and
+selection is byte-identical and still reports `Some((0, 0))`.
+
+Tests that pin this down (`crates/render/tests/render.rs`, 16 tests):
 
 - `a_shifted_frame_matches_a_fresh_view` - five scroll offsets, images included, byte-identical.
 - `a_scrolling_frame_reports_the_band_and_shift` - rebuilds each frame from the previous one using only
   `band` and `shift` and compares bytes; also checks that a viewport jump reports `None`.
 - `a_cached_frame_still_draws_its_images` - fails if decoded images are not shared by the renderer.
+- `a_click_maps_back_to_the_word_under_it` - a click at the word's rectangle returns the word's
+  document offset; a click past the line lands at its last caret position.
+- `a_click_finds_a_link_and_a_footnote_reference` - link index and destination, and a footnote mark
+  swept across the line.
+- `blocks_are_found_by_page_row` - `block_at` clamps at both ends, and a block nested in a list
+  reports its top-level row.
+- `hit_testing_and_selection_do_not_change_the_frame` - hit tests (including one on a block that was
+  never painted) and selection leave the frame delta and bytes untouched.
+- `a_selection_that_wraps_gives_one_rect_per_line` - a narrow page gives several rectangles, all
+  inside the page.
 
 **Measured** (`spikes/parser/data/generated_1mib.md`: 1.0 MB, 25,060 blocks, 583,619 px page):
 
@@ -310,6 +338,14 @@ the bar to 6 px.
 Keys: Home/End, arrows (48 px), Page Up/Down and Space (90% of the viewport). Mouse: a press in the
 gutter jumps there and starts a drag; the drag follows the pointer.
 
+**Selection and links.** A press on the page starts a selection through the same XAML pointer events;
+moving extends it and release keeps it. If the pointer never moved, release follows the link or
+footnote under the press: a `#fragment` scrolls with `PageLayout::y_of`, another local Markdown file
+is loaded and then scrolled to its fragment, and `http(s):`/`mailto:` goes to `ShellExecuteW`.
+Escape clears the selection. The selection is `Option<(u32, u32)>` over `Document::text`, and its
+rectangles are CPU-blended into the **back buffer** just before the gutter strip, so the page texture
+- and with it `band`/`shift` - never contains selection pixels.
+
 **Hand-written additions in `bindings.rs`** (regenerating would drop them):
 
 - `FrameworkElement::set_requested_theme` - the root grid is set Light/Dark with the page, otherwise
@@ -359,6 +395,15 @@ its cost:
 mdview-qt: painted 1086x846 at scroll 96 in 0.7 ms, band 798+48, shifted 48
 ```
 
+**Selection and links.** `mousePressEvent`/`mouseMoveEvent`/`mouseReleaseEvent` go to
+`DocumentRenderer::hit_test`, and the selection is kept as two document offsets in `shell.rs`. It is
+painted with a translucent `QPainter::fillRect` after the page blit, so the frame is still the
+document only. A release without movement follows the link or footnote under the press: a
+`#fragment` scrolls with `PageLayout::y_of`, another local Markdown file is loaded and scrolled to
+its fragment after layout, and `http(s)`/`mailto` goes through `QDesktopServices::openUrl`. The
+cursor becomes a pointing hand over a link or footnote mark. `--select-test`, `--select-hold` and
+`--link-test` drive these through Qt's real event path for scripted checks.
+
 **No band path here, on purpose.** The raster backend has no upload to save and `drawImage` only
 touches the pixels the paint event exposes. Measured on Windows: 0.5-0.7 ms per 48 px scroll paint at
 1086x846, and 2.0 ms at 3386x1327 (4.5 Mpx) - inside the 4 ms and 8 ms budgets. Cutting it further
@@ -384,6 +429,9 @@ and are not errors.
 | `shell-qt-{light,scrolled,open,images}.png` | the Qt window at the top, after a bar click, the Open dialog, images |
 | `shell-qt-linux.png` | the Qt shell built against Qt 6.8.2 on Debian 13 under Xvfb |
 | `shell-qt-1mb.png` | the Qt shell on the 1 MB generated document |
+| `shell-qt-selection.png` | the Qt shell with "Markdown" selected (`--select-hold`) |
+| `shell-winui-selection.png` | the WinUI window after a real press-drag-release over the heading |
+| `shell-winui-anchor.png` | the WinUI window after clicking the `#diagrams` link |
 
 **These are for review, not a pixel baseline yet.** They use this host's system fonts (Segoe UI,
 Consolas), so another machine or Linux will differ; the plan calls for bundled fonts and a tolerance
@@ -429,8 +477,12 @@ Traps that cost time here:
 
 **Windows:** the whole workspace test suite; the WinUI shell on `fixtures/showcase.md` and
 `fixtures/images.md` with the wheel, real keys, scrollbar clicks and drags, both themes, `--zoom`,
-`--trace`, `--measure`, a live resize (2000x1250, reflowed to 1984x1171 with a whole-frame upload), and
-the shifted-frame path against a whole-frame reference; the Qt shell on the same files with layout,
+`--trace`, `--measure`, a live resize (2000x1250, reflowed to 1984x1171 with a whole-frame upload),
+and the shifted-frame path against a whole-frame reference; selection in both shells: Qt through
+`--select-test` (selection 7..15 = "Markdown", one rect) and `--link-test` (scrolled to 1222, the row
+`y_of` reports for the Diagrams heading), plus a captured `--select-hold`; WinUI through a real
+press-drag-release on the running window (a drag from the heading into the next paragraph, two
+selection rows) and a click on the `#diagrams` link, both captured. The Qt shell on the same files with layout,
 first paint, wheel, scrollbar, keys, File > Open..., themes, `--zoom`, a live resize to 3400x1380 and
 `--drop-test`.
 
@@ -439,11 +491,12 @@ passing, and `cargo test --release -p mdview-core -p mdview-render` passing.
 
 **Not run:** the Qt View/Help menu items; the Qt scrollbar and keys on Linux (Windows only); DPI scales
 other than 100% (zoom is tested, DPI scaling is not); a real OLE drag from Explorer (the drop test drives
-Qt's event path instead).
+Qt's event path instead); the new selection and link checks on Linux (Windows only so far).
 
 ## 11. Known gaps
 
-- **No selection, links, anchors, or `<details>` toggling.** `BlockBox` exists for this and is unused.
+- **No copy or toggling yet.** Selection is drawn but Ctrl+C does not copy it, and `<details>` still
+  does not open or close. `BlockBox` and the hit map are what a toggle needs next.
 - **SVG** (and anything that is not PNG/JPEG) is a placeholder; `<picture>` light/dark sources and
   `width`/`height` attributes are ignored; a blocked image is retried on every render.
 - No find, tabs, folder tree, outline or recent files in either shell; no bundled fonts.
@@ -455,26 +508,22 @@ Qt's event path instead).
 
 ## 12. What to do next
 
-1. **Get the four `tests/golden/` images approved by the user** - it is the Phase 2 exit gate. Show
-   `showcase-{light,dark}@{1.0,1.5}.png` plus the shell captures and ask for a yes or a list of
-   changes.
-2. **Selection and link/anchor hit-testing.** Start in `crates/render`:
-   - `PageLayout` already stores every top-level block's extent (`spans: Vec<BlockBox>`) from the height
-     pass, but exposes only `total_height()` and `matches()`. Add an accessor and a `block_at(y)`.
-   - `Pager` (the layout+paint pass) keeps `blocks: Vec<BlockBox>` for the slice and a per-block paint
-     cache (`HashMap<u32, Vec<Paint>>`); a text run's rect has to be recorded there for a per-block hit
-     test, and the same map can carry link and anchor targets.
-   - The shells then need a selection model (anchor + focus in page coordinates, stored as
-     `(block, offset)` so it survives a re-layout) and a hover cursor over links. Keep the selection
-     out of the frame delta: `band`/`shift` describe the document, selection is drawn on top.
-3. **`<details>` toggling** after that: the doc model needs an open/closed flag per `<details>`, and the
-   height pass has to be invalidated for that block only (the paint cache is per block, so a rebuild is
-   cheap).
-4. **Phase 4, SVG**: a new `mdview-engine` process (the plan's Phase 4) that renders SVG with resvg; the
+1. **Get the `tests/golden/` images approved by the user** - it is the Phase 2 exit gate. Show
+   `showcase-{light,dark}@{1.0,1.5}.png` plus the shell captures (including the new selection and
+   anchor shots) and ask for a yes or a list of changes.
+2. **`<details>` toggling** is the last unstarted Phase 2 row. The model already keeps
+   `Details { open }` and `Document::hidden_ranges(is_open)` / `details_keys()`; the renderer's
+   `details()` currently uses `details_open_as_written`. Give the renderer an open-state callback,
+   hit-test the summary row (the `LineGeom` for the summary is cached like any other), and invalidate
+   just that block: the paint cache is per top-level block, and `PageLayout` is cheap to rebuild, so
+   a toggle can do one height pass and redraw. Keep open state in the shell, keyed by
+   `details_keys()`.
+3. **Phase 4, SVG**: a new `mdview-engine` process (the plan's Phase 4) that renders SVG with resvg; the
    image cache is already shared across frames, so a decoded SVG slots into `images` where a PNG does.
-5. **Then the Qt/WinUI parity items** from `docs/PORT_CHECKLIST.md`: tabs, folder tree, outline, find,
-   recents, zoom limits, themes, focus mode, session restore.
-6. **Bundled fonts**, then turn the goldens into a real pixel suite (the plan's Phase 6).
+4. **Then the Qt/WinUI parity items** from `docs/PORT_CHECKLIST.md`: tabs, folder tree, outline, find,
+   recents, zoom limits, themes, focus mode, session restore. Selection is done in both shells; copy
+   to the clipboard and a link context menu are the obvious next shell features.
+5. **Bundled fonts**, then turn the goldens into a real pixel suite (the plan's Phase 6).
 
 Every Qt/Linux change is tested on the VM as well as on Windows, and nothing counts as working on
 Windows until it has run on Windows.
