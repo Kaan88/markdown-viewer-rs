@@ -48,7 +48,8 @@ approved by the user.
   to build. It has its own `Cargo.lock` (the Qt-only graph, seeded from the spike's lock) and its
   own target directory.
 - Window 1100x900, menus File > Quit, View > Light/Dark theme, Help > About, a status bar with the
-  file name and block count. A file comes from the command line or is dropped on the window
+  file name and block count. `--zoom 1.5` scales the page (verified: showcase page grows from
+  3020 px to 4596 px at 1.5). A file comes from the command line or is dropped on the window
   (Qt file URIs, `%20` decoded). There is no File > Open dialog yet.
 - `src/shell.rs` renders the page with `mdview-render` for the canvas width and device pixel ratio,
   copies the visible slice into a BGRX buffer and blits it through QPainter with an identity

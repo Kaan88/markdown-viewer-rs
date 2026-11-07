@@ -33,10 +33,11 @@ struct Shell {
     scroll: Cell<f64>,
     viewport: Cell<i32>,
     theme: Cell<Theme>,
+    zoom: Cell<f64>,
 }
 
 impl Shell {
-    fn new(theme: Theme) -> Shell {
+    fn new(theme: Theme, zoom: f64) -> Shell {
         Shell {
             window: Cell::new(None),
             canvas: Cell::new(None),
@@ -48,6 +49,7 @@ impl Shell {
             scroll: Cell::new(0.0),
             viewport: Cell::new(0),
             theme: Cell::new(theme),
+            zoom: Cell::new(zoom),
         }
     }
 
@@ -109,9 +111,10 @@ impl Shell {
     }
 
     fn options(&self, width: i32, scale: f64) -> Options {
+        let zoom = self.zoom.get();
         Options {
-            width: width as f32,
-            scale: scale as f32,
+            width: (width as f64 / zoom) as f32,
+            scale: (scale * zoom) as f32,
             theme: self.theme.get(),
             max_height: None,
             base_dir: self
@@ -286,14 +289,19 @@ fn build(shell: &Rc<Shell>, file: Option<PathBuf>) {
 pub fn run() -> i32 {
     let mut file = None;
     let mut theme = LIGHT;
-    for argument in std::env::args().skip(1) {
+    let mut zoom = 1.0f64;
+    let mut args = std::env::args().skip(1);
+    while let Some(argument) = args.next() {
         match argument.as_str() {
             "--light" => theme = LIGHT,
             "--dark" => theme = DARK,
+            "--zoom" => {
+                zoom = args.next().expect("--zoom needs a number").parse().unwrap();
+            }
             other if !other.starts_with("--") => file = Some(PathBuf::from(other)),
             other => eprintln!("mdview-qt: ignoring {other}"),
         }
     }
-    let shell = Rc::new(Shell::new(theme));
+    let shell = Rc::new(Shell::new(theme, zoom.clamp(0.5, 3.0)));
     run_app(move || build(&shell, file))
 }
