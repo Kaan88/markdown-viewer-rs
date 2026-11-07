@@ -27,10 +27,19 @@ Diagrams heading sits just below the top edge. `shell-winui-details.png` is the 
 through `mdview-engine` in both shells. `shell-winui-two-svg.png` is `fixtures/two-svg.md`, where
 both badges come from one engine process; the process count was 1 three seconds in and 0 after the
 10 s idle exit, with the viewer still open.
+`shell-qt-math.png` and `shell-winui-math.png` are `fixtures/math.md`: inline math on the text
+baseline, centred display math, a matrix, a heading formula and formulas inside a table. All seven
+came from one shared engine process.
+
+Math changed the showcase: the page is now 3041 px at 100% (the inline fraction and sum make that
+line taller) and the Mathematics section shows rendered formulas instead of labelled code boxes, so
+the four `showcase-*` images were regenerated. The engine must be built (or `MDV_ENGINE` set) when
+regenerating, because SVG and math go through it.
 
 `images-light.png` is `fixtures/images.md` through `mdv-bench`: a real PNG drawn as a block and
-inline, next to the placeholders for a missing file and an SVG. `shell-winui-images.png` and
-`shell-qt-images.png` show the same file in both shells, with the badge drawn both ways.
+inline, a missing file's placeholder, and the SVG badge that the engine now draws in the last line.
+`shell-winui-images.png` and `shell-qt-images.png` show the same file in both shells, with the badge
+drawn both ways.
 
 They are **not** a pixel test baseline yet:
 

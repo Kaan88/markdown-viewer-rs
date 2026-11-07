@@ -33,18 +33,18 @@ Phase 2, the headless renderer, and it is nearly done.**
 |---|---|
 | every block type laid out and painted | done |
 | themes, zoom, DPI scaling | done |
-| images (PNG/JPEG, limits, inline) | done; SVG is Phase 4 |
+| images (PNG/JPEG, limits, inline) | done; SVG and math draw through `mdview-engine` |
 | virtualized viewport, scroll budget | done: 0.2-2.6 ms per scroll frame (budget 4 ms at 150%, 8 ms at 4K) |
 | selection, link/anchor hit-testing | done in the renderer and both shells; no clipboard copy yet |
 | `<details>` toggling | done: a summary click flips it in both shells; view state lives in the renderer |
 | exit gate: goldens approved by the user | **open**: the images in `tests/golden/` have not been approved yet |
 
-Phase 4 has its first slice: SVG files render through `mdview-engine` (resvg), so the showcase's
-badge and `fixtures/images.md` draw instead of showing a placeholder. Math, Mermaid and syntax
-highlighting still show their source.
+Phase 4 has two slices: SVG files render through `mdview-engine` (resvg), and TeX math renders through
+RaTeX into the same rasterizer. The showcase's badge, its inline and display formulas and
+`fixtures/math.md` all draw; Mermaid and syntax highlighting still show their source.
 
 So the immediate queue is the golden approval, which is the Phase 2 exit gate; then Phase 3 (Qt shell parity),
-Phase 4 (engine: math, Mermaid, highlighting, SVG), Phase 5 (WinUI parity, W1-W3), Phase 6 (polish,
+Phase 4 (engine: Mermaid, highlighting), Phase 5 (WinUI parity, W1-W3), Phase 6 (polish,
 installer). The shells already exist and run, which is ahead of the plan's order - the user asked for
 the UIs early - so Phase 3 and 5 become "make the existing shells match the checklist" rather than
 "build them".
@@ -68,15 +68,15 @@ Toolchain here: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msv
 ```powershell
 cd C:\Users\kaank\Desktop\mv
 cargo test --release --offline --workspace     # 7 core, 11 fuzz, 113 regression, 3 spec,
-                                               # 4 engine, 4 engine-proto, 6 render unit
-                                               # (4 + 2 ignored deadline waits), 17 render integration
+                                               # 7 engine, 6 engine-proto, 5 render unit
+                                               # (3 + 2 ignored deadline waits), 18 render integration
 cargo fmt --all --check
 cargo build --release --offline --workspace    # includes target/release/mdview-engine.exe
 cargo build --release --offline -p mdview-winui
 ```
 
 The shells look for `mdview-engine` beside themselves or in a `target/release` above them, so build
-the workspace (or set `MDV_ENGINE`) before opening a document with SVG.
+the workspace (or set `MDV_ENGINE`) before opening a document with SVG or math.
 
 **Cargo cannot reach crates.io from this machine** (`schannel: AcquireCredentialsHandle failed:
 SEC_E_NO_CREDENTIALS`), so always pass `--offline`. If a dependency is missing from the cache,
@@ -204,10 +204,10 @@ Then:
 
 ```sh
 cd ~/mdview/bins/mdv-qt && export QMAKE=/usr/lib/qt6/bin/qmake6 && cargo build --release
-cd ~/mdview && cargo build --release -p mdview-engine      # for SVG images
+cd ~/mdview && cargo build --release -p mdview-engine      # for SVG images and math
 cd ~/mdview && cargo test --release -p mdview-core -p mdview-render -p mdview-engine -p mdview-engine-proto
                                                                       # 7 core, 11 fuzz, 113 regression,
-                                                                      # 3 spec, 4 engine, 4 proto, 6+17 render
+                                                                      # 3 spec, 7 engine, 6 proto, 5+18 render
 cd ~/mdview && xvfb-run -a /mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt \
     --drop-test fixtures/linked.md                                   # prints "drop test ok: ..."
 cd ~/mdview && BIN=/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt
@@ -217,7 +217,7 @@ xvfb-run -a $BIN fixtures/showcase.md --light --details-test         # "details 
 ```
 
 The scripted checks print one line and exit; on this VM they report selection `7..15` ("Markdown"),
-a link jump to 1243 px (Linux font metrics) and a details height of 3041 -> 3095 px.
+a link jump to 1266 px (Linux font metrics) and a details height of 3064 -> 3118 px.
 
 Capturing a Linux window (`Xvfb` has no window manager, so the window sits at 0,0):
 
@@ -227,7 +227,7 @@ DISPLAY=:99 /mnt/.../target/release/mdview-qt fixtures/showcase.md & sleep 6
 DISPLAY=:99 import -window root /tmp/shot.png
 ```
 
-Linux font metrics differ from Windows (the showcase page is 3041 px tall there, 3020 here), so Linux
+Linux font metrics differ from Windows (the showcase page is 3064 px tall there, 3040 here), so Linux
 renders are for "does it run and look sane", not for golden comparison. CJK needed
 `fonts-noto-cjk`; the renderer's stack falls back through fontconfig.
 
@@ -322,7 +322,7 @@ cargo run --release --offline -p mdv-bench -- --input spikes/parser/data/generat
 Height pass 3.7-9.3 ms, glyph cache 92% hit, bitmap is the viewport rather than the page. Both plan
 budgets (4 ms p99 at 150%, 8 ms at 4K) are met with room.
 
-### Phase 4, first slice: SVG through `mdview-engine`
+### Phase 4 slices: SVG and math through `mdview-engine`
 
 `crates/engine` is both a library (`mdview_engine`) and the `mdview-engine` binary. The library
 renders SVG with resvg 0.47 (0.49 is not in the offline cache; the API used here is unchanged), loads
@@ -330,26 +330,50 @@ system fonts once per process, and clamps the raster to the renderer's 24 M pixe
 back through the renderer's sans stack when usvg's default serif fallback is unavailable, which is
 what makes the badge's label appear on a minimal Debian install as well as on Windows.
 
+Math is a second job kind. `KIND_MATH` carries a small header (font size in device pixels per em,
+a display flag, the RGB text colour) and then the TeX source; the reply adds a **baseline** to the
+usual `status/width/height/length` header. RaTeX 0.1.15 parses and lays out the formula, writes an
+SVG display list with **embedded KaTeX fonts** (the `embed-fonts` feature), and resvg rasterizes it
+through the same `render_svg` path. Two details matter: the paint syntax is RGB rather than RaTeX's
+default `rgba()`, which is not valid SVG 1.1, and RaTeX sizes the root in `pt` while its viewBox is
+in pixels, so the engine strips the unit or every formula comes out a third too large. The engine's
+reply baseline is `padding + layout height * font size`, which is what puts inline math on the text
+line instead of hanging below it.
+
+The renderer turns an inline `$...$` span into one image atom, rendered at **twice the surrounding
+text size** so it stays crisp when a heading, table cell, footnote or zoom enlarges it; the box and
+baseline are halved back in `text_layout`. A `$$...$$` (or fenced ```math) block is a centred image
+with normal paragraph spacing. If the engine is missing, or RaTeX rejects the source, inline math
+falls back to its styled source text and a display block falls back to the old labelled code box.
+Building up a table cell used to drop its inline boxes entirely; `cell_inline` now shifts and keeps
+them, which is also what makes math and images inside tables work.
+
 The renderer never links it: `crates/render/src/engine.rs` keeps **one shared process** in a global
-slot. The first SVG starts it and a worker thread owns its pipes; later jobs reuse it, so the font
-database is loaded once. Each job has a 5 s deadline. A pipe error (the engine's 10 s idle exit, or
-a crash) invalidates the slot and the same job retries once against a fresh process; a timeout also
-kills and reaps the process and returns a placeholder, so the next job starts clean. A missing
-engine, a bad raster or a malformed SVG leaves the existing placeholder, so a hostile file can slow
-one image, not the viewer.
+slot. The first SVG or formula starts it and a worker thread owns its pipes; later jobs reuse it, so
+the font database is loaded once. Each job has a 5 s deadline. A pipe error (the engine's 10 s idle
+exit, or a crash) invalidates the slot and the same job retries once against a fresh process; a
+timeout also kills and reaps the process and returns a placeholder, so the next job starts clean. A
+missing engine, a bad raster or a malformed job leaves the existing placeholder, so a hostile file
+can slow one image, not the viewer.
 
 `image::load` sends anything whose first tag is `<svg` (after an optional XML declaration) to the
 engine; PNG and JPEG stay in-process. The binary is found through `MDV_ENGINE`, beside the current
 executable, or in `target/release` beside an ancestor, which covers the Qt shell building into its
 own `bins/mdv-qt/target/release`.
 
+**Offline build note.** The local registry index lists `bit-set` 0.10 and `bit-vec` 0.9, but
+`ratex-parser`'s `fancy-regex` needs 0.8; their 0.8 crates were in the cache. They are extracted under
+`vendor/` and pinned with `[patch.crates-io]` in the workspace `Cargo.toml` so `--offline` resolves.
+
 Measured on this PC: two consecutive 180x28 badge jobs took **13.2 ms then 2.4 ms with one engine
 start**; a deliberately stalled engine was killed at **5003.9 ms** and the next job started in
 13.4 ms; after **11 s idle** the next job took 15.7 ms and started exactly one fresh process.
-`fixtures/two-svg.md` (two badges) draws through `mdv-bench` in 24.8 ms. On the Linux VM the same
-checks report **5.2 ms then 0.8 ms**, a stalled job killed at **5003.0 ms** with a **3.6 ms**
-respawn, **3.7 ms** after 11 s idle, and **10.8 ms** for the two badges. The idle and stalled cases
-are `#[ignore]`d tests, because they wait out the real deadlines.
+`fixtures/two-svg.md` (two badges) draws through `mdv-bench` in 24.8 ms. `fixtures/math.md` (seven
+formulas including a matrix, a table and a heading) draws in **18.7 ms** on Windows and **14.7 ms**
+on the VM, with one engine process for all of them; the shells show the same page. On the VM the
+sharing checks report **5.2 ms then 0.8 ms**, a stalled job killed at **5003.0 ms** with a **3.6 ms**
+respawn, and **3.7 ms** after 11 s idle. The idle and stalled cases are `#[ignore]`d tests, because
+they wait out the real deadlines.
 
 ## 7. The WinUI shell (`bins/mdv-winui`)
 
@@ -502,12 +526,18 @@ and are not errors.
 | `shell-qt-svg.png` | the Qt shell at scroll 760: the showcase badge is an SVG, drawn by the engine |
 | `shell-winui-svg.png` | the same view in WinUI, with the engine running beside the shell |
 | `shell-winui-two-svg.png` | `fixtures/two-svg.md`: both badges from the one shared engine process |
+| `shell-qt-math.png` | the Qt shell on `fixtures/math.md`: inline, display, matrix, heading and table formulas |
+| `shell-winui-math.png` | the same page in WinUI, one engine process for all seven formulas |
 
 **These are for review, not a pixel baseline yet.** They use this host's system fonts (Segoe UI,
 Consolas), so another machine or Linux will differ; the plan calls for bundled fonts and a tolerance
 before they become a suite. The four review images still have **not been approved by the user**.
+Math changed the showcase page height from 3020 to 3041 px here (inline fractions and sums need a
+taller line), so the four `showcase-*` files were regenerated with the engine built; they are the
+current review copies.
 
-Renderer goldens regenerate byte-identically:
+Renderer goldens regenerate byte-identically when `mdview-engine` is built beside the bench (SVG and
+math need it):
 
 ```powershell
 cargo run --release --offline -p mdv-bench -- --all
@@ -549,11 +579,11 @@ Traps that cost time here:
 `fixtures/images.md` with the wheel, real keys, scrollbar clicks and drags, both themes, `--zoom`,
 `--trace`, `--measure`, a live resize (2000x1250, reflowed to 1984x1171 with a whole-frame upload),
 and the shifted-frame path against a whole-frame reference; selection in both shells: Qt through
-`--select-test` (selection 7..15 = "Markdown", one rect) and `--link-test` (scrolled to 1222, the row
+`--select-test` (selection 7..15 = "Markdown", one rect) and `--link-test` (scrolled to 1242, the row
 `y_of` reports for the Diagrams heading), plus a captured `--select-hold`; WinUI through a real
 press-drag-release on the running window (a drag from the heading into the next paragraph, two
 selection rows) and a click on the `#diagrams` link, both captured; `<details>` toggling through
-`--details-test` in both shells (3020 -> 3074 px, the body appearing) and a WinUI capture of the
+`--details-test` in both shells (3040 -> 3094 px, the body appearing) and a WinUI capture of the
 open body. The Qt shell on the same files with layout,
 first paint, wheel, scrollbar, keys, File > Open..., themes, `--zoom`, `--scroll`, a live resize to
 3400x1380 and `--drop-test`. The SVG badge renders through `mdview-engine` in `mdv-bench` and both
@@ -562,14 +592,20 @@ shells; with `MDV_ENGINE` pointing at a missing file the same view falls back to
 2.4 ms), kills a stalled one at 5003.9 ms and respawns in 13.4 ms, and replaces the idle-exited
 process after 11 s in 15.7 ms; `fixtures/two-svg.md` draws both badges in 24.8 ms. In the running
 WinUI shell with `two-svg.md`, `Get-Process mdview-engine` counted 1 process three seconds in and 0
-after 15 s, while the window stayed open and both badges stayed drawn.
+after 15 s, while the window stayed open and both badges stayed drawn. Math renders in `mdv-bench` at
+light, dark and 150% and in both shells (`fixtures/math.md`: inline, display, matrix, heading and
+table formulas; one engine process for all seven), and falls back to source text or the labelled math
+box with `MDV_ENGINE` missing. The table-cell image path that `cell_inline` used to drop is covered by
+`a_table_cell_draws_its_inline_image`.
 
 **Linux:** the Qt shell built with Qt 6.8.2 on the VM, run and captured under Xvfb, `--drop-test`,
-`--select-test` (7..15 = "Markdown"), `--link-test` (scrolled to 1243 px) and `--details-test`
-(3041 -> 3095 px) passing, and `cargo test --release -p mdview-core -p mdview-render` passing
-(17 render tests included). `mdv-bench fixtures/images.md` renders the SVG badge at 780x413 in
+`--select-test` (7..15 = "Markdown"), `--link-test` (scrolled to 1266 px) and `--details-test`
+(3064 -> 3118 px) passing, and `cargo test --release -p mdview-core -p mdview-render` passing
+(18 render tests included). `mdv-bench fixtures/images.md` renders the SVG badge at 780x413 in
 11.4 ms with its text: the engine's font query now falls through Noto Sans, DejaVu Sans and the
 other names in the renderer's stack because fontdb reports no generic `sans-serif` face there.
+`mdv-bench fixtures/math.md` draws all seven formulas at 780x631 in 14.7 ms, and the engine and
+protocol test binaries pass on the VM (7 and 6).
 
 **Not run:** the Qt View/Help menu items; the Qt scrollbar and keys on Linux (Windows only); DPI scales
 other than 100% (zoom is tested, DPI scaling is not); a real OLE drag from Explorer (the drop test drives
@@ -578,11 +614,14 @@ Qt's event path instead).
 ## 11. Known gaps
 
 - **No copy yet.** Selection is drawn but Ctrl+C does not copy it, and links have no context menu.
-- **Images:** PNG and JPEG decode in-process, SVG through `mdview-engine`; `<picture>` light/dark
-  sources and `width`/`height` attributes are ignored, and any other format keeps its placeholder. A
-  blocked image is retried on every render.
+- **Images:** PNG and JPEG decode in-process, SVG and math through `mdview-engine`; `<picture>`
+  light/dark sources and `width`/`height` attributes are ignored, and any other format keeps its
+  placeholder. A blocked image is retried on every render.
 - No find, tabs, folder tree, outline or recent files in either shell; no bundled fonts.
-- Table `colspan`/`rowspan` ignored; math, Mermaid and highlighting show their source (Phase 4).
+- Table `colspan`/`rowspan` ignored; Mermaid and highlighting still show their source (Phase 4).
+- Math blocks are images: dragging across a display equation selects nothing, and there is no
+  equation numbering or copy-as-TeX.
+- Mermaid and fenced source blocks still show their source; highlighting is not applied to code.
 - The WinUI title bar follows Windows, not the in-app theme override.
 - The WinUI scrollbar is drawn by the shell, not a WinUI control (no `ScrollBar` in the bindings).
 - Scroll frames meet the budgets, but a frame still waits for vsync (3-6 ms in the trace): the
@@ -593,9 +632,9 @@ Qt's event path instead).
 1. **Get the `tests/golden/` images approved by the user** - it is the Phase 2 exit gate. Show
    `showcase-{light,dark}@{1.0,1.5}.png` plus the shell captures (including the new selection,
    anchor and details shots) and ask for a yes or a list of changes.
-2. **Phase 4, the rest**: math (RaTeX), Mermaid (merman, 8 families), and syntax highlighting
-   (syntect/two-face) join the engine, reusing the job/reply format, the shared process and the 5 s
-   deadline. SVG is already done. The client keeps the process warm; its idle exit and the
+2. **Phase 4, the rest**: Mermaid (merman, 8 families) and syntax highlighting (syntect/two-face)
+   join the engine, reusing the job/reply format, the shared process and the 5 s deadline. SVG and
+   math are done. The client keeps the process warm; its idle exit and the
    kill-and-respawn path are tested.
 3. **Then the Qt/WinUI parity items** from `docs/PORT_CHECKLIST.md`: tabs, folder tree, outline, find,
    recents, zoom limits, themes, focus mode, session restore. Selection and `<details>` are done in
