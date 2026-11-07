@@ -310,7 +310,7 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn build(shell: &Rc<Shell>, file: Option<PathBuf>) {
+fn build(shell: &Rc<Shell>, file: Option<PathBuf>, drop_test: Option<PathBuf>) {
     let window = H::<QMainWindow>::new();
     window.widget().set_title("mdview");
     window.widget().resize(1100, 900);
@@ -383,11 +383,44 @@ fn build(shell: &Rc<Shell>, file: Option<PathBuf>) {
         *shell.document.borrow_mut() = Some(parse_bytes(WELCOME.as_bytes()));
         shell.redraw();
     }
+
+    // `--drop-test` sends one drop through the window's event path (Qt uses OLE, so a WM_DROPFILES
+    // from another process never arrives) and exits with the result, for scripted checks.
+    if let Some(target) = drop_test {
+        let (x, y) = canvas.widget().center_in_window();
+        let text = target.display().to_string();
+        let sent = window
+            .widget()
+            .window_handle()
+            .map(|window| window.send_drag_and_drop(x, y, &text));
+        let loaded = shell.path.borrow().as_deref() == Some(target.as_path());
+        match sent {
+            Some((entered, dropped)) if loaded => {
+                println!(
+                    "drop test ok: {} entered={entered} dropped={dropped}",
+                    target.display()
+                );
+                std::process::exit(0);
+            }
+            Some((entered, dropped)) => {
+                println!(
+                    "drop test failed: {} entered={entered} dropped={dropped}",
+                    target.display()
+                );
+                std::process::exit(1);
+            }
+            None => {
+                println!("drop test failed: no window handle");
+                std::process::exit(1);
+            }
+        }
+    }
 }
 
 /// `mdview-qt [FILE] [--light|--dark]`.
 pub fn run() -> i32 {
     let mut file = None;
+    let mut drop_test = None;
     let mut theme = LIGHT;
     let mut zoom = 1.0f64;
     let mut args = std::env::args().skip(1);
@@ -398,10 +431,15 @@ pub fn run() -> i32 {
             "--zoom" => {
                 zoom = args.next().expect("--zoom needs a number").parse().unwrap();
             }
+            "--drop-test" => {
+                drop_test = Some(PathBuf::from(
+                    args.next().expect("--drop-test needs a path"),
+                ));
+            }
             other if !other.starts_with("--") => file = Some(PathBuf::from(other)),
             other => eprintln!("mdview-qt: ignoring {other}"),
         }
     }
     let shell = Rc::new(Shell::new(theme, zoom.clamp(0.5, 3.0)));
-    run_app(move || build(&shell, file))
+    run_app(move || build(&shell, file, drop_test))
 }

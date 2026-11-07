@@ -50,9 +50,11 @@ approved by the user.
   exits.
 - Measured on this PC (RTX 4070 Ti SUPER, 96 DPI): first frame at 263.5 ms from process start,
   height pass 8.8 ms for the 1084 dip panel, parse 0.1 ms.
-- Checked by driving the running window with posted messages: three Page Downs move the page to the
-  footnotes and the thumb to the bottom, and a press-and-drag in the gutter lands mid-document.
-  File > Open and the View items are still only wired, not clicked.
+- Checked by driving the running window with posted messages and real clicks: three Page Downs move
+  the page to the footnotes and the thumb to the bottom, a press-and-drag in the gutter lands
+  mid-document, File > Open... opens `GetOpenFileNameW` (class `#32770`, "Open") and typing a path in
+  it loads the file, Reload parses the document again, View > Dark theme repaints the page and the
+  menu bar dark, and Close closes the window.
 - Screenshots: `tests/golden/shell-winui-light.png`, `shell-winui-dark.png`, `shell-winui-images.png`.
 
 ## The Qt shell (`bins/mdv-qt`)
@@ -97,6 +99,11 @@ approved by the user.
 - Checked by driving the running Windows build: Page Down scrolls and the bar's thumb moves, a click
   in the bar's groove jumps a page, File > Open... opens the dialog in `fixtures/` and loading
   `linked.md` through it updates the title, the page and the status bar.
+- **Drag and drop** is reached through `--drop-test <path>`, which sends one `QDragEnterEvent` and
+  `QDropEvent` through the window and exits 0 when the dropped path was loaded. It exists because Qt
+  uses OLE drag and drop on Windows: the platform plugin has no `DragQueryFileW`, `DragAcceptFiles`
+  or `WM_DROPFILES` handling, so a posted `WM_DROPFILES` from another process is ignored. The check
+  passes on Windows and on the VM under Xvfb.
 - Screenshots: `tests/golden/shell-qt-light.png` (page top, scrollbar at zero), `shell-qt-scrolled.png`
   (after a click in the bar), `shell-qt-open.png` (the Open dialog).
 - The crate emits seven `unnecessary unsafe block` warnings from the `pin!` macro; they predate this
@@ -179,9 +186,10 @@ File > Open... opened the dialog and loaded `linked.md` from it.
 Run on Linux: the Qt shell on the VM, built with Qt 6.8.2, drawn and captured under Xvfb (the
 screenshot shows the scrollbar in place).
 
-Not tested by hand: the WinUI File > Open dialog and View theme items (wired, not clicked); the Qt
-View/Help menu items and drag and drop since the scrollbar landed; window resizing and reflow on
-both; DPI scaling other than 100%; the Qt scrollbar and keys on Linux (only on Windows).
+Not tested by hand: the Qt View/Help menu items, the WinUI window resizing and reflow on both,
+DPI scaling other than 100%, and the Qt scrollbar and keys on Linux (only on Windows). The Qt drop
+handler is covered by `--drop-test`, which drives Qt's event path rather than an OLE drag from
+Explorer.
 
 ## Linux target from Windows
 
@@ -210,9 +218,8 @@ files, writes the complete sparse index cache entry for every crate and download
   images now live on the `DocumentRenderer` and are shared by every frame, which is what keeps them
   in cached scroll frames (there is a test that fails without it).
 - **No selection, links, anchors or details toggling.** `BlockBox` is there for hit tests but unused.
-- **The WinUI File > Open, Reload and theme menu items are wired but have not been clicked**, and its
-  scrollbar is drawn by the shell rather than by a WinUI control. No find, tabs or document tree in
-  either shell.
+- **The WinUI scrollbar is drawn by the shell**, not by a WinUI control, because the checked-in
+  bindings have no `ScrollBar`. No find, tabs or document tree in either shell.
 - Table `colspan`/`rowspan` ignored; math, Mermaid and highlighting show source.
 - No bundled fonts, so goldens depend on system fonts.
 - The WinUI title bar follows Windows, not the in-app theme override.
@@ -220,12 +227,10 @@ files, writes the complete sparse index cache entry for every crate and download
 ## What to do next
 
 1. Get the four `tests/golden/` images and the shell screenshots approved.
-2. Click through the WinUI File and View menus, then the Qt drag and drop, which the Qt rework did not
-   re-test.
-3. Give the renderer a persistent frame plus dirty-band scrolling, for 4K and for the shells (they
+2. Give the renderer a persistent frame plus dirty-band scrolling, for 4K and for the shells (they
    currently copy a full viewport bitmap every frame).
-4. Add selection and link/anchor hit-testing, then details toggling.
-5. Add a shared image cache and SVG support when Phase 4 lands.
-6. Decide bundled fonts, then turn the goldens into a pixel suite.
+3. Add selection and link/anchor hit-testing, then details toggling.
+4. Add SVG support when Phase 4 lands (the image cache is already shared across frames).
+5. Decide bundled fonts, then turn the goldens into a pixel suite.
 
 Every Qt/Linux change is now tested on the VM above as well as on Windows.
