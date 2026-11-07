@@ -42,6 +42,7 @@ windows_core::link!("advapi32.dll" "system" fn RegGetValueW(hkey: *mut c_void, s
 windows_core::link!("user32.dll" "system" fn SetWindowsHookExW(id: i32, proc: unsafe extern "system" fn(i32, usize, isize) -> isize, module: *mut c_void, thread: u32) -> *mut c_void);
 windows_core::link!("user32.dll" "system" fn CallNextHookEx(hook: *mut c_void, code: i32, wparam: usize, lparam: isize) -> isize);
 windows_core::link!("user32.dll" "system" fn GetAncestor(window: *mut c_void, flags: u32) -> *mut c_void);
+windows_core::link!("shell32.dll" "system" fn ShellExecuteW(window: *mut c_void, operation: PCWSTR, file: PCWSTR, parameters: PCWSTR, directory: PCWSTR, show: i32) -> isize);
 
 /// `GETMESSAGE` hook id, `PM_REMOVE`, `WM_NULL` and `GA_ROOT`, from winuser.h.
 const WH_GETMESSAGE: i32 = 3;
@@ -236,6 +237,42 @@ struct OpenFileNameW {
 
 /// `GetOpenFileNameW`, because the WinRT file pickers need a window handle and a COM object this
 /// app does not otherwise use.
+/// Opens a web or mail link in the user's browser. Best effort: a failure leaves no message on a
+/// windowless shell, but the trace log has the destination.
+fn open_url(url: &str) {
+    let wide: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            PCWSTR(std::ptr::null()),
+            PCWSTR(wide.as_ptr()),
+            PCWSTR(std::ptr::null()),
+            PCWSTR(std::ptr::null()),
+            1,
+        )
+    };
+    diag::trace(&format!("opened {url}: {result}"));
+}
+
+/// `%20` and friends in a link destination.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(&text[i + 1..i + 3], 16) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 fn file_dialog() -> Option<PathBuf> {
     const FILE_MUST_EXIST: u32 = 0x0000_1000;
     const PATH_MUST_EXIST: u32 = 0x0000_0800;
@@ -287,6 +324,16 @@ struct Shell {
     dragging: Cell<Option<f32>>,
     /// Remaining `--scroll-steps` steps, each taken after a frame has been drawn.
     steps: Cell<u32>,
+    /// A text selection drag is in progress.
+    selecting: Cell<bool>,
+    /// Where the selection press landed.
+    selection_anchor: Cell<Option<u32>>,
+    /// The link or footnote under the press, followed on release when the pointer did not move.
+    pressed_link: Cell<Option<u32>>,
+    pressed_footnote: Cell<Option<u32>>,
+    selection_moved: Cell<bool>,
+    /// Select a word after the first frame, for `--select-test`.
+    select_test: Cell<bool>,
 }
 
 impl Shell {
@@ -297,6 +344,12 @@ impl Shell {
         const WM_SYSKEYDOWN: u32 = 0x0104;
         match msg {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
+                const VK_ESCAPE: usize = 0x1b;
+                if wparam == VK_ESCAPE {
+                    self.renderer.borrow_mut().set_selection(None);
+                    self.show();
+                    return true;
+                }
                 let scrolled = self.renderer.borrow_mut().key(wparam as u32);
                 if scrolled {
                     diag::trace(&format!(
@@ -311,6 +364,66 @@ impl Shell {
                 }
             }
             _ => false,
+        }
+    }
+
+    /// Follows the link or footnote under a click. A `#fragment` scrolls here, another Markdown
+    /// file is loaded (and scrolled to its fragment), and anything else goes to the browser.
+    fn follow(&self, link: Option<u32>, footnote: Option<u32>) {
+        if let Some(index) = footnote {
+            if self.renderer.borrow_mut().follow_footnote(index) {
+                self.show();
+            }
+            return;
+        }
+        let Some(index) = link else {
+            return;
+        };
+        let Some(destination) = self.renderer.borrow().link_destination(index) else {
+            return;
+        };
+        let (path, fragment) = match destination.split_once('#') {
+            Some((path, fragment)) => (path, Some(fragment)),
+            None => (destination.as_str(), None),
+        };
+        if path.is_empty() {
+            if let Some(fragment) = fragment {
+                self.renderer.borrow_mut().scroll_to_fragment(fragment);
+                self.show();
+            }
+            return;
+        }
+        let lower = path.to_ascii_lowercase();
+        if lower.starts_with("http://")
+            || lower.starts_with("https://")
+            || lower.starts_with("mailto:")
+        {
+            open_url(&destination);
+            return;
+        }
+        let target = PathBuf::from(percent_decode(path));
+        let resolved = if target.is_absolute() {
+            target
+        } else {
+            match self.path.borrow().as_ref().and_then(|path| path.parent()) {
+                Some(dir) => dir.join(target),
+                None => target,
+            }
+        };
+        if !resolved.is_file() {
+            diag::trace(&format!(
+                "link target is not a file: {}",
+                resolved.display()
+            ));
+            return;
+        }
+        // Lay the new document out first, then jump: `scroll_to_fragment` needs a page.
+        if load(self, &resolved).is_ok() {
+            self.show();
+            if let Some(fragment) = fragment {
+                self.renderer.borrow_mut().scroll_to_fragment(fragment);
+            }
+            self.show();
         }
     }
 
@@ -330,6 +443,16 @@ impl Shell {
             Ok(true) => {
                 if !self.presented.replace(true) {
                     diag::trace("first frame presented");
+                    if self.select_test.get() {
+                        self.select_test.set(false);
+                        let range = self.renderer.borrow_mut().select_word("Markdown");
+                        let rect = self.renderer.borrow_mut().selection_bounds();
+                        diag::trace(&format!(
+                            "select test: {range:?}, first rect {rect:?}, offset {:.0}",
+                            self.renderer.borrow().offset()
+                        ));
+                        self.show();
+                    }
                     if diag::measuring() {
                         // One line and out, so a script can time the first frame from process start.
                         diag::measure_line(&format!(
@@ -355,7 +478,7 @@ impl Shell {
     }
 }
 
-fn load(shell: &Rc<Shell>, path: &Path) -> std::result::Result<(), String> {
+fn load(shell: &Shell, path: &Path) -> std::result::Result<(), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let started = std::time::Instant::now();
     let document = parse_bytes(&bytes);
@@ -497,6 +620,8 @@ pub struct Startup {
     pub steps: u32,
     /// Logical window size, for `--size`.
     pub size: (i32, i32),
+    /// Select a word after the first frame, for `--select-test`.
+    pub select: bool,
 }
 
 pub fn build(
@@ -562,6 +687,12 @@ pub fn build(
         presented: Cell::new(false),
         dragging: Cell::new(None),
         steps: Cell::new(startup.steps),
+        selecting: Cell::new(false),
+        selection_anchor: Cell::new(None),
+        pressed_link: Cell::new(None),
+        pressed_footnote: Cell::new(None),
+        selection_moved: Cell::new(false),
+        select_test: Cell::new(startup.select),
     });
     if let Some(path) = &file
         && let Err(e) = load(&shell, path)
@@ -619,6 +750,25 @@ pub fn build(
                     return;
                 };
                 if x < bar.x {
+                    // The page: a press starts a selection, and a link or footnote is followed on
+                    // release if the pointer never moved.
+                    let hit = shell.renderer.borrow_mut().hit_test(x, y);
+                    if let Some(hit) = hit {
+                        _ = args.SetHandled(true);
+                        shell.selection_anchor.set(Some(hit.offset));
+                        shell
+                            .renderer
+                            .borrow_mut()
+                            .set_selection(Some((hit.offset, hit.offset)));
+                        shell.pressed_link.set(hit.link);
+                        shell.pressed_footnote.set(hit.footnote);
+                        shell.selection_moved.set(false);
+                        shell.selecting.set(true);
+                        diag::trace(&format!(
+                            "select press at {x:.0},{y:.0}: offset {}",
+                            hit.offset
+                        ));
+                    }
                     return;
                 }
                 _ = args.SetHandled(true);
@@ -635,11 +785,27 @@ pub fn build(
         let source = element.clone();
         element
             .pointer_moved(move |_, args| {
-                let Some(grab) = shell.dragging.get() else {
+                let Some(args) = args.as_ref() else { return };
+                let Some((x, y)) = shell.pointer_at(args, &source) else {
                     return;
                 };
-                let Some(args) = args.as_ref() else { return };
-                let Some((_, y)) = shell.pointer_at(args, &source) else {
+                if shell.selecting.get() {
+                    let Some(hit) = shell.renderer.borrow_mut().hit_test(x, y) else {
+                        return;
+                    };
+                    let anchor = shell.selection_anchor.get().unwrap_or(hit.offset);
+                    if hit.offset != anchor {
+                        shell.selection_moved.set(true);
+                    }
+                    _ = args.SetHandled(true);
+                    shell
+                        .renderer
+                        .borrow_mut()
+                        .set_selection(Some((anchor, hit.offset)));
+                    shell.show();
+                    return;
+                }
+                let Some(grab) = shell.dragging.get() else {
                     return;
                 };
                 let Some(bar) = shell.renderer.borrow().bar() else {
@@ -658,6 +824,22 @@ pub fn build(
             .pointer_released(move |_, args| {
                 if let Some(args) = args.as_ref() {
                     _ = args.SetHandled(true);
+                }
+                if shell.selecting.replace(false) {
+                    if !shell.selection_moved.get() {
+                        let link = shell.pressed_link.take();
+                        let footnote = shell.pressed_footnote.take();
+                        if link.is_some() || footnote.is_some() {
+                            shell.follow(link, footnote);
+                        } else {
+                            shell.renderer.borrow_mut().set_selection(None);
+                            shell.show();
+                        }
+                    } else {
+                        shell.pressed_link.set(None);
+                        shell.pressed_footnote.set(None);
+                        diag::trace("selection released");
+                    }
                 }
                 shell.dragging.set(None);
             })?

@@ -157,6 +157,7 @@ fn run() -> Result<()> {
         scroll: scroll_argument(),
         steps: steps_argument(),
         size: size_argument(),
+        select: std::env::args().any(|arg| arg == "--select-test"),
     };
     let gpu = Rc::new(RefCell::new(Some(gpu)));
     // Application and UI state must outlive Start, which returns at process end.

@@ -9,7 +9,7 @@
 use crate::bindings::*;
 use crate::diag;
 use mdview_core::Document;
-use mdview_render::{DocumentRenderer, Options, PageLayout, Theme};
+use mdview_render::{DocumentRenderer, Hit, Options, PageLayout, Rect, Theme};
 use std::ffi::c_void;
 use std::time::Instant;
 use windows_core::*;
@@ -112,6 +112,10 @@ pub struct Renderer {
     renderer: DocumentRenderer,
     document: Option<Document>,
     base_dir: Option<std::path::PathBuf>,
+    /// The options of the last frame, so hit tests and selection use the same page.
+    options: Option<Options>,
+    /// The selection, as two offsets into `Document::text`.
+    selection: Option<(u32, u32)>,
     theme: Theme,
     zoom: f32,
     scroll: f32,
@@ -143,6 +147,8 @@ impl Renderer {
             renderer: DocumentRenderer::new(),
             document: None,
             base_dir: None,
+            options: None,
+            selection: None,
             theme: mdview_render::LIGHT,
             zoom: 1.0,
             scroll: 0.0,
@@ -167,17 +173,23 @@ impl Renderer {
         self.document = Some(document);
         self.base_dir = base_dir;
         self.page_layout = None;
+        self.options = None;
+        self.selection = None;
         self.scroll = 0.0;
     }
 
     pub fn set_zoom(&mut self, zoom: f32) {
         self.zoom = zoom.clamp(0.5, 3.0);
         self.page_layout = None;
+        self.options = None;
+        self.selection = None;
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme;
         self.page_layout = None;
+        self.options = None;
+        self.selection = None;
     }
 
     pub fn scroll_by(&mut self, delta: f32) {
@@ -206,6 +218,104 @@ impl Renderer {
 
     pub fn scroll_to(&mut self, value: f32) {
         self.scroll = value.clamp(0.0, self.max_scroll());
+    }
+
+    /// What is under a panel position, in device px: the document offset and a link or footnote.
+    pub fn hit_test(&mut self, x: f32, y: f32) -> Option<Hit> {
+        let document = self.document.as_ref()?;
+        let options = self.options.as_ref()?;
+        let layout = self.page_layout.as_ref()?;
+        self.renderer
+            .hit_test(document, options, layout, x, y + self.scroll)
+    }
+
+    pub fn set_selection(&mut self, selection: Option<(u32, u32)>) {
+        self.selection = selection;
+    }
+
+    /// Selects the first occurrence of a word in the document, for `--select-test`.
+    pub fn select_word(&mut self, word: &str) -> Option<(u32, u32)> {
+        let start = {
+            let document = self.document.as_ref()?;
+            document.text.find(word)? as u32
+        };
+        let range = (start, start + word.len() as u32);
+        self.selection = Some(range);
+        Some(range)
+    }
+
+    /// The first page rectangle of the current selection, for logging the test's position.
+    pub fn selection_bounds(&mut self) -> Option<Rect> {
+        self.selection_rects().into_iter().next()
+    }
+
+    /// The selected text's page rectangles in device px.
+    pub fn selection_rects(&mut self) -> Vec<Rect> {
+        let Some((from, to)) = self.selection else {
+            return Vec::new();
+        };
+        if from == to {
+            return Vec::new();
+        }
+        let Some(document) = self.document.as_ref() else {
+            return Vec::new();
+        };
+        let Some(options) = self.options.as_ref() else {
+            return Vec::new();
+        };
+        let Some(layout) = self.page_layout.as_ref() else {
+            return Vec::new();
+        };
+        self.renderer
+            .selection_rects(document, options, layout, from.min(to), from.max(to))
+    }
+
+    /// Scrolls to a `#fragment` in the current document. False when no heading or anchor matches.
+    pub fn scroll_to_fragment(&mut self, fragment: &str) -> bool {
+        let row = {
+            let Some(document) = self.document.as_ref() else {
+                return false;
+            };
+            let Some(layout) = self.page_layout.as_ref() else {
+                return false;
+            };
+            document
+                .resolve_fragment(fragment)
+                .and_then(|block| layout.y_of(document, block))
+        };
+        let Some(row) = row else {
+            return false;
+        };
+        self.scroll_to(row - 24.0 * self.scale);
+        true
+    }
+
+    /// Scrolls to a footnote entry, by index into `Document::footnotes`.
+    pub fn follow_footnote(&mut self, index: u32) -> bool {
+        let row = {
+            let Some(document) = self.document.as_ref() else {
+                return false;
+            };
+            let Some(layout) = self.page_layout.as_ref() else {
+                return false;
+            };
+            document
+                .footnotes
+                .get(index as usize)
+                .and_then(|note| layout.footnote_y(note.number))
+        };
+        let Some(row) = row else {
+            return false;
+        };
+        self.scroll_to(row - 24.0 * self.scale);
+        true
+    }
+
+    /// A link's destination as written, for the shell to open or navigate.
+    pub fn link_destination(&self, index: u32) -> Option<String> {
+        let document = self.document.as_ref()?;
+        let link = document.links.get(index as usize)?;
+        Some(document.str(link.dest).to_string())
     }
 
     /// Home, End, the arrows, Page Up/Down and Space, in device px. False when the key is not ours.
@@ -359,6 +469,7 @@ impl Renderer {
             let sent = self.upload_page()?;
             let back_buffer: ID3D11Texture2D = swap_chain.GetBuffer(0)?;
             self.copy_page(&back_buffer)?;
+            self.overlay_selection(&back_buffer)?;
             self.upload_gutter(&back_buffer)?;
             let uploaded = uploading.elapsed();
             let presenting = Instant::now();
@@ -398,6 +509,7 @@ impl Renderer {
             max_height: None,
             base_dir: self.base_dir.clone(),
         };
+        self.options = Some(options.clone());
         let stale = self
             .page_layout
             .as_ref()
@@ -651,6 +763,78 @@ impl Renderer {
             self.gpu
                 .context
                 .copy_subresource_region(back_buffer, 0, 0, 0, &page, 0, Some(&boxed));
+            Ok(())
+        }
+    }
+
+    /// Draws the selection over the back buffer's copy of the page. The page texture itself stays
+    /// the document's pixels, so a selection never enters the frame delta or the scroll shift.
+    unsafe fn overlay_selection(&mut self, back_buffer: &ID3D11Texture2D) -> Result<()> {
+        unsafe {
+            if self.selection.is_none() {
+                return Ok(());
+            }
+            let rects = self.selection_rects();
+            if rects.is_empty() {
+                return Ok(());
+            }
+            let Some(frame) = self.renderer.frame() else {
+                return Ok(());
+            };
+            let (width, rows) = (frame.bitmap.width as usize, frame.bitmap.height as usize);
+            let mut spans = Vec::new();
+            let (mut lo, mut hi) = (rows, 0usize);
+            for rect in &rects {
+                let top = ((rect.y - frame.top).floor().max(0.0) as usize).min(rows);
+                let bottom = ((rect.y + rect.h - frame.top).ceil().max(0.0) as usize).min(rows);
+                let x0 = (rect.x.max(0.0) as usize).min(width);
+                let x1 = ((rect.x + rect.w).max(0.0) as usize).min(width);
+                if bottom <= top || x1 <= x0 {
+                    continue;
+                }
+                lo = lo.min(top);
+                hi = hi.max(bottom);
+                spans.push((top, bottom, x0, x1));
+            }
+            if lo >= hi || spans.is_empty() {
+                return Ok(());
+            }
+            let mut strip = vec![0u8; width * (hi - lo) * 4];
+            strip.copy_from_slice(&frame.bitmap.pixels[lo * width * 4..hi * width * 4]);
+            let [sr, sg, sb] = self.theme.accent;
+            let alpha = 72.0 / 255.0;
+            let blend = |under: u8, over: u8| -> u8 {
+                let value = (under as f32 * (1.0 - alpha) + over as f32 * alpha).round();
+                value.clamp(0.0, 255.0) as u8
+            };
+            for (top, bottom, x0, x1) in spans {
+                for y in top..bottom {
+                    let base = (y - lo) * width * 4;
+                    for x in x0..x1 {
+                        let at = base + x * 4;
+                        strip[at] = blend(strip[at], sb);
+                        strip[at + 1] = blend(strip[at + 1], sg);
+                        strip[at + 2] = blend(strip[at + 2], sr);
+                    }
+                }
+            }
+            let columns = (width as u32).min(self.gutter_x).max(1);
+            let boxed = D3D11_BOX {
+                left: 0,
+                top: lo as u32,
+                front: 0,
+                right: columns,
+                bottom: hi as u32,
+                back: 1,
+            };
+            self.gpu.context.UpdateSubresource(
+                back_buffer,
+                0,
+                Some(&boxed),
+                strip.as_ptr().cast::<c_void>(),
+                (width * 4) as u32,
+                0,
+            );
             Ok(())
         }
     }
