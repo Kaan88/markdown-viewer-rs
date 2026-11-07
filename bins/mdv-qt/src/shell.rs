@@ -128,6 +128,11 @@ impl Shell {
                 theme,
                 // A guard until virtualization exists; a very long file is cut off here.
                 max_height: Some(30_000.0),
+                base_dir: self
+                    .path
+                    .borrow()
+                    .as_ref()
+                    .and_then(|path| path.parent().map(|parent| parent.to_path_buf())),
             },
         );
         eprintln!(

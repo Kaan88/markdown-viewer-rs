@@ -224,7 +224,10 @@ fn load(shell: &Rc<Shell>, path: &Path) -> std::result::Result<(), String> {
         document.warnings.len(),
         started.elapsed().as_secs_f64() * 1000.0
     ));
-    shell.renderer.borrow_mut().set_document(document);
+    shell
+        .renderer
+        .borrow_mut()
+        .set_document(document, path.parent().map(|parent| parent.to_path_buf()));
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -373,7 +376,7 @@ pub fn build(
     let mut renderer = Renderer::new(gpu, panel.clone());
     renderer.set_theme(theme);
     if file.is_none() {
-        renderer.set_document(parse_bytes(WELCOME.as_bytes()));
+        renderer.set_document(parse_bytes(WELCOME.as_bytes()), None);
     }
     let shell = Rc::new(Shell {
         window: window.clone(),

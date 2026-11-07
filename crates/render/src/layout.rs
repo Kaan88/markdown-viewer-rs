@@ -1,18 +1,23 @@
-//! Lays the document model out in one top-down pass and paints it into a bitmap. This is the first
-//! Phase 2 milestone: no selection, anchors or scroll cache yet, and images, math and diagrams show
-//! a placeholder or their source until their phases. Virtualized layout comes next.
+//! Lays the document model out in one top-down pass and paints it into a bitmap: no selection,
+//! anchors or scroll cache yet. Images are drawn through parley inline boxes; math and diagrams
+//! still show their source. Virtualized layout comes next.
 
 use crate::bitmap::Bitmap;
+use crate::image::{self, DecodedImage};
 use crate::text::{Brush, TextEngine};
 use crate::theme::{Color, DARK, LIGHT, Theme};
 use mdview_core::model::{
     AlertKind, Align, BlockKind, Document, Footnote, ListMarker, NONE, SpanKind,
 };
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontFamily, FontStyle, FontWeight, Layout,
-    LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
+    Alignment, AlignmentOptions, FontContext, FontFamily, FontStyle, FontWeight, InlineBox,
+    InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
+    VerticalAlign,
 };
+use std::collections::HashMap;
 use std::ops::Range;
+use std::path::PathBuf;
+use std::rc::Rc;
 
 pub struct Options {
     /// Logical page width, before the device scale.
@@ -21,6 +26,9 @@ pub struct Options {
     pub theme: Theme,
     /// Stop laying out past this many logical px. The bitmap is clipped to it.
     pub max_height: Option<f32>,
+    /// The directory the document came from, so relative image paths resolve. `None` leaves
+    /// images as placeholders.
+    pub base_dir: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -30,6 +38,7 @@ impl Default for Options {
             scale: 1.0,
             theme: LIGHT,
             max_height: None,
+            base_dir: None,
         }
     }
 }
@@ -109,6 +118,17 @@ struct Inline {
     runs: Vec<(Range<usize>, Style)>,
     /// A task-list checkbox at the start of the content, drawn before the text.
     task: Option<bool>,
+    /// Images placed inline, at their byte offset in `text`.
+    boxes: Vec<ImageBox>,
+}
+
+/// One inline image: its text offset, the image it draws and its natural device-px size.
+#[derive(Clone, Copy)]
+struct ImageBox {
+    at: usize,
+    index: u32,
+    width: f32,
+    height: f32,
 }
 
 impl Inline {
@@ -157,6 +177,13 @@ enum Paint {
         x: f32,
         y: f32,
     },
+    Image {
+        index: u32,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    },
 }
 
 struct Txt {
@@ -180,6 +207,9 @@ struct Pager<'a> {
     blocks: Vec<BlockBox>,
     fonts: FontContext,
     layouts: LayoutContext<Brush>,
+    base_dir: Option<PathBuf>,
+    /// Decoded once per render; `None` remembers a file that will not load.
+    images: HashMap<u32, Option<Rc<DecodedImage>>>,
 }
 
 fn brush(c: Color) -> Brush {
@@ -209,7 +239,31 @@ impl<'a> Pager<'a> {
             blocks: Vec::new(),
             fonts: FontContext::new(),
             layouts: LayoutContext::new(),
+            base_dir: options.base_dir.clone(),
+            images: HashMap::new(),
         }
+    }
+
+    /// Loads an image once per render. `None` for an empty src, a missing file, a blocked format
+    /// or anything over the plan's limits.
+    fn image(&mut self, index: u32) -> Option<Rc<DecodedImage>> {
+        if let Some(cached) = self.images.get(&index) {
+            return cached.clone();
+        }
+        let src = self.doc.str(self.doc.images[index as usize].src);
+        let decoded = if src.is_empty() {
+            None
+        } else {
+            let path = PathBuf::from(src);
+            let path = match &self.base_dir {
+                Some(dir) if path.is_relative() => dir.join(path),
+                _ => path,
+            };
+            let decoded = image::load(&path);
+            decoded.map(Rc::new)
+        };
+        self.images.insert(index, decoded.clone());
+        decoded
     }
 
     fn px(&self, logical: f32) -> f32 {
@@ -360,6 +414,24 @@ impl<'a> Pager<'a> {
                 );
             }
         }
+        for image in &inline.boxes {
+            let (mut width, mut height) = (image.width, image.height);
+            if let Some(max) = txt.max
+                && width > max
+            {
+                height *= max / width;
+                width = max;
+            }
+            builder.push_inline_box(InlineBox {
+                id: image.index as u64,
+                kind: InlineBoxKind::InFlow,
+                index: image.at,
+                width,
+                height,
+                baseline: None,
+                vertical_align: VerticalAlign::BASELINE,
+            });
+        }
         let mut layout = builder.build(&inline.text);
         layout.break_all_lines(txt.max);
         layout.align(Alignment::Start, AlignmentOptions::default());
@@ -376,6 +448,20 @@ impl<'a> Pager<'a> {
 
     /// Pushes the chips, the glyphs and the decorations for one laid-out inline block, in that order.
     fn emit(&mut self, inline: &Inline, layout: Layout<Brush>, x: f32, y: f32, base_size: f32) {
+        let mut images = Vec::new();
+        for line in layout.lines() {
+            for item in line.items() {
+                if let PositionedLayoutItem::InlineBox(inline_box) = item {
+                    images.push(Paint::Image {
+                        index: inline_box.id as u32,
+                        x: x + inline_box.x,
+                        y: y + inline_box.y,
+                        w: inline_box.width,
+                        h: inline_box.height,
+                    });
+                }
+            }
+        }
         let mut chips = Vec::new();
         let mut decos = Vec::new();
         for line in layout.lines() {
@@ -430,6 +516,7 @@ impl<'a> Pager<'a> {
                 }
             }
         }
+        self.paints.extend(images);
         self.paints.extend(chips);
         self.paints.push(Paint::Text {
             layout: Box::new(layout),
@@ -497,7 +584,7 @@ impl<'a> Pager<'a> {
     fn paragraph(&mut self, b: u32, left: f32, width: f32, color: Color, align: Align) {
         let inline = self.inline_of(b);
         let task = inline.task;
-        if inline.text.trim().is_empty() && task.is_none() {
+        if inline.text.trim().is_empty() && inline.boxes.is_empty() && task.is_none() {
             return;
         }
         let indent = if task.is_some() {
@@ -528,7 +615,7 @@ impl<'a> Pager<'a> {
             self.draw_checkbox(left, self.y + baseline, checked);
         }
         let size = txt.size;
-        if !inline.text.trim().is_empty() {
+        if !inline.text.trim().is_empty() || !inline.boxes.is_empty() {
             self.emit(&inline, layout, x, self.y, size);
         }
         self.y += height + self.px(16.0);
@@ -537,7 +624,7 @@ impl<'a> Pager<'a> {
     fn plain(&mut self, b: u32, left: f32, width: f32, color: Color) {
         let inline = self.inline_of(b);
         let task = inline.task;
-        if inline.text.trim().is_empty() && task.is_none() {
+        if inline.text.trim().is_empty() && inline.boxes.is_empty() && task.is_none() {
             return;
         }
         let indent = if task.is_some() {
@@ -567,7 +654,7 @@ impl<'a> Pager<'a> {
             self.draw_checkbox(left, self.y + baseline, checked);
         }
         let size = txt.size;
-        if !inline.text.trim().is_empty() {
+        if !inline.text.trim().is_empty() || !inline.boxes.is_empty() {
             self.emit(&inline, layout, left + indent, self.y, size);
         }
         self.y += height + self.px(4.0);
@@ -583,7 +670,7 @@ impl<'a> Pager<'a> {
             _ => (15.0, 8.0, 6.0),
         };
         let inline = self.inline_of(b);
-        if inline.text.trim().is_empty() {
+        if inline.text.trim().is_empty() && inline.boxes.is_empty() {
             return;
         }
         self.y += self.px(top);
@@ -969,7 +1056,7 @@ impl<'a> Pager<'a> {
         let mut natural = vec![0f32; columns];
         for row in &table {
             for (ci, cell) in row.cells.iter().enumerate() {
-                if cell.inline.text.trim().is_empty() {
+                if cell.inline.text.trim().is_empty() && cell.inline.boxes.is_empty() {
                     continue;
                 }
                 let txt = Txt {
@@ -1095,7 +1182,7 @@ impl<'a> Pager<'a> {
         self.y = y0 + total_h + self.px(16.0);
     }
 
-    fn cell_inline(&self, cell: u32) -> Inline {
+    fn cell_inline(&mut self, cell: u32) -> Inline {
         let mut leaves = Vec::new();
         self.collect_leaves(cell, &mut leaves);
         let mut merged = Inline::default();
@@ -1224,7 +1311,7 @@ impl<'a> Pager<'a> {
 
     /// The model's inline content of a leaf block as styled runs, with atoms replaced by the text
     /// the page shows for them.
-    fn inline_of(&self, block: u32) -> Inline {
+    fn inline_of(&mut self, block: u32) -> Inline {
         let block = self.doc.blocks[block as usize];
         let base = block.text.start as usize;
         let end = block.text.end as usize;
@@ -1295,9 +1382,20 @@ impl<'a> Pager<'a> {
         style
     }
 
-    fn push_atom(&self, out: &mut Inline, kind: SpanKind) {
+    fn push_atom(&mut self, out: &mut Inline, kind: SpanKind) {
         match kind {
             SpanKind::Image(index) => {
+                if let Some(image) = self.image(index) {
+                    let width = image.width as f32 * self.scale;
+                    let height = image.height as f32 * self.scale;
+                    out.boxes.push(ImageBox {
+                        at: out.text.len(),
+                        index,
+                        width,
+                        height,
+                    });
+                    return;
+                }
                 let alt = self.doc.str(self.doc.images[index as usize].alt);
                 if alt.is_empty() {
                     out.push(
@@ -1371,6 +1469,11 @@ impl<'a> Pager<'a> {
                     color,
                 } => bitmap.line(a, b, thickness, color),
                 Paint::Text { layout, x, y } => engine.draw_layout(&mut bitmap, &layout, x, y),
+                Paint::Image { index, x, y, w, h } => {
+                    if let Some(Some(image)) = self.images.get(&index) {
+                        bitmap.image(&image.rgba, image.width, image.height, x, y, w, h);
+                    }
+                }
             }
         }
         Rendered {

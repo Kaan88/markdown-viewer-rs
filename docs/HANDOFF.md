@@ -15,7 +15,12 @@ approved by the user.
 - **There are now two windows, both running on this Windows PC:** the WinUI shell
   (`bins/mdv-winui`) and the Qt shell (`bins/mdv-qt`). Both open a Markdown file, draw the page
   through the renderer, and scroll with the wheel.
-- Workspace: 7 core, 11 fuzz, 113 regression, 3 spec, 4 render tests pass; `cargo fmt --all` clean.
+- Images draw: PNG and JPEG are decoded from the document's own directory, capped at 12 MiB and 24 M
+  pixels, placed as parley inline boxes and scaled to the content width. Missing, unsupported (SVG
+  is Phase 4) and over-limit files keep the `[image: alt]` placeholder. New fixture
+  `fixtures/images.md`, golden `tests/golden/images-light.png`, and shell captures.
+- Workspace: 7 core, 11 fuzz, 113 regression, 3 spec, 6 render tests and the renderer's image-limit
+  unit test pass; `cargo fmt --all` clean.
 
 ## The WinUI shell (`bins/mdv-winui`)
 
@@ -76,7 +81,11 @@ The user gave this VM for Qt and Linux testing from 2026-11-07. It is Debian 13 
 - Packages installed: `qt6-base-dev` (Qt 6.8.2), `libfontconfig1-dev`, `libxcb-cursor0`,
   `libxkbcommon-x11-0`, `xvfb`, `imagemagick`, `fonts-noto-cjk`.
 - The source tree is copied with `tar` + SFTP (the helper `target/vm.py`, not committed) into
-  `~/mdview`. It is a snapshot: re-upload after changes.
+  `~/mdview`. It is a snapshot: re-upload after changes. Two archives: the source (without
+  `spikes/`) and `spikes/parser/data`, which the spec tests read. The whole workspace does not
+  build on Linux because `bins/mdv-winui` is Windows-only, so Linux runs
+  `cargo test --release -p mdview-core -p mdview-render`; that now passes 7 core, 11 fuzz, 113
+  regression, 3 spec, the image-limit unit test and 6 render tests.
 - Build and run:
 
   ```sh
@@ -132,7 +141,9 @@ files, writes the complete sparse index cache entry for every crate and download
 
 - **No virtualization.** The whole document is laid out into one bitmap; the 1 MB scroll budget is
   unmeasured, and the 30,000 px guard truncates very long files.
-- **Images** are `[image: alt]`; no PNG/JPEG/SVG loading, limits or cache.
+- **Images**: SVG (and anything but PNG/JPEG) is still a placeholder; images are decoded once per
+  render rather than shared across renders; `<picture>` light/dark sources and `width`/`height`
+  attributes are ignored; a blocked image is retried on every render.
 - **No selection, links, anchors or details toggling.** `BlockBox` is there for hit tests but unused.
 - **No scrollbar or keyboard** in either shell; the wheel is the only scroll input. No File > Open in
   the Qt shell; no find, tabs or tree in either.
@@ -143,11 +154,10 @@ files, writes the complete sparse index cache entry for every crate and download
 ## What to do next
 
 1. Get the four `tests/golden/` images and the shell screenshots approved.
-2. Add image loading and drawing (PNG/JPEG, the plan's 12 MiB and 24 M-pixel limits, an image
-   cache), and pass each document's directory to the renderer so relative paths resolve.
-3. Add virtualization and measure the 1 MB scroll budget in `mdv-bench`.
-4. Add File > Open to the Qt shell, a scrollbar and keyboard scrolling to both.
-5. Add selection and link/anchor hit-testing, then details toggling.
+2. Add virtualization and measure the 1 MB scroll budget in `mdv-bench`.
+3. Add File > Open to the Qt shell, a scrollbar and keyboard scrolling to both.
+4. Add selection and link/anchor hit-testing, then details toggling.
+5. Add a shared image cache and SVG support when Phase 4 lands.
 6. Decide bundled fonts, then turn the goldens into a pixel suite.
 
 Every Qt/Linux change is now tested on the VM above as well as on Windows.

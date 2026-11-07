@@ -98,4 +98,81 @@ impl Bitmap {
             }
         }
     }
+
+    /// Draws a straight-alpha RGBA image, bilinearly scaled into the rectangle at `(x, y)`.
+    pub fn image(
+        &mut self,
+        rgba: &[u8],
+        source_width: u32,
+        source_height: u32,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    ) {
+        if source_width == 0 || source_height == 0 || w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        if rgba.len() < source_width as usize * source_height as usize * 4 {
+            return;
+        }
+        let (frame_width, frame_height) = (self.width as i32, self.height as i32);
+        let (left, top) = (x.round() as i32, y.round() as i32);
+        let (draw_width, draw_height) = (w.round().max(1.0) as i32, h.round().max(1.0) as i32);
+        let (sw, sh) = (source_width as f32, source_height as f32);
+        let sample = |sx: usize, sy: usize| -> [f32; 4] {
+            let i = (sy * source_width as usize + sx) * 4;
+            [
+                rgba[i] as f32,
+                rgba[i + 1] as f32,
+                rgba[i + 2] as f32,
+                rgba[i + 3] as f32,
+            ]
+        };
+        for row in 0..draw_height {
+            let py = top + row;
+            if py < 0 || py >= frame_height {
+                continue;
+            }
+            let sy = ((row as f32 + 0.5) / draw_height as f32 * sh - 0.5).clamp(0.0, sh - 1.0);
+            let y1 = sy.floor() as usize;
+            let y2 = (y1 + 1).min(source_height as usize - 1);
+            let fy = sy - y1 as f32;
+            for column in 0..draw_width {
+                let px = left + column;
+                if px < 0 || px >= frame_width {
+                    continue;
+                }
+                let sx =
+                    ((column as f32 + 0.5) / draw_width as f32 * sw - 0.5).clamp(0.0, sw - 1.0);
+                let x1 = sx.floor() as usize;
+                let x2 = (x1 + 1).min(source_width as usize - 1);
+                let fx = sx - x1 as f32;
+                let (a, b, c, d) = (
+                    sample(x1, y1),
+                    sample(x2, y1),
+                    sample(x1, y2),
+                    sample(x2, y2),
+                );
+                let mut pixel = [0.0f32; 4];
+                for channel in 0..4 {
+                    let upper = a[channel] + (b[channel] - a[channel]) * fx;
+                    let lower = c[channel] + (d[channel] - c[channel]) * fx;
+                    pixel[channel] = upper + (lower - upper) * fy;
+                }
+                let alpha = (pixel[3] / 255.0).clamp(0.0, 1.0);
+                if alpha <= 0.0 {
+                    continue;
+                }
+                let index = (py as usize * self.width as usize + px as usize) * 4;
+                let inverse = 1.0 - alpha;
+                for channel in 0..3 {
+                    // RGBA samples, BGRA framebuffer.
+                    let value =
+                        pixel[2 - channel] * alpha + self.pixels[index + channel] as f32 * inverse;
+                    self.pixels[index + channel] = (value + 0.5) as u8;
+                }
+            }
+        }
+    }
 }

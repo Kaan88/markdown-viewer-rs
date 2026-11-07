@@ -89,6 +89,7 @@ pub struct Renderer {
     pixels: Vec<u32>,
     page: Option<Page>,
     document: Option<Document>,
+    base_dir: Option<std::path::PathBuf>,
     theme: Theme,
     scroll: f32,
 }
@@ -104,13 +105,15 @@ impl Renderer {
             pixels: Vec::new(),
             page: None,
             document: None,
+            base_dir: None,
             theme: mdview_render::LIGHT,
             scroll: 0.0,
         }
     }
 
-    pub fn set_document(&mut self, document: Document) {
+    pub fn set_document(&mut self, document: Document, base_dir: Option<std::path::PathBuf>) {
         self.document = Some(document);
+        self.base_dir = base_dir;
         self.page = None;
         self.scroll = 0.0;
     }
@@ -245,6 +248,7 @@ impl Renderer {
                 theme: self.theme,
                 // A guard against a bitmap too large to draw; virtualization replaces it.
                 max_height: Some(30_000.0),
+                base_dir: self.base_dir.clone(),
             },
         );
         let ms = started.elapsed().as_secs_f64() * 1000.0;

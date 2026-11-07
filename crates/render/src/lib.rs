@@ -2,6 +2,7 @@
 //! any window system, so it runs in tests and in `mdv-bench` without a display.
 
 mod bitmap;
+mod image;
 mod layout;
 mod text;
 mod theme;

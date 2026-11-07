@@ -9,3 +9,4 @@ mdview-core = { path = "../core" }
 parley = "=0.12.0"
 swash = "=0.2.10"
 png = "0.18"
+zune-jpeg = "=0.5.15"

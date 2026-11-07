@@ -58,6 +58,7 @@ fn main() {
         parse_ms,
         doc.warnings.len()
     );
+    let base_dir = input.parent().map(|p| p.to_path_buf());
     if all {
         for (name, theme, scale) in [
             ("light@1.0", LIGHT, 1.0),
@@ -72,13 +73,14 @@ fn main() {
                 theme,
                 None,
                 Path::new("target/goldens").join(format!("{name}.png")),
+                base_dir.clone(),
             );
         }
         return;
     }
     let theme = if theme == "dark" { DARK } else { LIGHT };
     let out = out.unwrap_or_else(|| PathBuf::from("target/goldens/showcase.png"));
-    run(&doc, width, scale, theme, max_height, out);
+    run(&doc, width, scale, theme, max_height, out, base_dir);
 }
 
 fn run(
@@ -88,6 +90,7 @@ fn run(
     theme: Theme,
     max_height: Option<f32>,
     out: PathBuf,
+    base_dir: Option<PathBuf>,
 ) {
     let start = Instant::now();
     let rendered = render(
@@ -97,6 +100,7 @@ fn run(
             scale,
             theme,
             max_height,
+            base_dir,
         },
     );
     let ms = start.elapsed().as_secs_f64() * 1000.0;
