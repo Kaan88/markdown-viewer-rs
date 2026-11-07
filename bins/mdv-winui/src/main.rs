@@ -74,64 +74,63 @@ impl IXamlMetadataProvider_Impl for App_Impl {
     }
 }
 
-fn zoom_argument() -> f32 {
-    let args: Vec<String> = std::env::args().collect();
-    args.iter()
-        .position(|arg| arg == "--zoom")
-        .and_then(|at| args.get(at + 1))
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(1.0)
+/// The command line, read once. Flags that take a value consume the next argument, so
+/// `--zoom 2 file.md` opens `file.md`, not a file named `2`. `--trace` and `--measure[=FILE]` are
+/// read by `diag`, and only skipped here.
+struct Args {
+    document: Option<PathBuf>,
+    theme: Option<mdview_render::Theme>,
+    zoom: f32,
+    scroll: f32,
+    steps: u32,
+    size: (i32, i32),
+    flags: Vec<String>,
 }
 
-/// `--scroll <device px>`, so a screenshot can show the page partway down without driving input.
-fn scroll_argument() -> f32 {
-    let args: Vec<String> = std::env::args().collect();
-    args.iter()
-        .position(|arg| arg == "--scroll")
-        .and_then(|at| args.get(at + 1))
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(0.0)
-}
+const VALUE_FLAGS: [&str; 4] = ["--zoom", "--scroll", "--scroll-steps", "--size"];
 
-/// `--scroll-steps <n>`: walk the page down `n` 40 px steps, one frame each, after the first frame.
-fn steps_argument() -> u32 {
-    let args: Vec<String> = std::env::args().collect();
-    args.iter()
-        .position(|arg| arg == "--scroll-steps")
-        .and_then(|at| args.get(at + 1))
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(0)
-}
+impl Args {
+    fn parse(args: impl IntoIterator<Item = String>) -> Self {
+        let mut out = Args {
+            document: None,
+            theme: None,
+            zoom: 1.0,
+            scroll: 0.0,
+            steps: 0,
+            size: (1100, 900),
+            flags: Vec::new(),
+        };
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
+            if VALUE_FLAGS.contains(&arg.as_str()) {
+                let value = args.next().unwrap_or_default();
+                match arg.as_str() {
+                    "--zoom" => out.zoom = value.parse().unwrap_or(out.zoom),
+                    "--scroll" => out.scroll = value.parse().unwrap_or(out.scroll),
+                    "--scroll-steps" => out.steps = value.parse().unwrap_or(out.steps),
+                    _ => {
+                        if let Some((w, h)) = value.split_once('x')
+                            && let (Ok(w), Ok(h)) = (w.parse(), h.parse())
+                        {
+                            out.size = (w, h);
+                        }
+                    }
+                }
+            } else if arg == "--dark" {
+                out.theme = Some(mdview_render::DARK);
+            } else if arg == "--light" {
+                out.theme.get_or_insert(mdview_render::LIGHT);
+            } else if arg.starts_with("--") {
+                out.flags.push(arg);
+            } else if out.document.is_none() {
+                out.document = Some(PathBuf::from(arg));
+            }
+        }
+        out
+    }
 
-/// `--size <width>x<height>` in logical px, for measuring a large window.
-fn size_argument() -> (i32, i32) {
-    let args: Vec<String> = std::env::args().collect();
-    let parsed = args
-        .iter()
-        .position(|arg| arg == "--size")
-        .and_then(|at| args.get(at + 1))
-        .and_then(|value| value.split_once('x'))
-        .and_then(|(width, height)| Some((width.parse().ok()?, height.parse().ok()?)));
-    parsed.unwrap_or((1100, 900))
-}
-
-/// The first positional argument is the document to open; flags are handled by `diag`.
-fn document_argument() -> Option<PathBuf> {
-    std::env::args()
-        .skip(1)
-        .find(|arg| !arg.starts_with("--"))
-        .map(PathBuf::from)
-}
-
-/// `--light` and `--dark` override the Windows app theme, for screenshots and for testing both.
-fn theme_argument() -> Option<mdview_render::Theme> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|arg| arg == "--dark") {
-        Some(mdview_render::DARK)
-    } else if args.iter().any(|arg| arg == "--light") {
-        Some(mdview_render::LIGHT)
-    } else {
-        None
+    fn has(&self, flag: &str) -> bool {
+        self.flags.iter().any(|f| f == flag)
     }
 }
 
@@ -147,21 +146,22 @@ fn run() -> Result<()> {
     }
     diag::trace("STA ready, calling Application::Start");
 
-    let document = document_argument();
-    let theme = theme_argument();
-    let zoom = zoom_argument();
+    let args = Args::parse(std::env::args().skip(1));
+    let document = args.document.clone();
+    let theme = args.theme;
+    let zoom = args.zoom;
     // A shifted frame has to look exactly like a whole one; `--no-shift` sends every frame whole,
     // which is the picture to compare against.
     let startup = ui::Startup {
-        shift: !std::env::args().any(|arg| arg == "--no-shift"),
-        scroll: scroll_argument(),
-        steps: steps_argument(),
-        size: size_argument(),
-        select: std::env::args().any(|arg| arg == "--select-test"),
-        details: std::env::args().any(|arg| arg == "--details-test"),
-        find: std::env::args().any(|arg| arg == "--find-test"),
-        outline: std::env::args().any(|arg| arg == "--outline-test"),
-        copy: std::env::args().any(|arg| arg == "--copy-test"),
+        shift: !args.has("--no-shift"),
+        scroll: args.scroll,
+        steps: args.steps,
+        size: args.size,
+        select: args.has("--select-test"),
+        details: args.has("--details-test"),
+        find: args.has("--find-test"),
+        outline: args.has("--outline-test"),
+        copy: args.has("--copy-test"),
     };
     let gpu = Rc::new(RefCell::new(Some(gpu)));
     // Application and UI state must outlive Start, which returns at process end.
@@ -215,4 +215,35 @@ fn main() {
         diag::fatal("run", &e);
     }
     diag::trace("Application::Start returned");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Args;
+
+    fn parse(line: &str) -> Args {
+        Args::parse(line.split_whitespace().map(str::to_string))
+    }
+
+    #[test]
+    fn value_flags_do_not_become_the_document() {
+        let args = parse("--zoom 2 file.md --scroll 40 --size 800x600 --trace");
+        assert_eq!(
+            args.document.as_deref(),
+            Some(std::path::Path::new("file.md"))
+        );
+        assert_eq!(args.zoom, 2.0);
+        assert_eq!(args.scroll, 40.0);
+        assert_eq!(args.size, (800, 600));
+        assert!(args.has("--trace"));
+    }
+
+    #[test]
+    fn dark_wins_over_light_and_defaults_hold() {
+        let args = parse("--light --dark");
+        assert!(args.document.is_none());
+        assert_eq!(args.zoom, 1.0);
+        assert_eq!(args.size, (1100, 900));
+        assert!(args.theme.is_some());
+    }
 }

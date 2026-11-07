@@ -5,6 +5,8 @@
 
 use crate::qt::ffi::*;
 use crate::qt::*;
+use mdview_core::commands::strings;
+use mdview_core::links::{classify_link, LinkAction};
 use mdview_core::parse_bytes;
 use mdview_render::{DocumentRenderer, Hit, Options, PageLayout, Rect, Theme, DARK, LIGHT};
 use std::cell::{Cell, RefCell};
@@ -693,34 +695,31 @@ impl Shell {
     /// optional fragment) or a web/mail address. The shell loads files itself rather than handing
     /// markdown paths to the browser.
     fn open_destination(&self, destination: &str) {
-        let (path, fragment) = match destination.split_once('#') {
-            Some((path, fragment)) => (path, Some(fragment)),
-            None => (destination, None),
-        };
-        if path.is_empty() {
-            if let Some(fragment) = fragment {
-                self.jump_fragment(fragment);
+        let doc_dir = self
+            .path
+            .borrow()
+            .as_ref()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .unwrap_or_default();
+        // Core decides what a link may do: it ignores unknown schemes and refuses UNC paths, so a
+        // document can never make the machine contact another host.
+        let (resolved, fragment) = match classify_link(destination, &doc_dir) {
+            LinkAction::Fragment(fragment) => {
+                self.jump_fragment(&fragment);
+                return;
             }
-            return;
-        }
-        let lower = path.to_ascii_lowercase();
-        if lower.starts_with("http://")
-            || lower.starts_with("https://")
-            || lower.starts_with("mailto:")
-        {
-            if !open_url(destination) {
-                self.message(&format!("could not open {destination}"));
+            LinkAction::External(url) => {
+                if !open_url(&url) {
+                    self.message(&format!("could not open {url}"));
+                }
+                return;
             }
-            return;
-        }
-        let target = PathBuf::from(percent_decode(path));
-        let resolved = if target.is_absolute() {
-            target
-        } else {
-            match self.path.borrow().as_ref().and_then(|path| path.parent()) {
-                Some(dir) => dir.join(target),
-                None => target,
+            LinkAction::OpenMarkdown { path, fragment } => (path, fragment),
+            LinkAction::OtherLocalFile(_) => {
+                self.message(strings::ONLY_MARKDOWN_LINKS);
+                return;
             }
+            LinkAction::Ignored => return,
         };
         if !resolved.is_file() {
             self.message(&format!("not a file: {}", resolved.display()));
@@ -728,9 +727,7 @@ impl Shell {
         }
         self.load(&resolved);
         if let Some(fragment) = fragment {
-            self.pending_anchor
-                .borrow_mut()
-                .replace(fragment.to_string());
+            self.pending_anchor.borrow_mut().replace(fragment);
         }
         self.redraw();
     }
@@ -910,8 +907,14 @@ impl CanvasHandler for Shell {
         if first.is_empty() {
             return;
         }
-        let path = first.strip_prefix("file://").unwrap_or(first);
-        let path = PathBuf::from(percent_decode(path));
+        // A drop is a file URI or a plain path; core's link rules refuse UNC hosts here too.
+        let path = match classify_link(first, Path::new("")) {
+            LinkAction::OpenMarkdown { path, .. } | LinkAction::OtherLocalFile(path) => path,
+            _ => {
+                self.message(&format!("cannot open {first}"));
+                return;
+            }
+        };
         if path.is_file() {
             self.load(&path);
         } else {
@@ -922,25 +925,6 @@ impl CanvasHandler for Shell {
     fn timer(&self, _id: i32) {}
 
     fn update_request(&self) {}
-}
-
-/// `%20` and friends in a file URI. Enough for paths with spaces, which is what drag and drop sends.
-fn percent_decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(&text[i + 1..i + 3], 16) {
-                out.push(byte);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -59,12 +59,21 @@ fn shared() -> MutexGuard<'static, Option<Handle>> {
 /// Starts one engine and its worker thread.
 fn connect() -> Option<Handle> {
     let engine = engine_path()?;
-    let mut child = Command::new(engine)
+    let mut command = Command::new(engine);
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(Stdio::null());
+    // The engine is a console program. Started from a GUI shell without this, Windows gives it a
+    // new console, and with Windows Terminal as the default terminal that handoff can take longer
+    // than the 5 s deadline, so the first diagram on a page became a placeholder.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command.spawn().ok()?;
     let stdin = child.stdin.take()?;
     let stdout = child.stdout.take()?;
     let child = Arc::new(Mutex::new(child));

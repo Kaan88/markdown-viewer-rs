@@ -3,6 +3,7 @@
 use crate::bindings::*;
 use crate::diag;
 use crate::render::{Gpu, Renderer};
+use mdview_core::links::{LinkAction, classify_link};
 use mdview_core::parse_bytes;
 use mdview_render::{DARK, LIGHT};
 use std::cell::{Cell, RefCell};
@@ -264,25 +265,6 @@ fn open_url(url: &str) {
     diag::trace(&format!("opened {url}: {result}"));
 }
 
-/// `%20` and friends in a link destination.
-fn percent_decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(&text[i + 1..i + 3], 16) {
-                out.push(byte);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 fn file_dialog() -> Option<PathBuf> {
     const FILE_MUST_EXIST: u32 = 0x0000_1000;
     const PATH_MUST_EXIST: u32 = 0x0000_0800;
@@ -525,32 +507,32 @@ impl Shell {
         let Some(destination) = self.renderer.borrow().link_destination(index) else {
             return;
         };
-        let (path, fragment) = match destination.split_once('#') {
-            Some((path, fragment)) => (path, Some(fragment)),
-            None => (destination.as_str(), None),
-        };
-        if path.is_empty() {
-            if let Some(fragment) = fragment {
-                self.renderer.borrow_mut().scroll_to_fragment(fragment);
+        let doc_dir = self
+            .path
+            .borrow()
+            .as_ref()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .unwrap_or_default();
+        // Core decides what a link may do: it ignores unknown schemes and refuses UNC paths, so a
+        // document can never make the machine contact another host.
+        let (resolved, fragment) = match classify_link(&destination, &doc_dir) {
+            LinkAction::Fragment(fragment) => {
+                self.renderer.borrow_mut().scroll_to_fragment(&fragment);
                 self.show();
+                return;
             }
-            return;
-        }
-        let lower = path.to_ascii_lowercase();
-        if lower.starts_with("http://")
-            || lower.starts_with("https://")
-            || lower.starts_with("mailto:")
-        {
-            open_url(&destination);
-            return;
-        }
-        let target = PathBuf::from(percent_decode(path));
-        let resolved = if target.is_absolute() {
-            target
-        } else {
-            match self.path.borrow().as_ref().and_then(|path| path.parent()) {
-                Some(dir) => dir.join(target),
-                None => target,
+            LinkAction::External(url) => {
+                open_url(&url);
+                return;
+            }
+            LinkAction::OpenMarkdown { path, fragment } => (path, fragment),
+            LinkAction::OtherLocalFile(path) => {
+                diag::trace(&format!("not a markdown link: {}", path.display()));
+                return;
+            }
+            LinkAction::Ignored => {
+                diag::trace(&format!("ignored link: {destination}"));
+                return;
             }
         };
         if !resolved.is_file() {
@@ -564,7 +546,7 @@ impl Shell {
         if load(self, &resolved).is_ok() {
             self.show();
             if let Some(fragment) = fragment {
-                self.renderer.borrow_mut().scroll_to_fragment(fragment);
+                self.renderer.borrow_mut().scroll_to_fragment(&fragment);
             }
             self.show();
         }
