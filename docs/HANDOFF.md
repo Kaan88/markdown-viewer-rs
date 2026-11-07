@@ -1,8 +1,8 @@
-# Handoff: Phase 2 renderer and the first WinUI window
+# Handoff: Phase 2 renderer, WinUI shell, Qt shell on Windows
 
-**Branch:** `phase2-renderer`, from `phase1-audit-fixes` (pushed at `633c0a8`). The renderer and the
-first Windows shell are a checkpoint commit here; nothing is pushed. The four review images in
-`tests/golden/` still have not been approved by the user.
+**Branch:** `phase2-renderer`, from `phase1-audit-fixes` (pushed at `633c0a8`). Checkpoints are
+committed here; nothing is pushed. The four review images in `tests/golden/` still have not been
+approved by the user.
 
 ## State
 
@@ -11,10 +11,10 @@ first Windows shell are a checkpoint commit here; nothing is pushed. The four re
   665/672 GFM.
 - Phase 2: `crates/render` lays the document model out and paints a BGRA bitmap with no window
   system; `bins/mdv-bench` writes PNGs. `fixtures/showcase.md` (66 blocks) lays out in about 27 ms at
-  1084 logical px and 100% scale, 3020 px tall, in both themes.
-- **New: `bins/mdv-winui` is the first real window.** It runs on this PC, opens a Markdown file,
-  draws the page through the renderer into a `SwapChainPanel`, and scrolls with the wheel. This is
-  the first time WinUI has run on real Windows (the G8 spike had only run in a VM).
+  1084-1100 logical px and 100% scale, 3020 px tall, in both themes.
+- **There are now two windows, both running on this Windows PC:** the WinUI shell
+  (`bins/mdv-winui`) and the Qt shell (`bins/mdv-qt`). Both open a Markdown file, draw the page
+  through the renderer, and scroll with the wheel.
 - Workspace: 7 core, 11 fuzz, 113 regression, 3 spec, 4 render tests pass; `cargo fmt --all` clean.
 
 ## The WinUI shell (`bins/mdv-winui`)
@@ -22,58 +22,77 @@ first Windows shell are a checkpoint commit here; nothing is pushed. The four re
 - WinUI 3 with hand-generated Windows App SDK bindings (`src/bindings.rs`, copied from
   `spikes/winui`; regenerate only with the same NuGet winmds). No XAML, C#, or C++.
 - Framework-dependent build: needs the Windows App Runtime 2.6.4 or newer (x64). This PC has 2.6.5.
-  The self-contained staging from the spike was not carried over; that needs the NuGet packages.
 - Window is 1100x900. Menus: File > Open..., Reload, Close; View > Light theme, Dark theme. The
   wheel scrolls. The page follows the Windows app theme at startup (`AppsUseLightTheme`), and
-  `--light` / `--dark` override it for screenshots.
+  `--light` / `--dark` override it for screenshots. The menu row is painted the page background.
 - `src/render.rs` keeps one laid-out `Bitmap` and copies the visible slice into the swap chain
   buffer each frame, 1:1 with physical pixels. Re-layout happens when the width, DPI scale or theme
-  changes; `max_height` is capped at 30,000 logical px as a guard until virtualization exists.
-- `--trace` writes `mdview.trace.log` beside the exe; `--measure` writes one `result=ok` line with
-  first-frame time and private bytes, then exits.
+  changes; `max_height` is capped at 30,000 logical px until virtualization exists.
+- `--trace` writes `mdview.trace.log` beside the exe; `--measure` writes one `result=ok` line and
+  exits.
 - Measured on this PC (RTX 4070 Ti SUPER, 96 DPI): first frame at 251.9 ms from process start,
-  renderer layout 27.0 ms, parse 0.1 ms; `--measure` reports first frame at 259.3 ms in the spike and
-  251.9 ms here, both including DLL loading.
+  renderer layout 27.0 ms, parse 0.1 ms.
 - Screenshots: `tests/golden/shell-winui-light.png`, `tests/golden/shell-winui-dark.png`.
+
+## The Qt shell (`bins/mdv-qt`)
+
+- Qt Widgets through CXX-Qt 0.10, ported from `spikes/qt-shell`: `src/qt/mod.rs` (the only module
+  with `unsafe`) and `src/qt/ffi.rs` (C++ declarations, no authored C++). `src/shell.rs` is
+  `#![forbid(unsafe_code)]`.
+- **This crate is excluded from the workspace** (`Cargo.toml`), because it needs a Qt installation
+  to build. It has its own `Cargo.lock` (the Qt-only graph, seeded from the spike's lock) and its
+  own target directory.
+- Window 1100x900, menus File > Quit, View > Light/Dark theme, Help > About, a status bar with the
+  file name and block count. A file comes from the command line or is dropped on the window
+  (Qt file URIs, `%20` decoded). There is no File > Open dialog yet.
+- `src/shell.rs` renders the page with `mdview-render` for the canvas width and device pixel ratio,
+  copies the visible slice into a BGRX buffer and blits it through QPainter with an identity
+  transform. The wheel moves the scroll offset and repaints.
+- Build on this PC (Qt 6.9.3, MSVC 2022, installed at `C:\Qt\6.9.3\msvc2022_64` with `aqtinstall`):
+
+  ```powershell
+  cd bins/mdv-qt
+  $env:PATH = "C:\Qt\6.9.3\msvc2022_64\bin;$env:PATH"
+  $env:QMAKE = "C:\Qt\6.9.3\msvc2022_64\bin\qmake.exe"
+  $env:CMAKE_PREFIX_PATH = "C:\Qt\6.9.3\msvc2022_64"
+  cargo build --release --offline
+  ```
+
+  Run it with the Qt `bin` directory on `PATH` so the Qt DLLs are found. In this sandbox `TEMP` and
+  `TMP` must point at a writable directory (e.g. `target/tmp`) or MSVC's `lib.exe` fails with
+  access denied; a normal shell does not need that.
+- Measured here: parse 0.1 ms, layout 27.0 ms at 1100 dip, 100% scale, page 1100x3020; window opens
+  with the page drawn and the wheel scrolls it (checked from screenshots).
+- Screenshots: `tests/golden/shell-qt-light.png` (page top) and `shell-qt-scrolled.png`.
+- **This is the Windows build of the Qt variant, which the user asked for so it can be tested on
+  this machine. The Linux build itself has not been run anywhere; nothing here proves the Linux Qt
+  path beyond the spike it came from.**
 
 ## What has and has not run
 
-Run on Windows: the WinUI spike (`spikes/winui`, framework build, `--measure`: result=ok at 259 ms,
-private 168 MB with the real GPU), the new shell at 1100x900 with `fixtures/showcase.md`, wheel
-scrolling, system-theme selection, `--light`/`--dark`, `--trace`, `--measure`.
+Run on Windows: the WinUI spike (`spikes/winui`, framework build, `--measure`: result=ok at 259 ms),
+the WinUI shell on `fixtures/showcase.md` (wheel scrolling, system theme, `--light`/`--dark`,
+`--trace`), and the Qt shell on the same file (layout, first paint, wheel scrolling).
 
-Not tested yet by hand: the File > Open dialog and the View theme items were wired but not clicked;
-resize reflow and DPI scaling other than 100%; keyboard input (there is none yet); the spike's
-self-contained flavor.
-
-## Qt on Windows, in progress
-
-The user asked to "compile linux variant on windows for testing", so the Qt shell is being brought
-up on Windows as well:
-
-- Qt 6.9.3 for MSVC 2022 is installed at `C:\Qt\6.9.3\msvc2022_64` with `aqtinstall` (qtbase only).
-  `aqt` is in the Python user install; it also installed `cmake` and `ninja` wheels.
-- `cxx-qt` 0.10 and its closure were fetched into the cargo cache (the same Python seeding trick as
-  the text dependencies; script is `target/seed-lock.py`, not committed).
-- `spikes/qt-shell` is the reference bridge (`src/qt/mod.rs` wrapper and `ffi.rs` C++ declarations).
-  It contains Linux-only pieces (`libc::clock_gettime`, `libc::_exit`, `/proc` timing) that a Windows
-  build must not use.
-- **Nothing Qt has been built on Windows yet.** This section is the current attempt, not a result.
+Not tested by hand: the WinUI File > Open dialog and View theme items (wired, not clicked); the Qt
+menus (Quit, Light/Dark, About) and drag and drop; window resizing and reflow on both; DPI scaling
+other than 100%; keyboard input (neither shell has any).
 
 ## Linux target from Windows
 
-`rustup target add x86_64-unknown-linux-gnu` works in this shell (rustup's downloader is fine, only
-cargo's is not). `cargo check --target x86_64-unknown-linux-gnu -p mdview-core` passes. The renderer
-does not check yet: `yeslogic-fontconfig-sys` needs `pkg-config` and a Linux sysroot, and there is no
-Linux linker here, so this only ever proves compilation, never a runnable Linux binary. Qt cannot be
-cross-compiled from this machine at all.
+`rustup target add x86_64-unknown-linux-gnu` works here (rustup's downloader works; cargo's does
+not). `cargo check --target x86_64-unknown-linux-gnu -p mdview-core` passes. The renderer does not
+check: `yeslogic-fontconfig-sys` wants `pkg-config` and a Linux sysroot. There is no Linux linker,
+so this could only ever prove compilation. Qt cannot be cross-compiled from this machine; the Qt
+shell above is a native Windows build of the same source.
 
 ## Cargo in this sandbox
 
 Cargo cannot reach crates.io: `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`.
-Python's and `gh`'s TLS work. New dependencies were fetched with `target/seed-lock.py` (takes any
-`Cargo.lock`, writes the sparse index cache and `.crate` files in cargo's layout), so plain
-`cargo build`/`cargo test` work with `--offline`. If another dependency appears, seed it the same way.
+Python's and `gh`'s TLS work. `target/seed-lock.py` (not committed) takes any number of `Cargo.lock`
+files, writes the complete sparse index cache entry for every crate and downloads the locked
+`.crate` files, so `cargo build --offline` works. It must be given every lock in use
+(`Cargo.lock`, `spikes/qt-shell/Cargo.lock`): the index cache is shared.
 
 ## Known gaps, in the order they matter
 
@@ -81,17 +100,16 @@ Python's and `gh`'s TLS work. New dependencies were fetched with `target/seed-lo
   unmeasured, and the 30,000 px guard truncates very long files.
 - **Images** are `[image: alt]`; no PNG/JPEG/SVG loading, limits or cache.
 - **No selection, links, anchors or details toggling.** `BlockBox` is there for hit tests but unused.
-- **No scrollbar**, find box, tabs or tree; the wheel is the only scroll input, and there is no
-  keyboard handling.
+- **No scrollbar or keyboard** in either shell; the wheel is the only scroll input. No File > Open in
+  the Qt shell; no find, tabs or tree in either.
 - Table `colspan`/`rowspan` ignored; math, Mermaid and highlighting show source.
 - No bundled fonts, so goldens depend on system fonts.
-- The window's title bar follows Windows, not the in-app theme override, so `--dark` on a light
-  desktop leaves a light title bar (and the reverse).
+- The WinUI title bar follows Windows, not the in-app theme override.
 
 ## What to do next
 
-1. Finish the Qt shell on Windows (or report the exact blocker) and show both windows to the user.
-2. Get the four `tests/golden/` images and the two shell screenshots approved.
+1. Get the four `tests/golden/` images and the four shell screenshots approved.
+2. Add File > Open to the Qt shell (QFileDialog binding) and a scrollbar to both.
 3. Add image loading and drawing; then virtualization and the 1 MB budget.
-4. Add selection and link/anchor hit-testing, then details toggling and a scrollbar.
+4. Add selection and link/anchor hit-testing, then details toggling.
 5. Decide bundled fonts, then turn the goldens into a pixel suite.
