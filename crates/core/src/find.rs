@@ -35,10 +35,23 @@ fn find_with(text: &str, query: &str, cap: usize, hidden: impl Fn(u32) -> bool) 
     let mut result = FindResult::default();
     // Blocks are separated by newlines in the text, so a line break typed or pasted into the query
     // must look for a space to be able to match wrapped text at all.
-    let query: Vec<char> = query
-        .chars()
-        .map(|c| if c == '\n' || c == '\r' { ' ' } else { fold(c) })
-        .collect();
+    // A CRLF pair is one break, not two: Windows clipboard text would otherwise become two spaces
+    // and never match wrapped text.
+    let mut chars = query.chars().peekable();
+    let mut folded = Vec::new();
+    while let Some(c) = chars.next() {
+        match c {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                folded.push(' ');
+            }
+            '\n' => folded.push(' '),
+            _ => folded.push(fold(c)),
+        }
+    }
+    let query = folded;
     let Some(&first) = query.first() else {
         return result;
     };

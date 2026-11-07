@@ -29,12 +29,16 @@ pub const MAX_HTML_DEPTH: usize = 512;
 
 /// Largest pixel width or height taken from an HTML attribute, the same as the SVG height limit.
 pub const MAX_HTML_LENGTH_PX: u32 = MAX_SVG_HEIGHT;
+/// GitHub clamps `<img>` width and height to this, keeping their ratio. Table attributes are not
+/// clamped this way.
+pub const MAX_IMAGE_DIMENSION_PX: u32 = 2000;
 pub const MAX_COLSPAN: u16 = 1000;
 pub const MAX_ROWSPAN: u16 = 65534;
 
 /// Containers nested deeper than this add no block: what they hold joins the deepest one, text kept.
-/// Rows, cells, items and leaf blocks of a container already open may go a few levels past it. Layout
-/// inherits this bound, and real documents stay far under it.
+/// Rows, cells, items and leaf blocks of a container already open may go up to five levels past it
+/// (an implied table row, its cell, and a leaf inside), which is the bound the fuzz test asserts.
+/// Layout inherits this bound, and real documents stay far under it.
 pub const MAX_BLOCK_DEPTH: usize = 256;
 
 /// Why a block keeps showing its source instead of being rendered.

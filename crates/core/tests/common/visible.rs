@@ -5,8 +5,7 @@
 //! The reductions, applied identically to both sides:
 //! - comments, declarations and processing instructions vanish
 //! - tags outside the allow-list vanish and their text stays
-//! - script, style and iframe with a closer vanish with their content; without one, and all other
-//!   tagfilter names, show as literal text
+//! - tagfilter names (script, style, iframe and the rest) show as literal text, as GitHub does
 //! - synonyms unify (b/strong, i/em, s/del/strike), table sections and redundant nested strong vanish
 //! - only attributes the model keeps survive, and unclosed elements are closed
 
@@ -17,9 +16,10 @@ const FILTERED_LITERAL: &[&str] = &[
     "noembed",
     "noframes",
     "plaintext",
+    "script",
+    "style",
+    "iframe",
 ];
-const DROP_PAIRED: &[&str] = &["script", "style", "iframe"];
-const DROP_PAIRED_SILENT: &[&str] = &["object", "embed", "head", "template"];
 
 fn canonical(name: &str) -> Option<&'static str> {
     Some(match name {
@@ -63,10 +63,6 @@ fn canonical(name: &str) -> Option<&'static str> {
 
 const VOID: &[&str] = &["hr", "img", "br", "input"];
 
-fn find_ci(hay: &str, needle: &str) -> Option<usize> {
-    hay.to_ascii_lowercase().find(needle)
-}
-
 struct Item {
     name: &'static str,
     silent: bool,
@@ -106,7 +102,7 @@ pub fn visible(html: &str) -> String {
             let name = r[..gt].trim().to_ascii_lowercase();
             let chunk = &rest[..gt + 3];
             rest = &r[gt + 1..];
-            if FILTERED_LITERAL.contains(&name.as_str()) || DROP_PAIRED.contains(&name.as_str()) {
+            if FILTERED_LITERAL.contains(&name.as_str()) {
                 push_literal(chunk, &mut out);
             } else if let Some(c) = canonical(&name) {
                 close(c, &mut stack, &mut out);
@@ -126,14 +122,7 @@ pub fn visible(html: &str) -> String {
             let name = body[..name_end].to_ascii_lowercase();
             let attrs = parse_attrs(&body[name_end..]);
             rest = tail;
-            if DROP_PAIRED.contains(&name.as_str()) || DROP_PAIRED_SILENT.contains(&name.as_str()) {
-                let closer = format!("</{name}");
-                match find_ci(tail, &closer) {
-                    Some(at) => rest = tail[at..].find('>').map_or("", |e| &tail[at + e + 1..]),
-                    None if DROP_PAIRED.contains(&name.as_str()) => push_literal(chunk, &mut out),
-                    None => {}
-                }
-            } else if FILTERED_LITERAL.contains(&name.as_str()) {
+            if FILTERED_LITERAL.contains(&name.as_str()) {
                 push_literal(chunk, &mut out);
             } else if let Some(c) = canonical(&name) {
                 open(c, &attrs, &mut stack, &mut out);

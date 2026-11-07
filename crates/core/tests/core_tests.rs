@@ -37,7 +37,8 @@ fn gfm() {
             .any(|s| s.kind == SpanKind::Checkbox { checked: true })
     );
     assert!(d.spans.iter().any(|s| s.kind == SpanKind::Strike));
-    assert!(!d.text.contains("alert"));
+    // GitHub's tag filter shows a script tag as literal text, so the tag must not vanish.
+    assert!(d.text.contains("<script>") && d.text.contains("</script>"));
     assert_eq!(d.headings.len(), 1);
 }
 

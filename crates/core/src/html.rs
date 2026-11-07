@@ -34,38 +34,11 @@ impl<'a> Token<'a> {
 pub struct Tokenizer<'a> {
     src: &'a str,
     pos: usize,
-    // Once a closer was not found for a tag, it will not be found later either.
-    missing_closers: Vec<&'a str>,
 }
 
 impl<'a> Tokenizer<'a> {
     pub fn new(src: &'a str) -> Self {
-        Tokenizer {
-            src,
-            pos: 0,
-            missing_closers: Vec::new(),
-        }
-    }
-
-    /// Moves past the next `</name>`. False, without moving, if there is none.
-    pub fn skip_past_close(&mut self, name: &'a str) -> bool {
-        if self
-            .missing_closers
-            .iter()
-            .any(|n| n.eq_ignore_ascii_case(name))
-        {
-            return false;
-        }
-        match find_close_tag(&self.src[self.pos..], name) {
-            Some(end) => {
-                self.pos += end;
-                true
-            }
-            None => {
-                self.missing_closers.push(name);
-                false
-            }
-        }
+        Tokenizer { src, pos: 0 }
     }
 
     fn take(&mut self, len: usize) -> &'a str {
@@ -169,25 +142,6 @@ fn tag_end(b: &[u8], from: usize) -> Option<usize> {
             after_equals = c == b'=';
         }
         i += 1;
-    }
-    None
-}
-
-/// Byte offset just past the first `</name ... >` in `s`, ignoring ASCII case.
-pub(crate) fn find_close_tag(s: &str, name: &str) -> Option<usize> {
-    let b = s.as_bytes();
-    let n = name.as_bytes();
-    let mut from = 0;
-    while let Some(i) = memmem::find(&b[from..], b"</") {
-        let at = from + i + 2;
-        let matches = b.len() >= at + n.len()
-            && b[at..at + n.len()].eq_ignore_ascii_case(n)
-            && b.get(at + n.len())
-                .is_none_or(|&c| c.is_ascii_whitespace() || c == b'>' || c == b'/');
-        if matches {
-            return memchr(b'>', &b[at..]).map(|gt| at + gt + 1);
-        }
-        from = at;
     }
     None
 }
@@ -390,10 +344,6 @@ pub(crate) enum Tag {
     Sub,
     Sup,
     Mark,
-    /// Removed together with their content when closed.
-    DropContent {
-        literal_if_unclosed: bool,
-    },
     /// GFM tagfilter names that show as literal text.
     Literal,
     Unknown,
@@ -438,7 +388,7 @@ impl Tag {
             Tag::Sub => 35,
             Tag::Sup => 36,
             Tag::Mark => 37,
-            Tag::DropContent { .. } | Tag::Literal => 38,
+            Tag::Literal => 38,
             Tag::Unknown => 39,
         }
     }
@@ -457,6 +407,29 @@ impl Tag {
                 | Tag::Unknown
         )
     }
+}
+
+/// Tags GitHub's sanitizer keeps but this model has no element for. They draw nothing, yet an alert
+/// whose body holds one still counts as an alert on GitHub, so this is only asked about there.
+pub(crate) fn is_inert_tag(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "span"
+            | "font"
+            | "abbr"
+            | "bdo"
+            | "q"
+            | "rp"
+            | "rt"
+            | "ruby"
+            | "small"
+            | "time"
+            | "wbr"
+            | "hgroup"
+            | "col"
+            | "colgroup"
+            | "data"
+    )
 }
 
 pub(crate) fn classify_tag(name: &str) -> Tag {
@@ -508,13 +481,13 @@ pub(crate) fn classify_tag(name: &str) -> Tag {
         b"sub" => Tag::Sub,
         b"sup" => Tag::Sup,
         b"mark" => Tag::Mark,
-        b"script" | b"style" | b"iframe" => Tag::DropContent {
-            literal_if_unclosed: true,
-        },
-        b"object" | b"embed" | b"head" | b"template" => Tag::DropContent {
-            literal_if_unclosed: false,
-        },
-        b"title" | b"textarea" | b"xmp" | b"noembed" | b"noframes" | b"plaintext" => Tag::Literal,
+        // GitHub's tag filter escapes these tags, so they show as text and their content is ordinary
+        // HTML by the time the browser sees it. Nothing here executes either way: the model holds
+        // plain text, not markup.
+        b"script" | b"style" | b"iframe" | b"title" | b"textarea" | b"xmp" | b"noembed"
+        | b"noframes" | b"plaintext" => Tag::Literal,
+        // GitHub strips these tags and keeps their children, so they are treated as unknown.
+        b"object" | b"embed" | b"head" | b"template" => Tag::Unknown,
         _ => Tag::Unknown,
     }
 }

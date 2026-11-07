@@ -285,8 +285,11 @@ pub struct Footnote {
     pub label: StrRef,
     /// 1-based display number in order of first reference; 0 when never referenced.
     pub number: u32,
-    /// The definition. Only `NONE` while parsing: a reference exists only if its definition does.
+    /// The definition, when one got a block of its own. `NONE` for a flattened definition, or one
+    /// that was never defined; `defined` tells those apart.
     pub block: u32,
+    /// Whether a definition for this label was seen, even if it was too deep to own a block.
+    pub defined: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

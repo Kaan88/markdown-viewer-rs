@@ -248,7 +248,7 @@ pub(crate) fn may_contain_link(t: &str) -> bool {
 // letters and accepts in link destinations, and swapped back wherever text leaves the parser.
 // Offsets stay meaningful because the swapped string is the source of record for the whole parse.
 const SWAPS: [(u8, char); 3] = [(b'_', '\u{E000}'), (b'*', '\u{E001}'), (b'~', '\u{E002}')];
-const SWAP_PREFIX: &[u8] = b"\xEE\x80";
+pub(crate) const SWAP_PREFIX: &[u8] = b"\xEE\x80";
 
 /// Returns the source with delimiters inside bare URLs protected. Borrowed when there is nothing to
 /// do, which includes a document that already uses private-use characters from this block, since
@@ -347,10 +347,8 @@ fn url_extent(s: &str) -> usize {
 /// Stands in for a `$` the parser must not take as a math delimiter. It shares the swaps' prefix, so
 /// `restore` brings it back along with them.
 pub(crate) const HIDDEN_DOLLAR: char = '\u{E003}';
-pub(crate) const HIDDEN_DOLLAR_UTF8: &[u8] = "\u{E003}".as_bytes();
 /// The same for the `[` of an alert marker that GitHub would not treat as one.
 pub(crate) const HIDDEN_BRACKET: char = '\u{E004}';
-pub(crate) const HIDDEN_BRACKET_UTF8: &[u8] = "\u{E004}".as_bytes();
 
 /// Undoes `protect_url_delimiters` and the hidden delimiters on text coming back from the parser.
 pub(crate) fn restore(s: &str) -> Cow<'_, str> {

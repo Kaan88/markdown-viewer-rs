@@ -1,57 +1,63 @@
-# Handoff: continuing mdview on Windows
+# Handoff: Phase 1 audit fixes complete
 
-Written when work paused and moved from the Linux machine to Windows. Read this first, then [PLAN.md](PLAN.md).
+**Branch:** `phase1-audit-fixes`, based on `main` at `4127954`. The work is committed and pushed on this branch. [PLAN.md](PLAN.md), [AUDIT_PHASE1.md](AUDIT_PHASE1.md), [COVERAGE.md](COVERAGE.md) and [PORT_CHECKLIST.md](PORT_CHECKLIST.md) now agree with the code; where they disagree with this file, this file is current.
 
-## Where things stand
+## State
 
-- **Done:** Phase 0 (spikes, Go declared) and the Phase 1 core crate, `crates/core`. It has a parser, document model, find and session logic. There is no renderer or app yet, so nothing can be opened or seen.
-- **Tests on Linux:** 120 pass. CommonMark matches 645 of 652 and GFM 665 of 672, and every miss is a listed exception. These use a comparison reduced to what our allow-list can show, not byte-exact HTML; see [COVERAGE.md](COVERAGE.md).
-- **Speed:** a 1 MiB document parses in about 5.9 ms on a 28-thread desktop, with a 10.91 MiB peak and 2.08 MiB retained.
-- **Phase 1 is not closed.** The audit found defects that are not fixed yet. See "Do next".
+- The core crate's tests pass **on Windows**: 7 core, 11 fuzz, 113 regression and 3 spec tests, release profile. The fuzz and regression counts grew on this branch because every behaviour changed by the audit now has a test that fails if it reverts; the alert, implied-block and CRLF tests were mutation-checked by reverting the fix and watching them fail.
+- The spec suites still pass with 645/652 CommonMark and 665/672 GFM, the same 7 listed exceptions each.
+- Every finding the Phase 1 audit confirmed is either fixed with a regression test or listed as a known gap in `COVERAGE.md`. `AUDIT_PHASE1.md`'s table has a last column saying which, per finding.
+- `cargo fmt --all` is clean and the build has no warnings. There is still no CI, so run the tests yourself.
 
-**Never run on Windows:** the core crate's tests. It type-checks for `x86_64-pc-windows-msvc`, tests included, but `cfg(windows)` code has never executed, including `canonical_paths_have_one_identity_on_windows`.
+## Windows setup, including the trap
 
-**WinUI:** only an empty test skeleton exists, in `spikes/winui`. It ran in a Windows 11 VM with no GPU, never on real hardware.
-
-## Decisions already made (don't re-ask)
-
-- Launch speed, low memory and Markdown coverage rank equally first. Coverage means how much real-world Markdown renders correctly. Coverage work goes in lazily loaded code.
-- Windows shell: WinUI 3, code only, committed regardless of measured cost. Linux shell: Qt Widgets through CXX-Qt with no authored C++. Slint was compared and rejected for its text rendering; don't reopen that on numbers alone.
-- All authored code in Rust. Custom renderer, no webview. Windows 11 only. No screen-reader work. Private repo, no CI.
-- A paired `<script>`, `<style>` or `<iframe>` shows as literal text, as GitHub does. **Not yet changed in code.**
-- All exclusions in COVERAGE.md are accepted. Keep its "Not implemented" list current.
-- Rust text must use the channel order from `spikes/text/src/lib.rs`, `Format::CustomSubpixel([0.3, 0.0, -0.3])`, not `Format::Subpixel`, which swapped red and blue and caused visible colour fringes. The real renderer needs a regression test for this. Whether to hint at lower scales is still open.
-
-## Do next
-
-1. **Fix the audit findings** in [AUDIT_PHASE1.md](AUDIT_PHASE1.md): 19 confirmed and 11 unverified. Reproduce each unverified one before fixing it. The largest:
-   - `<object>`, `<embed>`, `<head>` and `<template>` drop their content silently, where GitHub keeps it.
-   - Footnotes aren't collected at the end of the document in reference order, as GitHub does. COVERAGE.md overstates this.
-   - Valid alerts are rejected when a heading or rule follows a blank line.
-   - The scaling test can miss small quadratic costs (unverified).
-2. **Change the script, style and iframe handling** to literal text, and update `tests/common/visible.rs`, which currently hides the difference.
-3. **Run the core tests on Windows** (below). Treat any failure as a real bug, and close Phase 1.
-4. **Ask the user about phase order.** The plan builds the Linux Qt shell (Phase 3) before WinUI (Phase 5), but the Qt shell can't be built on Windows. Working from Windows, the natural order is Phase 2, then a first WinUI window. It is the user's call. They want something they can open real files in as early as possible, so build a bare window as soon as the renderer can draw a page.
-
-## Setting up on Windows
-
-1. Install Git, the GitHub CLI, Visual Studio Build Tools with the C++ workload and Windows SDK, and rustup. Linux used Rust 1.99.1.
-2. Clone and test:
+`cargo test` fails in `utf8_bom_and_unicode` with `Access is denied` when creating a directory under `%TEMP%`. This host's DSH file sandbox blocks writes outside the workspace even when the runtime context says `danger-full-access`; PowerShell and Rust probes both confirmed it. It is an environment limit, not a repo bug. Run tests with temp inside the workspace:
 
 ```powershell
-gh repo clone Kaan88/markdown-viewer-rs
-cd markdown-viewer-rs
+New-Item -ItemType Directory -Force target\tmp | Out-Null
+$env:TMP = (Resolve-Path target\tmp).Path
+$env:TEMP = $env:TMP
 cargo test --release -p mdview-core
 ```
 
-`.gitattributes` keeps the test data on LF line endings. This has not been tried on a real Windows clone.
+Other setup notes:
 
-**WinUI spike:** its scripts are for cross-building from Linux and won't run on Windows as they are: `build-win.sh` (uses `cargo xwin`), `stage.sh` and `see-it.sh`. The two `cargo xwin build` lines there should become plain `cargo build`, untested. `stage.sh` shows how to lay out the folder and needs porting to PowerShell. Built output is not in the repo. `spikes/winui/W0.md` is the checklist for a first run on real hardware, and it has never been done.
+- Git's schannel backend fails in this sandbox with `SEC_E_NO_CREDENTIALS`; use `gh auth token` plus `-c http.sslBackend=openssl`. The remote URL in `.git/config` is the plain HTTPS URL, so no token is stored there. `gh api markdown` works normally and was used for every GitHub comparison.
+- Cargo network access and the MSVC toolchain (Rust 1.99.1) work.
 
-## What stayed on the Linux machine
+## What this branch changed, by audit finding
 
-- Claude's memory and this session's history. The parts that matter are copied here and in PLAN.md.
-- Build outputs, the Docker `WinApps` VM, and the private toolchain in `~/.local/rust-win`.
-- Probe code for the audit, in `~/.cache/mdview-audit`. The audit quotes the inputs, so nothing depends on it.
+The full per-finding list is in `AUDIT_PHASE1.md`. The user-visible decisions are these:
 
-The Linux desktop froze during this work with heavy builds running. The cause was never found. On any machine, keep build jobs moderate and don't copy the repo into a RAM-backed temp folder.
+- **Raw HTML.** `script`, `style` and `iframe` show as literal text, as GitHub's tag filter does. `object`, `embed`, `head` and `template` are dropped as tags with their children kept, so an `<object>` fallback shows. A raw `<input>` is ignored; Markdown task boxes still draw.
+- **Alerts.** A blank quote line between the marker and a heading, rule or `***` keeps the alert; `---`/`===`/`-`/`--` directly under the marker turn that line into a setext heading. A `#x` line plus `---` is setext text, not ATX. An empty body made only of inline HTML (`<i></i>`, `<a href=x></a>`, `<img>`, `<p></p>`, `<span></span>`) keeps the alert, while a comment, unknown tag, `<a>` without href or raw `<input>` does not. A `<td>`/`<th>` resets the `<div>`, list and quote ancestors; `<details>` still rejects inside a cell.
+- **Tables and lists.** An implied row, cell or item whose subtree has no text and no atoms is dropped, so empty tags no longer add phantom rows, columns or marker-less items.
+- **Lengths and images.** `width`/`height` follow the HTML dimension rule (`10em` is 10, `+5` and `.5` are no length, `50 %` is 50px). `colspan`/`rowspan` accept a leading `+`. Image dimensions clamp to 2000 on both axes together; table attributes keep 12000.
+- **Pictures.** A `<source>` counts only as a direct child of a `<picture>`, only for its first `<img>`, and only while the picture's block is open; the first matching source wins.
+- **Footnotes.** References inside a skipped duplicate definition are numbered, as on GitHub. A definition flattened at `MAX_BLOCK_DEPTH` sets `defined` but keeps `block == NONE`. The fuzz bound and its comment now say `MAX_BLOCK_DEPTH + 5`.
+- **Private-use characters.** `can_hide` tests the whole `SWAP_PREFIX` range (U+E000 to U+E03F), so a document's own characters survive a rejected `$` or alert.
+- **Find.** A CRLF pair in a query is one break, not two spaces. A multi-line selection from a code block or across two paragraphs still never matches; that and the real budget condition are listed in `COVERAGE.md`.
+- **Dead code.** `Tag::DropContent`, the `Pending` machinery, `wait_for_inline_closer`, `Tokenizer::skip_past_close` and `find_close_tag` are gone.
+
+## Decisions recorded
+
+- **Footnote relocation is the Phase 2 renderer's job.** Core keeps each definition where it was written. The renderer draws the end-of-document list in order of first reference, skips `FootnoteDefinition` blocks in flow, and does not draw unreferenced ones (number 0). Until then, find and the block order see mid-file and unreferenced definitions. This is in `COVERAGE.md` under "Decided, work left for later phases".
+- **Two alert gaps are documented, not fixed**: a marker that is not on the quote's first line (`> ` blank or `> <!-- c -->` before `> [!NOTE]`), and a marker that is also a reference label (`[!NOTE]: /u`). Both are in `COVERAGE.md`'s known gaps.
+- **`tests-parity #10` is accepted**: no value assertion can distinguish the fewer-allocations change on the bare-URL path, and the test says so.
+- The script/style/iframe question from the old handoff is closed: literal text, implemented, tested.
+- No test was added for a pure constant-factor slowdown at 256 KiB; the new `scaling_holds_at_the_file_limit` test covers the 16 MiB end, not a fixed 2x.
+
+## Still valid from the previous handoff
+
+- Decisions are unchanged: WinUI 3 on Windows, Qt Widgets through CXX-Qt on Linux, custom renderer, no webview, Windows 11 only, no screen-reader work, private repo, no CI, all authored code in Rust.
+- Coverage exclusions in `COVERAGE.md` remain accepted unless the user says otherwise.
+- Text must use `Format::CustomSubpixel([0.3, 0.0, -0.3])`, not `Format::Subpixel`. The renderer still needs the regression test.
+- Nothing counts as working on Windows until it has run on Windows; the core now has, the WinUI spike and shell have not.
+- The user wants a window they can open real files in as soon as the renderer can draw a page. The phase-order question from the old handoff (Phase 2 then a first WinUI window, instead of the plan's Qt-first order) is **still unanswered** and is the first thing to settle next.
+- `spikes/winui/W0.md` is still the first-run checklist; the spike's Linux build scripts have not been ported to Windows.
+
+## What to do next
+
+1. Settle the order: Phase 2 renderer (WinUI first?) against the plan's Qt-first order, and tell the user what they get first.
+2. Build the Phase 2 renderer against the model in `crates/core/src/model.rs`, including the footnote end list and the `CustomSubpixel` text format.
+3. Open a WinUI window on a real file. `spikes/winui/W0.md` is the checklist; nothing in the shell has run on Windows yet.

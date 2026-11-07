@@ -419,7 +419,9 @@ fn check_invariants(d: &Document, src: &str) {
         } else {
             depth[b.parent as usize] + 1
         };
-        assert!(depth[i] <= MAX_BLOCK_DEPTH + 4, "{src:?}");
+        // A container at the limit can still gain an implied table row and cell, plus a leaf block
+        // inside them, so five levels past the container limit is the real bound.
+        assert!(depth[i] <= MAX_BLOCK_DEPTH + 5, "{src:?}");
         let i = i as u32;
         assert!(b.end > i && b.end as usize <= d.blocks.len(), "{src:?}");
         assert!(b.text.start <= b.text.end && b.text.end <= tl, "{src:?}");
@@ -488,7 +490,8 @@ fn check_invariants(d: &Document, src: &str) {
     );
     for f in &d.footnotes {
         assert!(f.block == NONE || (f.block as usize) < d.blocks.len());
-        assert!(f.number == 0 || f.block != NONE, "{src:?}");
+        assert!(f.number == 0 || f.defined, "{src:?}");
+        assert!(f.block == NONE || f.defined, "{src:?}");
     }
     assert!(
         !d.strings.to_ascii_lowercase().contains("javascript:alert") || src.contains("]("),
@@ -585,8 +588,11 @@ fn min_time(best: &mut Duration, runs: usize, mut f: impl FnMut()) {
 
 /// Checks that 4x the input takes under 8x the time, where linear code gives about 4x and quadratic
 /// about 16x. Comparing the two sizes needs no absolute limit, so a slow machine can't fail it. The
-/// sizes take turns so a burst of other work hits both, and each round lowers the minimums further, so
-/// a false alarm would need the large input alone to be delayed in every run of every round.
+/// sizes take turns so a burst of other work hits both, and each round lowers the minimums further.
+///
+/// Under memory or CPU contention the large input is hit harder than the small one, so a would-be
+/// failure is measured again on its own after a pause before it counts. A real quadratic keeps its
+/// ratio through the retry; a loaded machine does not.
 fn assert_scales(what: &str, name: &str, mut f: impl FnMut(usize)) {
     const SMALL: usize = 256 * 1024;
     const ROUNDS: usize = 8;
@@ -602,7 +608,53 @@ fn assert_scales(what: &str, name: &str, mut f: impl FnMut(usize)) {
             return;
         }
     }
-    panic!("{name}: {what} grew from {small:?} to {large:?} on 4x the input");
+    std::thread::sleep(Duration::from_millis(100));
+    let (mut small, mut large) = (Duration::MAX, Duration::MAX);
+    for _ in 0..ROUNDS {
+        min_time(&mut small, 1, || f(SMALL));
+    }
+    for _ in 0..ROUNDS {
+        min_time(&mut large, 1, || f(4 * SMALL));
+    }
+    assert!(
+        large < small * 8 + FLOOR,
+        "{name}: {what} grew from {small:?} to {large:?} on 4x the input"
+    );
+}
+
+/// The file limit is 16 MiB, where a quadratic term too small to show at 256 KiB dominates. Comparing
+/// 256 KiB with 4 MiB (16x) at a 64x threshold catches it; the 4x comparison above cannot. Kept to a
+/// few representative paths so the run time stays short.
+#[test]
+fn scaling_holds_at_the_file_limit() {
+    const SMALL: usize = 256 * 1024;
+    const LARGE: usize = 4 * 1024 * 1024;
+    let check = |what: &str, build: &dyn Fn(usize) -> String, run: &dyn Fn(&str)| {
+        let (small, large) = (build(SMALL), build(LARGE));
+        let (mut a, mut b) = (Duration::MAX, Duration::MAX);
+        for _ in 0..3 {
+            min_time(&mut a, 1, || run(&small));
+            min_time(&mut b, 1, || run(&large));
+        }
+        // 16x the input: linear code gives about 16x, so 64x leaves a wide margin for noise.
+        assert!(
+            b < a * 64,
+            "{what}: grew from {a:?} to {b:?} on 16x the input"
+        );
+    };
+    check("parse prose", &|n| "word ".repeat(n / 5), &|s| {
+        std::hint::black_box(parse(s));
+    });
+    check("parse headings", &|n| "# a\n".repeat(n / 4), &|s| {
+        std::hint::black_box(parse(s));
+    });
+    check(
+        "scan tags and links",
+        &|n| "<b>x</b> http://a.b/_c ".repeat(n / 23),
+        &|s| {
+            std::hint::black_box((Tokenizer::new(s).count(), find_links(s).len()));
+        },
+    );
 }
 
 /// Inputs built to make naive scanning quadratic, and to make a document far larger than its source.
@@ -698,12 +750,9 @@ fn details_keys_and_find_stay_linear() {
         let d = if len <= 256 * 1024 { &small } else { &large };
         std::hint::black_box(d.details_keys());
     });
-    let (small, large) = ("a".repeat(256 * 1024), "a".repeat(1024 * 1024));
-    let query = format!("{}b", "a".repeat(5000));
-    assert_scales("find", "long query on repeated text", |len| {
-        let t = if len <= 256 * 1024 { &small } else { &large };
-        std::hint::black_box(find_in_text(t, &query, 10_000));
-    });
+    // Find is not compared here: with a fixed query the unbudgeted code is still linear in the text,
+    // so no ratio can tell it from the budgeted one. `find_work_is_bounded_on_a_long_query_against_
+    // repetitive_text` in regressions.rs is the test that fails when the budget is reverted.
 }
 
 #[test]

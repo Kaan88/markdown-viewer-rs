@@ -1,44 +1,44 @@
 # Phase 1 audit of be52ac4
 
-Stopped early at the user's request. The commit under review is `be52ac4`, compared with `762984d`. **None of these findings has been fixed.**
+Stopped early at the user's request. The commit under review is `be52ac4`, compared with `762984d`. The last column says what the `phase1-audit-fixes` branch did; the findings themselves are unchanged.
 
 Reviewers compared against `gh api markdown -f mode=gfm -f context=cli/cli`. Confirmed means a second agent, told to try to disprove the finding, reproduced it. Paths under `/home/kaan/.cache` are Linux-only probes that did not come with the repo; the inputs quoted here are enough to reproduce.
 
 **Totals:** 19 confirmed, 1 refuted, 11 unverified (the tests and parity lens only).
 
-| Finding | Status | Severity | File |
-|---|---|---|---|
-| correctness #0 | CONFIRMED | major | `crates/core/src/parse.rs` |
-| correctness #1 | CONFIRMED | minor | `crates/core/src/parse.rs` |
-| correctness #2 | CONFIRMED | minor | `crates/core/src/parse.rs` |
-| correctness #3 | CONFIRMED | minor | `crates/core/src/parse.rs` |
-| correctness #4 | CONFIRMED | minor | `crates/core/src/parse.rs` |
-| correctness #5 | CONFIRMED | minor | `crates/core/src/parse.rs` |
-| correctness #6 | CONFIRMED | minor | `crates/core/src/parse.rs` |
-| coverage #0 | CONFIRMED | major | `crates/core/src/html.rs:514` |
-| coverage #1 | CONFIRMED | major | `docs/COVERAGE.md:55` |
-| coverage #2 | CONFIRMED | minor | `crates/core/src/parse.rs alert_allowed_here; docs/` |
-| coverage #3 | CONFIRMED | minor | `crates/core/src/parse.rs block_quote/finish_block/` |
-| coverage #4 | CONFIRMED | minor | `crates/core/src/parse.rs in_picture / leave_pictur` |
-| coverage #5 | CONFIRMED | minor | `crates/core/src/parse.rs:2253 html_source` |
-| coverage #6 | CONFIRMED | minor | `crates/core/src/parse.rs parse_span / parse_length` |
-| coverage #7 | REFUTED | minor | `docs/COVERAGE.md:113` |
-| coverage #8 | CONFIRMED | minor | `crates/core/src/parse.rs html_input; docs/COVERAGE` |
-| coverage #9 | CONFIRMED | minor | `docs/COVERAGE.md:20,107,108` |
-| performance #0 | CONFIRMED | minor | `docs/COVERAGE.md` |
-| performance #1 | CONFIRMED | minor | `docs/COVERAGE.md` |
-| performance #2 | CONFIRMED | minor | `crates/core/src/find.rs` |
-| tests-parity #0 | UNVERIFIED | major | `crates/core/tests/fuzz.rs` |
-| tests-parity #1 | UNVERIFIED | minor | `crates/core/tests/fuzz.rs` |
-| tests-parity #2 | UNVERIFIED | minor | `crates/core/tests/fuzz.rs` |
-| tests-parity #3 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` |
-| tests-parity #4 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` |
-| tests-parity #5 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` |
-| tests-parity #6 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` |
-| tests-parity #7 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` |
-| tests-parity #8 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` |
-| tests-parity #9 | UNVERIFIED | minor | `docs/PORT_CHECKLIST.md` |
-| tests-parity #10 | UNVERIFIED | minor | `crates/core/src/parse.rs` |
+| Finding | Status | Severity | File | On `phase1-audit-fixes` |
+|---|---|---|---|---|
+| correctness #0 | CONFIRMED | major | `crates/core/src/parse.rs` | Fixed: a blank quote line makes the next block an ordinary child; tested |
+| correctness #1 | CONFIRMED | minor | `crates/core/src/parse.rs` | Fixed: empty implied row, cell and item subtrees are dropped; a link still lands on the cell text, listed in COVERAGE |
+| correctness #2 | CONFIRMED | minor | `crates/core/src/parse.rs` | Fixed: `-`/`--` become a setext heading, `#x` is setext text, a footnote definition rejects, empty inline HTML keeps the alert; tested |
+| correctness #3 | CONFIRMED | minor | `crates/core/src/parse.rs` | Fixed: `can_hide` tests the whole `SWAP_PREFIX`; tested |
+| correctness #4 | CONFIRMED | minor | `crates/core/src/parse.rs` | Fixed: `Footnote::defined` keeps a flattened definition's block at `NONE`; tested |
+| correctness #5 | CONFIRMED | minor | `crates/core/src/parse.rs` | Fixed: references inside a skipped duplicate definition are numbered; tested |
+| correctness #6 | CONFIRMED | minor | `crates/core/src/parse.rs` | Fixed the bound to `MAX_BLOCK_DEPTH + 5` in code, comment, fuzz and a regression test; the joined words after `</td>` on a flattened table are still not fixed |
+| coverage #0 | CONFIRMED | major | `crates/core/src/html.rs:514` | Fixed: `object`, `embed`, `head` and `template` are unknown tags whose children are kept; tested |
+| coverage #1 | CONFIRMED | major | `docs/COVERAGE.md:55` | Decision recorded: the Phase 2 renderer moves the notes into an end list and skips them in flow; core keeps them where written, and unreferenced ones stay in the model and find. Not implemented |
+| coverage #2 | CONFIRMED | minor | `crates/core/src/parse.rs alert_allowed_here; docs/` | Fixed: the walk starts innermost and stops at a cell; `<details>` still rejects; tested |
+| coverage #3 | CONFIRMED | minor | `crates/core/src/parse.rs block_quote/finish_block/` | Fixed (b), (c: the `--` half) and (d). (a) a marker after a blank or comment line, and (e) `[!NOTE]: /u`, are listed in COVERAGE |
+| coverage #4 | CONFIRMED | minor | `crates/core/src/parse.rs in_picture / leave_pictur` | Fixed: picture state ends with its block, a source must be a direct child; tested |
+| coverage #5 | CONFIRMED | minor | `crates/core/src/parse.rs:2253 html_source` | Fixed: the first matching source wins; tested |
+| coverage #6 | CONFIRMED | minor | `crates/core/src/parse.rs parse_span / parse_length` | Fixed: the HTML dimension rule, leading `+` on spans, and image clamps at 2000; COVERAGE updated and tested |
+| coverage #7 | REFUTED | minor | `docs/COVERAGE.md:113` | Refuted; COVERAGE's math rule now notes it was measured through `gh api`, not a repository render |
+| coverage #8 | CONFIRMED | minor | `crates/core/src/parse.rs html_input; docs/COVERAGE` | Fixed: a raw `<input>` is ignored; task boxes still draw; tested |
+| coverage #9 | CONFIRMED | minor | `docs/COVERAGE.md:20,107,108` | Fixed in COVERAGE: `percent_decode`, the synonym merges and drop list, the lone `<li>`, and `&lt;` |
+| performance #0 | CONFIRMED | minor | `docs/COVERAGE.md` | Fixed in COVERAGE: measured `#\n`, `>` and `[` figures, and retained memory is not nesting-bounded |
+| performance #1 | CONFIRMED | minor | `docs/COVERAGE.md` | Fixed in COVERAGE: the real condition and the capped display rule |
+| performance #2 | CONFIRMED | minor | `crates/core/src/find.rs` | Fixed CRLF; a selection from a code block or across paragraphs is listed as a gap; tested |
+| tests-parity #0 | UNVERIFIED | major | `crates/core/tests/fuzz.rs` | Fixed: `scaling_holds_at_the_file_limit` compares 256 KiB with 4 MiB at a 64x threshold |
+| tests-parity #1 | UNVERIFIED | minor | `crates/core/tests/fuzz.rs` | Fixed: the find arm is removed with a note pointing at the regression test that catches a budget revert |
+| tests-parity #2 | UNVERIFIED | minor | `crates/core/tests/fuzz.rs` | Fixed: `assert_scales` re-measures alone after a pause before failing |
+| tests-parity #3 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` | Fixed: the picture test covers a picture that closes without an image |
+| tests-parity #4 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` | Fixed: the timed-out-then-succeeded sequence is tested |
+| tests-parity #5 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` | Fixed: File, Edit and Help lists and the remaining titles are asserted |
+| tests-parity #6 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` | Fixed: `&frac12;`/`&sup2;` and the offset cases are tested; COVERAGE says the trim is letter-only |
+| tests-parity #7 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` | Fixed: direct `<td colspan>` and a depth-limit alert are tested; H4/H6 were left in place |
+| tests-parity #8 | UNVERIFIED | minor | `crates/core/tests/regressions.rs` | Documented in the test and in COVERAGE's stray-content gap |
+| tests-parity #9 | UNVERIFIED | minor | `docs/PORT_CHECKLIST.md` | Fixed: the overclaim, the missing worker strings and dialog titles, and the shortcuts dialog |
+| tests-parity #10 | UNVERIFIED | minor | `crates/core/src/parse.rs` | Accepted and stated in the test: no value assertion can see the allocation change |
 
 ## correctness
 

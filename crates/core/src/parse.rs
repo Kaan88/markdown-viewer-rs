@@ -1,10 +1,10 @@
 //! Streams pulldown-cmark events into the document model. No event is kept after it is handled.
 
-use crate::autolink::{self, Entities, HIDDEN_BRACKET_UTF8, HIDDEN_DOLLAR_UTF8, LinkKind};
+use crate::autolink::{self, Entities, LinkKind, SWAP_PREFIX};
 use crate::html::{self, Tag, Token, Tokenizer};
 use crate::limits::{
     MAX_BLOCK_DEPTH, MAX_COLSPAN, MAX_DECODED_BYTES, MAX_DIAGRAM_BYTES, MAX_EQUATION_BYTES,
-    MAX_HTML_DEPTH, MAX_HTML_LENGTH_PX, MAX_ROWSPAN, Oversize,
+    MAX_HTML_DEPTH, MAX_HTML_LENGTH_PX, MAX_IMAGE_DIMENSION_PX, MAX_ROWSPAN, Oversize,
 };
 use crate::model::*;
 use crate::slug::Slugger;
@@ -70,8 +70,10 @@ const MATH_PASSES: usize = 4;
 /// it finds one, and the line it takes may have belonged to a paragraph. So rejected delimiters are
 /// hidden from the parser and the source is parsed again. `rejected` holds those already known.
 fn parse_with_checks(mut src: Cow<'_, str>, mut restore: bool, rejected: Vec<usize>) -> Document {
-    let can_hide = memchr::memmem::find(src.as_bytes(), HIDDEN_DOLLAR_UTF8).is_none()
-        && memchr::memmem::find(src.as_bytes(), HIDDEN_BRACKET_UTF8).is_none();
+    // Hiding swaps in characters from U+E003 upward. A document that already uses any character
+    // from that private-use block would have its own text rewritten by `restore`, so such a
+    // document takes the literal pass instead.
+    let can_hide = memchr::memmem::find(src.as_bytes(), SWAP_PREFIX).is_none();
     if can_hide && !rejected.is_empty() {
         src = Cow::Owned(hide_delimiters(&src, &rejected));
         restore = true;
@@ -337,22 +339,6 @@ struct Ambient {
     depth: usize,
 }
 
-/// An inline `<script>` or similar whose closer shows in the source. The events after it wait here,
-/// because that closer only counts if it arrives as a real tag and not inside a code span or escape.
-struct Pending<'a> {
-    name: &'static str,
-    slot: usize,
-    raw: String,
-    literal_if_unclosed: bool,
-    depth: u32,
-    events: Vec<(Event<'a>, Range<usize>)>,
-}
-
-/// Elements dropped with their content when a closer exists.
-const DROP_NAMES: [&str; 7] = [
-    "script", "style", "iframe", "object", "embed", "head", "template",
-];
-
 struct Builder<'a> {
     src: &'a str,
     restore: bool,
@@ -383,15 +369,16 @@ struct Builder<'a> {
     image_alt_start: usize,
     image_idx: u32,
     in_picture: bool,
+    // The block the picture opened in, and how deep the stack was: a source counts only as a direct
+    // child, and the picture ends when its block does.
+    picture_block: u32,
+    picture_depth: usize,
     picture_dark: StrRef,
     picture_light: StrRef,
     aligns: Vec<Alignment>,
     col: usize,
     header_row: bool,
-    pending: Option<Pending<'a>>,
     inline_limit: usize,
-    html_event_end: usize,
-    no_closer_before: [usize; DROP_NAMES.len()],
     slugger: Slugger,
     in_heading: bool,
     heading_text: String,
@@ -404,8 +391,15 @@ struct Builder<'a> {
     // Text ranges of named entities in the current run, which a bare URL can't end on.
     entities: Vec<(usize, usize)>,
     block_depth: usize,
+    // Implied table rows, cells and list items, innermost last. They exist only to give stray
+    // content a legal home, so an empty one is dropped when it closes instead of drawing a gap.
+    implied: Vec<u32>,
     // At most one: an alert can't nest. The block, and where its marker's `[` is in the source.
     open_alert: Option<(u32, usize)>,
+    // Whether anything visible was added inside the open alert. GitHub keeps an alert whose body is
+    // only empty inline HTML (`<i></i>`, `<a href=x></a>`, `<p></p>`, `<img>`), though nothing of it
+    // reaches the model. A stray `<foo>` or a raw `<input>` adds nothing there either.
+    alert_content: bool,
     rejected_alerts: Vec<usize>,
     // The last pass, or a document that can't hide a marker: a rejected one is written out instead.
     literal_alerts: bool,
@@ -447,15 +441,14 @@ impl<'a> Builder<'a> {
             image_alt_start: 0,
             image_idx: 0,
             in_picture: false,
+            picture_block: NONE,
+            picture_depth: 0,
             picture_dark: StrRef::default(),
             picture_light: StrRef::default(),
             aligns: Vec::new(),
             col: 0,
             header_row: false,
-            pending: None,
             inline_limit: 0,
-            html_event_end: 0,
-            no_closer_before: [0; DROP_NAMES.len()],
             slugger: Slugger::default(),
             in_heading: false,
             heading_text: String::new(),
@@ -465,7 +458,9 @@ impl<'a> Builder<'a> {
             skip_depth: 0,
             entities: Vec::new(),
             block_depth: 0,
+            implied: Vec::new(),
             open_alert: None,
+            alert_content: false,
             rejected_alerts: Vec::new(),
             literal_alerts,
         }
@@ -479,12 +474,14 @@ impl<'a> Builder<'a> {
             match event {
                 Event::Start(_) => self.skip_depth += 1,
                 Event::End(_) => self.skip_depth -= 1,
+                // A reference inside a duplicate definition still counts on GitHub: it numbers the
+                // note and puts it in the list, even though this definition's text is dropped.
+                Event::FootnoteReference(label) => {
+                    self.number_footnote(&label);
+                }
                 _ => {}
             }
             return;
-        }
-        if self.pending.is_some() {
-            return self.pending_event(event, range);
         }
         if self.pre_open {
             return self.pre_event(event);
@@ -513,26 +510,20 @@ impl<'a> Builder<'a> {
                         buf.push_str(&t);
                     }
                 }
-                None => self.html_tokens(&autolink::restore(&t), true),
+                None => self.html_tokens(&autolink::restore(&t)),
             },
             Event::InlineHtml(t) => {
-                self.html_event_end = range.end;
                 if self.restore {
-                    self.html_tokens(&autolink::restore(&t), true);
+                    self.html_tokens(&autolink::restore(&t));
                 } else {
-                    self.html_tokens(&t, true);
+                    self.html_tokens(&t);
                 }
             }
             Event::FootnoteReference(label) => {
                 self.begin_inline();
-                let id = self.footnote(&label);
-                let fnote = &mut self.doc.footnotes[id as usize];
-                if fnote.number == 0 {
-                    self.next_footnote_number += 1;
-                    fnote.number = self.next_footnote_number;
-                }
+                let id = self.number_footnote(&label);
                 if self.in_heading {
-                    let number = fnote.number.to_string();
+                    let number = self.doc.footnotes[id as usize].number.to_string();
                     self.heading_text.push_str(&number);
                 }
                 self.push_atom(SpanKind::FootnoteRef(id));
@@ -541,8 +532,10 @@ impl<'a> Builder<'a> {
             Event::HardBreak => self.line_break('\n'),
             Event::Rule => {
                 self.close_inline_for_block();
-                // Under a marker line, `---` makes that line a setext heading, so no alert.
+                // Under a marker line, `---` makes that line a setext heading, so no alert. Only
+                // when no blank line separates them: after a blank line it is an ordinary rule.
                 if self.first_in_open_alert()
+                    && self.underlines_open_alert(range.start)
                     && self.src[range].trim_end().bytes().all(|c| c == b'-')
                 {
                     self.reject_open_alert();
@@ -584,67 +577,6 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn pending_event(&mut self, event: Event<'a>, range: Range<usize>) {
-        let Some(p) = &mut self.pending else {
-            return;
-        };
-        let ended = match &event {
-            Event::Start(
-                MdTag::Emphasis
-                | MdTag::Strong
-                | MdTag::Strikethrough
-                | MdTag::Link { .. }
-                | MdTag::Image { .. },
-            ) => {
-                p.depth += 1;
-                false
-            }
-            Event::Start(_) | Event::Rule => true,
-            Event::End(_) if p.depth == 0 => true,
-            Event::End(_) => {
-                p.depth -= 1;
-                false
-            }
-            Event::InlineHtml(t) => {
-                if let Some(Token::Close { name, .. }) = Tokenizer::new(t).next()
-                    && name.eq_ignore_ascii_case(p.name)
-                {
-                    // Spans that opened inside the dropped content still get their end events.
-                    let depth = p.depth;
-                    self.pending = None;
-                    for _ in 0..depth {
-                        self.push_open(Open {
-                            node: Node::Nothing,
-                            origin: Origin::Md,
-                        });
-                    }
-                    return;
-                }
-                false
-            }
-            _ => false,
-        };
-        p.events.push((event, range));
-        if ended {
-            self.release_pending();
-        }
-    }
-
-    /// No real closer came, so the tag is treated as unclosed and its events run after all. The
-    /// recorded limit stops later tags of this name repeating the wait, which keeps this linear.
-    fn release_pending(&mut self) {
-        let Some(p) = self.pending.take() else {
-            return;
-        };
-        self.no_closer_before[p.slot] = self.inline_limit.min(self.src.len());
-        if p.literal_if_unclosed {
-            self.collapsed_text(&p.raw);
-        }
-        for (event, range) in p.events {
-            self.event(event, range);
-        }
-    }
-
     /// Markdown inside a `<pre>` opened by an inline tag: a code block holds plain text only.
     fn pre_event(&mut self, event: Event<'a>) {
         match event {
@@ -662,7 +594,7 @@ impl<'a> Builder<'a> {
                 self.pre_text(&restored);
             }
             Event::SoftBreak | Event::HardBreak => self.pre_text("\n"),
-            Event::Html(t) | Event::InlineHtml(t) => self.html_tokens(&autolink::restore(&t), true),
+            Event::Html(t) | Event::InlineHtml(t) => self.html_tokens(&autolink::restore(&t)),
             _ => {}
         }
     }
@@ -705,11 +637,23 @@ impl<'a> Builder<'a> {
                 self.push_atom(SpanKind::Image(self.image_idx));
             }
             MdTag::Paragraph => {
+                // `--` and `-` are setext underlines to GitHub, though pulldown-cmark reads them
+                // as paragraph text. They underline the marker line, so this is not an alert.
+                if self.first_in_open_alert()
+                    && self.underlines_open_alert(range.start)
+                    && is_dash_run(&self.src[range.clone()])
+                {
+                    self.reject_open_alert();
+                }
                 self.md_block(BlockKind::Paragraph { align: Align::None }, true, range)
             }
             MdTag::Heading { level, .. } => {
                 // A setext underline turns what is above it into the heading, marker line included.
-                if self.first_in_open_alert() && self.src.as_bytes()[range.start] != b'#' {
+                // An ATX heading is a child instead, and so is a setext heading after a blank line.
+                if self.first_in_open_alert()
+                    && self.underlines_open_alert(range.start)
+                    && !is_atx_heading(&self.src[range.start..])
+                {
                     self.reject_open_alert();
                 }
                 self.md_block(
@@ -766,14 +710,31 @@ impl<'a> Builder<'a> {
             }
             MdTag::Item => self.md_block(BlockKind::ListItem { task: false }, false, range),
             MdTag::FootnoteDefinition(label) => {
+                // GitHub draws a footnote definition as a list item, so a marker line immediately
+                // above one makes a plain quote, not an alert.
+                if self.first_in_open_alert() && self.underlines_open_alert(range.start) {
+                    self.reject_open_alert();
+                }
                 let id = self.footnote(&label);
-                if self.doc.footnotes[id as usize].block != NONE {
+                if self.doc.footnotes[id as usize].defined {
                     self.close_inline_for_block();
                     self.skip_depth = 1;
                     return;
                 }
+                // First definition wins. At the depth limit it gets no block of its own, so the
+                // content joins an ancestor; `block` must then stay NONE rather than name that
+                // ancestor, and `defined` is what keeps a later definition from replacing it.
+                self.doc.footnotes[id as usize].defined = true;
                 self.md_block(BlockKind::FootnoteDefinition { footnote: id }, false, range);
-                self.doc.footnotes[id as usize].block = self.cur_block;
+                let b = self.cur_block;
+                if b != NONE
+                    && matches!(
+                        self.doc.blocks[b as usize].kind,
+                        BlockKind::FootnoteDefinition { footnote } if footnote == id
+                    )
+                {
+                    self.doc.footnotes[id as usize].block = b;
+                }
             }
             MdTag::Table(aligns) => {
                 self.aligns = aligns;
@@ -867,6 +828,7 @@ impl<'a> Builder<'a> {
         };
         self.close_inline_for_block();
         if self.alert_allowed_here() {
+            self.alert_content = false;
             self.md_block(BlockKind::Alert(alert), false, range);
             // Unless it was flattened, deep inside tags that don't rule out an alert.
             if matches!(self.doc.blocks.last(), Some(b) if matches!(b.kind, BlockKind::Alert(_))) {
@@ -881,26 +843,66 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Bottom-up, because the first Markdown container ends this: it stays short on any input.
+    /// Walked from the innermost entry: the first Markdown container or rejecting HTML tag ends it,
+    /// and a table cell resets the `<div>`, list and quote ancestors outside it. Only `<details>`
+    /// still rejects inside a cell. That is how GitHub behaves, measured with `gh api markdown`.
     fn alert_allowed_here(&self) -> bool {
-        !self.stack.iter().any(|o| match (o.origin, o.node) {
-            (Origin::Html(tag), _) => {
-                matches!(tag, Tag::Div | Tag::Blockquote | Tag::Li | Tag::Details)
+        if self
+            .stack
+            .iter()
+            .any(|o| matches!((o.origin, o.node), (Origin::Html(Tag::Details), _)))
+        {
+            return false;
+        }
+        for o in self.stack.iter().rev() {
+            match (o.origin, o.node) {
+                (Origin::Html(Tag::Td | Tag::Th), _) => return true,
+                (Origin::Html(tag), _) => {
+                    if matches!(tag, Tag::Div | Tag::Blockquote | Tag::Li) {
+                        return false;
+                    }
+                }
+                (Origin::Md, Node::Block(b)) => {
+                    if matches!(
+                        self.doc.blocks[b as usize].kind,
+                        BlockKind::BlockQuote
+                            | BlockKind::Alert(_)
+                            | BlockKind::ListItem { .. }
+                            | BlockKind::FootnoteDefinition { .. }
+                    ) {
+                        return false;
+                    }
+                }
+                (Origin::Md, Node::Nothing) => {}
+                _ => {}
             }
-            (Origin::Md, Node::Block(b)) => matches!(
-                self.doc.blocks[b as usize].kind,
-                BlockKind::BlockQuote
-                    | BlockKind::Alert(_)
-                    | BlockKind::ListItem { .. }
-                    | BlockKind::FootnoteDefinition { .. }
-            ),
-            (Origin::Md, Node::Nothing) => true,
-            _ => false,
-        })
+        }
+        true
     }
 
     fn first_in_open_alert(&self) -> bool {
         matches!(self.open_alert, Some((b, _)) if b as usize + 1 == self.doc.blocks.len())
+    }
+
+    /// Whether a block starting at `start` touches the open alert's marker line. A blank quote line
+    /// between them means it is an ordinary child block; otherwise a setext underline or thematic
+    /// break rewrites the marker line itself, which leaves a plain quote on GitHub.
+    fn underlines_open_alert(&self, start: usize) -> bool {
+        let Some((_, marker)) = self.open_alert else {
+            return false;
+        };
+        let from = self.src[marker..]
+            .find('\n')
+            .map_or(self.src.len(), |i| marker + i + 1);
+        if from >= start {
+            return true;
+        }
+        let region = &self.src[from..start];
+        let parts: Vec<&str> = region.split('\n').collect();
+        // The last piece is only the prefix of the line `start` sits on, not a complete line.
+        !parts[..parts.len().saturating_sub(1)]
+            .iter()
+            .any(|line| is_blank_quote_line(line))
     }
 
     fn reject_open_alert(&mut self) {
@@ -982,6 +984,7 @@ impl<'a> Builder<'a> {
                     _ => {
                         let b = self
                             .open_block(BlockKind::ListItem { task: false }, Origin::Html(Tag::Li));
+                        self.implied.push(b);
                         self.doc.block_attrs.push(BlockAttrs {
                             block: b,
                             marker: Some(ListMarker::None),
@@ -995,7 +998,8 @@ impl<'a> Builder<'a> {
     }
 
     fn open_implied_row(&mut self) {
-        self.open_block(BlockKind::TableRow { header: false }, Origin::Html(Tag::Tr));
+        let b = self.open_block(BlockKind::TableRow { header: false }, Origin::Html(Tag::Tr));
+        self.implied.push(b);
     }
 
     fn open_implied_cell(&mut self) {
@@ -1005,7 +1009,8 @@ impl<'a> Builder<'a> {
             colspan: 1,
             rowspan: 1,
         };
-        self.open_block(cell, Origin::Html(Tag::Td));
+        let b = self.open_block(cell, Origin::Html(Tag::Td));
+        self.implied.push(b);
     }
 
     /// Closes everything down to and including the innermost entry a Markdown event opened. A
@@ -1071,6 +1076,10 @@ impl<'a> Builder<'a> {
     }
 
     fn open_block(&mut self, kind: BlockKind, origin: Origin) -> u32 {
+        // A block an HTML tag opened is content even when it ends empty, as GitHub keeps the alert.
+        if self.open_alert.is_some() && !matches!(origin, Origin::Md) {
+            self.alert_content = true;
+        }
         self.fit_parent(kind);
         self.block_depth += 1;
         let idx = self.doc.blocks.len() as u32;
@@ -1099,12 +1108,16 @@ impl<'a> Builder<'a> {
 
     fn finish_block(&mut self, b: u32) {
         if matches!(self.open_alert, Some((a, _)) if a == b) {
-            if self.doc.blocks.len() == b as usize + 1 {
+            if self.doc.blocks.len() == b as usize + 1 && !self.alert_content {
                 self.reject_open_alert();
             }
             self.open_alert = None;
+            self.alert_content = false;
         }
         self.block_depth -= 1;
+        if self.in_picture && self.picture_block == b {
+            self.leave_picture();
+        }
         let text_end = self.doc.text.len();
         let spans_end = self.doc.spans.len() as u32;
         let blocks_end = self.doc.blocks.len() as u32;
@@ -1156,6 +1169,22 @@ impl<'a> Builder<'a> {
         if matches!(kind, BlockKind::CodeBlock { .. }) {
             self.pre_open = false;
         }
+        // An implied row, cell or item that never got content would draw an empty line or a phantom
+        // column. GitHub moves such stray content out of the table; keeping the shape without the
+        // empty node is the closest this model can do. Empty inline tags such as `<b></b>` leave an
+        // empty container child, so the whole subtree goes: no text of its own and no atom anywhere.
+        if self.implied.last() == Some(&b) {
+            self.implied.pop();
+            let block = self.doc.blocks[b as usize];
+            let empty = block.text.is_empty()
+                && !self.doc.spans[block.spans.start as usize..]
+                    .iter()
+                    .any(is_atom);
+            if empty {
+                self.drop_last_block(b);
+                return;
+            }
+        }
         // `<a id="x"></a>` alone on a line parses as a paragraph that would only add a gap. A browser
         // gives an empty paragraph no height. Anchors noted against it land on the next block.
         let block = self.doc.blocks[b as usize];
@@ -1174,6 +1203,22 @@ impl<'a> Builder<'a> {
         self.doc.blocks.truncate(b as usize);
         while self.doc.block_attrs.last().is_some_and(|a| a.block >= b) {
             self.doc.block_attrs.pop();
+        }
+        // An empty implied container can hold an empty heading or an anchor; both would point past
+        // the end of the tree once it goes.
+        while self.doc.headings.last().is_some_and(|h| h.block >= b) {
+            self.doc.headings.pop();
+        }
+        // An anchor noted for the dropped container, or for the block that would have followed it,
+        // belongs to whatever block takes its place.
+        for a in &mut self.doc.anchors {
+            a.block = a.block.min(b);
+        }
+        // A definition with no text can itself have been what the empty container held.
+        for f in &mut self.doc.footnotes {
+            if f.block != NONE && f.block >= b {
+                f.block = NONE;
+            }
         }
     }
 
@@ -1438,6 +1483,9 @@ impl<'a> Builder<'a> {
     }
 
     fn push_span(&mut self, kind: SpanKind, origin: Origin) -> u32 {
+        if self.open_alert.is_some() {
+            self.alert_content = true;
+        }
         let at = self.doc.text.len() as u32;
         let idx = self.doc.spans.len() as u32;
         self.doc.spans.push(Span {
@@ -1461,6 +1509,9 @@ impl<'a> Builder<'a> {
 
     fn push_atom(&mut self, kind: SpanKind) {
         self.flush_run();
+        if self.open_alert.is_some() {
+            self.alert_content = true;
+        }
         let at = self.doc.text.len() as u32;
         self.atom_end = at as usize;
         self.doc.spans.push(Span {
@@ -1473,6 +1524,9 @@ impl<'a> Builder<'a> {
 
     /// A span whose text was already appended, starting at `start`.
     fn push_atom_like(&mut self, kind: SpanKind, start: usize) {
+        if self.open_alert.is_some() {
+            self.alert_content = true;
+        }
         let end = self.doc.text.len() as u32;
         self.doc.spans.push(Span {
             start: start as u32,
@@ -1697,8 +1751,21 @@ impl<'a> Builder<'a> {
             label: label_ref,
             number: 0,
             block: NONE,
+            defined: false,
         });
         self.footnote_ids.insert(key, id);
+        id
+    }
+
+    /// Numbers a footnote the first time any reference reaches it, in reference order as GitHub
+    /// does, and returns its id. Duplicate definitions share the id, so they share the number.
+    fn number_footnote(&mut self, label: &str) -> u32 {
+        let id = self.footnote(label);
+        let fnote = &mut self.doc.footnotes[id as usize];
+        if fnote.number == 0 {
+            self.next_footnote_number += 1;
+            fnote.number = self.next_footnote_number;
+        }
         id
     }
 
@@ -1720,9 +1787,12 @@ impl<'a> Builder<'a> {
         let Some(buf) = self.html_buf.take() else {
             return;
         };
-        self.html_tokens(&buf, false);
+        self.html_tokens(&buf);
         self.html_store = buf;
         self.flush_run();
+        // An unclosed `<picture>` ends with the HTML block that held it, as in a browser, so its
+        // sources cannot leak onto a later image.
+        self.leave_picture();
         if self.pre_open {
             self.close_html(Tag::Pre);
             self.pre_open = false;
@@ -1739,7 +1809,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn html_tokens(&mut self, html: &str, inline: bool) {
+    fn html_tokens(&mut self, html: &str) {
         let mut tk = Tokenizer::new(html);
         while let Some(tok) = tk.next() {
             if self.pre_open {
@@ -1753,7 +1823,7 @@ impl<'a> Builder<'a> {
                 // Self-closing syntax means nothing on HTML elements, so it is ignored as a browser does.
                 Token::Open {
                     name, attrs, raw, ..
-                } => self.html_open(name, attrs, raw, inline, &mut tk),
+                } => self.html_open(name, attrs, raw),
             }
         }
     }
@@ -1819,30 +1889,17 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn html_open<'h>(
-        &mut self,
-        name: &'h str,
-        attrs: &str,
-        raw: &str,
-        inline: bool,
-        tk: &mut Tokenizer<'h>,
-    ) {
+    fn html_open(&mut self, name: &str, attrs: &str, raw: &str) {
         let tag = html::classify_tag(name);
+        // An image, source or break with no text still counts as body for an alert, as on GitHub, and
+        // so does a tag the sanitizer keeps with no element here, such as `<span>`.
+        if self.open_alert.is_some()
+            && (matches!(tag, Tag::Img | Tag::Source | Tag::Br) || html::is_inert_tag(name))
+        {
+            self.alert_content = true;
+        }
         match tag {
             Tag::Literal => return self.collapsed_text(raw),
-            Tag::DropContent {
-                literal_if_unclosed,
-            } => {
-                let closed = if inline {
-                    self.wait_for_inline_closer(name, raw, literal_if_unclosed)
-                } else {
-                    tk.skip_past_close(name)
-                };
-                if !closed && literal_if_unclosed {
-                    self.collapsed_text(raw);
-                }
-                return;
-            }
             // A browser stops nesting too. The text stays, in the element that is already open.
             _ if self.html_depth >= MAX_HTML_DEPTH && tag.nests() => return,
             _ => {}
@@ -1866,13 +1923,18 @@ impl<'a> Builder<'a> {
                 self.flush_run();
                 self.doc.text.push('\n');
             }
-            Tag::Input => self.html_input(attrs),
+            // GitHub's sanitizer removes a raw input outside a task list, so nothing is drawn.
+            Tag::Input => {}
             Tag::Picture => {
                 self.in_picture = true;
+                self.picture_block = self.cur_block;
+                self.picture_depth = self.stack.len();
                 self.picture_dark = StrRef::default();
                 self.picture_light = StrRef::default();
             }
-            Tag::Source if self.in_picture => self.html_source(attrs),
+            Tag::Source if self.in_picture && self.stack.len() == self.picture_depth => {
+                self.html_source(attrs)
+            }
             Tag::Source => {}
             _ => self.html_open_block(tag, attrs),
         }
@@ -2111,16 +2173,12 @@ impl<'a> Builder<'a> {
     fn html_close(&mut self, name: &str, raw: &str) {
         let tag = html::classify_tag(name);
         match tag {
-            Tag::Literal
-            | Tag::DropContent {
-                literal_if_unclosed: true,
-            } => return self.collapsed_text(raw),
+            Tag::Literal => return self.collapsed_text(raw),
             Tag::Picture => {
                 self.leave_picture();
                 return;
             }
             Tag::Unknown
-            | Tag::DropContent { .. }
             | Tag::TableSection
             | Tag::Hr
             | Tag::Br
@@ -2204,8 +2262,9 @@ impl<'a> Builder<'a> {
         let alt = self.pool(&alt);
         let title = html::attr(attrs, "title").unwrap_or_default();
         let title = self.pool(&title);
-        let width = html::attr(attrs, "width").and_then(|v| parse_length(&v));
-        let height = html::attr(attrs, "height").and_then(|v| parse_length(&v));
+        let mut width = html::attr(attrs, "width").and_then(|v| parse_length(&v));
+        let mut height = html::attr(attrs, "height").and_then(|v| parse_length(&v));
+        clamp_image_size(&mut width, &mut height);
         let idx = self.doc.images.len() as u32;
         self.doc.images.push(ImageInfo {
             src,
@@ -2224,6 +2283,8 @@ impl<'a> Builder<'a> {
     /// A `<picture>` shows one image, and a `<source>` means nothing outside one.
     fn leave_picture(&mut self) {
         self.in_picture = false;
+        self.picture_block = NONE;
+        self.picture_depth = 0;
         self.picture_dark = StrRef::default();
         self.picture_light = StrRef::default();
     }
@@ -2250,52 +2311,15 @@ impl<'a> Builder<'a> {
             .filter(|c| !c.is_ascii_whitespace())
             .collect::<String>()
             .to_ascii_lowercase();
-        if compact.contains("prefers-color-scheme:dark") {
+        // A browser takes the first matching source; a later one never replaces it.
+        if compact.contains("prefers-color-scheme:dark") && self.picture_dark.len == 0 {
             self.picture_dark = self.pool(first);
-        } else if compact.contains("prefers-color-scheme:light") {
+        } else if compact.contains("prefers-color-scheme:light") && self.picture_light.len == 0 {
             self.picture_light = self.pool(first);
         }
     }
 
-    fn html_input(&mut self, attrs: &str) {
-        let is_checkbox =
-            html::attr(attrs, "type").is_some_and(|t| t.eq_ignore_ascii_case("checkbox"));
-        if is_checkbox {
-            self.begin_inline();
-            let checked = html::attrs(attrs).any(|(k, _)| k.eq_ignore_ascii_case("checked"));
-            self.push_atom(SpanKind::Checkbox { checked });
-        }
-    }
-
-    /// Starts waiting for the closer of an inline `<script>` or similar if the source of this inline
-    /// container shows one. False when there is none: tagfilter wants such a tag literal.
-    fn wait_for_inline_closer(&mut self, name: &str, raw: &str, literal_if_unclosed: bool) -> bool {
-        let Some(slot) = DROP_NAMES.iter().position(|n| n.eq_ignore_ascii_case(name)) else {
-            return false;
-        };
-        let limit = self.inline_limit.min(self.src.len());
-        if self.no_closer_before[slot] == limit {
-            return false;
-        }
-        let from = self.html_event_end.min(limit);
-        if html::find_close_tag(&self.src[from..limit], name).is_none() {
-            self.no_closer_before[slot] = limit;
-            return false;
-        }
-        self.flush_run();
-        self.pending = Some(Pending {
-            name: DROP_NAMES[slot],
-            slot,
-            raw: raw.to_string(),
-            literal_if_unclosed,
-            depth: 0,
-            events: Vec::new(),
-        });
-        true
-    }
-
     fn into_document(mut self) -> Document {
-        self.release_pending();
         self.flush_run();
         while let Some(open) = self.pop_open() {
             self.close(open);
@@ -2377,6 +2401,38 @@ fn parse_image_align(v: &str) -> ImageAlign {
     }
 }
 
+/// A line inside a quote that shows nothing: just the `>` markers, or a lone HTML comment, which
+/// GitHub ignores. Such a line separates a marker from the block after it.
+fn is_blank_quote_line(line: &str) -> bool {
+    let mut s = line.trim();
+    while let Some(rest) = s.strip_prefix('>') {
+        s = rest.trim_start();
+    }
+    s.is_empty() || (s.starts_with("<!--") && s.ends_with("-->"))
+}
+
+/// ATX headings need one to six `#` followed by a space or the end of the line. `#x` is a setext
+/// heading's text, not an ATX heading, and that distinction picks the right alert rule.
+fn is_atx_heading(s: &str) -> bool {
+    let indent = s.len() - s.trim_start_matches(' ').len();
+    if indent > 3 {
+        return false;
+    }
+    let s = &s[indent..];
+    let hashes = s.bytes().take_while(|&c| c == b'#').count();
+    (1..=6).contains(&hashes)
+        && s.as_bytes()
+            .get(hashes)
+            .is_none_or(|&c| c == b' ' || c == b'\t')
+}
+
+/// `-`, `--` and longer runs are setext underlines to GitHub, though pulldown-cmark only makes a
+/// heading of `---` and longer.
+fn is_dash_run(s: &str) -> bool {
+    let t = s.trim();
+    !t.is_empty() && t.bytes().all(|c| c == b'-')
+}
+
 fn is_atom(s: &Span) -> bool {
     matches!(
         s.kind,
@@ -2401,6 +2457,8 @@ fn parse_span(attrs: &str, key: &str, max: u16) -> u16 {
         return 1;
     };
     let v = v.trim();
+    // Chromium accepts a leading `+` here, as in `colspan="+2"`.
+    let v = v.strip_prefix('+').unwrap_or(v);
     let digits = v.bytes().take_while(u8::is_ascii_digit).count();
     let n = match v[..digits].parse::<u64>() {
         Ok(n) => n,
@@ -2410,19 +2468,57 @@ fn parse_span(attrs: &str, key: &str, max: u16) -> u16 {
     n.clamp(1, u64::from(max)) as u16
 }
 
+/// A length as Chromium reads one from an HTML attribute: leading digits, an optional fraction,
+/// then an optional `%` immediately after; any other suffix is ignored (`10em` is 10). No sign and
+/// no exponent, so `+5`, `.5` and `1e3` give no length or just their leading digit. `50 %` is 50px,
+/// because the space stops the percent form.
 fn parse_length(v: &str) -> Option<Length> {
-    let number = |s: &str| {
-        s.trim()
-            .parse::<f32>()
-            .ok()
-            .filter(|n| n.is_finite() && *n >= 0.0)
-    };
-    let v = v.trim();
-    if let Some(p) = v.strip_suffix('%') {
-        return number(p).map(|n| Length::Percent(n.min(1000.0) as u16));
+    let v = v.trim_start();
+    let b = v.as_bytes();
+    let mut i = 0;
+    while i < b.len() && b[i].is_ascii_digit() {
+        i += 1;
     }
-    number(v.strip_suffix("px").unwrap_or(v))
-        .map(|n| Length::Px((n as u32).min(MAX_HTML_LENGTH_PX)))
+    if i == 0 {
+        return None;
+    }
+    if b.get(i) == Some(&b'.') {
+        let mut j = i + 1;
+        while j < b.len() && b[j].is_ascii_digit() {
+            j += 1;
+        }
+        i = j;
+    }
+    let number: f64 = v[..i].parse().ok()?;
+    if v[i..].starts_with('%') {
+        return Some(Length::Percent(number.min(1000.0) as u16));
+    }
+    Some(Length::Px((number as u32).min(MAX_HTML_LENGTH_PX)))
+}
+
+/// GitHub caps an image's pixel width and height at 2000, scaling both together so the picture
+/// keeps its shape. A percentage is left alone, as is one dimension with nothing to scale against.
+fn clamp_image_size(width: &mut Option<Length>, height: &mut Option<Length>) {
+    let side = |l: Option<Length>| match l {
+        Some(Length::Px(n)) => Some(f64::from(n)),
+        _ => None,
+    };
+    let max = f64::from(MAX_IMAGE_DIMENSION_PX);
+    let (w, h) = (side(*width), side(*height));
+    if let (Some(w), Some(h)) = (w, h)
+        && (w > max || h > max)
+    {
+        let scale = (max / w.max(h)).min(1.0);
+        *width = Some(Length::Px((w * scale).round() as u32));
+        *height = Some(Length::Px((h * scale).round() as u32));
+        return;
+    }
+    if matches!(*width, Some(Length::Px(n)) if n > MAX_IMAGE_DIMENSION_PX) {
+        *width = Some(Length::Px(MAX_IMAGE_DIMENSION_PX));
+    }
+    if matches!(*height, Some(Length::Px(n)) if n > MAX_IMAGE_DIMENSION_PX) {
+        *height = Some(Length::Px(MAX_IMAGE_DIMENSION_PX));
+    }
 }
 
 /// `&name;` with letters only. GitHub's URL trimming, working on the source, stops at anything else.

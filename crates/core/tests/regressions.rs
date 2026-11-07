@@ -316,7 +316,11 @@ fn nothing_executable_survives() {
         "<script>alert(6)</script>\n\n<iframe src=\"https://evil\"></iframe>\n\n<div onclick=\"alert(7)\">t</div>\n\n",
         "foo <script>alert(8)</script> bar\n\n<style>p{color:red}</style>\n\n<object data=\"x\">alert(9)</object>\n"
     ));
-    assert!(!d.text.contains("alert"), "{}", d.text);
+    // The tag filter turns script, style and iframe into text, and object keeps its fallback
+    // content, so their words reach the model now. What must not survive is anything executable.
+    assert!(d.text.contains("<script>alert(6)</script>"), "{}", d.text);
+    assert!(d.text.contains("<iframe"), "{}", d.text);
+    assert!(d.text.contains("alert(9)"), "{}", d.text);
     assert!(
         !d.strings.to_lowercase().contains("javascript"),
         "{}",
@@ -1734,7 +1738,7 @@ fn backslash_runs_stay_linear_and_escape_correctly() {
 // Review findings: dropped inline elements
 
 #[test]
-fn inline_drop_tags_never_swallow_what_follows() {
+fn literal_tags_never_swallow_what_follows() {
     let d = parse("- <object> `</object>`\n\nparagraph one\n\n# Heading two\n\nparagraph three\n");
     assert!(d.text.contains("</object>"), "{:?}", d.text);
     assert!(d.text.contains("paragraph one") && d.text.contains("paragraph three"));
@@ -1743,33 +1747,31 @@ fn inline_drop_tags_never_swallow_what_follows() {
     let d = parse("- <embed> `</embed>`\n- second item\n\nall the rest\n");
     assert!(d.text.contains("second item") && d.text.contains("all the rest"));
 
+    // Tag-filtered tags show literally, and their content is treated as ordinary HTML text.
     let d = parse("a <script> `</script>` and more text");
-    assert_eq!(
-        d.block_text(0).trim_end(),
-        "a <script> </script> and more text"
-    );
+    assert!(d.text.contains("<script>") && d.text.contains("</script>"));
+    assert!(d.block_text(0).contains("and more text"));
     assert_eq!(d.spans[0].kind, SpanKind::Code);
 
     let d = parse("a <embed> \\</embed> visible?");
     assert_eq!(d.block_text(0).trim_end(), "a </embed> visible?");
 
-    // A real closer still drops the element with its content, whatever Markdown is inside it.
     assert_eq!(
         parse("a <script>x</script> b").block_text(0).trim_end(),
-        "a b"
+        "a <script>x</script> b"
     );
-    assert_eq!(
-        parse("a <script>*x* `y`</script> b")
-            .block_text(0)
-            .trim_end(),
-        "a b"
-    );
+    let d = parse("a <script>*x* `y`</script> b");
+    assert!(d.text.contains("<script>") && d.text.contains("</script>"));
+    assert!(d.spans.iter().any(|s| s.kind == SpanKind::Code));
+
+    // Object keeps its fallback text now, as GitHub does.
     let d = parse("- <object>gone</object> after\n\nnext\n");
-    assert!(d.text.contains("after") && d.text.contains("next") && !d.text.contains("gone"));
-    // Emphasis that opens inside the dropped part and ends after it stays balanced.
+    assert!(d.text.contains("after") && d.text.contains("next") && d.text.contains("gone"));
+
+    // Markdown delimiters around a literal tag stay balanced.
     let d = parse("a <script> *b </script> c* d");
-    assert_eq!(d.block_text(0).trim_end(), "a c d");
-    // A closer in the next block does not count.
+    assert!(d.text.contains("b") && d.text.contains("c") && d.text.contains("d"));
+    // A closer in the next block does not count, and both tags still show.
     let d = parse("a <script> b\n\nc </script> d");
     assert!(
         d.text.contains("<script> b") && d.text.contains("c </script> d"),
@@ -1777,7 +1779,7 @@ fn inline_drop_tags_never_swallow_what_follows() {
         d.text
     );
 
-    // Many tags whose closer never really comes, in one block.
+    // Many tags in one block stay linear and all show.
     let src = format!("x {}`</script>`", "<script> a ".repeat(50_000));
     let d = assert_quick("waiting", Duration::from_secs(2), &src);
     assert_eq!(d.text.matches("<script>").count(), 50_000);
@@ -2210,8 +2212,10 @@ fn html_spans_and_lengths_are_clamped() {
     for (attrs, width, height) in [
         ("width=inf height=NaN", None, None),
         ("width=infinity height=-1", None, None),
-        ("width=99999999999999 height=1e30", Some(12000), Some(12000)),
-        ("width=12001px height=11999", Some(12000), Some(11999)),
+        ("width=99999999999999", Some(2000), None),
+        ("height=1e30", None, Some(1)),
+        ("width=3000 height=100", Some(2000), Some(67)),
+        ("width=12001px height=11999", Some(2000), Some(2000)),
     ] {
         let d = parse(&format!("<img src=a {attrs}>"));
         let px = |l: Option<Length>| {
@@ -2232,6 +2236,42 @@ fn html_spans_and_lengths_are_clamped() {
 }
 
 #[test]
+fn html_lengths_follow_the_dimension_rule() {
+    // HTML's rule: digits, an optional fraction, then `%` only if it comes immediately. Anything
+    // else ends the number, so `10em` is 10 while `+5` and `.5` are not lengths at all.
+    for (value, want) in [
+        ("10em", Some(Length::Px(10))),
+        ("100abc", Some(Length::Px(100))),
+        ("1e3", Some(Length::Px(1))),
+        ("+5", None),
+        (".5", None),
+        ("-1", None),
+        ("50 %", Some(Length::Px(50))),
+        ("300px;", Some(Length::Px(300))),
+        ("300;", Some(Length::Px(300))),
+        ("100%;", Some(Length::Percent(100))),
+        ("2.5", Some(Length::Px(2))),
+        (" 3 ", Some(Length::Px(3))),
+    ] {
+        let d = parse(&format!("<img src=a width=\"{value}\">"));
+        assert_eq!(d.images[0].width, want, "{value:?}");
+    }
+    // A leading `+` is a number for colspan, as HTML reads it.
+    let d = parse("<table><tr><td colspan=\"+2\">a</td></tr></table>");
+    assert_eq!(cell(&d, 0).0, 2);
+    // GitHub clamps image width and height to 2000; table attributes stop at 12000.
+    let d = parse("<img src=a width=5000px>");
+    assert_eq!(d.images[0].width, Some(Length::Px(2000)));
+    let d = parse("<img src=a height=99999>");
+    assert_eq!(d.images[0].height, Some(Length::Px(2000)));
+    let d = parse("<img src=a width=3000 height=100>");
+    assert_eq!(d.images[0].width, Some(Length::Px(2000)));
+    assert_eq!(d.images[0].height, Some(Length::Px(67)));
+    let d = parse("<table width=99999><tr><td>a</td></tr></table>");
+    assert_eq!(d.attrs_of(0).unwrap().width, Some(Length::Px(12000)));
+}
+
+#[test]
 fn orphan_cells_and_rows_keep_their_text() {
     for src in ["<td>raw</td>", "<tr><td>raw</td></tr>", "<th>raw</th>"] {
         let d = parse(src);
@@ -2242,6 +2282,8 @@ fn orphan_cells_and_rows_keep_their_text() {
     assert_eq!(d.blocks.len(), 1, "a browser does not end the paragraph");
     assert!(d.text.contains('a') && d.text.contains('b') && d.text.contains('c'));
     let d = parse("| h |\n|---|\n| a <tr>b<td>c |\n");
+    // This expected value differs from GitHub: inside a GFM cell GitHub moves `b` before the table
+    // and splits `a` and `c` into separate rows. The difference is listed in COVERAGE's known gaps.
     assert_eq!(d.block_text(d.blocks.len() as u32 - 1).trim_end(), "a bc");
 }
 
@@ -2256,6 +2298,9 @@ fn table_content_always_has_a_row_and_a_cell() {
         d.blocks[d.children(row).next().unwrap() as usize].kind,
         BlockKind::TableCell { .. }
     ));
+    // A `<td>` with no row still gets its implied parents, and keeps its own attributes.
+    let d = parse("<table><td colspan=2>a</td></table>");
+    assert_eq!(cell(&d, 0).0, 2, "{:?}", kinds(&d));
 
     let d = parse("<table><tr>\n\nStray\n\n</tr><td>no row</td>text in table</table>\n\nout");
     assert_eq!(d.text, "Stray\nno row\ntext in table\nout\n");
@@ -2352,11 +2397,27 @@ fn bare_url_ending_in_an_entity_trims_as_on_github() {
             "http://a.b/c&x1",
             "http://a.b/c&x1; x\n",
         ),
+        // `frac12` and `sup2` are entities, but their names carry digits, so the URL does not trim
+        // on them; the decoded character stays inside the link. GitHub links the raw spelling
+        // instead, which is the decoded-entity gap in COVERAGE.
+        (
+            "http://a.b/c&frac12; x",
+            "http://a.b/c½",
+            "http://a.b/c½ x\n",
+        ),
+        ("http://a.b/c&sup2; x", "http://a.b/c²", "http://a.b/c² x\n"),
     ] {
         let d = parse(src);
         assert_eq!(links(&d)[0].0, link, "{src}");
         assert_eq!(d.text, text, "{src}");
     }
+    // The trim still works when the run does not start at offset 0.
+    assert_eq!(
+        links(&parse("para\n\nhttp://a.b/c&amp; x"))[0].0,
+        "http://a.b/c"
+    );
+    let d = parse("y www.a.b/c&amp; x");
+    assert_eq!(links(&d)[0].1, "http://www.a.b/c");
     // Only a URL's end is affected.
     assert_eq!(links(&parse("http://a.b/c&amp;d x"))[0].0, "http://a.b/c&d");
     let d = parse("http://a.b/c&amp; http://d.e/f&amp; x");
@@ -2436,6 +2497,33 @@ fn picture_sources_only_count_inside_a_picture_until_its_image() {
         "<picture><img src=a></picture><source {dark}><img src=b>"
     ));
     assert_eq!(d.images[1].dark_src, StrRef::default());
+    // A picture that closes without an image leaves nothing for a later image to pick up.
+    let d = parse(&format!("<picture><source {dark}></picture><img src=b>"));
+    assert_eq!(d.images[0].src.len, 1);
+    assert_eq!(d.images[0].dark_src, StrRef::default());
+    // The picture ends with the block that opened it, unclosed or not.
+    for src in [
+        format!("<picture><source {dark}>\n\n<img src=b>"),
+        format!("<div><picture><source {dark}></div>\n\n<img src=b>"),
+        format!("> <picture><source {dark}>\n\n<img src=b>"),
+        format!("- <picture><source {dark}>\n- <img src=b>"),
+        format!("<p><picture><source {dark}></p>\n<p><img src=b></p>"),
+    ] {
+        assert_eq!(parse(&src).images[0].dark_src, StrRef::default(), "{src}");
+    }
+    // A source that is not a direct child of the picture does not count.
+    let d = parse(&format!(
+        "<picture><div><source {dark}></div><img src=a></picture>"
+    ));
+    assert_eq!(d.images[0].dark_src, StrRef::default());
+    // A browser takes the first matching source, not the last.
+    let d = parse(concat!(
+        "<picture>",
+        "<source media=\"(prefers-color-scheme: dark)\" srcset=d1.png>",
+        "<source media=\"(prefers-color-scheme: dark)\" srcset=d2.png>",
+        "<img src=a></picture>",
+    ));
+    assert_eq!(d.str(d.images[0].dark_src), "d1.png");
 }
 
 #[test]
@@ -2477,6 +2565,14 @@ fn first_load_is_not_announced_as_a_refresh() {
     t.finished(g, ReloadOutcome::Failed("bad".into()));
     let (g, _) = t.begin(false);
     assert_eq!(t.finished(g, ok()).unwrap().text, strings::REFRESHED);
+
+    // A first load that times out, then succeeds on the retry, clears the stuck timeout message.
+    let mut t = ReloadTracker::default();
+    let (g, _) = t.begin(false);
+    assert_eq!(t.timed_out(g).unwrap().text, strings::RENDER_TIMEOUT);
+    assert!(!t.is_running());
+    let (g, _) = t.begin(false);
+    assert_eq!(t.finished(g, ok()).unwrap().text, "");
 }
 
 #[test]
@@ -2539,6 +2635,48 @@ fn command_table_matches_the_old_toolbar_and_view_menu() {
     );
     let titles = [Menu::File, Menu::Edit, Menu::View, Menu::Help].map(|m| m.title().unwrap());
     assert_eq!(titles, ["&File", "&Edit", "&View", "&Help"]);
+    let file: Vec<_> = commands::menu_items(Menu::File)
+        .map(|c| (c.label, c.separator_before))
+        .collect();
+    assert_eq!(
+        file,
+        [
+            ("Open files…", false),
+            ("Open folder…", false),
+            ("Refresh", false),
+            ("Open recent", true),
+            ("Manage recent files…", false),
+            ("Clear recent files", false),
+            ("Close tab", true),
+            ("Close all tabs", false),
+            ("Exit", true),
+        ]
+    );
+    let edit: Vec<_> = commands::menu_items(Menu::Edit)
+        .map(|c| (c.label, c.separator_before))
+        .collect();
+    assert_eq!(
+        edit,
+        [
+            ("Find", false),
+            ("Find next", false),
+            ("Find previous", false),
+            ("Clear search", false),
+        ]
+    );
+    let help: Vec<_> = commands::menu_items(Menu::Help)
+        .map(|c| (c.label, c.separator_before))
+        .collect();
+    assert_eq!(
+        help,
+        [
+            ("Keyboard shortcuts", false),
+            ("About Markdown Viewer", false),
+        ]
+    );
+    assert_eq!(strings::ABOUT_TITLE, "About Markdown Viewer");
+    assert_eq!(strings::SHORTCUTS_TITLE, "Keyboard shortcuts");
+    assert_eq!(strings::MATCH_COUNT_NAME, "Search result count");
     assert_eq!(Menu::TabContext.title(), None);
     assert_eq!(strings::TOOLBAR_TITLE, "Reader");
     assert_eq!(strings::MANAGE_RECENT_TITLE, "Manage recent files");
@@ -2605,6 +2743,9 @@ fn a_fragment_is_decoded_once() {
 
 #[test]
 fn protected_urls_give_the_same_strings_as_unprotected_ones() {
+    // Accepting the audit's tests-parity #10: the fewer-allocations change on the bare-URL path
+    // produces the same values either way, so no value assertion can tell it from a revert. Only a
+    // counting allocator could, and that would be a test of one backend, not of behaviour.
     let plain = parse("![al*t `c` $m$](u.png \"t\") [a](/u_v \"w_x\") [^f]\n\n[^f]: n\n");
     let protected =
         parse("![al*t `c` $m$](u.png \"t\") [a](/u_v \"w_x\") [^f]\n\n[^f]: n\n\nhttp://a.b/c_d\n");
@@ -2664,10 +2805,16 @@ fn nesting_stops_at_a_fixed_depth_with_the_text_kept() {
             ),
             "h\nc\n".to_string(),
         ),
+        // An implied table row, its cell and a leaf inside them reach the real bound, five past the
+        // container limit: 254 sections plus a table and its implied row, cell and leaf.
+        (
+            format!("{}<table><table>x", "<section>".repeat(254)),
+            "x\n".to_string(),
+        ),
     ] {
         let d = parse(&src);
         assert!(
-            block_depth(&d) <= MAX_BLOCK_DEPTH + 4,
+            block_depth(&d) <= MAX_BLOCK_DEPTH + 5,
             "{}",
             block_depth(&d)
         );
@@ -2677,4 +2824,264 @@ fn nesting_stops_at_a_fixed_depth_with_the_text_kept() {
     // At the limit nothing changes.
     let d = parse(&format!("{} a", ">".repeat(MAX_BLOCK_DEPTH - 1)));
     assert_eq!(block_depth(&d), MAX_BLOCK_DEPTH);
+}
+
+// Audit fixes: each behaviour below changed in `phase1-audit-fixes`, and these are the tests that
+// fail if it reverts. Expected values are what `gh api markdown -f mode=gfm` showed where the audit
+// compared against GitHub.
+
+#[test]
+fn object_head_template_and_embed_keep_their_children() {
+    // GitHub strips these tags and keeps what they hold; a document must not come out blank.
+    let d = parse("<object data=\"x.svg\"><img src=\"f.png\" alt=\"fb\"></object>");
+    assert_eq!(d.images.len(), 1);
+    assert_eq!(d.str(d.images[0].alt), "fb");
+    let d = parse("<object><p>para</p></object>\n\nz");
+    assert!(
+        d.text.contains("para") && d.text.contains('z'),
+        "{:?}",
+        d.text
+    );
+    for (src, want) in [
+        ("<object>x</object>y", "xy"),
+        ("<embed>x</embed>y", "xy"),
+        ("<template>x</template>y", "xy"),
+        ("<head>x</head>y", "xy"),
+    ] {
+        assert_eq!(parse(src).text.trim(), want, "{src:?}");
+    }
+    // The usual `<object>` fallback keeps its text and its link.
+    let d = parse(
+        "<object data=\"x.pdf\">cannot show this <a href=\"x.pdf\">download</a></object>\n\nnext",
+    );
+    assert!(
+        d.text.contains("cannot show this") && d.text.contains("next"),
+        "{:?}",
+        d.text
+    );
+    assert_eq!(links(&d)[0].1, "x.pdf");
+}
+
+#[test]
+fn script_style_and_iframe_show_as_literal_text() {
+    // The GFM tag filter escapes these, so they read as text; nothing here executes either way.
+    for src in [
+        "<script>alert(1)</script>",
+        "<style>p{color:red}</style>",
+        "<iframe src=x></iframe>",
+    ] {
+        let d = parse(src);
+        assert_eq!(d.text.trim_end(), src, "{src:?}");
+        assert!(!d.blocks.is_empty(), "{src:?}");
+    }
+}
+
+#[test]
+fn a_blank_quote_line_makes_the_next_block_an_ordinary_alert_child() {
+    // The marker line only stops being an alert when the next line is a setext underline for it.
+    for src in [
+        "> [!NOTE]\n>\n> Title\n> ===",
+        "> [!NOTE]\n>\n> Title\n> ---",
+        "> [!NOTE]\n>\n> Title\n> ***",
+    ] {
+        assert!(has_alert(&parse(src)), "{src:?}");
+    }
+    let d = parse("> [!NOTE]\n>\n> Title\n> ===");
+    assert_eq!(d.str(d.headings[0].title), "Title");
+    let d = parse("> [!NOTE]\n>\n> Title\n> ---");
+    assert_eq!(d.str(d.headings[0].title), "Title");
+    assert_eq!(d.headings[0].level, 2);
+    let d = parse("> [!NOTE]\n>\n> ---");
+    assert!(
+        has_alert(&d) && d.blocks.iter().any(|b| b.kind == BlockKind::ThematicBreak),
+        "{:?}",
+        kinds(&d)
+    );
+    let d = parse("> [!NOTE]\n>\n> # Title");
+    assert!(has_alert(&d));
+    assert_eq!(d.str(d.headings[0].title), "Title");
+    // With no blank line the underline rewrites the marker line, so no alert.
+    assert!(!has_alert(&parse("> [!NOTE]\n> Title\n> ===")));
+    assert!(!has_alert(&parse("> [!NOTE]\n> Title\n> ---")));
+}
+
+#[test]
+fn empty_inline_html_is_content_for_an_alert() {
+    // GitHub keeps an alert whose only body is empty inline HTML.
+    for src in [
+        "> [!NOTE]\n> <i></i>",
+        "> [!NOTE]\n> <b></b>",
+        "> [!NOTE]\n> <span></span>",
+        "> [!NOTE]\n> <a href=\"x\"></a>",
+        "> [!NOTE]\n> <img>",
+        "> [!NOTE]\n> <p></p>",
+        "> [!NOTE]\n> <source>",
+        "> [!NOTE]\n> <br>",
+        "> [!NOTE]\n> <hr>",
+    ] {
+        assert!(has_alert(&parse(src)), "{src:?}");
+    }
+    // Nothing the sanitizer keeps, so the quote stays plain with its marker.
+    for src in [
+        "> [!NOTE]",
+        "> [!NOTE]\n>",
+        "> [!NOTE]\n> <!-- c -->",
+        "> [!NOTE]\n> <foo></foo>",
+        "> [!NOTE]\n> <a></a>",
+        "> [!NOTE]\n> <input type=checkbox>",
+    ] {
+        assert!(!has_alert(&parse(src)), "{src:?}");
+        assert!(parse(src).text.contains("[!NOTE]"), "{src:?}");
+    }
+}
+
+#[test]
+fn dashes_under_a_marker_line_are_a_setext_heading() {
+    // pulldown reads `-` and `--` as paragraph text; GitHub makes the marker line an H2.
+    for src in ["> [!NOTE]\n> -", "> [!NOTE]\n> --"] {
+        let d = parse(src);
+        assert!(!has_alert(&d), "{src:?}");
+        assert_eq!(d.headings[0].level, 2, "{src:?}");
+        assert_eq!(d.str(d.headings[0].title), "[!NOTE]", "{src:?}");
+    }
+    // `#x` is not an ATX heading, so the dashes underline the whole first line.
+    let d = parse("> [!NOTE]\n> #x\n> ---");
+    assert!(!has_alert(&d));
+    assert_eq!(d.str(d.headings[0].title), "[!NOTE] #x");
+}
+
+#[test]
+fn a_table_cell_resets_the_tags_that_reject_an_alert() {
+    // A <td> resets <div>, <li> and quote ancestors on GitHub; only <details> still rejects.
+    for src in [
+        "<div align=\"center\">\n<table><tr><td>\n\n> [!TIP]\n> x\n\n</td></tr></table>\n</div>",
+        "<li><table><tr><td>\n\n> [!TIP]\n> x\n\n</td></tr></table></li>",
+        "<blockquote><table><tr><td>\n\n> [!TIP]\n> x\n\n</td></tr></table></blockquote>",
+        "<table><tr><th>\n\n> [!TIP]\n> x\n\n</th></tr></table>",
+    ] {
+        assert!(has_alert(&parse(src)), "{src:?}");
+    }
+    for src in [
+        "<details><table><tr><td>\n\n> [!TIP]\n> x\n\n</td></tr></table></details>",
+        "<table><tr><td><div>\n\n> [!TIP]\n> x\n\n</div></td></tr></table>",
+    ] {
+        assert!(!has_alert(&parse(src)), "{src:?}");
+    }
+}
+
+#[test]
+fn a_footnote_definition_under_a_marker_rejects_the_alert() {
+    // GitHub draws a footnote definition as a list item, so the marker line stays plain text.
+    let d = parse("> [!NOTE]\n> [^1]: f");
+    assert!(!has_alert(&d));
+    assert!(d.text.contains("[!NOTE]"), "{:?}", d.text);
+}
+
+#[test]
+fn a_reference_in_a_skipped_footnote_definition_is_still_numbered() {
+    // GitHub numbers b from inside the dropped duplicate, so x points at note 2.
+    let d = parse("[^a]: 1\n\n[^a]: 2[^b]\n\n[^b]: b\n\nx[^a]");
+    assert_eq!(d.footnotes.len(), 2);
+    let number = |label: &str| {
+        d.footnotes
+            .iter()
+            .find(|f| d.str(f.label) == label)
+            .expect("a footnote")
+            .number
+    };
+    assert_eq!(number("b"), 1);
+    assert_eq!(number("a"), 2);
+    assert!(!d.text.contains("2"), "the duplicate's text is dropped");
+    assert!(d.text.contains('b'), "{:?}", d.text);
+}
+
+#[test]
+fn a_footnote_definition_past_the_depth_limit_owns_no_block() {
+    let src = format!(
+        "{}\n\n[^a]: first\n\n[^a]: second\n\nr[^a]",
+        "<div>".repeat(300)
+    );
+    let d = parse(&src);
+    assert_eq!(d.footnotes.len(), 1);
+    assert!(d.footnotes[0].defined);
+    assert_eq!(d.footnotes[0].number, 1);
+    assert_eq!(
+        d.footnotes[0].block, NONE,
+        "a flattened definition names no block"
+    );
+    // Shallower nesting gives the definition a real block, and the duplicate still loses.
+    let src = format!(
+        "{}\n\n[^a]: first\n\n[^a]: second\n\nr[^a]",
+        "<div>".repeat(10)
+    );
+    let d = parse(&src);
+    assert!(matches!(
+        d.blocks[d.footnotes[0].block as usize].kind,
+        BlockKind::FootnoteDefinition { .. }
+    ));
+    assert_eq!(d.block_text(d.footnotes[0].block).trim_end(), "first");
+}
+
+#[test]
+fn empty_implied_rows_cells_and_items_are_dropped() {
+    // A link wrapped around a cell no longer adds an empty leading column; the cell count is right.
+    let d = parse("<table><tr><a href=\"u\"><td>a</td></a><td>b</td></tr></table>");
+    let row = d.children(0).next().unwrap();
+    assert_eq!(d.children(row).count(), 2, "{:?}", kinds(&d));
+    // Empty tags and empty block elements add no phantom row or item.
+    for src in [
+        "<table><p></p><tr><td>a</td></tr></table>",
+        "<table><b></b><tr><td>a</td></tr></table>",
+    ] {
+        let d = parse(src);
+        assert_eq!(d.children(0).count(), 1, "{src}: {:?}", kinds(&d));
+    }
+    for src in [
+        "<ul><p></p><li>a</li></ul>",
+        "<ul><li>a</li><b></b></ul>",
+        "<ul><a href=\"u\"><li>a</li></a><li>b</li></ul>",
+    ] {
+        let want = if src.contains("b</li>") { 2 } else { 1 };
+        assert_eq!(parse(src).children(0).count(), want, "{src}");
+    }
+}
+
+#[test]
+fn raw_input_is_ignored_but_task_boxes_still_draw() {
+    // GitHub's sanitizer removes a raw input outside a task list.
+    let d = parse("<input type=\"checkbox\" checked>y");
+    assert!(
+        !d.spans
+            .iter()
+            .any(|s| matches!(s.kind, SpanKind::Checkbox { .. })),
+        "{:?}",
+        d.spans
+    );
+    assert_eq!(d.text, "y\n");
+    let d = parse("<input type=\"checkbox\">");
+    assert!(d.blocks.is_empty(), "{:?}", kinds(&d));
+    let d = parse("<ul><li><input type=\"checkbox\" checked disabled> done</li></ul>");
+    assert!(d.text.contains("done"), "{:?}", d.text);
+    // A Markdown task item still draws its box.
+    let d = parse("- [x] task");
+    assert!(
+        d.spans
+            .iter()
+            .any(|s| matches!(s.kind, SpanKind::Checkbox { checked: true }))
+    );
+    // And a raw input is not content that keeps an alert.
+    assert!(!has_alert(&parse("> [!NOTE]\n> <input type=checkbox>")));
+}
+
+#[test]
+fn find_matches_a_crlf_line_break() {
+    // A CRLF pair in a pasted query is one line break, not two spaces.
+    let d = parse("para one\nsame para\n");
+    for q in ["one\nsame", "one same", "one\r\nsame"] {
+        assert_eq!(find(&d, q).hits.len(), 1, "{q:?}");
+    }
+    // A selection from inside a code block still does not match; that is COVERAGE's find gap.
+    let d = parse("```\nfoo\nbar\n```\n");
+    assert_eq!(find(&d, "foo").hits.len(), 1);
+    assert_eq!(find(&d, "foo\nbar").hits.len(), 0);
 }
