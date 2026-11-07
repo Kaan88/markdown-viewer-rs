@@ -24,6 +24,7 @@ pub mod ffi {
         type Alignment = crate::qt::Alignment;
         type Orientation = crate::qt::Orientation;
         type FocusPolicy = crate::qt::FocusPolicy;
+        type CursorShape = crate::qt::CursorShape;
     }
 
     #[namespace = "QEvent"]
@@ -39,15 +40,22 @@ pub mod ffi {
         include!("cxx-qt-lib/qimage.h");
         include!("cxx-qt-lib/qpoint.h");
         include!("cxx-qt-lib/qpointf.h");
+        include!("cxx-qt-lib/qrectf.h");
+        include!("cxx-qt-lib/qcolor.h");
         type QString = cxx_qt_lib::QString;
         type QStringList = cxx_qt_lib::QStringList;
         type qsizetype = crate::qt::QSizeType;
         type QImage = cxx_qt_lib::QImage;
         type QPoint = cxx_qt_lib::QPoint;
         type QPointF = cxx_qt_lib::QPointF;
+        type QRectF = cxx_qt_lib::QRectF;
+        type QColor = cxx_qt_lib::QColor;
+        type QUrl = cxx_qt_lib::QUrl;
+        type QCursor;
 
         include!(<QtGui/QPainter>);
         include!(<QtGui/QTransform>);
+        include!(<QtGui/QCursor>);
         include!(<QtGui/QPaintEvent>);
         include!(<QtGui/QMouseEvent>);
         include!(<QtGui/QKeyEvent>);
@@ -55,6 +63,7 @@ pub mod ffi {
         include!(<QtGui/QDragEnterEvent>);
         include!(<QtGui/QDropEvent>);
         include!(<QtGui/QBackingStore>);
+        include!(<QtGui/QDesktopServices>);
         include!(<QtCore/QTimerEvent>);
         include!(<QtCore/QEvent>);
         include!(<QtWidgets/QFileDialog>);
@@ -72,6 +81,7 @@ pub mod ffi {
         type QTransform;
         type QBackingStore;
         type QPaintDevice;
+        type QDesktopServices;
         #[cxx_name = "QImage"]
         type RawImage;
         type QTreeWidgetItem;
@@ -170,6 +180,9 @@ pub mod ffi {
         #[cxx_name = "mouseMoveEvent"]
         unsafe fn mouse_move_event(self: Pin<&mut Self>, e: *mut QMouseEvent);
         #[cxx_override]
+        #[cxx_name = "mouseReleaseEvent"]
+        unsafe fn mouse_release_event(self: Pin<&mut Self>, e: *mut QMouseEvent);
+        #[cxx_override]
         #[cxx_name = "wheelEvent"]
         unsafe fn wheel_event(self: Pin<&mut Self>, e: *mut QWheelEvent);
         #[cxx_override]
@@ -236,6 +249,8 @@ pub mod ffi {
         fn new_ptr() -> *mut QMimeData;
         #[rust_name = "new_painter"]
         unsafe fn make_unique(w: *mut Canvas) -> UniquePtr<QPainter>;
+        #[rust_name = "new_cursor"]
+        fn make_unique(shape: CursorShape) -> UniquePtr<QCursor>;
         #[rust_name = "new_transform"]
         fn make_unique(
             m11: f64,
@@ -295,6 +310,7 @@ pub mod ffi {
         // QWidget
         fn show(self: Pin<&mut QWidget>);
         fn update(self: Pin<&mut QWidget>);
+        fn repaint(self: Pin<&mut QWidget>);
         fn resize(self: Pin<&mut QWidget>, w: i32, h: i32);
         fn width(self: &QWidget) -> i32;
         fn height(self: &QWidget) -> i32;
@@ -305,6 +321,7 @@ pub mod ffi {
         fn setMaximumWidth(self: Pin<&mut QWidget>, w: i32);
         fn setFocusPolicy(self: Pin<&mut QWidget>, p: FocusPolicy);
         fn setFocus(self: Pin<&mut QWidget>);
+        fn setCursor(self: Pin<&mut QWidget>, cursor: &QCursor);
         fn windowHandle(self: &QWidget) -> *mut QWindow;
         fn devicePixelRatioF(self: &QWidget) -> f64;
         fn window(self: &QWidget) -> *mut QWidget;
@@ -416,8 +433,15 @@ pub mod ffi {
         fn setWorldTransform(self: Pin<&mut RawPainter>, t: &QTransform, combine: bool);
         #[rust_name = "draw_image_at"]
         fn drawImage(self: Pin<&mut RawPainter>, p: &QPoint, img: &QImage);
+        #[rust_name = "fill_rect_raw"]
+        fn fillRect(self: Pin<&mut RawPainter>, r: &QRectF, c: &QColor);
         #[rust_name = "painter_end"]
         fn end(self: Pin<&mut RawPainter>) -> bool;
+
+        // Opening a web or mail link in the platform's handler.
+        #[Self = "QDesktopServices"]
+        #[rust_name = "open_url"]
+        fn openUrl(url: &QUrl) -> bool;
 
         // Backing store
         fn paintDevice(self: Pin<&mut QBackingStore>) -> *mut QPaintDevice;

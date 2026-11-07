@@ -7,8 +7,8 @@ pub mod ffi;
 use cxx::UniquePtr;
 use cxx_qt::{casting::Upcast, CxxQtType};
 use cxx_qt_lib::{
-    KeyboardModifier, MouseButton, MouseButtons, QFlags, QImage, QImageFormat, QPoint, QPointF,
-    QString,
+    KeyboardModifier, MouseButton, MouseButtons, QColor, QFlags, QImage, QImageFormat, QPoint,
+    QPointF, QRectF, QString, QUrl,
 };
 use ffi::*;
 use std::os::raw::c_char;
@@ -33,6 +33,7 @@ trivial_cxx!(TimerType, "Qt::TimerType");
 trivial_cxx!(Alignment, "Qt::Alignment");
 trivial_cxx!(Orientation, "Qt::Orientation");
 trivial_cxx!(FocusPolicy, "Qt::FocusPolicy");
+trivial_cxx!(CursorShape, "Qt::CursorShape");
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -102,6 +103,7 @@ pub trait CanvasHandler {
     fn paint(&self, target: &mut PaintTarget<'_>);
     fn mouse_press(&self, x: f64, y: f64);
     fn mouse_move(&self, x: f64, y: f64);
+    fn mouse_release(&self, x: f64, y: f64);
     fn wheel(&self, dx: i32, dy: i32);
     fn key(&self, code: i32);
     fn drag_enter(&self, text: String) -> bool;
@@ -135,6 +137,10 @@ impl Canvas {
     unsafe fn mouse_move_event(self: Pin<&mut Self>, e: *mut QMouseEvent) {
         let p = (*e).mouse_pos();
         self.handler().mouse_move(p.x(), p.y());
+    }
+    unsafe fn mouse_release_event(self: Pin<&mut Self>, e: *mut QMouseEvent) {
+        let p = (*e).mouse_pos();
+        self.handler().mouse_release(p.x(), p.y());
     }
     unsafe fn wheel_event(self: Pin<&mut Self>, e: *mut QWheelEvent) {
         let a = (*e).angleDelta();
@@ -217,6 +223,35 @@ impl PaintTarget<'_> {
         raw.as_mut().draw_image_at(&QPoint::new(0, 0), &img);
         raw.painter_end();
     }
+    /// Fills page rectangles (x, y, w, h in device px) through QPainter with a translucent colour,
+    /// on top of whatever was blitted. The scroll offset is subtracted here.
+    pub fn fill_rects(&mut self, rects: &[(f64, f64, f64, f64)], scroll: f64, color: [u8; 4]) {
+        if rects.is_empty() {
+            return;
+        }
+        let dpr = self.dpr();
+        let canvas = unsafe { self.canvas.as_mut().get_unchecked_mut() as *mut Canvas };
+        let mut p: UniquePtr<QPainter> = unsafe { new_painter(canvas) };
+        let inv = new_transform(1.0 / dpr, 0.0, 0.0, 1.0 / dpr, 0.0, 0.0);
+        let raw = unsafe {
+            Pin::new_unchecked(
+                &mut *(p.as_mut().unwrap().get_unchecked_mut() as *mut _ as *mut RawPainter),
+            )
+        };
+        let mut raw = raw;
+        raw.as_mut().set_world_transform(&inv, false);
+        let c = QColor::from_rgba_f(
+            color[0] as f32 / 255.0,
+            color[1] as f32 / 255.0,
+            color[2] as f32 / 255.0,
+            color[3] as f32 / 255.0,
+        );
+        for (x, y, w, h) in rects {
+            let r = QRectF::new(*x, *y - scroll, *w, *h);
+            raw.as_mut().fill_rect_raw(&r, &c);
+        }
+        raw.painter_end();
+    }
     /// Copies BGRX straight into the backing store's own QImage, in device pixels.
     /// Returns false if the backing store is not a 32 bit QImage.
     pub fn blit_direct(&mut self, buf: &[u8], w: i32, h: i32) -> bool {
@@ -263,6 +298,9 @@ impl H<Canvas> {
         unsafe { Pin::new_unchecked(&mut *c) }.rust_mut().handler = Some(handler);
         H(c)
     }
+    pub fn set_cursor_shape(&self, shape: u32) {
+        self.widget().set_cursor_shape(shape)
+    }
     pub fn start_timer(&self, ms: i32) -> i32 {
         pin!(self).startTimer(ms, TimerType(0)) // Qt::PreciseTimer
     }
@@ -299,6 +337,9 @@ impl H<QWidget> {
     pub fn update(&self) {
         pin!(self).update()
     }
+    pub fn repaint(&self) {
+        pin!(self).repaint()
+    }
     pub fn resize(&self, w: i32, h: i32) {
         pin!(self).resize(w, h)
     }
@@ -317,9 +358,19 @@ impl H<QWidget> {
     pub fn set_focus(&self) {
         pin!(self).setFocus()
     }
+    pub fn set_cursor_shape(&self, shape: u32) {
+        let cursor = new_cursor(CursorShape(shape));
+        pin!(self).setCursor(cursor.as_ref().expect("cursor"))
+    }
     pub fn fix_width(&self, w: i32) {
         pin!(self).setMinimumWidth(w);
         pin!(self).setMaximumWidth(w);
+    }
+    pub fn width(&self) -> i32 {
+        unsafe { &*self.0 }.width()
+    }
+    pub fn dpr(&self) -> f64 {
+        unsafe { &*self.0 }.devicePixelRatioF()
     }
     pub fn window_handle(&self) -> Option<H<QWindow>> {
         let w = unsafe { &*self.0 }.windowHandle();
@@ -329,6 +380,13 @@ impl H<QWidget> {
         let d = unsafe { &*self.0 };
         let win = d.window();
         let o = unsafe { d.mapTo(win, &QPoint::new(d.width() / 2, d.height() / 2)) };
+        (o.x() as f64, o.y() as f64)
+    }
+    /// The widget's top-left corner in window coordinates.
+    pub fn origin_in_window(&self) -> (f64, f64) {
+        let d = unsafe { &*self.0 };
+        let win = d.window();
+        let o = unsafe { d.mapTo(win, &QPoint::new(0, 0)) };
         (o.x() as f64, o.y() as f64)
     }
 }
@@ -359,6 +417,12 @@ impl H<QScrollBar> {
             .on_value_changed(move |_, v| f.get()(v))
             .release();
     }
+}
+
+/// Opens an http(s) or mailto link in the platform's handler. False when Qt could not start one.
+pub fn open_url(url: &str) -> bool {
+    let parsed = QUrl::from_user_input(&qs(url), &qs(""));
+    QDesktopServices::open_url(&parsed)
 }
 
 /// The system file chooser, starting in `dir`. `None` when the user cancels.

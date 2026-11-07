@@ -6,7 +6,7 @@
 use crate::qt::ffi::*;
 use crate::qt::*;
 use mdview_core::parse_bytes;
-use mdview_render::{DocumentRenderer, Options, PageLayout, Theme, DARK, LIGHT};
+use mdview_render::{DocumentRenderer, Hit, Options, PageLayout, Rect, Theme, DARK, LIGHT};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -51,6 +51,21 @@ struct Shell {
     viewport: Cell<i32>,
     theme: Cell<Theme>,
     zoom: Cell<f64>,
+    /// Device px per logical px, as the last paint saw it, for mouse coordinates.
+    scale: Cell<f64>,
+    /// The options of the last paint, so a hit test lays out for the same width/scale/theme.
+    options: RefCell<Option<Options>>,
+    /// The selection, as two offsets into `Document::text`.
+    selection: Cell<Option<(u32, u32)>>,
+    /// Where the press that started a selection landed.
+    anchor: Cell<Option<u32>>,
+    /// The link or footnote under the press, followed on release if the pointer did not move.
+    pressed_link: Cell<Option<u32>>,
+    pressed_footnote: Cell<Option<u32>>,
+    selecting: Cell<bool>,
+    moved: Cell<bool>,
+    /// A fragment to scroll to once the next layout exists, for links into another document.
+    pending_anchor: RefCell<Option<String>>,
 }
 
 impl Shell {
@@ -69,6 +84,15 @@ impl Shell {
             viewport: Cell::new(0),
             theme: Cell::new(theme),
             zoom: Cell::new(zoom),
+            scale: Cell::new(1.0),
+            options: RefCell::new(None),
+            selection: Cell::new(None),
+            anchor: Cell::new(None),
+            pressed_link: Cell::new(None),
+            pressed_footnote: Cell::new(None),
+            selecting: Cell::new(false),
+            moved: Cell::new(false),
+            pending_anchor: RefCell::new(None),
         }
     }
 
@@ -100,6 +124,9 @@ impl Shell {
                 *self.document.borrow_mut() = Some(document);
                 *self.layout.borrow_mut() = None;
                 self.scroll.set(0.0);
+                self.selection.set(None);
+                self.anchor.set(None);
+                self.pending_anchor.borrow_mut().take();
                 *self.path.borrow_mut() = Some(path.to_path_buf());
                 let name = path
                     .file_name()
@@ -203,6 +230,264 @@ impl Shell {
             _ => {}
         }
     }
+
+    /// Lays the page out without waiting for a paint event, for the scripted checks: a window that
+    /// has been shown but not mapped yet has no paint yet on some platforms.
+    fn ensure_layout(&self) {
+        let Some(canvas) = self.canvas.get() else {
+            return;
+        };
+        let width = canvas.widget().width();
+        let scale = canvas.widget().dpr();
+        if width <= 0 {
+            return;
+        }
+        self.scale.set(scale);
+        let options = self.options(width, scale);
+        *self.options.borrow_mut() = Some(options.clone());
+        let stale = match &*self.layout.borrow() {
+            None => true,
+            Some(page) => !page.matches(&options),
+        };
+        if stale {
+            if let Some(document) = self.document.borrow().as_ref() {
+                let page = self.renderer.borrow_mut().layout(document, &options);
+                *self.layout.borrow_mut() = Some(page);
+            }
+        }
+    }
+
+    /// What is under a logical widget position, in page coordinates.
+    fn hit(&self, x: f64, y: f64) -> Option<Hit> {
+        let options = self.options.borrow().clone()?;
+        let scale = self.scale.get();
+        let document = self.document.borrow();
+        let document = document.as_ref()?;
+        let layout = self.layout.borrow();
+        let layout = layout.as_ref()?;
+        self.renderer.borrow_mut().hit_test(
+            document,
+            &options,
+            layout,
+            (x * scale) as f32,
+            (y * scale + self.scroll.get()) as f32,
+        )
+    }
+
+    /// The selected text's page rectangles, in device px.
+    fn selection_rects(&self) -> Vec<Rect> {
+        let Some((from, to)) = self.selection.get() else {
+            return Vec::new();
+        };
+        self.rects_for(from, to)
+    }
+
+    /// The page rectangles a range would paint, whether or not it is the current selection.
+    fn rects_for(&self, from: u32, to: u32) -> Vec<Rect> {
+        if from == to {
+            return Vec::new();
+        }
+        let Some(options) = self.options.borrow().clone() else {
+            return Vec::new();
+        };
+        let document = self.document.borrow();
+        let Some(document) = document.as_ref() else {
+            return Vec::new();
+        };
+        let layout = self.layout.borrow();
+        let Some(layout) = layout.as_ref() else {
+            return Vec::new();
+        };
+        self.renderer
+            .borrow_mut()
+            .selection_rects(document, &options, layout, from, to)
+    }
+
+    fn press(&self, x: f64, y: f64) {
+        let Some(hit) = self.hit(x, y) else {
+            return;
+        };
+        self.anchor.set(Some(hit.offset));
+        self.selection.set(Some((hit.offset, hit.offset)));
+        self.pressed_link.set(hit.link);
+        self.pressed_footnote.set(hit.footnote);
+        self.moved.set(false);
+        self.selecting.set(true);
+    }
+
+    fn drag(&self, x: f64, y: f64) {
+        if !self.selecting.get() {
+            // Hovering: a link or a footnote mark gets the pointing hand.
+            let pointing = self
+                .hit(x, y)
+                .is_some_and(|hit| hit.link.is_some() || hit.footnote.is_some());
+            if let Some(canvas) = self.canvas.get() {
+                canvas.set_cursor_shape(if pointing { 13 } else { 0 });
+            }
+            return;
+        }
+        let (Some(anchor), Some(hit)) = (self.anchor.get(), self.hit(x, y)) else {
+            return;
+        };
+        if hit.offset != anchor {
+            self.moved.set(true);
+        }
+        self.selection.set(Some((anchor, hit.offset)));
+        self.redraw();
+    }
+
+    fn release(&self, _x: f64, _y: f64) {
+        if !self.selecting.get() {
+            return;
+        }
+        self.selecting.set(false);
+        if self.moved.get() {
+            self.pressed_link.set(None);
+            self.pressed_footnote.set(None);
+            return;
+        }
+        if let Some(link) = self.pressed_link.take() {
+            self.follow_link(link);
+        } else if let Some(note) = self.pressed_footnote.take() {
+            self.follow_footnote(note);
+        } else {
+            self.selection.set(None);
+            self.redraw();
+        }
+    }
+
+    /// A margin above a jumped-to anchor, so the heading is not glued to the top edge.
+    fn jump_margin(&self) -> f64 {
+        self.scale.get() * 24.0
+    }
+
+    fn scroll_to_row(&self, y: f32) {
+        self.scroll_to((y as f64 - self.jump_margin()).max(0.0));
+    }
+
+    fn follow_link(&self, index: u32) {
+        let destination = {
+            let document = self.document.borrow();
+            let Some(document) = document.as_ref() else {
+                return;
+            };
+            document
+                .links
+                .get(index as usize)
+                .map(|link| document.str(link.dest).to_string())
+        };
+        if let Some(destination) = destination {
+            self.open_destination(&destination);
+        }
+    }
+
+    fn follow_footnote(&self, index: u32) {
+        let number = {
+            let document = self.document.borrow();
+            document
+                .as_ref()
+                .and_then(|document| document.footnotes.get(index as usize))
+                .map(|note| note.number)
+        };
+        let Some(number) = number else {
+            return;
+        };
+        let layout = self.layout.borrow();
+        if let Some(layout) = layout.as_ref() {
+            if let Some(y) = layout.footnote_y(number) {
+                self.scroll_to_row(y);
+            }
+        }
+    }
+
+    /// A link destination: a fragment in this document, another local Markdown file (with an
+    /// optional fragment) or a web/mail address. The shell loads files itself rather than handing
+    /// markdown paths to the browser.
+    fn open_destination(&self, destination: &str) {
+        let (path, fragment) = match destination.split_once('#') {
+            Some((path, fragment)) => (path, Some(fragment)),
+            None => (destination, None),
+        };
+        if path.is_empty() {
+            if let Some(fragment) = fragment {
+                self.jump_fragment(fragment);
+            }
+            return;
+        }
+        let lower = path.to_ascii_lowercase();
+        if lower.starts_with("http://")
+            || lower.starts_with("https://")
+            || lower.starts_with("mailto:")
+        {
+            if !open_url(destination) {
+                self.message(&format!("could not open {destination}"));
+            }
+            return;
+        }
+        let target = PathBuf::from(percent_decode(path));
+        let resolved = if target.is_absolute() {
+            target
+        } else {
+            match self.path.borrow().as_ref().and_then(|path| path.parent()) {
+                Some(dir) => dir.join(target),
+                None => target,
+            }
+        };
+        if !resolved.is_file() {
+            self.message(&format!("not a file: {}", resolved.display()));
+            return;
+        }
+        self.load(&resolved);
+        if let Some(fragment) = fragment {
+            self.pending_anchor
+                .borrow_mut()
+                .replace(fragment.to_string());
+        }
+        self.redraw();
+    }
+
+    fn jump_fragment(&self, fragment: &str) {
+        let block = {
+            let document = self.document.borrow();
+            document
+                .as_ref()
+                .and_then(|document| document.resolve_fragment(fragment))
+        };
+        let Some(block) = block else {
+            self.message(&format!("no anchor named {fragment}"));
+            return;
+        };
+        let layout = self.layout.borrow();
+        let document = self.document.borrow();
+        let mut jumped = false;
+        if let (Some(layout), Some(document)) = (layout.as_ref(), document.as_ref()) {
+            if let Some(y) = layout.y_of(document, block) {
+                self.scroll_to_row(y);
+                jumped = true;
+            }
+        }
+        if !jumped {
+            self.pending_anchor
+                .borrow_mut()
+                .replace(fragment.to_string());
+        }
+    }
+
+    /// Applies a fragment saved while a linked document was still being laid out.
+    fn apply_pending_anchor(&self, page: &PageLayout) {
+        let Some(fragment) = self.pending_anchor.borrow_mut().take() else {
+            return;
+        };
+        let document = self.document.borrow();
+        let Some(document) = document.as_ref() else {
+            return;
+        };
+        if let Some(block) = document.resolve_fragment(&fragment) {
+            if let Some(y) = page.y_of(document, block) {
+                self.scroll_to_row(y);
+            }
+        }
+    }
 }
 
 impl CanvasHandler for Shell {
@@ -214,7 +499,9 @@ impl CanvasHandler for Shell {
         let scale = target.dpr();
         let device_height = (height as f64 * scale).ceil() as i32;
         self.viewport.set(device_height);
+        self.scale.set(scale);
         let options = self.options(width, scale);
+        *self.options.borrow_mut() = Some(options.clone());
         let stale = match &*self.layout.borrow() {
             None => true,
             Some(page) => !page.matches(&options),
@@ -231,6 +518,9 @@ impl CanvasHandler for Shell {
                 page.total_height()
             );
             *self.layout.borrow_mut() = Some(page);
+        }
+        if let Some(page) = &*self.layout.borrow() {
+            self.apply_pending_anchor(page);
         }
         let scroll = self.scroll.get().clamp(0.0, self.scroll_max(device_height));
         self.scroll.set(scroll);
@@ -249,27 +539,45 @@ impl CanvasHandler for Shell {
             scroll as f32,
             device_height as f32,
         );
-        let renderer = self.renderer.borrow();
-        let frame = renderer.frame().expect("frame");
-        target.blit_painter(
-            &frame.bitmap.pixels,
-            frame.bitmap.width as i32,
-            frame.bitmap.height as i32,
-            true,
-        );
-        eprintln!(
-            "mdview-qt: painted {width}x{height} at scroll {scroll:.0} in {:.1} ms{}",
-            started.elapsed().as_secs_f64() * 1000.0,
-            match frame.band {
-                None => ", whole frame".to_string(),
-                Some((top, rows)) => format!(", band {top}+{rows}, shifted {}", frame.shift),
-            }
-        );
+        {
+            let renderer = self.renderer.borrow();
+            let frame = renderer.frame().expect("frame");
+            target.blit_painter(
+                &frame.bitmap.pixels,
+                frame.bitmap.width as i32,
+                frame.bitmap.height as i32,
+                true,
+            );
+            eprintln!(
+                "mdview-qt: painted {width}x{height} at scroll {scroll:.0} in {:.1} ms{}",
+                started.elapsed().as_secs_f64() * 1000.0,
+                match frame.band {
+                    None => ", whole frame".to_string(),
+                    Some((top, rows)) => format!(", band {top}+{rows}, shifted {}", frame.shift),
+                }
+            );
+        }
+        // The selection is drawn over the frame, which stays the document's pixels only.
+        let rects: Vec<(f64, f64, f64, f64)> = self
+            .selection_rects()
+            .iter()
+            .map(|rect| (rect.x as f64, rect.y as f64, rect.w as f64, rect.h as f64))
+            .collect();
+        let [r, g, b] = self.theme.get().accent;
+        target.fill_rects(&rects, scroll, [r, g, b, 72]);
     }
 
-    fn mouse_press(&self, _x: f64, _y: f64) {}
+    fn mouse_press(&self, x: f64, y: f64) {
+        self.press(x, y);
+    }
 
-    fn mouse_move(&self, _x: f64, _y: f64) {}
+    fn mouse_move(&self, x: f64, y: f64) {
+        self.drag(x, y);
+    }
+
+    fn mouse_release(&self, x: f64, y: f64) {
+        self.release(x, y);
+    }
 
     fn wheel(&self, _dx: i32, dy: i32) {
         self.scroll_to(self.scroll.get() - dy as f64 * 0.75);
@@ -321,7 +629,127 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn build(shell: &Rc<Shell>, file: Option<PathBuf>, drop_test: Option<PathBuf>) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Check {
+    /// Drag over a word and report the selection, then exit.
+    Select,
+    /// The same, but leave the window open so a screenshot can show the selection.
+    Hold,
+    /// Click a link and report where it scrolled, then exit.
+    Link,
+}
+
+/// Scripted checks through Qt's real mouse path, for `--select-test`, `--select-hold` and
+/// `--link-test`; the same route a person's click takes, not a shortcut to the hit test.
+fn run_check(shell: &Rc<Shell>, check: Check) {
+    let Some(canvas) = shell.canvas.get() else {
+        println!("check failed: no canvas");
+        std::process::exit(1);
+    };
+    shell.ensure_layout();
+    canvas.widget().repaint();
+    let Some(window) = shell
+        .window
+        .get()
+        .and_then(|window| window.widget().window_handle())
+    else {
+        println!("check failed: no window handle");
+        std::process::exit(1);
+    };
+    let (origin_x, origin_y) = canvas.widget().origin_in_window();
+    let scale = shell.scale.get();
+    let scroll = shell.scroll.get();
+    let word = match check {
+        Check::Link => "Jump to diagrams",
+        _ => "Markdown",
+    };
+    let start = {
+        let document = shell.document.borrow();
+        let Some(document) = document.as_ref() else {
+            println!("check failed: no document");
+            std::process::exit(1);
+        };
+        document.text.find(word).map(|at| at as u32)
+    };
+    let Some(start) = start else {
+        println!("check failed: {word:?} is not in the document");
+        std::process::exit(1);
+    };
+    let rects = shell.rects_for(start, start + word.len() as u32);
+    let Some(rect) = rects.first().copied() else {
+        println!("check failed: no rectangle for {word:?}");
+        std::process::exit(1);
+    };
+    let to_screen = |x: f32, y: f32| {
+        (
+            origin_x + x as f64 / scale,
+            origin_y + (y as f64 - scroll) / scale,
+        )
+    };
+    let (x0, y0) = to_screen(rect.x + 2.0, rect.y + rect.h / 2.0);
+    let (x1, _) = to_screen(rect.x + rect.w - 2.0, rect.y + rect.h / 2.0);
+    match check {
+        Check::Link => {
+            window.send_mouse(EV_MOUSE_PRESS, x0, y0);
+            window.send_mouse(EV_MOUSE_RELEASE, x0, y0);
+            let moved = shell.scroll.get();
+            let expected = {
+                let document = shell.document.borrow();
+                let layout = shell.layout.borrow();
+                match (document.as_ref(), layout.as_ref()) {
+                    (Some(document), Some(layout)) => document
+                        .resolve_fragment("diagrams")
+                        .and_then(|block| layout.y_of(document, block))
+                        .map(|y| (y as f64 - shell.jump_margin()).max(0.0)),
+                    _ => None,
+                }
+            };
+            let ok = moved > 0.0 && expected.is_some_and(|expected| (moved - expected).abs() < 1.0);
+            println!(
+                "link test {}: scrolled to {moved:.0}, expected {expected:?}",
+                if ok { "ok" } else { "failed" }
+            );
+            std::process::exit(if ok { 0 } else { 1 });
+        }
+        Check::Select | Check::Hold => {
+            window.send_mouse(EV_MOUSE_PRESS, x0, y0);
+            window.send_mouse(EV_MOUSE_MOVE, x1, y0);
+            window.send_mouse(EV_MOUSE_RELEASE, x1, y0);
+            let selection = shell.selection.get();
+            let selected = {
+                let document = shell.document.borrow();
+                match (document.as_ref(), selection) {
+                    (Some(document), Some((from, to))) => {
+                        document.text[from.min(to) as usize..from.max(to) as usize].to_string()
+                    }
+                    _ => String::new(),
+                }
+            };
+            let painted = shell.selection_rects().len();
+            let ok = painted > 0 && selected.contains(word);
+            println!(
+                "select test {}: selection {:?} of {:?}, {painted} rects",
+                if ok { "ok" } else { "failed" },
+                selection,
+                selected
+            );
+            if !ok {
+                std::process::exit(1);
+            }
+            if check == Check::Hold {
+                return;
+            }
+            std::process::exit(0);
+        }
+    }
+}
+
+fn build(
+    shell: &Rc<Shell>,
+    file: Option<PathBuf>,
+    drop_test: Option<PathBuf>,
+    check: Option<Check>,
+) {
     let window = H::<QMainWindow>::new();
     window.widget().set_title("mdview");
     window.widget().resize(1100, 900);
@@ -364,6 +792,7 @@ fn build(shell: &Rc<Shell>, file: Option<PathBuf>, drop_test: Option<PathBuf>) {
 
     let canvas = H::<Canvas>::new(shell.clone() as Rc<dyn CanvasHandler>);
     canvas.widget().accept_drops();
+    canvas.widget().track_mouse();
     canvas.widget().set_focus_policy(11); // Qt::StrongFocus, so the keys arrive
     let page = new_plain_widget();
     let bar = H::<QScrollBar>::vertical(page);
@@ -395,8 +824,15 @@ fn build(shell: &Rc<Shell>, file: Option<PathBuf>, drop_test: Option<PathBuf>) {
         shell.redraw();
     }
 
+    if let Some(check) = check {
+        run_check(shell, check);
+    }
+
     // `--drop-test` sends one drop through the window's event path (Qt uses OLE, so a WM_DROPFILES
     // from another process never arrives) and exits with the result, for scripted checks.
+    if let Some(check) = check {
+        run_check(shell, check);
+    }
     if let Some(target) = drop_test {
         let (x, y) = canvas.widget().center_in_window();
         let text = target.display().to_string();
@@ -428,10 +864,11 @@ fn build(shell: &Rc<Shell>, file: Option<PathBuf>, drop_test: Option<PathBuf>) {
     }
 }
 
-/// `mdview-qt [FILE] [--light|--dark]`.
+/// `mdview-qt [FILE] [--light|--dark] [--select-test|--select-hold|--link-test]`.
 pub fn run() -> i32 {
     let mut file = None;
     let mut drop_test = None;
+    let mut check = None;
     let mut theme = LIGHT;
     let mut zoom = 1.0f64;
     let mut args = std::env::args().skip(1);
@@ -439,6 +876,9 @@ pub fn run() -> i32 {
         match argument.as_str() {
             "--light" => theme = LIGHT,
             "--dark" => theme = DARK,
+            "--select-test" => check = Some(Check::Select),
+            "--select-hold" => check = Some(Check::Hold),
+            "--link-test" => check = Some(Check::Link),
             "--zoom" => {
                 zoom = args.next().expect("--zoom needs a number").parse().unwrap();
             }
@@ -452,5 +892,5 @@ pub fn run() -> i32 {
         }
     }
     let shell = Rc::new(Shell::new(theme, zoom.clamp(0.5, 3.0)));
-    run_app(move || build(&shell, file, drop_test))
+    run_app(move || build(&shell, file, drop_test, check))
 }
