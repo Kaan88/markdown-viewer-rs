@@ -21,7 +21,8 @@ showcase heading. The Qt one is from `--select-hold`, which drags through the re
 keeps the window open; the WinUI one is after a real press-drag-release on the running window. The
 selection is drawn over the frame in both shells and is not part of the frame delta.
 `shell-winui-anchor.png` is the WinUI window after a click on the `#diagrams` link, scrolled so the
-Diagrams heading sits just below the top edge.
+Diagrams heading sits just below the top edge. `shell-winui-details.png` is the WinUI window after
+`--details-test` opened the showcase `<details>`: the chevron points down and the body is visible.
 
 `images-light.png` is `fixtures/images.md` through `mdv-bench`: a real PNG drawn as a block and
 inline, next to the placeholders for a missing file and an SVG. `shell-winui-images.png` and
