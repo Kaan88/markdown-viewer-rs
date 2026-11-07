@@ -95,6 +95,10 @@ The user gave this VM for Qt and Linux testing from 2026-11-07. It is Debian 13 
 - Chinese/Japanese text was tofu until `fonts-noto-cjk` was installed; the renderer's font stack has
   a CJK fallback on Linux through fontconfig.
 - No window manager runs, so the window sits at 0,0 on the Xvfb root; that is fine for captures.
+- **X forwarding to the user's desktop:** MobaXterm's X server listens on `0.0.0.0:6000`, so the app
+  can be started with `DISPLAY=windows-host:0.0` (the Windows host's LAN address) and appears on the
+  user's screen, mouse and wheel included. Windows' OpenSSH `-X` does not work here: it cannot
+  generate the xauth cookie, so the VM's `DISPLAY` stays empty. Use the direct TCP display instead.
 
 ## What has and has not run
 
