@@ -23,6 +23,8 @@ selection is drawn over the frame in both shells and is not part of the frame de
 `shell-winui-anchor.png` is the WinUI window after a click on the `#diagrams` link, scrolled so the
 Diagrams heading sits just below the top edge. `shell-winui-details.png` is the WinUI window after
 `--details-test` opened the showcase `<details>`: the chevron points down and the body is visible.
+`shell-qt-svg.png` and `shell-winui-svg.png` show the showcase's SVG badge, with its text, drawn
+through `mdview-engine` in both shells.
 
 `images-light.png` is `fixtures/images.md` through `mdv-bench`: a real PNG drawn as a block and
 inline, next to the placeholders for a missing file and an SVG. `shell-winui-images.png` and

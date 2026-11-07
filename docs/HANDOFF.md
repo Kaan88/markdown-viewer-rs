@@ -39,6 +39,10 @@ Phase 2, the headless renderer, and it is nearly done.**
 | `<details>` toggling | done: a summary click flips it in both shells; view state lives in the renderer |
 | exit gate: goldens approved by the user | **open**: the images in `tests/golden/` have not been approved yet |
 
+Phase 4 has its first slice: SVG files render through `mdview-engine` (resvg), so the showcase's
+badge and `fixtures/images.md` draw instead of showing a placeholder. Math, Mermaid and syntax
+highlighting still show their source.
+
 So the immediate queue is the golden approval, which is the Phase 2 exit gate; then Phase 3 (Qt shell parity),
 Phase 4 (engine: math, Mermaid, highlighting, SVG), Phase 5 (WinUI parity, W1-W3), Phase 6 (polish,
 installer). The shells already exist and run, which is ahead of the plan's order - the user asked for
@@ -51,9 +55,10 @@ the UIs early - so Phase 3 and 5 become "make the existing shells match the chec
 - Recent commits: `a583c05` docs selection, `385ded5` WinUI selection/links, `5630e61` Qt
   selection/links, `f212fe8` render hit testing, `556e5eb` docs. `git log --oneline -5` has the
   exact tip.
-- Workspace members: `crates/core`, `crates/render`, `bins/mdv-bench`, `bins/mdv-winui`.
-  `bins/mdv-qt` is **excluded** from the workspace because it needs Qt to build; it has its own
-  `Cargo.lock` and its own `target/`.
+- Workspace members: `crates/core`, `crates/render`, `crates/engine`, `crates/engine-proto`,
+  `bins/mdv-bench`, `bins/mdv-winui`. `crates/engine` is both a library and the `mdview-engine`
+  binary. `bins/mdv-qt` is **excluded** from the workspace because it needs Qt to build; it has its
+  own `Cargo.lock` and its own `target/`.
 - `spikes/` is throwaway reference code and is excluded from the workspace.
 - `target/` is git-ignored; the helper scripts in it (`vm.py`, `seed-lock.py`, `cap.ps1`) are **not
   committed**. Section 5 and section 9 describe what they do in case they have to be rewritten.
@@ -65,10 +70,15 @@ Toolchain here: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msv
 ```powershell
 cd C:\Users\kaank\Desktop\mv
 cargo test --release --offline --workspace     # 7 core, 11 fuzz, 113 regression, 3 spec,
-                                               # 2 render unit, 17 render integration
+                                               # 4 engine, 4 engine-proto, 3 render unit,
+                                               # 17 render integration
 cargo fmt --all --check
+cargo build --release --offline --workspace    # includes target/release/mdview-engine.exe
 cargo build --release --offline -p mdview-winui
 ```
+
+The shells look for `mdview-engine` beside themselves or in a `target/release` above them, so build
+the workspace (or set `MDV_ENGINE`) before opening a document with SVG.
 
 **Cargo cannot reach crates.io from this machine** (`schannel: AcquireCredentialsHandle failed:
 SEC_E_NO_CREDENTIALS`), so always pass `--offline`. If a dependency is missing from the cache,
@@ -195,8 +205,10 @@ Then:
 
 ```sh
 cd ~/mdview/bins/mdv-qt && export QMAKE=/usr/lib/qt6/bin/qmake6 && cargo build --release
-cd ~/mdview && cargo test --release -p mdview-core -p mdview-render   # 7 core, 11 fuzz, 113
-                                                                      # regression, 3 spec, 2+17 render
+cd ~/mdview && cargo build --release -p mdview-engine      # for SVG images
+cd ~/mdview && cargo test --release -p mdview-core -p mdview-render -p mdview-engine -p mdview-engine-proto
+                                                                      # 7 core, 11 fuzz, 113 regression,
+                                                                      # 3 spec, 4 engine, 4 proto, 2+17 render
 cd ~/mdview && xvfb-run -a /mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt \
     --drop-test fixtures/linked.md                                   # prints "drop test ok: ..."
 cd ~/mdview && BIN=/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt
@@ -310,6 +322,29 @@ cargo run --release --offline -p mdv-bench -- --input spikes/parser/data/generat
 
 Height pass 3.7-9.3 ms, glyph cache 92% hit, bitmap is the viewport rather than the page. Both plan
 budgets (4 ms p99 at 150%, 8 ms at 4K) are met with room.
+
+### Phase 4, first slice: SVG through `mdview-engine`
+
+`crates/engine` is both a library (`mdview_engine`) and the `mdview-engine` binary. The library
+renders SVG with resvg 0.47 (0.49 is not in the offline cache; the API used here is unchanged), loads
+system fonts once per process, and clamps the raster to the renderer's 24 M pixel cap. Text falls
+back through the renderer's sans stack when usvg's default serif fallback is unavailable, which is
+what makes the badge's label appear on a minimal Debian install as well as on Windows. The renderer
+never links it: `crates/render/src/engine.rs` starts the process for an SVG, sends one job over the
+`crates/engine-proto` frame format, reads the reply with a 5 s deadline, and closes stdin so the
+engine exits. A missing engine, a timeout, a bad raster or a malformed SVG leaves the existing
+placeholder, so a hostile file can slow one image, not the viewer.
+
+`image::load` sends anything whose first tag is `<svg` (after an optional XML declaration) to the
+engine; PNG and JPEG stay in-process. The binary is found through `MDV_ENGINE`, beside the current
+executable, or in `target/release` beside an ancestor, which covers the Qt shell building into its
+own `bins/mdv-qt/target/release`.
+
+Measured on this PC: the showcase badge (180x28, text) draws in both shells; `fixtures/images.md`
+through `mdv-bench` takes 18-53 ms including engine start and fontconfig (the wide range is the
+font cache warming). Each SVG currently starts its own process, so a page of many SVGs would pay
+that start repeatedly; a shared connection that keeps the engine for its 10 s idle window is the
+next step, and the engine already loops until idle or EOF.
 
 ## 7. The WinUI shell (`bins/mdv-winui`)
 
@@ -459,6 +494,8 @@ and are not errors.
 | `shell-winui-selection.png` | the WinUI window after a real press-drag-release over the heading |
 | `shell-winui-anchor.png` | the WinUI window after clicking the `#diagrams` link |
 | `shell-winui-details.png` | the WinUI window after `--details-test` opened the showcase `<details>` |
+| `shell-qt-svg.png` | the Qt shell at scroll 760: the showcase badge is an SVG, drawn by the engine |
+| `shell-winui-svg.png` | the same view in WinUI, with the engine running beside the shell |
 
 **These are for review, not a pixel baseline yet.** They use this host's system fonts (Segoe UI,
 Consolas), so another machine or Linux will differ; the plan calls for bundled fonts and a tolerance
@@ -512,13 +549,17 @@ press-drag-release on the running window (a drag from the heading into the next 
 selection rows) and a click on the `#diagrams` link, both captured; `<details>` toggling through
 `--details-test` in both shells (3020 -> 3074 px, the body appearing) and a WinUI capture of the
 open body. The Qt shell on the same files with layout,
-first paint, wheel, scrollbar, keys, File > Open..., themes, `--zoom`, a live resize to 3400x1380 and
-`--drop-test`.
+first paint, wheel, scrollbar, keys, File > Open..., themes, `--zoom`, `--scroll`, a live resize to
+3400x1380 and `--drop-test`. The SVG badge renders through `mdview-engine` in `mdv-bench` and both
+shells; with `MDV_ENGINE` pointing at a missing file the same view falls back to
+`[image: Native desktop badge]`.
 
 **Linux:** the Qt shell built with Qt 6.8.2 on the VM, run and captured under Xvfb, `--drop-test`,
 `--select-test` (7..15 = "Markdown"), `--link-test` (scrolled to 1243 px) and `--details-test`
 (3041 -> 3095 px) passing, and `cargo test --release -p mdview-core -p mdview-render` passing
-(17 render tests included).
+(17 render tests included). `mdv-bench fixtures/images.md` renders the SVG badge at 780x413 in
+11.4 ms with its text: the engine's font query now falls through Noto Sans, DejaVu Sans and the
+other names in the renderer's stack because fontdb reports no generic `sans-serif` face there.
 
 **Not run:** the Qt View/Help menu items; the Qt scrollbar and keys on Linux (Windows only); DPI scales
 other than 100% (zoom is tested, DPI scaling is not); a real OLE drag from Explorer (the drop test drives
@@ -527,8 +568,9 @@ Qt's event path instead).
 ## 11. Known gaps
 
 - **No copy yet.** Selection is drawn but Ctrl+C does not copy it, and links have no context menu.
-- **SVG** (and anything that is not PNG/JPEG) is a placeholder; `<picture>` light/dark sources and
-  `width`/`height` attributes are ignored; a blocked image is retried on every render.
+- **Images:** PNG and JPEG decode in-process, SVG through `mdview-engine`; `<picture>` light/dark
+  sources and `width`/`height` attributes are ignored, and any other format keeps its placeholder. A
+  blocked image is retried on every render.
 - No find, tabs, folder tree, outline or recent files in either shell; no bundled fonts.
 - Table `colspan`/`rowspan` ignored; math, Mermaid and highlighting show their source (Phase 4).
 - The WinUI title bar follows Windows, not the in-app theme override.
@@ -541,8 +583,10 @@ Qt's event path instead).
 1. **Get the `tests/golden/` images approved by the user** - it is the Phase 2 exit gate. Show
    `showcase-{light,dark}@{1.0,1.5}.png` plus the shell captures (including the new selection,
    anchor and details shots) and ask for a yes or a list of changes.
-2. **Phase 4, SVG**: a new `mdview-engine` process (the plan's Phase 4) that renders SVG with resvg; the
-   image cache is already shared across frames, so a decoded SVG slots into `images` where a PNG does.
+2. **Phase 4, the rest**: math (RaTeX), Mermaid (merman, 8 families), and syntax highlighting
+   (syntect/two-face) join the engine, reusing the job/reply format and the 5 s deadline. SVG is
+   already done. The engine currently takes one job per process; a shared connection that keeps it
+   for the 10 s idle window is the next engine change, and the reason an SVG pays a start.
 3. **Then the Qt/WinUI parity items** from `docs/PORT_CHECKLIST.md`: tabs, folder tree, outline, find,
    recents, zoom limits, themes, focus mode, session restore. Selection and `<details>` are done in
    both shells; copy to the clipboard and a link context menu are the obvious next shell features.
