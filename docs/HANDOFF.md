@@ -117,7 +117,8 @@ The user gave this VM for Qt and Linux testing from 2026-11-07. It is Debian 13 
   still paints a whole page for tests; `render_slice` is the one-shot layout+view form.
 - Measured on `spikes/parser/data/generated_1mib.md` (1.0 MB, 25,060 blocks, 897,583 bytes of text,
   583,619 px page): parse 8.3 ms; height pass 8.9 ms; 40 scroll frames at 780x900 at 100%: mean
-  5.9 ms, worst 7.8 ms; glyph cache 99% hit, peak 0.2 MiB. The bitmap is the viewport (2.8 MB) rather
+  5.3 ms, worst 7.2 ms after caching each block's paints relative to its top; glyph cache 99% hit,
+  peak 0.2 MiB. The bitmap is the viewport (2.8 MB) rather
   than the page (1.8 GB at 780x583,619x4).
 - The plan's budget is 4 ms p99 per scroll frame at 150%. **Not met yet**: every frame re-shapes the
   visible blocks. Caching each block's laid-out text between frames is the next step.
@@ -156,8 +157,10 @@ files, writes the complete sparse index cache entry for every crate and download
 
 ## Known gaps, in the order they matter
 
-- **Scroll frames are 5.9 ms on the 1 MB fixture** against a 4 ms p99 budget, because visible
-  blocks are re-shaped every frame; block layout caching is the fix.
+- **Scroll frames are 5.3 ms on the 1 MB fixture** against a 4 ms p99 budget. A per-block paint
+  cache is in (`DocumentRenderer` keeps block paints relative to the block top; a test proves a
+  cached frame equals a fresh slice). The cache only bought 0.6 ms, so shaping is not the remaining
+  cost: profile the per-frame paint/clear before trying more.
 - **Images**: SVG (and anything but PNG/JPEG) is still a placeholder; images are decoded once per
   render rather than shared across renders; `<picture>` light/dark sources and `width`/`height`
   attributes are ignored; a blocked image is retried on every render.
@@ -171,7 +174,7 @@ files, writes the complete sparse index cache entry for every crate and download
 ## What to do next
 
 1. Get the four `tests/golden/` images and the shell screenshots approved.
-2. Cache laid-out blocks between frames to reach the 4 ms scroll budget.
+2. Profile and cut the remaining scroll-frame cost (5.3 ms) toward the 4 ms p99 budget.
 3. Add File > Open to the Qt shell, a scrollbar and keyboard scrolling to both.
 4. Add selection and link/anchor hit-testing, then details toggling.
 5. Add a shared image cache and SVG support when Phase 4 lands.

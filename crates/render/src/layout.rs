@@ -132,6 +132,9 @@ pub struct DocumentRenderer {
     fonts: FontContext,
     layouts: LayoutContext<Brush>,
     engine: TextEngine,
+    /// Laid-out paints per top-level block, relative to the block's top, for scroll frames.
+    cache: HashMap<u32, Vec<Paint>>,
+    cache_key: Option<(f32, f32, &'static str)>,
 }
 
 impl Default for DocumentRenderer {
@@ -146,12 +149,16 @@ impl DocumentRenderer {
             fonts: FontContext::new(),
             layouts: LayoutContext::new(),
             engine: TextEngine::new(4 << 20),
+            cache: HashMap::new(),
+            cache_key: None,
         }
     }
 
     /// Measures the whole document. Do this once per width, scale and theme.
     pub fn layout(&mut self, doc: &Document, options: &Options) -> PageLayout {
-        Pager::new(doc, options, &mut self.fonts, &mut self.layouts).measure_page()
+        self.cache.clear();
+        self.cache_key = Some((options.width, options.scale, options.theme.name));
+        Pager::new(doc, options, &mut self.fonts, &mut self.layouts, None).measure_page()
     }
 
     /// Renders one viewport slice, reusing the contexts and glyph cache.
@@ -166,7 +173,18 @@ impl DocumentRenderer {
         debug_assert!(page.matches(options), "page layout for different options");
         let height = height.max(1.0);
         let top = top.clamp(0.0, (page.total_height - height).max(0.0));
-        let mut pager = Pager::new(doc, options, &mut self.fonts, &mut self.layouts);
+        let key = (options.width, options.scale, options.theme.name);
+        if self.cache_key != Some(key) {
+            self.cache.clear();
+            self.cache_key = Some(key);
+        }
+        let mut pager = Pager::new(
+            doc,
+            options,
+            &mut self.fonts,
+            &mut self.layouts,
+            Some(&mut self.cache),
+        );
         pager.slice_page(page, top, height);
         pager.finish_slice(top, height, page.total_height, &mut self.engine)
     }
@@ -174,7 +192,7 @@ impl DocumentRenderer {
     /// Paints the whole page into one bitmap. For tests and small documents; scrolling uses
     /// [`layout`](Self::layout) and [`view`](Self::view).
     pub fn page(&mut self, doc: &Document, options: &Options) -> Rendered {
-        let mut pager = Pager::new(doc, options, &mut self.fonts, &mut self.layouts);
+        let mut pager = Pager::new(doc, options, &mut self.fonts, &mut self.layouts, None);
         pager.page();
         pager.finish(&mut self.engine)
     }
@@ -266,6 +284,7 @@ impl Inline {
     }
 }
 
+#[derive(Clone)]
 enum Paint {
     Rect {
         x: f32,
@@ -282,7 +301,7 @@ enum Paint {
         color: Color,
     },
     Text {
-        layout: Box<Layout<Brush>>,
+        layout: Rc<Layout<Brush>>,
         x: f32,
         y: f32,
     },
@@ -293,6 +312,20 @@ enum Paint {
         w: f32,
         h: f32,
     },
+}
+
+impl Paint {
+    fn shift(&mut self, dy: f32) {
+        match self {
+            Paint::Rect { y, .. } => *y += dy,
+            Paint::Line { a, b, .. } => {
+                a.1 += dy;
+                b.1 += dy;
+            }
+            Paint::Text { y, .. } => *y += dy,
+            Paint::Image { y, .. } => *y += dy,
+        }
+    }
 }
 
 struct Txt {
@@ -316,6 +349,7 @@ struct Pager<'a, 'b> {
     blocks: Vec<BlockBox>,
     fonts: &'b mut FontContext,
     layouts: &'b mut LayoutContext<Brush>,
+    cache: Option<&'b mut HashMap<u32, Vec<Paint>>>,
     base_dir: Option<PathBuf>,
     /// Decoded once per render; `None` remembers a file that will not load.
     images: HashMap<u32, Option<Rc<DecodedImage>>>,
@@ -331,6 +365,7 @@ impl<'a, 'b> Pager<'a, 'b> {
         options: &Options,
         fonts: &'b mut FontContext,
         layouts: &'b mut LayoutContext<Brush>,
+        cache: Option<&'b mut HashMap<u32, Vec<Paint>>>,
     ) -> Self {
         let scale = options.scale.max(0.1);
         let logical_width = options.width.max(120.0);
@@ -353,6 +388,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             blocks: Vec::new(),
             fonts,
             layouts,
+            cache,
             base_dir: options.base_dir.clone(),
             images: HashMap::new(),
         }
@@ -633,7 +669,7 @@ impl<'a, 'b> Pager<'a, 'b> {
         self.paints.extend(images);
         self.paints.extend(chips);
         self.paints.push(Paint::Text {
-            layout: Box::new(layout),
+            layout: Rc::new(layout),
             x,
             y,
         });
@@ -1602,8 +1638,30 @@ impl<'a, 'b> Pager<'a, 'b> {
             if span.y + span.height <= top || span.y >= bottom {
                 continue;
             }
+            if let Some(cache) = self.cache.as_deref()
+                && let Some(cached) = cache.get(&span.block)
+            {
+                let mut paints = cached.clone();
+                for paint in &mut paints {
+                    paint.shift(span.y);
+                }
+                self.paints.extend(paints);
+                continue;
+            }
+            let mark = self.paints.len();
             self.y = span.y;
             self.block(span.block, self.left, content, self.theme.text, 0);
+            if let Some(cache) = self.cache.as_deref_mut() {
+                let mut made = self.paints.split_off(mark);
+                for paint in &mut made {
+                    paint.shift(-span.y);
+                }
+                cache.insert(span.block, made.clone());
+                for paint in &mut made {
+                    paint.shift(span.y);
+                }
+                self.paints.extend(made);
+            }
         }
         if page.footnotes_height > 0.0
             && page.footnotes_y + page.footnotes_height > top

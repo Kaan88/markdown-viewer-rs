@@ -1,7 +1,7 @@
 //! Pixel-level smoke tests for the headless renderer. The golden images are approved by eye; these
 //! catch a crash, a blank page, a lost theme and a lost clamp.
 
-use mdview_render::{DARK, LIGHT, Options, render, render_slice};
+use mdview_render::{DARK, DocumentRenderer, LIGHT, Options, render, render_slice};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> mdview_core::Document {
@@ -181,6 +181,24 @@ fn a_slice_matches_the_same_rows_of_the_full_page() {
             "row {row}"
         );
     }
+}
+
+#[test]
+fn cached_scroll_frames_match_a_fresh_slice() {
+    let doc = fixture("showcase.md");
+    let options = Options {
+        width: 780.0,
+        scale: 1.0,
+        theme: LIGHT,
+        max_height: None,
+        base_dir: None,
+    };
+    let mut renderer = DocumentRenderer::new();
+    let page = renderer.layout(&doc, &options);
+    renderer.view(&doc, &options, &page, 100.0, 300.0);
+    let second = renderer.view(&doc, &options, &page, 400.0, 300.0);
+    let fresh = render_slice(&doc, &options, 400.0, 300.0);
+    assert_eq!(second.bitmap.pixels, fresh.bitmap.pixels);
 }
 
 #[test]
