@@ -15,9 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("mdview-core-reg-{}-{name}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+    common::temp_dir(name)
 }
 
 fn span_text(d: &Document, s: &Span) -> String {

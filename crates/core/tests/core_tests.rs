@@ -1,6 +1,8 @@
 //! The old app's core_tests that still apply, expressed against the document model. `math` and
 //! `families` exercised renderers, which move to the engine in Phase 4, and are not ported here.
 
+mod common;
+
 use mdview_core::model::*;
 use mdview_core::parse;
 use mdview_core::slug::Slugger;
@@ -10,8 +12,7 @@ fn kinds(doc: &Document) -> Vec<BlockKind> {
 }
 
 fn temp_file(name: &str, bytes: &[u8]) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("mdview-core-test-{}-{name}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = common::temp_dir("core");
     let path = dir.join(name);
     std::fs::write(&path, bytes).unwrap();
     path

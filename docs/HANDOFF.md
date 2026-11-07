@@ -9,9 +9,11 @@
 - Every finding the Phase 1 audit confirmed is either fixed with a regression test or listed as a known gap in `COVERAGE.md`. `AUDIT_PHASE1.md`'s table has a last column saying which, per finding.
 - `cargo fmt --all` is clean and the build has no warnings. There is still no CI, so run the tests yourself.
 
-## Windows setup, including the trap
+## Windows setup
 
-`cargo test` fails in `utf8_bom_and_unicode` with `Access is denied` when creating a directory under `%TEMP%`. This host's DSH file sandbox blocks writes outside the workspace even when the runtime context says `danger-full-access`; PowerShell and Rust probes both confirmed it. It is an environment limit, not a repo bug. Run tests with temp inside the workspace:
+`cargo test` works from a plain shell now. The test helpers ask for a directory under `%TEMP%` first and fall back to a workspace-local `target/tmp` when that is not writable. On this host the DSH file sandbox blocks writes outside the workspace even when the runtime context says `danger-full-access`, so the fallback is what runs here; PowerShell and Rust probes confirmed it is an environment limit, not a repo bug.
+
+Setting `TMP`/`TEMP` to `target\tmp` still works but is no longer needed:
 
 ```powershell
 New-Item -ItemType Directory -Force target\tmp | Out-Null
@@ -19,6 +21,8 @@ $env:TMP = (Resolve-Path target\tmp).Path
 $env:TEMP = $env:TMP
 cargo test --release -p mdview-core
 ```
+
+A debug `cargo test -p mdview-core` also passes; the fuzz suite is simply slower (about 45 s against about 6 s in release).
 
 Other setup notes:
 

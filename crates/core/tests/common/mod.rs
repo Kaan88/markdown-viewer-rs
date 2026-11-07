@@ -28,3 +28,19 @@ impl Rng {
 pub fn neutral(html: &str) -> String {
     normalize::semantic(&normalize::normalize(&visible::visible(html)))
 }
+
+/// A writable directory for a test's files. `%TEMP%` can be blocked by a sandbox even when the
+/// workspace is writable, which is the case on the Windows host this repo is developed on, so this
+/// falls back to a workspace-local `target/tmp` rather than failing the test.
+pub fn temp_dir(name: &str) -> std::path::PathBuf {
+    let in_root = |root: std::path::PathBuf| {
+        let dir = root.join(format!("mdview-core-test-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).ok().map(|()| dir)
+    };
+    in_root(std::env::temp_dir())
+        .or_else(|| {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/tmp");
+            in_root(root)
+        })
+        .expect("a writable directory for test files")
+}
