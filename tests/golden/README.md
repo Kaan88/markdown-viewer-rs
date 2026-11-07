@@ -30,11 +30,13 @@ both badges come from one engine process; the process count was 1 three seconds 
 `shell-qt-math.png` and `shell-winui-math.png` are `fixtures/math.md`: inline math on the text
 baseline, centred display math, a matrix, a heading formula and formulas inside a table. All seven
 came from one shared engine process.
+`shell-qt-mermaid.png` and `shell-winui-mermaid.png` are the showcase at scroll 1100: flowchart,
+sequence and class diagrams drawn by merman in both shells, again from the one engine process.
 
-Math changed the showcase: the page is now 3041 px at 100% (the inline fraction and sum make that
-line taller) and the Mathematics section shows rendered formulas instead of labelled code boxes, so
-the four `showcase-*` images were regenerated. The engine must be built (or `MDV_ENGINE` set) when
-regenerating, because SVG and math go through it.
+Math and Mermaid changed the showcase: the page is now 4085 px at 100% (taller formula lines and
+diagram images instead of code boxes) and the Mathematics and Diagrams sections show rendered output,
+so the four `showcase-*` images were regenerated. The engine must be built (or `MDV_ENGINE` set) when
+regenerating, because SVG, math and Mermaid go through it.
 
 `images-light.png` is `fixtures/images.md` through `mdv-bench`: a real PNG drawn as a block and
 inline, a missing file's placeholder, and the SVG badge that the engine now draws in the last line.
@@ -45,7 +47,7 @@ They are **not** a pixel test baseline yet:
 
 - They use this host's system fonts (Segoe UI, Consolas), so a render on Linux or another Windows
   build will differ. The plan calls for bundled fonts and a small tolerance; that is still open.
-- Math and diagrams are still source text until Phase 4.
+- Syntax highlighting is still source text; SVG, math and Mermaid already render.
 - The window captures include the 31 px title bar, which follows Windows; compare the client area.
 
 To regenerate:
