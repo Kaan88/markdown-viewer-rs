@@ -120,7 +120,9 @@ pub fn render_mermaid(
     // the left edge. Asking for native text labels avoids both problems. The directive comes
     // first, so a document's own `%%{init: ...}%%` can still override it.
     let source = format!(
-        "%%{{init: {{\"themeVariables\": {{\"fontSize\": \"11px\"}}, \"htmlLabels\": false, \"flowchart\": {{\"htmlLabels\": false}}}}}}%%\n{source}"
+        "%%{{init: {{\"themeVariables\": {{\"fontSize\": \"11px\"}}, \"htmlLabels\": false, \
+         \"flowchart\": {{\"htmlLabels\": false}}, \
+         \"gantt\": {{\"leftPadding\": 150, \"gridLineStartPadding\": 35}}}}}}%%\n{source}"
     );
     let output = Renderer::new()
         .render(RenderRequest::svg(
@@ -142,18 +144,26 @@ pub fn render_mermaid(
     render_svg_at(svg.as_bytes(), scale, max_pixels, options)
 }
 
+/// `name="number"` in an SVG tag fragment.
+fn attr_f32(fragment: &str, name: &str) -> Option<f32> {
+    let at = fragment.find(&format!("{name}=\""))? + name.len() + 2;
+    let rest = &fragment[at..];
+    let end = rest.find('"')?;
+    rest[..end].parse().ok()
+}
+
 /// Replaces `<use href="#mindmap-foreignobject-label-N">` with the fallback `<text>` that the
 /// readable pipeline put inside the referenced `<defs>` group. resvg does not draw labels through a
 /// `<use>` of a nested `<svg>`; inlining the text at the use site keeps the label group's transform.
 fn inline_label_uses(svg: &str) -> String {
-    const PREFIX: &str = "merman-foreignobject-label-";
+    const PREFIX: &str = "foreignobject-label-";
     let mut labels: Vec<(String, String)> = Vec::new();
     let mut rest = svg;
     while let Some(found) = rest.find("<g id=\"") {
         let after = &rest[found + 7..];
         let Some(quote) = after.find('"') else { break };
         let id = &after[..quote];
-        if !id.starts_with(PREFIX) {
+        if !id.contains(PREFIX) {
             rest = &after[quote..];
             continue;
         }
@@ -164,7 +174,21 @@ fn inline_label_uses(svg: &str) -> String {
             break;
         };
         let end = text_start + text_end + "</text>".len();
-        labels.push((id.to_string(), after[text_start..end].to_string()));
+        // The fallback text keeps Mermaid's default 16 px, but the nodes were measured at our
+        // 11 px init size; at 16 the label overflows the circle and boxes.
+        let mut text = after[text_start..end].replace("font-size: 16px", "font-size: 11px");
+        // The fallback font is wider than merman's deterministic measurement (notably DejaVu on
+        // Linux), and the node shape clips the first and last letters. Compress the label
+        // horizontally around its own anchor so it stays inside the circle or box.
+        if let Some(open) = text.find('>')
+            && let Some(cx) = attr_f32(&text[..open], "x")
+        {
+            text.insert_str(
+                open,
+                &format!(" transform=\"translate({cx} 0) scale(0.85 1) translate(-{cx} 0)\""),
+            );
+        }
+        labels.push((id.to_string(), text));
         rest = &after[end..];
     }
     if labels.is_empty() {
@@ -280,6 +304,19 @@ mod tests {
     use super::*;
 
     const BADGE: &str = include_str!("../../../fixtures/assets/badge.svg");
+
+    #[test]
+    fn a_label_use_is_inlined_and_compressed() {
+        let svg = concat!(
+            r##"<defs><g id="merman-foreignobject-label-1"><svg width="33" height="16">"##,
+            r##"<text x="16.5" y="8" style="font-size: 16px; transform: none;">Reading</text>"##,
+            r##"</svg></g></defs><use x="0" y="0" href="#merman-foreignobject-label-1"/>"##,
+        );
+        let out = inline_label_uses(svg);
+        assert!(!out.contains("<use"), "{out}");
+        assert!(out.contains("font-size: 11px"), "{out}");
+        assert!(out.contains("scale(0.85 1)"), "{out}");
+    }
 
     #[test]
     fn the_badge_renders_at_its_natural_size() {
