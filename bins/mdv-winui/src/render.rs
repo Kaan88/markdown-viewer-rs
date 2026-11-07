@@ -184,8 +184,9 @@ impl Renderer {
         self.scroll_to(self.scroll + delta);
     }
 
-    pub fn viewport_height(&self) -> u32 {
-        self.height
+    /// Device px per logical px, as the last frame saw it.
+    pub fn device_scale(&self) -> f32 {
+        self.scale
     }
 
     /// The current scroll offset in device px.

@@ -39,64 +39,86 @@ windows_core::link!("user32.dll" "system" fn GetDpiForWindow(window: *mut c_void
 windows_core::link!("user32.dll" "system" fn SetWindowPos(window: *mut c_void, after: *mut c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32);
 windows_core::link!("comdlg32.dll" "system" fn GetOpenFileNameW(ofn: *mut OpenFileNameW) -> i32);
 windows_core::link!("advapi32.dll" "system" fn RegGetValueW(hkey: *mut c_void, subkey: PCWSTR, value: PCWSTR, flags: u32, ty: *mut u32, data: *mut c_void, size: *mut u32) -> i32);
-windows_core::link!("user32.dll" "system" fn SetWindowLongPtrW(window: *mut c_void, index: i32, value: isize) -> isize);
-windows_core::link!("user32.dll" "system" fn CallWindowProcW(previous: isize, window: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize);
-windows_core::link!("user32.dll" "system" fn GetClientRect(window: *mut c_void, rect: *mut Rect) -> i32);
+windows_core::link!("user32.dll" "system" fn SetWindowsHookExW(id: i32, proc: unsafe extern "system" fn(i32, usize, isize) -> isize, module: *mut c_void, thread: u32) -> *mut c_void);
+windows_core::link!("user32.dll" "system" fn CallNextHookEx(hook: *mut c_void, code: i32, wparam: usize, lparam: isize) -> isize);
+windows_core::link!("user32.dll" "system" fn GetAncestor(window: *mut c_void, flags: u32) -> *mut c_void);
 
-/// `GWLP_WNDPROC`
-const GWLP_WNDPROC: i32 = -4;
+/// `GETMESSAGE` hook id, `PM_REMOVE`, `WM_NULL` and `GA_ROOT`, from winuser.h.
+const WH_GETMESSAGE: i32 = 3;
+const PM_REMOVE: usize = 1;
+const WM_NULL: u32 = 0;
+const GA_ROOT: u32 = 2;
 
 #[repr(C)]
 #[derive(Default)]
-struct Rect {
-    left: i32,
-    top: i32,
-    right: i32,
-    bottom: i32,
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+/// `MSG`, for the `WH_GETMESSAGE` hook: the message about to be dispatched.
+#[repr(C)]
+#[derive(Default)]
+struct Msg {
+    window: *mut c_void,
+    message: u32,
+    wparam: usize,
+    lparam: isize,
+    time: u32,
+    point: Point,
+    private: u32,
 }
 
 thread_local! {
     static SHELL: RefCell<Option<Rc<Shell>>> = const { RefCell::new(None) };
-    /// For every window we hooked, the procedure it had before, so unhandled messages still reach
-    /// WinUI. WinUI's content lives in child windows (`InputSite`, `DesktopChildSiteBridge`) and the
-    /// keyboard goes to those, not to the top-level window, so all of them are hooked.
-    static PREVIOUS: RefCell<Vec<(isize, isize)>> = const { RefCell::new(Vec::new()) };
+    /// The WinUI top-level window, so the message hook can ignore everything that is not ours.
+    static TOP_LEVEL: Cell<isize> = const { Cell::new(0) };
 }
 
-fn previous_proc(window: isize) -> isize {
-    PREVIOUS.with(|map| {
-        map.borrow()
-            .iter()
-            .find(|(hooked, _)| *hooked == window)
-            .map_or(0, |(_, previous)| *previous)
-    })
-}
-
-/// WinUI's window procedure, wrapped so the shell sees keys and scrollbar clicks first.
-unsafe extern "system" fn window_proc(
-    window: *mut c_void,
-    msg: u32,
-    wparam: usize,
-    lparam: isize,
-) -> isize {
-    let handled = SHELL.with(|cell| match cell.borrow().as_ref() {
-        Some(shell) => shell.handle_message(window, msg, wparam, lparam),
-        None => false,
-    });
-    if handled {
-        return 0;
+/// True for the WinUI window and every child of it (the content site and the input site).
+fn ours(window: *mut c_void) -> bool {
+    let top = TOP_LEVEL.with(|top| top.get());
+    if top == 0 || window.is_null() {
+        return false;
     }
-    let previous = previous_proc(window as isize);
-    unsafe { CallWindowProcW(previous, window, msg, wparam, lparam) }
+    window as isize == top || unsafe { GetAncestor(window, GA_ROOT) } as isize == top
 }
 
-unsafe extern "system" fn hook_one(window: *mut c_void, _: isize) -> i32 {
-    let previous =
-        unsafe { SetWindowLongPtrW(window, GWLP_WNDPROC, window_proc as *const () as isize) };
-    if previous != 0 && previous != window_proc as *const () as isize {
-        PREVIOUS.with(|map| map.borrow_mut().push((window as isize, previous)));
+/// A thread-level message hook, because WinUI's content windows take the keyboard and their window
+/// procedures are not stable across a resize: subclasses installed with `SetWindowLongPtrW` stop
+/// being called once WinUI reinstalls its own. `WH_GETMESSAGE` runs for every message this thread
+/// retrieves, including nested loops such as the file dialog, which is why `ours` filters by window.
+unsafe extern "system" fn get_message(code: i32, wparam: usize, lparam: isize) -> isize {
+    if code >= 0 && wparam == PM_REMOVE && lparam != 0 {
+        let msg = unsafe { &mut *(lparam as *mut Msg) };
+        if ours(msg.window) {
+            let handled = SHELL.with(|cell| match cell.borrow().as_ref() {
+                Some(shell) => {
+                    shell.handle_message(msg.window, msg.message, msg.wparam, msg.lparam)
+                }
+                None => false,
+            });
+            if handled {
+                // Nothing is dispatched; the shell already scrolled or started a drag.
+                msg.message = WM_NULL;
+            }
+        }
     }
-    1
+    unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
+}
+
+/// Installs the message hook on this thread and records the window it is for.
+fn hook_messages(window: *mut c_void) -> bool {
+    TOP_LEVEL.with(|top| top.set(window as isize));
+    let hook = unsafe {
+        SetWindowsHookExW(
+            WH_GETMESSAGE,
+            get_message,
+            std::ptr::null_mut(),
+            GetCurrentThreadId(),
+        )
+    };
+    !hook.is_null()
 }
 
 /// Follows the Windows app theme, the way the shell's own chrome does.
@@ -268,13 +290,11 @@ struct Shell {
 }
 
 impl Shell {
-    /// Keys and scrollbar clicks, before WinUI's own window procedure runs.
-    fn handle_message(&self, window: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> bool {
+    /// Keys, before WinUI dispatches them. The scrollbar is driven by XAML pointer events instead,
+    /// because WinUI sends those to its child windows outside the message queue.
+    fn handle_message(&self, window: *mut c_void, msg: u32, wparam: usize, _lparam: isize) -> bool {
         const WM_KEYDOWN: u32 = 0x0100;
         const WM_SYSKEYDOWN: u32 = 0x0104;
-        const WM_MOUSEMOVE: u32 = 0x0200;
-        const WM_LBUTTONDOWN: u32 = 0x0201;
-        const WM_LBUTTONUP: u32 = 0x0202;
         match msg {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let scrolled = self.renderer.borrow_mut().key(wparam as u32);
@@ -290,52 +310,17 @@ impl Shell {
                     false
                 }
             }
-            WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP => {
-                let Some((x, y)) = self.panel_point(window, lparam) else {
-                    return false;
-                };
-                let Some(bar) = self.renderer.borrow().bar() else {
-                    return false;
-                };
-                if x < bar.x {
-                    return false;
-                }
-                match msg {
-                    WM_LBUTTONDOWN => {
-                        let grab = self.renderer.borrow_mut().press_on_bar(&bar, y);
-                        self.dragging.set(Some(grab));
-                        self.show();
-                        true
-                    }
-                    WM_MOUSEMOVE => match self.dragging.get() {
-                        Some(grab) => {
-                            self.renderer.borrow_mut().drag_to(&bar, y, grab);
-                            self.show();
-                            true
-                        }
-                        None => false,
-                    },
-                    _ => {
-                        self.dragging.set(None);
-                        false
-                    }
-                }
-            }
             _ => false,
         }
     }
 
-    /// Client coordinates to panel coordinates: the panel is the bottom row of the window.
-    fn panel_point(&self, window: *mut c_void, lparam: isize) -> Option<(f32, f32)> {
-        let mut rect = Rect::default();
-        if unsafe { GetClientRect(window, &mut rect) } == 0 {
-            return None;
-        }
-        let panel_height = self.renderer.borrow().viewport_height() as f32;
-        let panel_top = rect.bottom as f32 - panel_height;
-        let x = (lparam & 0xFFFF) as u16 as i16 as f32;
-        let y = ((lparam >> 16) & 0xFFFF) as u16 as i16 as f32;
-        Some((x, y - panel_top))
+    /// Where a pointer event landed, in panel device px: XAML reports it in the panel's own logical
+    /// coordinates, so only the DPI scale has to be applied.
+    fn pointer_at(&self, args: &PointerRoutedEventArgs, source: &UIElement) -> Option<(f32, f32)> {
+        let point = args.GetCurrentPoint(source).ok()?;
+        let position = point.position().ok()?;
+        let scale = self.renderer.borrow().device_scale();
+        Some((position.x * scale, position.y * scale))
     }
 
     fn show(&self) {
@@ -617,6 +602,67 @@ pub fn build(
             })?
             .forget();
     }
+    // The scrollbar: a press in the gutter jumps there and starts a drag, and the drag follows the
+    // pointer. XAML delivers these to the panel's own hit target, which is why the shell does not
+    // have to look at window messages for the mouse at all.
+    {
+        let shell = shell.clone();
+        let element: UIElement = panel.cast()?;
+        let source = element.clone();
+        element
+            .pointer_pressed(move |_, args| {
+                let Some(args) = args.as_ref() else { return };
+                let Some((x, y)) = shell.pointer_at(args, &source) else {
+                    return;
+                };
+                let Some(bar) = shell.renderer.borrow().bar() else {
+                    return;
+                };
+                if x < bar.x {
+                    return;
+                }
+                _ = args.SetHandled(true);
+                let grab = shell.renderer.borrow_mut().press_on_bar(&bar, y);
+                shell.dragging.set(Some(grab));
+                diag::trace(&format!("bar press at {x:.0},{y:.0}"));
+                shell.show();
+            })?
+            .forget();
+    }
+    {
+        let shell = shell.clone();
+        let element: UIElement = panel.cast()?;
+        let source = element.clone();
+        element
+            .pointer_moved(move |_, args| {
+                let Some(grab) = shell.dragging.get() else {
+                    return;
+                };
+                let Some(args) = args.as_ref() else { return };
+                let Some((_, y)) = shell.pointer_at(args, &source) else {
+                    return;
+                };
+                let Some(bar) = shell.renderer.borrow().bar() else {
+                    return;
+                };
+                _ = args.SetHandled(true);
+                shell.renderer.borrow_mut().drag_to(&bar, y, grab);
+                shell.show();
+            })?
+            .forget();
+    }
+    {
+        let shell = shell.clone();
+        let element: UIElement = panel.cast()?;
+        element
+            .pointer_released(move |_, args| {
+                if let Some(args) = args.as_ref() {
+                    _ = args.SetHandled(true);
+                }
+                shell.dragging.set(None);
+            })?
+            .forget();
+    }
 
     build_menu(&shell)?;
     window.SetContent(&root.cast::<UIElement>()?)?;
@@ -626,20 +672,15 @@ pub fn build(
 
     let hwnd = winui_window();
     if hwnd != 0 {
-        // The top-level window and every child of it: WinUI's content sits in a child window that
-        // takes the keyboard, and the pointer's coordinates there are already the XAML root's.
-        unsafe {
-            hook_one(hwnd as *mut c_void, 0);
-            EnumChildWindows(hwnd as *mut c_void, hook_one, 0);
-        }
-        let hooked = PREVIOUS.with(|map| map.borrow().len());
-        if hooked > 0 {
+        // Keys and scrollbar clicks arrive through a thread message hook: WinUI's content lives in
+        // child windows that take the keyboard, and subclassing those is not durable across a
+        // resize. The hook ignores anything that is not this window or a child of it, so the file
+        // dialog's nested message loop is untouched.
+        if hook_messages(hwnd as *mut c_void) {
             SHELL.with(|cell| *cell.borrow_mut() = Some(shell.clone()));
-            diag::trace(&format!(
-                "window procedures hooked for keys and the scrollbar: {hooked}"
-            ));
+            diag::trace("thread message hook installed for keys and the scrollbar");
         } else {
-            diag::trace("SetWindowLongPtrW failed; keys and the scrollbar stay inert");
+            diag::trace("SetWindowsHookExW failed; keys and the scrollbar stay inert");
         }
     }
     Ok(())

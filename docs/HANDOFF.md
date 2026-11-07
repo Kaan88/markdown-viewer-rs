@@ -46,13 +46,21 @@ approved by the user.
   that calls the `RequestedTheme` vtable slot the generator left unbound; the root grid is set to
   Light or Dark with the page, and the View menu keeps them in step. Regenerating the bindings would
   remove that helper, so it is duplicated there deliberately.
-- **Keys and scrollbar clicks are heard through the child windows.** WinUI's content lives in child
-  windows (`InputSiteWindowClass`, `Microsoft.UI.Content.DesktopChildSiteBridge`,
-  `InputNonClientPointerSource`) and the keyboard goes to one of those, never to the top-level window:
-  hooking only the top-level window, as this shell first did, silently saw no key at all. `build`
-  now hooks the top-level window and every child, keeping each one's previous procedure so
-  `CallWindowProcW` still reaches WinUI. Verified with real Page Down presses: the page moves three
-  pages and the trace shows the band uploads.
+- **Input arrives two ways, because WinUI moves it around.** Keys come through a thread-level
+  `WH_GETMESSAGE` hook: WinUI's content lives in child windows (`InputSiteWindowClass`,
+  `Microsoft.UI.Content.DesktopChildSiteBridge`) that take the keyboard, and subclassing those
+  window procedures with `SetWindowLongPtrW` is not durable - WinUI reinstalls its own and the
+  subclass silently stops being called after a resize. The hook filters by window (`GetAncestor`
+  must be our top-level window), so the file dialog's own message loop is untouched, and it swallows
+  the keys it uses by setting the message to `WM_NULL`. The scrollbar is driven by XAML pointer
+  events (`PointerPressed`/`PointerMoved`/`PointerReleased`), which the generator left as unbound
+  vtable slots; `bindings.rs` carries hand-written `pointer_*` helpers and `IPointerPoint::position`
+  for them. XAML reports the position in the panel's own logical px, so no window-coordinate maths is
+  involved.
+- After a *programmatic* resize from another process the app needs one click before keys reach it
+  again: WinUI loses the XAML keyboard focus and `SetForegroundWindow` does not restore it. A resize
+  with the mouse keeps the input focus, and a click fixes it, so this is a focus matter rather than
+  a hook one - verified by clicking after a resize and watching the next arrow key scroll again.
 - `src/render.rs` keeps the page in **two D3D11 textures** (see the virtualization section) and the
   scrollbar in a 15 px strip beside it, so a scroll sends the band and a GPU copy of the rest instead
   of the whole viewport. The page can be a few px wider than the width it was laid out for; the

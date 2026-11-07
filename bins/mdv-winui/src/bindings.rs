@@ -5808,3 +5808,108 @@ impl ID3D11DeviceContext {
         }
     }
 }
+
+/// `Windows::Foundation::Point`, the type a pointer position comes back in. Named apart from the
+/// message structure's `Point` in `ui.rs`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PointerPosition {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl IPointerPoint {
+    /// `IPointerPoint::Position`: the generator left it as an unbound slot.
+    pub fn position(&self) -> windows_core::Result<PointerPosition> {
+        unsafe {
+            let vtbl = windows_core::Interface::vtable(self);
+            let get: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *mut PointerPosition,
+            ) -> windows_core::HRESULT = core::mem::transmute(vtbl.Position);
+            let mut position = PointerPosition::default();
+            get(windows_core::Interface::as_raw(self), &mut position).ok()?;
+            Ok(position)
+        }
+    }
+}
+
+impl IUIElement {
+    /// Registers a `PointerEventHandler`. `add_PointerPressed` and friends cannot be named by the
+    /// generator, so the registration goes through the vtable slot by hand.
+    fn pointer_event<F>(
+        &self,
+        add: usize,
+        remove: usize,
+        handler: F,
+    ) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(
+                windows_core::Ref<windows_core::IInspectable>,
+                windows_core::Ref<PointerRoutedEventArgs>,
+            ) + 'static,
+    {
+        let handler: PointerEventHandler = {
+            let com = windows_core::imp::DelegateBox::<PointerEventHandler, F>::new(
+                &PointerEventHandlerBox::<F>::VTABLE,
+                handler,
+            );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let add: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *mut core::ffi::c_void,
+                *mut i64,
+            ) -> windows_core::HRESULT = core::mem::transmute(add);
+            let mut token: i64 = 0;
+            add(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut token,
+            )
+            .ok()?;
+            let remove: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                i64,
+            ) -> windows_core::HRESULT = core::mem::transmute(remove);
+            Ok(windows_core::EventRevoker::new(self.clone(), token, remove))
+        }
+    }
+
+    pub fn pointer_pressed<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(
+                windows_core::Ref<windows_core::IInspectable>,
+                windows_core::Ref<PointerRoutedEventArgs>,
+            ) + 'static,
+    {
+        let vtbl = windows_core::Interface::vtable(self);
+        self.pointer_event(vtbl.PointerPressed, vtbl.RemovePointerPressed, handler)
+    }
+
+    pub fn pointer_moved<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(
+                windows_core::Ref<windows_core::IInspectable>,
+                windows_core::Ref<PointerRoutedEventArgs>,
+            ) + 'static,
+    {
+        let vtbl = windows_core::Interface::vtable(self);
+        self.pointer_event(vtbl.PointerMoved, vtbl.RemovePointerMoved, handler)
+    }
+
+    pub fn pointer_released<F>(
+        &self,
+        handler: F,
+    ) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(
+                windows_core::Ref<windows_core::IInspectable>,
+                windows_core::Ref<PointerRoutedEventArgs>,
+            ) + 'static,
+    {
+        let vtbl = windows_core::Interface::vtable(self);
+        self.pointer_event(vtbl.PointerReleased, vtbl.RemovePointerReleased, handler)
+    }
+}
