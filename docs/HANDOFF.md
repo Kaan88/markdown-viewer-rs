@@ -64,15 +64,45 @@ approved by the user.
 - Measured here: parse 0.1 ms, layout 27.0 ms at 1100 dip, 100% scale, page 1100x3020; window opens
   with the page drawn and the wheel scrolls it (checked from screenshots).
 - Screenshots: `tests/golden/shell-qt-light.png` (page top) and `shell-qt-scrolled.png`.
-- **This is the Windows build of the Qt variant, which the user asked for so it can be tested on
-  this machine. The Linux build itself has not been run anywhere; nothing here proves the Linux Qt
-  path beyond the spike it came from.**
+- **Both the Windows build and the Linux build now run.** The Linux build is built and run on the
+  test VM below (Qt 6.8.2, Debian 13), under Xvfb; see `tests/golden/shell-qt-linux.png`.
+
+## The Linux test VM (`user@vm-host`)
+
+The user gave this VM for Qt and Linux testing from 2026-11-07. It is Debian 13 (trixie), 20 cores,
+7.8 GB RAM, Xvfb, ImageMagick, and Rust 1.99.1 with `CARGO_HOME`/`CARGO_TARGET_DIR` under
+`/mnt/2b4bc8c0-.../` (global environment; the binary lands in `$CARGO_TARGET_DIR/release/`).
+
+- Packages installed: `qt6-base-dev` (Qt 6.8.2), `libfontconfig1-dev`, `libxcb-cursor0`,
+  `libxkbcommon-x11-0`, `xvfb`, `imagemagick`, `fonts-noto-cjk`.
+- The source tree is copied with `tar` + SFTP (the helper `target/vm.py`, not committed) into
+  `~/mdview`. It is a snapshot: re-upload after changes.
+- Build and run:
+
+  ```sh
+  cd ~/mdview/bins/mdv-qt
+  export QMAKE=/usr/lib/qt6/bin/qmake6
+  export PATH=/usr/lib/qt6/bin:$PATH
+  cargo build --release
+  cd ~/mdview
+  Xvfb :99 -screen 0 1600x1200x24 &
+  DISPLAY=:99 "$CARGO_TARGET_DIR/release/mdview-qt" fixtures/showcase.md &
+  DISPLAY=:99 import -window root /tmp/shot.png
+  ```
+
+- First run: parse 0.1 ms, layout 26.8 ms, page 1100x3041 (Linux font metrics differ from Windows'
+  3020), page drawn and menus present. `tests/golden/shell-qt-linux.png` is that screen capture.
+- Chinese/Japanese text was tofu until `fonts-noto-cjk` was installed; the renderer's font stack has
+  a CJK fallback on Linux through fontconfig.
+- No window manager runs, so the window sits at 0,0 on the Xvfb root; that is fine for captures.
 
 ## What has and has not run
 
 Run on Windows: the WinUI spike (`spikes/winui`, framework build, `--measure`: result=ok at 259 ms),
 the WinUI shell on `fixtures/showcase.md` (wheel scrolling, system theme, `--light`/`--dark`,
 `--trace`), and the Qt shell on the same file (layout, first paint, wheel scrolling).
+
+Run on Linux: the Qt shell on the VM, built with Qt 6.8.2, drawn and captured under Xvfb.
 
 Not tested by hand: the WinUI File > Open dialog and View theme items (wired, not clicked); the Qt
 menus (Quit, Light/Dark, About) and drag and drop; window resizing and reflow on both; DPI scaling
@@ -108,8 +138,12 @@ files, writes the complete sparse index cache entry for every crate and download
 
 ## What to do next
 
-1. Get the four `tests/golden/` images and the four shell screenshots approved.
-2. Add File > Open to the Qt shell (QFileDialog binding) and a scrollbar to both.
-3. Add image loading and drawing; then virtualization and the 1 MB budget.
-4. Add selection and link/anchor hit-testing, then details toggling.
-5. Decide bundled fonts, then turn the goldens into a pixel suite.
+1. Get the four `tests/golden/` images and the shell screenshots approved.
+2. Add image loading and drawing (PNG/JPEG, the plan's 12 MiB and 24 M-pixel limits, an image
+   cache), and pass each document's directory to the renderer so relative paths resolve.
+3. Add virtualization and measure the 1 MB scroll budget in `mdv-bench`.
+4. Add File > Open to the Qt shell, a scrollbar and keyboard scrolling to both.
+5. Add selection and link/anchor hit-testing, then details toggling.
+6. Decide bundled fonts, then turn the goldens into a pixel suite.
+
+Every Qt/Linux change is now tested on the VM above as well as on Windows.
