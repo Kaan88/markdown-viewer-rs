@@ -118,12 +118,20 @@ The user gave this VM for Qt and Linux testing from 2026-11-07. It is Debian 13 
   and `view(doc, options, &PageLayout, top, height) -> Slice` (one viewport-sized bitmap). `render`
   still paints a whole page for tests; `render_slice` is the one-shot layout+view form.
 - Measured on `spikes/parser/data/generated_1mib.md` (1.0 MB, 25,060 blocks, 897,583 bytes of text,
-  583,619 px page): parse 8.3 ms; height pass 8.9 ms; 40 scroll frames at 780x900 at 100%: mean
-  5.3 ms, worst 7.2 ms after caching each block's paints relative to its top; glyph cache 99% hit,
-  peak 0.2 MiB. The bitmap is the viewport (2.8 MB) rather
-  than the page (1.8 GB at 780x583,619x4).
-- The plan's budget is 4 ms p99 per scroll frame at 150%. **Not met yet**: every frame re-shapes the
-  visible blocks. Caching each block's laid-out text between frames is the next step.
+  583,619 px page): parse 8.3 ms; height pass 3.7 ms; scroll frames over 60 steps at 40 px, after
+  caching each block's paints relative to its top: **0.9 ms mean, 1.1 ms worst at 780x900 (100%)**,
+  **2.2 mean, 2.6 worst at 1170x1350 (150%)**, 8.1 mean, 8.4 worst at 3840x2200 (4K, 150%). Glyph
+  cache 99% hit, peak 0.2 MiB. The bitmap is the viewport (2.8 MB) rather than the page (1.8 GB at
+  780x583,619x4).
+- The plan's budget is 4 ms p99 per scroll frame at 150%: **met** (2.6 ms worst). It was 5.3 ms mean
+  before the profile; the profile showed the cost was not text at all but `Bitmap::rrect`: code-block
+  and table backgrounds are rounded rectangles, and the old loop ran a `hypot` distance and a float
+  blend on every pixel of them (5.8 ms of a 6.5 ms frame). `rrect` now fills the fully covered part of
+  each row with a wide store and runs the distance formula only on the pixels the edges cut through.
+  A unit test compares it pixel for pixel against the old per-pixel form, and regenerating the four
+  `tests/golden/showcase-*.png` images still gives byte-identical files.
+- At 4K the frame is 8.1 ms against the plan's 8 ms: borderline. The clear (33 MB) and the glyph blits
+  are now the two big items, so the next win there is not drawing the whole viewport each frame.
 - **Both shells are wired to this API**: each keeps a `DocumentRenderer` and a `PageLayout`, paints
   one viewport slice per frame, and scrolls without laying the page out again. On this PC the height
   pass for `generated_1mib.md` is 284 ms (Qt) and 287 ms (WinUI) at ~1100 dip, page 583,619 px; the
@@ -159,10 +167,10 @@ files, writes the complete sparse index cache entry for every crate and download
 
 ## Known gaps, in the order they matter
 
-- **Scroll frames are 5.3 ms on the 1 MB fixture** against a 4 ms p99 budget. A per-block paint
-  cache is in (`DocumentRenderer` keeps block paints relative to the block top; a test proves a
-  cached frame equals a fresh slice). The cache only bought 0.6 ms, so shaping is not the remaining
-  cost: profile the per-frame paint/clear before trying more.
+- **Scroll frames meet the 4 ms p99 budget at 150%** (2.2 ms mean, 2.6 ms worst) but are 8.1 ms at
+  4K against the plan's 8 ms. The per-block paint cache, the rect fast path and the wide fill are in;
+  what remains is the full-viewport clear and the glyph blits, which need dirty-band scrolling (keep
+  the previous frame, shift it, redraw only the newly exposed rows) rather than more micro-tuning.
 - **Images**: SVG (and anything but PNG/JPEG) is still a placeholder; images are decoded once per
   render rather than shared across renders; `<picture>` light/dark sources and `width`/`height`
   attributes are ignored; a blocked image is retried on every render.
@@ -176,8 +184,9 @@ files, writes the complete sparse index cache entry for every crate and download
 ## What to do next
 
 1. Get the four `tests/golden/` images and the shell screenshots approved.
-2. Profile and cut the remaining scroll-frame cost (5.3 ms) toward the 4 ms p99 budget.
-3. Add File > Open to the Qt shell, a scrollbar and keyboard scrolling to both.
+2. Add File > Open to the Qt shell, a scrollbar and keyboard scrolling to both.
+3. Give the renderer a persistent frame plus dirty-band scrolling, for 4K and for the shells (they
+   currently copy a full viewport bitmap every frame).
 4. Add selection and link/anchor hit-testing, then details toggling.
 5. Add a shared image cache and SVG support when Phase 4 lands.
 6. Decide bundled fonts, then turn the goldens into a pixel suite.
