@@ -70,7 +70,7 @@ Toolchain here: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msv
 cd C:\Users\kaank\Desktop\mv
 cargo test --release --offline --workspace     # 7 core, 11 fuzz, 113 regression, 3 spec,
                                                # 10 engine, 7 engine-proto, 6 render unit
-                                               # (3 + 2 ignored deadline waits), 18 render integration
+                                               # (6 + 2 ignored deadline waits), 18 render integration
 cargo fmt --all --check
 cargo build --release --offline --workspace    # includes target/release/mdview-engine.exe
 cargo build --release --offline -p mdview-winui
@@ -205,7 +205,7 @@ Then:
 
 ```sh
 cd ~/mdview/bins/mdv-qt && export QMAKE=/usr/lib/qt6/bin/qmake6 && cargo build --release
-cd ~/mdview && cargo build --release -p mdview-engine      # for SVG images and math
+cd ~/mdview && cargo build --release -p mdview-engine      # for SVG, math and Mermaid
 cd ~/mdview && cargo test --release -p mdview-core -p mdview-render -p mdview-engine -p mdview-engine-proto
                                                                       # 7 core, 11 fuzz, 113 regression,
                                                                       # 3 spec, 10 engine, 7 proto, 6+18 render
@@ -670,5 +670,6 @@ Qt's event path instead).
 
 Every Qt/Linux change is tested on the VM as well as on Windows, and nothing counts as working on
 Windows until it has run on Windows.
+
 
 
