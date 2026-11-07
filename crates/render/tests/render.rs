@@ -11,7 +11,7 @@ fn fixture(name: &str) -> mdview_core::Document {
     mdview_core::parse_bytes(&std::fs::read(path).unwrap())
 }
 
-fn background(r: &mdview_render::Rendered, theme: mdview_render::Theme) -> (u8, u8, u8) {
+fn background(r: &mdview_render::Rendered, _theme: mdview_render::Theme) -> (u8, u8, u8) {
     let p = &r.bitmap.pixels[0..4];
     (p[0], p[1], p[2])
 }
@@ -315,6 +315,197 @@ fn cached_scroll_frames_match_a_fresh_slice() {
     let second = renderer.view(&doc, &options, &page, 400.0, 300.0);
     let fresh = render_slice(&doc, &options, 400.0, 300.0);
     assert_eq!(second.bitmap.pixels, fresh.bitmap.pixels);
+}
+
+#[test]
+fn a_click_maps_back_to_the_word_under_it() {
+    let doc = mdview_core::parse("# Title\n\nHello **world** after.\n");
+    let options = Options {
+        width: 500.0,
+        scale: 1.0,
+        theme: LIGHT,
+        max_height: None,
+        base_dir: None,
+    };
+    let mut renderer = DocumentRenderer::new();
+    let page = renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, &page, 0.0, 400.0);
+    let world = doc.text.find("world").expect("the word is in the document") as u32;
+    let rects = renderer.selection_rects(&doc, &options, &page, world, world + 5);
+    assert_eq!(rects.len(), 1, "one line, one rect");
+    let rect = rects[0];
+    assert!(rect.w > 10.0, "{rect:?}");
+    let hit = renderer
+        .hit_test(&doc, &options, &page, rect.x + 1.0, rect.y + rect.h / 2.0)
+        .expect("a click in the text");
+    assert_eq!(hit.offset, world, "the click is on the first letter");
+    assert_eq!(
+        &doc.text[hit.offset as usize..hit.offset as usize + 5],
+        "world"
+    );
+    assert_eq!(hit.link, None);
+    // A click past the end of the line still lands on it, at the last caret stop.
+    let hit = renderer
+        .hit_test(&doc, &options, &page, rect.x + 400.0, rect.y + rect.h / 2.0)
+        .expect("a click to the right");
+    assert_eq!(hit.block, page.blocks()[1].block);
+    let after = doc.text.find("after").unwrap() as u32;
+    assert!(hit.offset >= after, "offset {}", hit.offset);
+}
+
+#[test]
+fn a_click_finds_a_link_and_a_footnote_reference() {
+    let doc = mdview_core::parse(
+        "A [link](https://example.com) and a reference[^n].\n\n[^n]: The note.\n",
+    );
+    let options = Options {
+        width: 640.0,
+        scale: 1.0,
+        theme: LIGHT,
+        max_height: None,
+        base_dir: None,
+    };
+    let mut renderer = DocumentRenderer::new();
+    let page = renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, &page, 0.0, 400.0);
+    let link = doc.text.find("link").expect("link text") as u32;
+    let rect = renderer.selection_rects(&doc, &options, &page, link, link + 4)[0];
+    let hit = renderer
+        .hit_test(
+            &doc,
+            &options,
+            &page,
+            rect.x + rect.w / 2.0,
+            rect.y + rect.h / 2.0,
+        )
+        .expect("a click on the link");
+    let index = hit.link.expect("a link under the pointer");
+    assert_eq!(
+        doc.str(doc.links[index as usize].dest),
+        "https://example.com"
+    );
+    // The footnote mark has no text of its own in the document, so sweep the line for it.
+    let text = &doc.blocks[page.blocks()[0].block as usize].text;
+    let row = renderer.selection_rects(&doc, &options, &page, text.start, text.end)[0];
+    let mut found = None;
+    let mut x = row.x;
+    while x < row.x + row.w {
+        if let Some(hit) = renderer.hit_test(&doc, &options, &page, x, row.y + row.h / 2.0)
+            && let Some(note) = hit.footnote
+        {
+            found = Some((note, hit.offset));
+            break;
+        }
+        x += 1.0;
+    }
+    let (note, offset) = found.expect("the footnote mark is hittable");
+    assert_eq!(doc.footnotes[note as usize].number, 1);
+    assert_eq!(
+        offset,
+        doc.spans
+            .iter()
+            .find(|s| matches!(s.kind, mdview_core::model::SpanKind::FootnoteRef(_)))
+            .unwrap()
+            .start
+    );
+    assert!(
+        page.footnote_y(1).is_some(),
+        "the footnote list has a position"
+    );
+}
+
+#[test]
+fn blocks_are_found_by_page_row() {
+    let doc = mdview_core::parse("first paragraph\n\nsecond paragraph\n");
+    let page = mdview_render::layout(&doc, &Options::light());
+    let blocks = page.blocks();
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(
+        page.block_at(blocks[0].y + 1.0).unwrap().block,
+        blocks[0].block
+    );
+    assert_eq!(
+        page.block_at(blocks[1].y + 1.0).unwrap().block,
+        blocks[1].block
+    );
+    // A row above the content and one in the bottom padding both clamp to a block.
+    assert_eq!(page.block_at(0.0).unwrap().block, blocks[0].block);
+    assert_eq!(
+        page.block_at(page.total_height() - 1.0).unwrap().block,
+        blocks[1].block
+    );
+    // A nested block reports the row of the top-level block that holds it.
+    let list = mdview_core::parse("- item\n");
+    let list_page = mdview_render::layout(&list, &Options::light());
+    let top = list_page.blocks()[0].block;
+    let child = list.children(top).next().expect("a list item");
+    assert_eq!(list_page.y_of(&list, child), Some(list_page.blocks()[0].y));
+    assert_eq!(list_page.y_of(&list, 0), Some(list_page.blocks()[0].y));
+}
+
+#[test]
+fn hit_testing_and_selection_do_not_change_the_frame() {
+    let doc = fixture("showcase.md");
+    let options = Options {
+        width: 520.0,
+        scale: 1.0,
+        theme: LIGHT,
+        max_height: None,
+        base_dir: None,
+    };
+    let mut renderer = DocumentRenderer::new();
+    let page = renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, &page, 0.0, 400.0);
+    // Ask for the same view once more so the delta is explicitly empty, then use hit testing.
+    let before = renderer
+        .view_frame(&doc, &options, &page, 0.0, 400.0)
+        .bitmap
+        .pixels
+        .clone();
+    let text = &doc.blocks[page.blocks()[0].block as usize].text;
+    let _ = renderer.selection_rects(&doc, &options, &page, text.start, text.end);
+    let heading = doc.headings.last().expect("a heading").block;
+    let last = *page
+        .blocks()
+        .iter()
+        .find(|block| block.block == heading)
+        .expect("the heading is a top-level block");
+    let hit = renderer
+        .hit_test(&doc, &options, &page, 30.0, last.y + 5.0)
+        .expect("a click on a block far below the viewport");
+    assert_eq!(hit.block, last.block, "the block was laid out on demand");
+    let frame = renderer.view_frame(&doc, &options, &page, 0.0, 400.0);
+    assert_eq!(
+        frame.band,
+        Some((0, 0)),
+        "the frame delta is about the document only"
+    );
+    assert_eq!(frame.bitmap.pixels, before, "the frame is byte-identical");
+}
+
+#[test]
+fn a_selection_that_wraps_gives_one_rect_per_line() {
+    let doc = mdview_core::parse(
+        "This paragraph is long enough that a narrow page breaks it over several lines, which is \
+         what the selection needs in order to produce more than one rectangle on the page.\n",
+    );
+    let options = Options {
+        width: 300.0,
+        scale: 1.0,
+        theme: LIGHT,
+        max_height: None,
+        base_dir: None,
+    };
+    let mut renderer = DocumentRenderer::new();
+    let page = renderer.layout(&doc, &options);
+    let text = &doc.blocks[page.blocks()[0].block as usize].text;
+    let rects = renderer.selection_rects(&doc, &options, &page, text.start, text.end);
+    assert!(rects.len() > 1, "{rects:?}");
+    // Every rect is on its own row band and inside the page.
+    for rect in &rects {
+        assert!(rect.x >= 0.0 && rect.w > 0.0 && rect.h > 0.0);
+        assert!(rect.y >= 0.0 && rect.y + rect.h <= page.total_height());
+    }
 }
 
 #[test]

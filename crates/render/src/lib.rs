@@ -9,8 +9,8 @@ mod theme;
 
 pub use bitmap::Bitmap;
 pub use layout::{
-    BlockBox, DocumentRenderer, Frame, Options, PageLayout, Rendered, Slice, layout, render,
-    render_slice, render_view,
+    BlockBox, DocumentRenderer, Frame, Hit, Options, PageLayout, Rect, Rendered, Slice, layout,
+    render, render_slice, render_view,
 };
 pub use text::{CacheStats, TextEngine};
 pub use theme::{Color, DARK, LIGHT, Theme};

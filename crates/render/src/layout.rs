@@ -1,6 +1,7 @@
-//! Lays the document model out in one top-down pass and paints it into a bitmap: no selection,
-//! anchors or scroll cache yet. Images are drawn through parley inline boxes; math and diagrams
-//! still show their source. Virtualized layout comes next.
+//! Lays the document model out in one top-down pass and paints it into a bitmap: blocks are
+//! virtualized, scroll frames reuse the previous bitmap's rows, and every laid-out text run keeps
+//! its caret stops so a click can be turned back into a document offset, a link or a selection.
+//! Images are drawn through parley inline boxes; math and diagrams still show their source.
 
 use crate::bitmap::Bitmap;
 use crate::image::{self, DecodedImage};
@@ -10,15 +11,16 @@ use mdview_core::model::{
     AlertKind, Align, BlockKind, Document, Footnote, ListMarker, NONE, SpanKind,
 };
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontFamily, FontStyle, FontWeight, InlineBox,
-    InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
-    VerticalAlign,
+    Alignment, AlignmentOptions, Cluster, ClusterSide, FontContext, FontFamily, FontStyle,
+    FontWeight, InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
+    StyleProperty, VerticalAlign,
 };
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+#[derive(Clone)]
 pub struct Options {
     /// Logical page width, before the device scale.
     pub width: f32,
@@ -67,6 +69,26 @@ pub struct BlockBox {
     pub height: f32,
 }
 
+/// A rectangle in page device px.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// Where a click landed: the top-level block, the offset into `Document::text`, and anything
+/// actionable under the point. `link` indexes `Document::links`, `footnote` indexes
+/// `Document::footnotes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hit {
+    pub block: u32,
+    pub offset: u32,
+    pub link: Option<u32>,
+    pub footnote: Option<u32>,
+}
+
 pub struct Rendered {
     pub bitmap: Bitmap,
     /// The height the document needed, in device px, before any `max_height` clamp.
@@ -108,6 +130,8 @@ pub struct Frame {
 /// width/scale/theme and reuse it for scroll frames; a 1 MB document costs one height pass.
 pub struct PageLayout {
     spans: Vec<BlockBox>,
+    /// The measured y of each footnote entry, by footnote number, in reading order.
+    notes: Vec<(u32, f32)>,
     footnotes_y: f32,
     footnotes_height: f32,
     total_height: f32,
@@ -119,6 +143,58 @@ pub struct PageLayout {
 impl PageLayout {
     pub fn total_height(&self) -> f32 {
         self.total_height
+    }
+
+    /// Every top-level block's measured extent, in page order.
+    pub fn blocks(&self) -> &[BlockBox] {
+        &self.spans
+    }
+
+    /// The top-level block at page row `y`. Clamps into the first or last block outside the
+    /// content, so a click in the page margins still lands on text.
+    pub fn block_at(&self, y: f32) -> Option<BlockBox> {
+        self.spans.get(self.index_at(y)?).copied()
+    }
+
+    /// The index of the block at page row `y`, for callers that keep parallel data.
+    pub fn index_at(&self, y: f32) -> Option<usize> {
+        if self.spans.is_empty() {
+            return None;
+        }
+        if y < self.spans[0].y {
+            return Some(0);
+        }
+        let index = self
+            .spans
+            .partition_point(|span| span.y + span.height <= y)
+            .min(self.spans.len() - 1);
+        Some(index)
+    }
+
+    /// The page row of a block, including one nested in a list, quote, table or details, so an
+    /// anchor can be scrolled to. Footnote entries are not drawn where their definitions are; use
+    /// [`footnote_y`](Self::footnote_y) for those.
+    pub fn y_of(&self, doc: &Document, block: u32) -> Option<f32> {
+        let mut block = block;
+        loop {
+            let parent = doc.blocks.get(block as usize)?.parent;
+            if parent == NONE {
+                break;
+            }
+            block = parent;
+        }
+        self.spans
+            .iter()
+            .find(|span| span.block == block)
+            .map(|span| span.y)
+    }
+
+    /// The page row of a footnote entry, by the number shown in the text.
+    pub fn footnote_y(&self, number: u32) -> Option<f32> {
+        self.notes
+            .iter()
+            .find(|(n, _)| *n == number)
+            .map(|(_, y)| *y)
     }
 
     pub fn matches(&self, options: &Options) -> bool {
@@ -152,8 +228,9 @@ pub struct DocumentRenderer {
     fonts: FontContext,
     layouts: LayoutContext<Brush>,
     engine: TextEngine,
-    /// Laid-out paints per top-level block, relative to the block's top, for scroll frames.
-    cache: HashMap<u32, Vec<Paint>>,
+    /// Laid-out paints and caret stops per top-level block, relative to the block's top, for scroll
+    /// frames and hit tests.
+    cache: HashMap<u32, CachedBlock>,
     cache_key: Option<(f32, f32, &'static str)>,
     /// Decoded images, shared by every frame so a cached paint can still find its pixels.
     images: HashMap<u32, Option<Rc<DecodedImage>>>,
@@ -345,6 +422,114 @@ impl DocumentRenderer {
         self.frame.as_ref()
     }
 
+    /// What is at page position `x, y`: the document offset, plus a link or footnote reference when
+    /// the point is over one. Lays out the one block that was hit if the frame has not painted it
+    /// yet, so this works before or after [`view_frame`](Self::view_frame) for that row.
+    pub fn hit_test(
+        &mut self,
+        doc: &Document,
+        options: &Options,
+        page: &PageLayout,
+        x: f32,
+        y: f32,
+    ) -> Option<Hit> {
+        let index = page.index_at(y)?;
+        let span = page.spans[index];
+        self.ensure_block(doc, options, page, index);
+        let cached = self.cache.get(&span.block)?;
+        let local = y - span.y;
+        let line = cached.lines.iter().min_by(|a, b| {
+            distance(a, local)
+                .total_cmp(&distance(b, local))
+                .then_with(|| a.top.total_cmp(&b.top))
+        })?;
+        let offset = offset_at(line, x, local);
+        let mut hit = Hit {
+            block: span.block,
+            offset,
+            link: None,
+            footnote: None,
+        };
+        if let Some(inner) = doc.block_at(offset) {
+            for i in doc.blocks[inner as usize].spans.usize() {
+                let span = &doc.spans[i];
+                match span.kind {
+                    SpanKind::Link(link) if span.start <= offset && offset < span.end => {
+                        hit.link = Some(link);
+                    }
+                    SpanKind::FootnoteRef(note) if span.start == offset => {
+                        hit.footnote = Some(note);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Some(hit)
+    }
+
+    /// The page rectangles a selection between two document offsets paints. Multi-line ranges give
+    /// one rect per line, and blocks that are not currently painted are laid out for the test. The
+    /// selected pixels are the caller's to draw, so the frame delta stays about the document only.
+    pub fn selection_rects(
+        &mut self,
+        doc: &Document,
+        options: &Options,
+        page: &PageLayout,
+        from: u32,
+        to: u32,
+    ) -> Vec<Rect> {
+        let (start, end) = if from <= to { (from, to) } else { (to, from) };
+        if start == end {
+            return Vec::new();
+        }
+        let mut rects = Vec::new();
+        for (index, span) in page.spans.iter().enumerate() {
+            let text = doc.blocks[span.block as usize].text;
+            if text.end <= start || text.start >= end {
+                continue;
+            }
+            self.ensure_block(doc, options, page, index);
+            let Some(cached) = self.cache.get(&span.block) else {
+                continue;
+            };
+            for line in &cached.lines {
+                let first = start.max(line.doc_start);
+                let last = end.min(line.doc_end);
+                if first >= last {
+                    continue;
+                }
+                let x0 = x_at(line, first);
+                let x1 = x_at(line, last);
+                if x1 - x0 > 0.25 {
+                    rects.push(Rect {
+                        x: x0,
+                        y: span.y + line.top,
+                        w: x1 - x0,
+                        h: line.bottom - line.top,
+                    });
+                }
+            }
+        }
+        rects
+    }
+
+    /// Lays out one block so its paint cache and caret stops exist. Blocks painted by a frame are
+    /// already cached; this covers a click before the block has come on screen.
+    fn ensure_block(&mut self, doc: &Document, options: &Options, page: &PageLayout, index: usize) {
+        if self.cache.contains_key(&page.spans[index].block) {
+            return;
+        }
+        let mut pager = Pager::new(
+            doc,
+            options,
+            &mut self.fonts,
+            &mut self.layouts,
+            Some(&mut self.cache),
+            &mut self.images,
+        );
+        pager.block_paints(page, index);
+    }
+
     /// Paints the whole page into one bitmap. For tests and small documents; scrolling uses
     /// [`layout`](Self::layout) and [`view`](Self::view).
     pub fn page(&mut self, doc: &Document, options: &Options) -> Rendered {
@@ -410,6 +595,10 @@ struct Inline {
     task: Option<bool>,
     /// Images placed inline, at their byte offset in `text`.
     boxes: Vec<ImageBox>,
+    /// Inline byte range -> offset in `Document::text`, so a caret position can be turned back into
+    /// a document position. `fixed` ranges stand for an atom (an image placeholder, a footnote
+    /// mark): every offset in them maps to the atom's one position.
+    origins: Vec<(Range<usize>, u32, bool)>,
 }
 
 /// One inline image: its text offset, the image it draws and its natural device-px size.
@@ -437,6 +626,67 @@ impl Inline {
             return;
         }
         self.runs.push((start..end, style));
+    }
+
+    /// Pushes a slice copied from the document, remembering the document offset it starts at.
+    fn push_doc(&mut self, s: &str, style: Style, at: u32) {
+        if s.is_empty() {
+            return;
+        }
+        let start = self.text.len();
+        self.push(s, style);
+        let end = self.text.len();
+        self.origins.push((start..end, at, false));
+    }
+
+    /// Pushes text that stands for the atom at `at`, which has no text of its own in the document.
+    fn push_atom(&mut self, s: &str, style: Style, at: u32) {
+        if s.is_empty() {
+            return;
+        }
+        let start = self.text.len();
+        self.push(s, style);
+        let end = self.text.len();
+        self.origins.push((start..end, at, true));
+    }
+
+    /// The document offset for an inline byte offset, or `None` for text the renderer invented
+    /// (a list marker, a language label, an alert title) that is not part of the document.
+    fn doc_at(&self, at: usize) -> Option<u32> {
+        let mut last = None;
+        for (range, origin, fixed) in &self.origins {
+            if at < range.start {
+                continue;
+            }
+            if at < range.end {
+                return Some(if *fixed {
+                    *origin
+                } else {
+                    origin + (at - range.start) as u32
+                });
+            }
+            last = Some(if *fixed {
+                *origin
+            } else {
+                origin + range.len() as u32
+            });
+        }
+        last
+    }
+
+    /// The inline byte offset for a document offset, the inverse of [`doc_at`](Self::doc_at). An
+    /// atom maps to the start of the text that stands for it.
+    fn inline_at(&self, doc: u32) -> Option<usize> {
+        for (range, origin, fixed) in &self.origins {
+            if *fixed {
+                if *origin == doc {
+                    return Some(range.start);
+                }
+            } else if doc >= *origin && doc <= *origin + range.len() as u32 {
+                return Some(range.start + (doc - *origin) as usize);
+            }
+        }
+        None
     }
 
     fn style_at(&self, at: usize) -> Style {
@@ -491,6 +741,89 @@ impl Paint {
     }
 }
 
+/// One laid-out line: where it sits, what text it covers and the layout that owns it, so a click
+/// can be resolved back to a document offset without keeping a caret table per glyph.
+#[derive(Clone)]
+struct LineGeom {
+    top: f32,
+    bottom: f32,
+    /// The layout this line belongs to, and where its origin sits in page coordinates.
+    layout: Rc<Layout<Brush>>,
+    source: Rc<Inline>,
+    x: f32,
+    y: f32,
+    /// The line's inline byte range.
+    end: usize,
+    /// The line's x range: start and end of the text, in page coordinates.
+    x0: f32,
+    x1: f32,
+    /// The document offsets the line covers.
+    doc_start: u32,
+    doc_end: u32,
+}
+
+impl LineGeom {
+    fn shift(&mut self, dy: f32) {
+        self.top += dy;
+        self.bottom += dy;
+        self.y += dy;
+    }
+}
+
+/// Everything a top-level block keeps for later frames: what to paint and where its text is.
+#[derive(Clone, Default)]
+struct CachedBlock {
+    paints: Vec<Paint>,
+    lines: Vec<LineGeom>,
+}
+
+/// Vertical distance from `y` to a line, zero inside it.
+fn distance(line: &LineGeom, y: f32) -> f32 {
+    if y < line.top {
+        line.top - y
+    } else if y > line.bottom {
+        y - line.bottom
+    } else {
+        0.0
+    }
+}
+
+/// The page x of a document offset on a line, from the line's own layout.
+fn x_at(line: &LineGeom, offset: u32) -> f32 {
+    if offset <= line.doc_start {
+        return line.x0;
+    }
+    if offset >= line.doc_end {
+        return line.x1;
+    }
+    let Some(at) = line.source.inline_at(offset) else {
+        return line.x0;
+    };
+    if at >= line.end {
+        return line.x1;
+    }
+    let Some(cluster) = Cluster::from_byte_index(&line.layout, at) else {
+        return line.x0;
+    };
+    line.x + cluster.visual_offset().unwrap_or(0.0)
+}
+
+/// The document offset under a point on a line, using the line's own layout for the search.
+fn offset_at(line: &LineGeom, x: f32, y: f32) -> u32 {
+    let px = (x - line.x).max(0.0);
+    let py = y - line.y;
+    let Some((cluster, side)) = Cluster::from_point(&line.layout, px, py) else {
+        return line.doc_start;
+    };
+    let range = cluster.text_range();
+    let at = if side == ClusterSide::Right {
+        range.end
+    } else {
+        range.start
+    };
+    line.source.doc_at(at).unwrap_or(line.doc_start)
+}
+
 struct Txt {
     size: f32,
     line_height: f32,
@@ -510,9 +843,16 @@ struct Pager<'a, 'b> {
     y: f32,
     paints: Vec<Paint>,
     blocks: Vec<BlockBox>,
+    /// Caret geometry for the block being laid out, in page coordinates until it moves into the
+    /// cache, where it is stored relative to that block's top like the paints.
+    hits: Vec<LineGeom>,
+    /// Whether to keep hit geometry; the height pass does not need it.
+    record: bool,
+    /// The measured y of each footnote entry, built by the height pass.
+    notes: Vec<(u32, f32)>,
     fonts: &'b mut FontContext,
     layouts: &'b mut LayoutContext<Brush>,
-    cache: Option<&'b mut HashMap<u32, Vec<Paint>>>,
+    cache: Option<&'b mut HashMap<u32, CachedBlock>>,
     base_dir: Option<PathBuf>,
     /// Decoded images, owned by the `DocumentRenderer` so cached frames keep theirs. `None`
     /// remembers a file that will not load.
@@ -529,7 +869,7 @@ impl<'a, 'b> Pager<'a, 'b> {
         options: &Options,
         fonts: &'b mut FontContext,
         layouts: &'b mut LayoutContext<Brush>,
-        cache: Option<&'b mut HashMap<u32, Vec<Paint>>>,
+        cache: Option<&'b mut HashMap<u32, CachedBlock>>,
         images: &'b mut HashMap<u32, Option<Rc<DecodedImage>>>,
     ) -> Self {
         let scale = options.scale.max(0.1);
@@ -541,6 +881,7 @@ impl<'a, 'b> Pager<'a, 'b> {
         let max_y = options
             .max_height
             .map_or(f32::MAX, |h| (h * scale).max(1.0));
+        let record = cache.is_some();
         Pager {
             doc,
             theme: options.theme,
@@ -551,6 +892,9 @@ impl<'a, 'b> Pager<'a, 'b> {
             y: 0.0,
             paints: Vec::new(),
             blocks: Vec::new(),
+            hits: Vec::new(),
+            record,
+            notes: Vec::new(),
             fonts,
             layouts,
             cache,
@@ -763,6 +1107,11 @@ impl<'a, 'b> Pager<'a, 'b> {
 
     /// Pushes the chips, the glyphs and the decorations for one laid-out inline block, in that order.
     fn emit(&mut self, inline: &Inline, layout: Layout<Brush>, x: f32, y: f32, base_size: f32) {
+        let layout = Rc::new(layout);
+        // Only document text is hittable; a list marker or a language label is drawn but has no
+        // document offsets to select.
+        let track = self.record && !inline.origins.is_empty();
+        let source = Rc::new(inline.clone());
         let mut images = Vec::new();
         for line in layout.lines() {
             for item in line.items() {
@@ -779,7 +1128,28 @@ impl<'a, 'b> Pager<'a, 'b> {
         }
         let mut chips = Vec::new();
         let mut decos = Vec::new();
+        let mut lines = Vec::new();
         for line in layout.lines() {
+            let metrics = line.metrics();
+            let line_height = metrics.line_height.max(1.0);
+            let baseline = y + metrics.baseline;
+            let top = baseline - line_height * 0.82;
+            let bottom = baseline + line_height * 0.18;
+            if track && let Some(doc_start) = inline.doc_at(line.text_range().start) {
+                lines.push(LineGeom {
+                    top,
+                    bottom,
+                    layout: layout.clone(),
+                    source: source.clone(),
+                    x,
+                    y,
+                    end: line.text_range().end,
+                    x0: x + metrics.offset,
+                    x1: x + metrics.offset + metrics.advance,
+                    doc_start,
+                    doc_end: inline.doc_at(line.text_range().end).unwrap_or(doc_start),
+                });
+            }
             for item in line.items() {
                 let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
                     continue;
@@ -831,13 +1201,12 @@ impl<'a, 'b> Pager<'a, 'b> {
                 }
             }
         }
+        if track {
+            self.hits.extend(lines);
+        }
         self.paints.extend(images);
         self.paints.extend(chips);
-        self.paints.push(Paint::Text {
-            layout: Rc::new(layout),
-            x,
-            y,
-        });
+        self.paints.push(Paint::Text { layout, x, y });
         self.paints.extend(decos);
     }
 
@@ -1180,13 +1549,15 @@ impl<'a, 'b> Pager<'a, 'b> {
 
     fn code_block(&mut self, b: u32, left: f32, width: f32, label: Option<String>) {
         let source = self.doc.block_text(b).trim_end_matches('\n').to_string();
+        let text_start = self.doc.blocks[b as usize].text.start;
         let mut inline = Inline::default();
-        inline.push(
+        inline.push_doc(
             &source,
             Style {
                 code: true,
                 ..Style::default()
             },
+            text_start,
         );
         let pad_x = self.px(16.0);
         let pad_y = self.px(13.0);
@@ -1511,7 +1882,8 @@ impl<'a, 'b> Pager<'a, 'b> {
                 merged.push(" ", Style::default());
             }
             for (range, style) in &inline.runs {
-                merged.push(&inline.text[range.clone()], *style);
+                let at = inline.doc_at(range.start).unwrap_or(0);
+                merged.push_doc(&inline.text[range.clone()], *style, at);
             }
             first = false;
         }
@@ -1590,7 +1962,8 @@ impl<'a, 'b> Pager<'a, 'b> {
                             inline.push(" ", Style::default());
                         }
                         for (range, style) in &body.runs {
-                            inline.push(&body.text[range.clone()], *style);
+                            let at = body.doc_at(range.start).unwrap_or(0);
+                            inline.push_doc(&body.text[range.clone()], *style, at);
                         }
                         first = false;
                     }
@@ -1607,7 +1980,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 (note.number, inline)
             })
             .collect();
-        for (_, inline) in entries {
+        for (number, inline) in entries {
             let txt = Txt {
                 size: 14.0,
                 line_height: 1.6,
@@ -1619,6 +1992,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             let layout = self.text_layout(&inline, &txt);
             let height = layout.height().round();
             let size = txt.size;
+            self.notes.push((number, self.y));
             self.emit(&inline, layout, left, self.y, size);
             self.y += height + self.px(6.0);
         }
@@ -1657,7 +2031,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             let at = cuts[i];
             for (position, kind) in &atoms {
                 if *position == at {
-                    self.push_atom(&mut out, *kind);
+                    self.push_atom(&mut out, *kind, *position as u32);
                 }
             }
             if i + 1 == cuts.len() {
@@ -1668,7 +2042,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 continue;
             }
             let style = self.style_at(&spans, at);
-            out.push(&src[at - base..to - base], style);
+            out.push_doc(&src[at - base..to - base], style, at as u32);
         }
         out
     }
@@ -1697,7 +2071,7 @@ impl<'a, 'b> Pager<'a, 'b> {
         style
     }
 
-    fn push_atom(&mut self, out: &mut Inline, kind: SpanKind) {
+    fn push_atom(&mut self, out: &mut Inline, kind: SpanKind, at: u32) {
         match kind {
             SpanKind::Image(index) => {
                 if let Some(image) = self.image(index) {
@@ -1713,33 +2087,36 @@ impl<'a, 'b> Pager<'a, 'b> {
                 }
                 let alt = self.doc.str(self.doc.images[index as usize].alt);
                 if alt.is_empty() {
-                    out.push(
+                    out.push_atom(
                         "[image]",
                         Style {
                             muted: true,
                             ..Style::default()
                         },
+                        at,
                     );
                 } else {
-                    out.push(
+                    out.push_atom(
                         &format!("[image: {alt}]"),
                         Style {
                             muted: true,
                             italic: true,
                             ..Style::default()
                         },
+                        at,
                     );
                 }
             }
             SpanKind::FootnoteRef(index) => {
                 let number = self.doc.footnotes[index as usize].number;
-                out.push(
+                out.push_atom(
                     &format!("[{number}]"),
                     Style {
                         link: true,
                         small: true,
                         ..Style::default()
                     },
+                    at,
                 );
             }
             SpanKind::Checkbox { checked } => {
@@ -1747,12 +2124,13 @@ impl<'a, 'b> Pager<'a, 'b> {
                     out.task = Some(checked);
                 } else {
                     // Only a task item starts with its box; anything else keeps a readable mark.
-                    out.push(
+                    out.push_atom(
                         if checked { "[x] " } else { "[ ] " },
                         Style {
                             muted: true,
                             ..Style::default()
                         },
+                        at,
                     );
                 }
             }
@@ -1782,9 +2160,11 @@ impl<'a, 'b> Pager<'a, 'b> {
         self.footnotes();
         let footnotes_height = self.y - footnotes_y;
         self.paints.clear();
+        self.hits.clear();
         let total_height = self.y + self.px(24.0);
         PageLayout {
             spans,
+            notes: self.notes,
             footnotes_y,
             footnotes_height,
             total_height,
@@ -1797,43 +2177,63 @@ impl<'a, 'b> Pager<'a, 'b> {
     /// Lays out and paints only the blocks that reach the viewport.
     fn slice_page(&mut self, page: &PageLayout, top: f32, height: f32) {
         self.y = self.px(36.0);
-        let content = self.content_width();
         let bottom = top + height;
-        for span in &page.spans {
+        for index in 0..page.spans.len() {
+            let span = page.spans[index];
             if span.y + span.height <= top || span.y >= bottom {
                 continue;
             }
-            if let Some(cache) = self.cache.as_deref()
-                && let Some(cached) = cache.get(&span.block)
-            {
-                let mut paints = cached.clone();
-                for paint in &mut paints {
-                    paint.shift(span.y);
-                }
-                self.paints.extend(paints);
-                continue;
-            }
-            let mark = self.paints.len();
-            self.y = span.y;
-            self.block(span.block, self.left, content, self.theme.text, 0);
-            if let Some(cache) = self.cache.as_deref_mut() {
-                let mut made = self.paints.split_off(mark);
-                for paint in &mut made {
-                    paint.shift(-span.y);
-                }
-                cache.insert(span.block, made.clone());
-                for paint in &mut made {
-                    paint.shift(span.y);
-                }
-                self.paints.extend(made);
-            }
+            self.block_paints(page, index);
         }
         if page.footnotes_height > 0.0
             && page.footnotes_y + page.footnotes_height > top
             && page.footnotes_y < bottom
         {
             self.y = page.footnotes_y;
+            self.notes.clear();
             self.footnotes();
+        }
+    }
+
+    /// Paints one top-level block, its paints and caret stops cached relative to its top so scroll
+    /// frames only move them. The cache is the renderer's, so hit tests can read it later.
+    fn block_paints(&mut self, page: &PageLayout, index: usize) {
+        let span = page.spans[index];
+        let content = self.content_width();
+        if let Some(cache) = self.cache.as_deref()
+            && let Some(cached) = cache.get(&span.block)
+        {
+            let mut paints = cached.paints.clone();
+            for paint in &mut paints {
+                paint.shift(span.y);
+            }
+            self.paints.extend(paints);
+            return;
+        }
+        let paints_mark = self.paints.len();
+        let hits_mark = self.hits.len();
+        self.y = span.y;
+        self.block(span.block, self.left, content, self.theme.text, 0);
+        if let Some(cache) = self.cache.as_deref_mut() {
+            let mut made = self.paints.split_off(paints_mark);
+            let mut lines = self.hits.split_off(hits_mark);
+            for paint in &mut made {
+                paint.shift(-span.y);
+            }
+            for line in &mut lines {
+                line.shift(-span.y);
+            }
+            cache.insert(
+                span.block,
+                CachedBlock {
+                    paints: made.clone(),
+                    lines,
+                },
+            );
+            for paint in &mut made {
+                paint.shift(span.y);
+            }
+            self.paints.extend(made);
         }
     }
 
