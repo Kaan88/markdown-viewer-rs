@@ -15,6 +15,11 @@ const IDLE: Duration = Duration::from_secs(10);
 const MAX_PIXELS: u64 = 24_000_000;
 
 fn main() {
+    // A deadline self-test hook: the client's timeout test starts the engine with this set, so it
+    // accepts no jobs. It is otherwise inert and costs one environment lookup.
+    if std::env::var_os("MDV_ENGINE_STALL").is_some() {
+        std::thread::sleep(Duration::from_secs(60));
+    }
     let (sender, receiver) = mpsc::channel::<Option<Request>>();
     std::thread::spawn(move || {
         let stdin = io::stdin();
