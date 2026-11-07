@@ -509,6 +509,61 @@ fn a_selection_that_wraps_gives_one_rect_per_line() {
 }
 
 #[test]
+fn a_details_summary_toggles_and_the_page_remeasures() {
+    let doc = mdview_core::parse(
+        "# Title\n\n<details>\n<summary>More</summary>\n\nHidden body text.\n\n</details>\n",
+    );
+    let details = doc
+        .blocks
+        .iter()
+        .position(|block| matches!(block.kind, mdview_core::model::BlockKind::Details { .. }))
+        .expect("a details block") as u32;
+    let summary = doc
+        .children(details)
+        .find(|child| {
+            matches!(
+                doc.blocks[*child as usize].kind,
+                mdview_core::model::BlockKind::Summary
+            )
+        })
+        .expect("a summary");
+    let options = Options {
+        width: 500.0,
+        scale: 1.0,
+        theme: LIGHT,
+        max_height: None,
+        base_dir: None,
+    };
+    let mut renderer = DocumentRenderer::new();
+    let closed = renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, &closed, 0.0, 400.0);
+    let text = doc.blocks[summary as usize].text;
+    let rect = renderer.selection_rects(&doc, &options, &closed, text.start, text.end)[0];
+    let hit = renderer
+        .hit_test(&doc, &options, &closed, rect.x + 2.0, rect.y + rect.h / 2.0)
+        .expect("a click on the summary");
+    assert_eq!(hit.details, Some(details), "the summary names its details");
+    assert!(!renderer.details_open(&doc, details), "closed as written");
+    renderer.set_details(details, true);
+    assert!(renderer.details_open(&doc, details));
+    let open = renderer.layout(&doc, &options);
+    assert!(
+        open.total_height() > closed.total_height() + 20.0,
+        "opening shows the body: {} vs {}",
+        open.total_height(),
+        closed.total_height()
+    );
+    renderer.set_details(details, false);
+    let again = renderer.layout(&doc, &options);
+    assert!(
+        (again.total_height() - closed.total_height()).abs() < 0.5,
+        "closing restores the height: {} vs {}",
+        again.total_height(),
+        closed.total_height()
+    );
+}
+
+#[test]
 fn a_missing_image_falls_back_to_the_placeholder() {
     let dir = temp_dir("image-missing");
     let doc = mdview_core::parse("![alt text](nope.png)\n");

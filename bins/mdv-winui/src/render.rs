@@ -9,6 +9,7 @@
 use crate::bindings::*;
 use crate::diag;
 use mdview_core::Document;
+use mdview_core::model::BlockKind;
 use mdview_render::{DocumentRenderer, Hit, Options, PageLayout, Rect, Theme};
 use std::ffi::c_void;
 use std::time::Instant;
@@ -176,6 +177,7 @@ impl Renderer {
         self.options = None;
         self.selection = None;
         self.scroll = 0.0;
+        self.renderer.clear_details();
     }
 
     pub fn set_zoom(&mut self, zoom: f32) {
@@ -309,6 +311,69 @@ impl Renderer {
         };
         self.scroll_to(row - 24.0 * self.scale);
         true
+    }
+
+    /// Flips a `<details>` and forgets the page, so the next frame measures it again.
+    pub fn toggle_details(&mut self, block: u32) -> Option<bool> {
+        let open = {
+            let document = self.document.as_ref()?;
+            self.renderer.details_open(document, block)
+        };
+        self.renderer.set_details(block, !open);
+        self.page_layout = None;
+        self.selection = None;
+        Some(!open)
+    }
+
+    /// `--details-test`: click the first summary, then measure the page before and after. Returns
+    /// the details block, the two heights and the new open state.
+    pub fn details_test(&mut self) -> Option<(u32, f32, f32, bool)> {
+        let block = {
+            let document = self.document.as_ref()?;
+            document
+                .blocks
+                .iter()
+                .position(|block| matches!(block.kind, BlockKind::Details { .. }))?
+                as u32
+        };
+        let (_, text) = {
+            let document = self.document.as_ref()?;
+            let summary = document.children(block).find(|child| {
+                matches!(document.blocks[*child as usize].kind, BlockKind::Summary)
+            })?;
+            (summary, document.blocks[summary as usize].text)
+        };
+        let options = self.options.clone()?;
+        let before = self.page_layout.as_ref()?.total_height();
+        let hit = {
+            let document = self.document.as_ref()?;
+            let layout = self.page_layout.as_ref()?;
+            let rect = *self
+                .renderer
+                .selection_rects(document, &options, layout, text.start, text.end)
+                .first()?;
+            self.renderer.hit_test(
+                document,
+                &options,
+                layout,
+                rect.x + 2.0,
+                rect.y + rect.h / 2.0,
+            )?
+        };
+        let details = hit.details?;
+        let open = {
+            let document = self.document.as_ref()?;
+            self.renderer.details_open(document, details)
+        };
+        self.renderer.set_details(details, !open);
+        let page = {
+            let document = self.document.as_ref()?;
+            self.renderer.layout(document, &options)
+        };
+        let after = page.total_height();
+        self.page_layout = Some(page);
+        self.selection = None;
+        Some((details, before, after, !open))
     }
 
     /// A link's destination as written, for the shell to open or navigate.

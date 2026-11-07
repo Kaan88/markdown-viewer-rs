@@ -87,6 +87,8 @@ pub struct Hit {
     pub offset: u32,
     pub link: Option<u32>,
     pub footnote: Option<u32>,
+    /// The `<details>` block whose summary is under the point; clicking toggles it.
+    pub details: Option<u32>,
 }
 
 pub struct Rendered {
@@ -234,6 +236,8 @@ pub struct DocumentRenderer {
     cache_key: Option<(f32, f32, &'static str)>,
     /// Decoded images, shared by every frame so a cached paint can still find its pixels.
     images: HashMap<u32, Option<Rc<DecodedImage>>>,
+    /// `<details>` open overrides, by block, so a toggle is view state the document does not carry.
+    details: HashMap<u32, bool>,
     /// The frame [`view_frame`](Self::view_frame) keeps between calls.
     frame: Option<Frame>,
 }
@@ -253,6 +257,7 @@ impl DocumentRenderer {
             cache: HashMap::new(),
             cache_key: None,
             images: HashMap::new(),
+            details: HashMap::new(),
             frame: None,
         }
     }
@@ -270,6 +275,7 @@ impl DocumentRenderer {
             &mut self.layouts,
             None,
             &mut self.images,
+            &self.details,
         )
         .measure_page()
     }
@@ -300,6 +306,7 @@ impl DocumentRenderer {
             &mut self.layouts,
             Some(&mut self.cache),
             &mut self.images,
+            &self.details,
         );
         pager.slice_page(page, top, height);
         pager.finish_slice(top, height, page.total_height, &mut self.engine)
@@ -335,6 +342,7 @@ impl DocumentRenderer {
             &mut self.layouts,
             Some(&mut self.cache),
             &mut self.images,
+            &self.details,
         );
         let rows = height.ceil().max(1.0) as u32;
         let width = pager.width.round().max(1.0) as u32;
@@ -422,6 +430,32 @@ impl DocumentRenderer {
         self.frame.as_ref()
     }
 
+    /// Whether a `<details>` is open, honouring a shell override and falling back to how the
+    /// document was written.
+    pub fn details_open(&self, doc: &Document, block: u32) -> bool {
+        self.details
+            .get(&block)
+            .copied()
+            .unwrap_or_else(|| doc.details_open_as_written(block))
+    }
+
+    /// Opens or closes a `<details>`. The block's height changes, so the cached frame and the paint
+    /// cache go; the caller has to measure the page again.
+    pub fn set_details(&mut self, block: u32, open: bool) {
+        self.details.insert(block, open);
+        self.cache.clear();
+        self.frame = None;
+    }
+
+    /// Forgets every toggle, for a new document whose block numbers no longer mean the same.
+    pub fn clear_details(&mut self) {
+        if !self.details.is_empty() {
+            self.details.clear();
+            self.cache.clear();
+            self.frame = None;
+        }
+    }
+
     /// What is at page position `x, y`: the document offset, plus a link or footnote reference when
     /// the point is over one. Lays out the one block that was hit if the frame has not painted it
     /// yet, so this works before or after [`view_frame`](Self::view_frame) for that row.
@@ -449,8 +483,27 @@ impl DocumentRenderer {
             offset,
             link: None,
             footnote: None,
+            details: None,
         };
         if let Some(inner) = doc.block_at(offset) {
+            let mut block = inner;
+            loop {
+                let current = &doc.blocks[block as usize];
+                if matches!(current.kind, BlockKind::Summary)
+                    && current.parent != NONE
+                    && matches!(
+                        doc.blocks[current.parent as usize].kind,
+                        BlockKind::Details { .. }
+                    )
+                {
+                    hit.details = Some(current.parent);
+                    break;
+                }
+                if current.parent == NONE || matches!(current.kind, BlockKind::Details { .. }) {
+                    break;
+                }
+                block = current.parent;
+            }
             for i in doc.blocks[inner as usize].spans.usize() {
                 let span = &doc.spans[i];
                 match span.kind {
@@ -526,6 +579,7 @@ impl DocumentRenderer {
             &mut self.layouts,
             Some(&mut self.cache),
             &mut self.images,
+            &self.details,
         );
         pager.block_paints(page, index);
     }
@@ -540,6 +594,7 @@ impl DocumentRenderer {
             &mut self.layouts,
             None,
             &mut self.images,
+            &self.details,
         );
         pager.page();
         pager.finish(&mut self.engine)
@@ -857,6 +912,8 @@ struct Pager<'a, 'b> {
     /// Decoded images, owned by the `DocumentRenderer` so cached frames keep theirs. `None`
     /// remembers a file that will not load.
     images: &'b mut HashMap<u32, Option<Rc<DecodedImage>>>,
+    /// `<details>` open overrides from the shell; empty means use the document.
+    details: &'b HashMap<u32, bool>,
 }
 
 fn brush(c: Color) -> Brush {
@@ -871,6 +928,7 @@ impl<'a, 'b> Pager<'a, 'b> {
         layouts: &'b mut LayoutContext<Brush>,
         cache: Option<&'b mut HashMap<u32, CachedBlock>>,
         images: &'b mut HashMap<u32, Option<Rc<DecodedImage>>>,
+        details: &'b HashMap<u32, bool>,
     ) -> Self {
         let scale = options.scale.max(0.1);
         let logical_width = options.width.max(120.0);
@@ -900,7 +958,16 @@ impl<'a, 'b> Pager<'a, 'b> {
             cache,
             base_dir: options.base_dir.clone(),
             images,
+            details,
         }
+    }
+
+    /// Whether a `<details>` shows its body: the shell's toggle if there is one, else the source.
+    fn details_open(&self, block: u32) -> bool {
+        self.details
+            .get(&block)
+            .copied()
+            .unwrap_or_else(|| self.doc.details_open_as_written(block))
     }
 
     /// Loads an image once per render. `None` for an empty src, a missing file, a blocked format
@@ -1626,7 +1693,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             .iter()
             .copied()
             .find(|c| matches!(self.doc.blocks[*c as usize].kind, BlockKind::Summary));
-        let open = self.doc.details_open_as_written(b);
+        let open = self.details_open(b);
         if let Some(summary) = summary {
             let inline = self.inline_of(summary);
             let txt = Txt {

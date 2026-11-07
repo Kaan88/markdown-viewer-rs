@@ -301,6 +301,32 @@ impl H<Canvas> {
     pub fn set_cursor_shape(&self, shape: u32) {
         self.widget().set_cursor_shape(shape)
     }
+    /// Sends a mouse event straight to the canvas, in canvas logical coordinates. Unlike a
+    /// synthetic event through the QWindow, this reaches `mouseReleaseEvent` reliably: Qt only
+    /// keeps the press's implicit grab for events it knows came from the platform.
+    pub fn send_mouse(&self, kind: u32, x: f64, y: f64) -> bool {
+        let p = QPointF::new(x, y);
+        let (button, buttons) = if kind == EV_MOUSE_MOVE {
+            (
+                MouseButton::NoButton,
+                MouseButtons::from(MouseButton::LeftButton),
+            )
+        } else if kind == EV_MOUSE_PRESS {
+            (
+                MouseButton::LeftButton,
+                MouseButtons::from(MouseButton::LeftButton),
+            )
+        } else {
+            (MouseButton::LeftButton, QFlags::from(MouseButton::NoButton))
+        };
+        let mods = QFlags::from(KeyboardModifier::NoModifier);
+        let mut e = new_mouse_event(EventType(kind), &p, &p, button, buttons, mods);
+        let raw = e.as_mut().unwrap();
+        let raw = unsafe { raw.get_unchecked_mut() as *mut QMouseEvent as *mut QEvent };
+        let receiver =
+            unsafe { <QWidget as Upcast<QObject>>::upcast_ptr(self.widget().0) }.cast_mut();
+        unsafe { QApplication::send_event(receiver, raw) }
+    }
     pub fn start_timer(&self, ms: i32) -> i32 {
         pin!(self).startTimer(ms, TimerType(0)) // Qt::PreciseTimer
     }
@@ -380,13 +406,6 @@ impl H<QWidget> {
         let d = unsafe { &*self.0 };
         let win = d.window();
         let o = unsafe { d.mapTo(win, &QPoint::new(d.width() / 2, d.height() / 2)) };
-        (o.x() as f64, o.y() as f64)
-    }
-    /// The widget's top-left corner in window coordinates.
-    pub fn origin_in_window(&self) -> (f64, f64) {
-        let d = unsafe { &*self.0 };
-        let win = d.window();
-        let o = unsafe { d.mapTo(win, &QPoint::new(0, 0)) };
         (o.x() as f64, o.y() as f64)
     }
 }

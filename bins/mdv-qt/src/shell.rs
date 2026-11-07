@@ -62,6 +62,7 @@ struct Shell {
     /// The link or footnote under the press, followed on release if the pointer did not move.
     pressed_link: Cell<Option<u32>>,
     pressed_footnote: Cell<Option<u32>>,
+    pressed_details: Cell<Option<u32>>,
     selecting: Cell<bool>,
     moved: Cell<bool>,
     /// A fragment to scroll to once the next layout exists, for links into another document.
@@ -90,6 +91,7 @@ impl Shell {
             anchor: Cell::new(None),
             pressed_link: Cell::new(None),
             pressed_footnote: Cell::new(None),
+            pressed_details: Cell::new(None),
             selecting: Cell::new(false),
             moved: Cell::new(false),
             pending_anchor: RefCell::new(None),
@@ -122,6 +124,7 @@ impl Shell {
                     started.elapsed().as_secs_f64() * 1000.0
                 );
                 *self.document.borrow_mut() = Some(document);
+                self.renderer.borrow_mut().clear_details();
                 *self.layout.borrow_mut() = None;
                 self.scroll.set(0.0);
                 self.selection.set(None);
@@ -311,6 +314,7 @@ impl Shell {
         self.selection.set(Some((hit.offset, hit.offset)));
         self.pressed_link.set(hit.link);
         self.pressed_footnote.set(hit.footnote);
+        self.pressed_details.set(hit.details);
         self.moved.set(false);
         self.selecting.set(true);
     }
@@ -344,16 +348,33 @@ impl Shell {
         if self.moved.get() {
             self.pressed_link.set(None);
             self.pressed_footnote.set(None);
+            self.pressed_details.set(None);
             return;
         }
         if let Some(link) = self.pressed_link.take() {
             self.follow_link(link);
         } else if let Some(note) = self.pressed_footnote.take() {
             self.follow_footnote(note);
+        } else if let Some(details) = self.pressed_details.take() {
+            self.toggle_details(details);
         } else {
             self.selection.set(None);
             self.redraw();
         }
+    }
+
+    /// Flips a `<details>`; the next paint measures the page again, because its body changes height.
+    fn toggle_details(&self, block: u32) {
+        let open = {
+            let document = self.document.borrow();
+            let Some(document) = document.as_ref() else {
+                return;
+            };
+            self.renderer.borrow().details_open(document, block)
+        };
+        self.renderer.borrow_mut().set_details(block, !open);
+        *self.layout.borrow_mut() = None;
+        self.redraw();
     }
 
     /// A margin above a jumped-to anchor, so the heading is not glued to the top edge.
@@ -637,6 +658,8 @@ enum Check {
     Hold,
     /// Click a link and report where it scrolled, then exit.
     Link,
+    /// Click a `<details>` summary and report the height change, then exit.
+    Details,
 }
 
 /// Scripted checks through Qt's real mouse path, for `--select-test`, `--select-hold` and
@@ -648,19 +671,11 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
     };
     shell.ensure_layout();
     canvas.widget().repaint();
-    let Some(window) = shell
-        .window
-        .get()
-        .and_then(|window| window.widget().window_handle())
-    else {
-        println!("check failed: no window handle");
-        std::process::exit(1);
-    };
-    let (origin_x, origin_y) = canvas.widget().origin_in_window();
     let scale = shell.scale.get();
     let scroll = shell.scroll.get();
     let word = match check {
         Check::Link => "Jump to diagrams",
+        Check::Details => "Read more about this viewer",
         _ => "Markdown",
     };
     let start = {
@@ -680,18 +695,13 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
         println!("check failed: no rectangle for {word:?}");
         std::process::exit(1);
     };
-    let to_screen = |x: f32, y: f32| {
-        (
-            origin_x + x as f64 / scale,
-            origin_y + (y as f64 - scroll) / scale,
-        )
-    };
-    let (x0, y0) = to_screen(rect.x + 2.0, rect.y + rect.h / 2.0);
-    let (x1, _) = to_screen(rect.x + rect.w - 2.0, rect.y + rect.h / 2.0);
+    let to_local = |x: f32, y: f32| (x as f64 / scale, (y as f64 - scroll) / scale);
+    let (x0, y0) = to_local(rect.x + 2.0, rect.y + rect.h / 2.0);
+    let (x1, _) = to_local(rect.x + rect.w - 2.0, rect.y + rect.h / 2.0);
     match check {
         Check::Link => {
-            window.send_mouse(EV_MOUSE_PRESS, x0, y0);
-            window.send_mouse(EV_MOUSE_RELEASE, x0, y0);
+            canvas.send_mouse(EV_MOUSE_PRESS, x0, y0);
+            canvas.send_mouse(EV_MOUSE_RELEASE, x0, y0);
             let moved = shell.scroll.get();
             let expected = {
                 let document = shell.document.borrow();
@@ -711,10 +721,31 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
             );
             std::process::exit(if ok { 0 } else { 1 });
         }
+        Check::Details => {
+            let before = shell
+                .layout
+                .borrow()
+                .as_ref()
+                .map_or(0.0, |page| page.total_height());
+            canvas.send_mouse(EV_MOUSE_PRESS, x0, y0);
+            canvas.send_mouse(EV_MOUSE_RELEASE, x0, y0);
+            shell.ensure_layout();
+            let after = shell
+                .layout
+                .borrow()
+                .as_ref()
+                .map_or(0.0, |page| page.total_height());
+            let ok = after > before + 20.0;
+            println!(
+                "details test {}: {before:.0} -> {after:.0} px",
+                if ok { "ok" } else { "failed" }
+            );
+            std::process::exit(if ok { 0 } else { 1 });
+        }
         Check::Select | Check::Hold => {
-            window.send_mouse(EV_MOUSE_PRESS, x0, y0);
-            window.send_mouse(EV_MOUSE_MOVE, x1, y0);
-            window.send_mouse(EV_MOUSE_RELEASE, x1, y0);
+            canvas.send_mouse(EV_MOUSE_PRESS, x0, y0);
+            canvas.send_mouse(EV_MOUSE_MOVE, x1, y0);
+            canvas.send_mouse(EV_MOUSE_RELEASE, x1, y0);
             let selection = shell.selection.get();
             let selected = {
                 let document = shell.document.borrow();
@@ -879,6 +910,7 @@ pub fn run() -> i32 {
             "--select-test" => check = Some(Check::Select),
             "--select-hold" => check = Some(Check::Hold),
             "--link-test" => check = Some(Check::Link),
+            "--details-test" => check = Some(Check::Details),
             "--zoom" => {
                 zoom = args.next().expect("--zoom needs a number").parse().unwrap();
             }

@@ -331,9 +331,12 @@ struct Shell {
     /// The link or footnote under the press, followed on release when the pointer did not move.
     pressed_link: Cell<Option<u32>>,
     pressed_footnote: Cell<Option<u32>>,
+    pressed_details: Cell<Option<u32>>,
     selection_moved: Cell<bool>,
     /// Select a word after the first frame, for `--select-test`.
     select_test: Cell<bool>,
+    /// Toggle the first details after the first frame, for `--details-test`.
+    details_test: Cell<bool>,
 }
 
 impl Shell {
@@ -451,6 +454,17 @@ impl Shell {
                             "select test: {range:?}, first rect {rect:?}, offset {:.0}",
                             self.renderer.borrow().offset()
                         ));
+                        self.show();
+                    }
+                    if self.details_test.get() {
+                        self.details_test.set(false);
+                        let result = self.renderer.borrow_mut().details_test();
+                        match result {
+                            Some((block, before, after, open)) => diag::trace(&format!(
+                                "details test ok: block {block} open={open}, {before:.0} -> {after:.0} px"
+                            )),
+                            None => diag::trace("details test failed: no summary or no change"),
+                        }
                         self.show();
                     }
                     if diag::measuring() {
@@ -622,6 +636,8 @@ pub struct Startup {
     pub size: (i32, i32),
     /// Select a word after the first frame, for `--select-test`.
     pub select: bool,
+    /// Toggle the first `<details>` after the first frame, for `--details-test`.
+    pub details: bool,
 }
 
 pub fn build(
@@ -691,8 +707,10 @@ pub fn build(
         selection_anchor: Cell::new(None),
         pressed_link: Cell::new(None),
         pressed_footnote: Cell::new(None),
+        pressed_details: Cell::new(None),
         selection_moved: Cell::new(false),
         select_test: Cell::new(startup.select),
+        details_test: Cell::new(startup.details),
     });
     if let Some(path) = &file
         && let Err(e) = load(&shell, path)
@@ -762,6 +780,7 @@ pub fn build(
                             .set_selection(Some((hit.offset, hit.offset)));
                         shell.pressed_link.set(hit.link);
                         shell.pressed_footnote.set(hit.footnote);
+                        shell.pressed_details.set(hit.details);
                         shell.selection_moved.set(false);
                         shell.selecting.set(true);
                         diag::trace(&format!(
@@ -829,8 +848,15 @@ pub fn build(
                     if !shell.selection_moved.get() {
                         let link = shell.pressed_link.take();
                         let footnote = shell.pressed_footnote.take();
+                        let details = shell.pressed_details.take();
                         if link.is_some() || footnote.is_some() {
                             shell.follow(link, footnote);
+                        } else if let Some(details) = details {
+                            if let Some(open) = shell.renderer.borrow_mut().toggle_details(details)
+                            {
+                                diag::trace(&format!("details {details} open={open}"));
+                                shell.show();
+                            }
                         } else {
                             shell.renderer.borrow_mut().set_selection(None);
                             shell.show();
@@ -838,6 +864,7 @@ pub fn build(
                     } else {
                         shell.pressed_link.set(None);
                         shell.pressed_footnote.set(None);
+                        shell.pressed_details.set(None);
                         diag::trace("selection released");
                     }
                 }
