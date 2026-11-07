@@ -340,6 +340,36 @@ impl Renderer {
         &self.find.query
     }
 
+    /// Headings in document order: level, title and the block to scroll to.
+    pub fn headings(&self) -> Vec<(u8, String, u32)> {
+        let Some(document) = self.document.as_ref() else {
+            return Vec::new();
+        };
+        document
+            .headings
+            .iter()
+            .map(|heading| {
+                (
+                    heading.level,
+                    document.str(heading.title).to_string(),
+                    heading.block,
+                )
+            })
+            .collect()
+    }
+
+    /// Scrolls to a block's heading row. Returns the offset it chose, or `None` before layout.
+    pub fn scroll_to_block(&mut self, block: u32) -> Option<f32> {
+        let row = {
+            let document = self.document.as_ref()?;
+            let layout = self.page_layout.as_ref()?;
+            layout.y_of(document, block)?
+        };
+        let target = (row - 24.0 * self.scale).max(0.0);
+        self.scroll_to(target);
+        Some(target)
+    }
+
     /// Number of highlight rectangles in the current matches, for the scripted find check.
     pub fn find_rect_count(&mut self, current_only: bool) -> usize {
         self.find_rects(current_only).len()

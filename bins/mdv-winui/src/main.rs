@@ -160,6 +160,7 @@ fn run() -> Result<()> {
         select: std::env::args().any(|arg| arg == "--select-test"),
         details: std::env::args().any(|arg| arg == "--details-test"),
         find: std::env::args().any(|arg| arg == "--find-test"),
+        outline: std::env::args().any(|arg| arg == "--outline-test"),
     };
     let gpu = Rc::new(RefCell::new(Some(gpu)));
     // Application and UI state must outlive Start, which returns at process end.

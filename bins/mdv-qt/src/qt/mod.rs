@@ -69,6 +69,11 @@ impl<T> Clone for H<T> {
     }
 }
 impl<T> Copy for H<T> {}
+impl<T> H<T> {
+    pub fn raw(&self) -> *mut T {
+        self.0
+    }
+}
 
 macro_rules! pin {
     ($h:expr) => {
@@ -680,6 +685,18 @@ impl H<QTreeWidget> {
         let t = H(new_tree());
         pin!(t).setHeaderHidden(true);
         t
+    }
+    pub fn clear(&self) {
+        pin!(self).clear_tree()
+    }
+    pub fn expand_all(&self) {
+        pin!(self).expand_tree()
+    }
+    pub fn on_item_clicked(&self, f: impl FnMut(*mut QTreeWidgetItem) + 'static) {
+        let mut f = GuiThreadOnly(f);
+        pin!(self)
+            .on_item_clicked(move |_, item, _| f.get()(item))
+            .release();
     }
     pub fn add_top(&self, text: &str) -> H<QTreeWidgetItem> {
         let i = H(unsafe { new_tree_item(self.0) });

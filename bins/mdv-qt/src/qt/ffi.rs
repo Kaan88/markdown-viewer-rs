@@ -165,6 +165,20 @@ pub mod ffi {
         #[qsignal]
         #[cxx_name = "returnPressed"]
         fn return_pressed(self: Pin<&mut QLineEdit>);
+        #[qsignal]
+        #[cxx_name = "itemClicked"]
+        unsafe fn item_clicked(
+            self: Pin<&mut QTreeWidget>,
+            item: *mut QTreeWidgetItem,
+            column: i32,
+        );
+
+        #[rust_name = "clear_tree"]
+        #[cxx_name = "clear"]
+        fn clear(self: Pin<&mut QTreeWidget>);
+        #[rust_name = "expand_tree"]
+        #[cxx_name = "expandAll"]
+        fn expandAll(self: Pin<&mut QTreeWidget>);
 
         // The find bar needs these; cxx-qt's generated header does not expose them by default.
         #[rust_name = "set_visible"]

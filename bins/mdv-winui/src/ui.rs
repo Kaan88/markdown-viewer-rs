@@ -342,6 +342,11 @@ struct Shell {
     find_active: Cell<bool>,
     /// Run the find check after the first frame, for `--find-test`.
     find_test: Cell<bool>,
+    /// Run the outline check after the first frame, for `--outline-test`.
+    outline_test: Cell<bool>,
+    /// The Outline menu, rebuilt when a document loads.
+    outline_menu: RefCell<Option<MenuBarItem>>,
+    outline_entries: Cell<usize>,
 }
 
 impl Shell {
@@ -597,6 +602,26 @@ impl Shell {
                         ));
                         self.show();
                     }
+                    if self.outline_test.get() {
+                        self.outline_test.set(false);
+                        let headings = self.renderer.borrow().headings();
+                        let entries = self.outline_entries.get();
+                        let target = headings
+                            .iter()
+                            .find(|(_, title, _)| title == "Diagrams")
+                            .map(|(_, _, block)| *block);
+                        let expected = target
+                            .and_then(|block| self.renderer.borrow_mut().scroll_to_block(block));
+                        let after = self.renderer.borrow().offset();
+                        let ok = entries >= 5
+                            && expected.is_some_and(|expected| (after - expected).abs() < 1.0);
+                        diag::trace(&format!(
+                            "outline test {}: {entries} headings, scrolled to {after:.0}, \
+                             expected {expected:?}",
+                            if ok { "ok" } else { "failed" }
+                        ));
+                        self.show();
+                    }
                     if diag::measuring() {
                         // One line and out, so a script can time the first frame from process start.
                         diag::measure_line(&format!(
@@ -647,6 +672,7 @@ fn load(shell: &Shell, path: &Path) -> std::result::Result<(), String> {
         .SetTitle(&format!("mdview - {name}"))
         .map_err(|e| e.to_string())?;
     *shell.path.borrow_mut() = Some(path.to_path_buf());
+    refresh_outline(shell);
     Ok(())
 }
 
@@ -686,6 +712,46 @@ fn set_root_background(root: &Grid, theme: mdview_render::Theme) -> Result<()> {
     root.cast::<IPanel>()?
         .SetBackground(&brush.cast::<Brush>()?)?;
     Ok(())
+}
+
+/// Rebuilds the Outline menu from the renderer's headings. Called after a document loads, because
+/// the menu is created once but its items depend on the document.
+fn refresh_outline(shell: &Shell) {
+    let Some(menu) = shell.outline_menu.borrow().clone() else {
+        return;
+    };
+    let Some(target) = SHELL.with(|cell| cell.borrow().clone()) else {
+        return;
+    };
+    let Ok(items) = menu.Items() else {
+        return;
+    };
+    _ = items.Clear();
+    let headings = shell.renderer.borrow().headings();
+    for (level, title, block) in &headings {
+        let Ok(item) = MenuFlyoutItem::new() else {
+            continue;
+        };
+        let indent = "    ".repeat(level.saturating_sub(1) as usize);
+        if item.SetText(&format!("{indent}{title}")).is_err() {
+            continue;
+        }
+        let target = target.clone();
+        let block = *block;
+        if item
+            .Click(move |_, _| {
+                target.renderer.borrow_mut().scroll_to_block(block);
+                target.show();
+            })
+            .is_err()
+        {
+            continue;
+        }
+        if let Ok(base) = item.cast::<MenuFlyoutItemBase>() {
+            _ = items.Append(&base);
+        }
+    }
+    shell.outline_entries.set(headings.len());
 }
 
 fn build_menu(shell: &Rc<Shell>) -> Result<()> {
@@ -737,6 +803,11 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
         .Append(&previous.cast::<MenuFlyoutItemBase>()?)?;
     menu.Items()?.Append(&edit)?;
 
+    let outline = MenuBarItem::new()?;
+    outline.SetTitle("&Outline")?;
+    menu.Items()?.Append(&outline)?;
+    *shell.outline_menu.borrow_mut() = Some(outline);
+
     let view = MenuBarItem::new()?;
     view.SetTitle("View")?;
     for (title, theme) in [("Light theme", LIGHT), ("Dark theme", DARK)] {
@@ -756,6 +827,7 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
 
     place(&shell.root, &menu, 0, 0)?;
     Grid::SetColumnSpan(&menu.cast::<FrameworkElement>()?, 2)?;
+    refresh_outline(shell);
     Ok(())
 }
 
@@ -790,6 +862,8 @@ pub struct Startup {
     pub details: bool,
     /// Run the find check after the first frame, for `--find-test`.
     pub find: bool,
+    /// Run the outline check after the first frame, for `--outline-test`.
+    pub outline: bool,
 }
 
 pub fn build(
@@ -865,6 +939,9 @@ pub fn build(
         details_test: Cell::new(startup.details),
         find_active: Cell::new(false),
         find_test: Cell::new(startup.find),
+        outline_test: Cell::new(startup.outline),
+        outline_menu: RefCell::new(None),
+        outline_entries: Cell::new(0),
     });
     if let Some(path) = &file
         && let Err(e) = load(&shell, path)
@@ -1027,6 +1104,7 @@ pub fn build(
             .forget();
     }
 
+    SHELL.with(|cell| *cell.borrow_mut() = Some(shell.clone()));
     build_menu(&shell)?;
     window.SetContent(&root.cast::<UIElement>()?)?;
     window.Closed(|_, _| diag::trace("window closed"))?.forget();

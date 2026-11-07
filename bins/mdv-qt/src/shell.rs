@@ -81,6 +81,10 @@ struct Shell {
     find_bar: Cell<Option<H<QToolBar>>>,
     find_edit: Cell<Option<H<QLineEdit>>>,
     find: RefCell<Find>,
+    /// The outline dock and its heading items, each paired with its block.
+    outline_dock: Cell<Option<H<QDockWidget>>>,
+    outline_tree: Cell<Option<H<QTreeWidget>>>,
+    outline_items: RefCell<Vec<(H<QTreeWidgetItem>, u32)>>,
 }
 
 impl Shell {
@@ -112,6 +116,9 @@ impl Shell {
             find_bar: Cell::new(None),
             find_edit: Cell::new(None),
             find: RefCell::new(Find::default()),
+            outline_dock: Cell::new(None),
+            outline_tree: Cell::new(None),
+            outline_items: RefCell::new(Vec::new()),
         }
     }
 
@@ -258,6 +265,82 @@ impl Shell {
         }
     }
 
+    /// Rebuilds the heading tree from the current document. Levels nest, so an `<h3>` under an
+    /// `<h2>` becomes its child; a skipped level starts a new top-level branch.
+    fn build_outline(&self) {
+        let Some(tree) = self.outline_tree.get() else {
+            return;
+        };
+        let headings = {
+            let document = self.document.borrow();
+            let Some(document) = document.as_ref() else {
+                return;
+            };
+            document
+                .headings
+                .iter()
+                .map(|heading| {
+                    (
+                        heading.level,
+                        document.str(heading.title).to_string(),
+                        heading.block,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        tree.clear();
+        let mut items = self.outline_items.borrow_mut();
+        items.clear();
+        let mut stack: Vec<(u8, H<QTreeWidgetItem>)> = Vec::new();
+        for (level, title, block) in headings {
+            while stack.last().is_some_and(|(parent, _)| *parent >= level) {
+                stack.pop();
+            }
+            let item = match stack.last() {
+                Some((_, parent)) => parent.add_child(&title),
+                None => tree.add_top(&title),
+            };
+            stack.push((level, item));
+            items.push((item, block));
+        }
+        tree.expand_all();
+    }
+
+    fn show_outline(&self, visible: bool) {
+        if let Some(dock) = self.outline_dock.get() {
+            if visible {
+                self.build_outline();
+            }
+            dock.widget().set_visible(visible);
+        }
+    }
+
+    fn outline_click(&self, item: *mut QTreeWidgetItem) {
+        let block = self
+            .outline_items
+            .borrow()
+            .iter()
+            .find(|(handle, _)| handle.raw() == item)
+            .map(|(_, block)| *block);
+        if let Some(block) = block {
+            self.scroll_to_outline(block);
+        }
+    }
+
+    fn scroll_to_outline(&self, block: u32) {
+        let row = {
+            let document = self.document.borrow();
+            let layout = self.layout.borrow();
+            match (document.as_ref(), layout.as_ref()) {
+                (Some(document), Some(layout)) => layout.y_of(document, block),
+                _ => None,
+            }
+        };
+        if let Some(row) = row {
+            self.scroll_to_row(row);
+        }
+    }
+
     fn load(&self, path: &Path) {
         match std::fs::read(path) {
             Ok(bytes) => {
@@ -283,6 +366,7 @@ impl Shell {
                     bar.widget().set_visible(false);
                 }
                 self.pending_anchor.borrow_mut().take();
+                self.build_outline();
                 *self.path.borrow_mut() = Some(path.to_path_buf());
                 let name = path
                     .file_name()
@@ -847,6 +931,10 @@ enum Check {
     Find,
     /// The same, but leave the window open so a screenshot can show the find bar and marks.
     FindHold,
+    /// Show the outline and jump to a heading, then exit.
+    Outline,
+    /// The same, but leave the window open so a screenshot can show the dock.
+    OutlineHold,
 }
 
 /// Scripted checks through Qt's real mouse path, for `--select-test`, `--select-hold` and
@@ -883,6 +971,53 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
             std::process::exit(1);
         }
         if check == Check::FindHold {
+            return;
+        }
+        std::process::exit(0);
+    }
+    if matches!(check, Check::Outline | Check::OutlineHold) {
+        shell.show_outline(true);
+        let dock_visible = shell
+            .outline_dock
+            .get()
+            .is_some_and(|dock| dock.widget().is_visible());
+        let entries = shell.outline_items.borrow().len();
+        let target = {
+            let document = shell.document.borrow();
+            document.as_ref().and_then(|document| {
+                document
+                    .headings
+                    .iter()
+                    .find(|heading| document.str(heading.title) == "Diagrams")
+                    .map(|heading| heading.block)
+            })
+        };
+        let expected = target.and_then(|block| {
+            let document = shell.document.borrow();
+            let layout = shell.layout.borrow();
+            match (document.as_ref(), layout.as_ref()) {
+                (Some(document), Some(layout)) => layout
+                    .y_of(document, block)
+                    .map(|y| (y as f64 - shell.jump_margin()).max(0.0)),
+                _ => None,
+            }
+        });
+        if let Some(block) = target {
+            shell.scroll_to_outline(block);
+        }
+        let moved = shell.scroll.get();
+        let ok = dock_visible
+            && entries >= 5
+            && expected.is_some_and(|expected| moved > 0.0 && (moved - expected).abs() < 1.0);
+        println!(
+            "outline test {}: {entries} headings, dock {dock_visible}, scrolled to {moved:.0}, \
+             expected {expected:?}",
+            if ok { "ok" } else { "failed" }
+        );
+        if !ok {
+            std::process::exit(1);
+        }
+        if check == Check::OutlineHold {
             return;
         }
         std::process::exit(0);
@@ -958,7 +1093,12 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
             );
             std::process::exit(if ok { 0 } else { 1 });
         }
-        Check::Select | Check::Hold | Check::Find | Check::FindHold => {
+        Check::Select
+        | Check::Hold
+        | Check::Find
+        | Check::FindHold
+        | Check::Outline
+        | Check::OutlineHold => {
             canvas.send_mouse(EV_MOUSE_PRESS, x0, y0);
             canvas.send_mouse(EV_MOUSE_MOVE, x1, y0);
             canvas.send_mouse(EV_MOUSE_RELEASE, x1, y0);
@@ -1053,7 +1193,28 @@ fn build(
     close.on_triggered(move |_| s.hide_find());
     shell.find_bar.set(Some(find_bar));
     shell.find_edit.set(Some(find_edit));
+
+    let outline_dock = H::<QDockWidget>::new("Outline", window.clone());
+    let outline_tree = H::<QTreeWidget>::new();
+    outline_dock.set_widget(outline_tree.widget());
+    window.add_dock(true, outline_dock);
+    outline_dock.widget().set_visible(false);
+    outline_dock.widget().resize(240, 700);
+    let s = shell.clone();
+    outline_tree.on_item_clicked(move |item| s.outline_click(item));
+    shell.outline_dock.set(Some(outline_dock));
+    shell.outline_tree.set(Some(outline_tree));
+
     let view_menu = menus.add_menu("&View");
+    let outline = view_menu.add_action("&Outline");
+    let s = shell.clone();
+    outline.on_triggered(move |_| {
+        let visible = s
+            .outline_dock
+            .get()
+            .is_some_and(|dock| dock.widget().is_visible());
+        s.show_outline(!visible);
+    });
     let light = view_menu.add_action("&Light theme");
     let dark = view_menu.add_action("&Dark theme");
     let help = menus.add_menu("&Help");
@@ -1171,6 +1332,8 @@ pub fn run() -> i32 {
             "--details-test" => check = Some(Check::Details),
             "--find-test" => check = Some(Check::Find),
             "--find-hold" => check = Some(Check::FindHold),
+            "--outline-test" => check = Some(Check::Outline),
+            "--outline-hold" => check = Some(Check::OutlineHold),
             "--zoom" => {
                 zoom = args.next().expect("--zoom needs a number").parse().unwrap();
             }
