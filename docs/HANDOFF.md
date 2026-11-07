@@ -143,7 +143,8 @@ cargo build --release --offline
 ```
 
 Run it with Qt's `bin` on `PATH` so the DLLs resolve. Flags: `<file>`, `--light`/`--dark`,
-`--zoom <x>`, `--drop-test <path>` (sends one `QDragEnterEvent` and `QDropEvent` through the window
+`--zoom <x>`, `--scroll <px>` (start partway down, for captures), `--drop-test <path>` (sends one
+`QDragEnterEvent` and `QDropEvent` through the window
 and exits 0 when the dropped path was loaded; it exists because Qt uses OLE drag and drop on Windows,
 so a posted `WM_DROPFILES` from another process is ignored), `--select-test` (drags over "Markdown"
 through the real mouse path, prints the selection and rect count, exits), `--select-hold` (the same
