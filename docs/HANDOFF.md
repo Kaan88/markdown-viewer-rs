@@ -1,301 +1,478 @@
-# Handoff: Phase 2 renderer, WinUI shell, Qt shell on Windows
+# Handoff
 
-**Branch:** `phase2-renderer`, from `phase1-audit-fixes` (pushed at `633c0a8`). Checkpoints are
-committed here; nothing is pushed. The four review images in `tests/golden/` still have not been
-approved by the user.
+`mdview` is a Rust remake of `Kaan88/markdown-viewer-cpp`: a Markdown viewer with its own renderer,
+**WinUI 3 on Windows** and **Qt Widgets (CXX-Qt) on Linux**, no webview, no authored C++ or XAML.
 
-## State
+This document is the current state: what works, how to build and check it, the traps already found,
+and what to do next. `docs/PLAN.md` is the full plan (budgets, phases, gates). Read this file first,
+then the plan.
 
-- Phase 1 closed: core audit fixes, tests and docs on `phase1-audit-fixes`. Suite passes on Windows:
-  7 core, 11 fuzz, 113 regression, 3 spec, release profile. Spec counts stay 645/652 CommonMark and
-  665/672 GFM.
-- Phase 2: `crates/render` lays the document model out and paints a BGRA bitmap with no window
-  system; `bins/mdv-bench` writes PNGs. `fixtures/showcase.md` (66 blocks) lays out in about 27 ms at
-  1084-1100 logical px and 100% scale, 3020 px tall, in both themes.
-- **There are now two windows, both running on this Windows PC:** the WinUI shell
-  (`bins/mdv-winui`) and the Qt shell (`bins/mdv-qt`). Both open a Markdown file, draw the page
-  through the renderer, and scroll with the wheel.
-- Images draw: PNG and JPEG are decoded from the document's own directory, capped at 12 MiB and 24 M
-  pixels, placed as parley inline boxes and scaled to the content width. Missing, unsupported (SVG
-  is Phase 4) and over-limit files keep the `[image: alt]` placeholder. New fixture
-  `fixtures/images.md`, golden `tests/golden/images-light.png`, and shell captures.
-- Workspace: 7 core, 11 fuzz, 113 regression, 3 spec, 6 render tests and the renderer's image-limit
-  unit test pass; `cargo fmt --all` clean.
-- A scroll frame now reaches the WinUI window as a band: the renderer reports which rows it painted
-  and how far the rest moved, and the shell moves the rest with a GPU copy. See "Virtualized
-  viewports" below.
+**Branch:** `phase2-renderer`, tracking `origin/phase2-renderer`, HEAD `09e5622`, everything pushed.
+There is no CI: tests are run by hand before a push. Commit and push at milestones.
 
-## The WinUI shell (`bins/mdv-winui`)
+Working agreements (from `CLAUDE.md`): read this file before touching anything; commit and push as
+phases or milestones complete, not continuously, but do push, because the user checks GitHub; there is
+no CI, so run the tests yourself; `spikes/` is throwaway; report results plainly, including what was
+**not** run; nothing counts as working on Windows until it has run on Windows. The user is on Windows
+and the Linux Qt work happens on their VM (section 5).
 
-- WinUI 3 with hand-generated Windows App SDK bindings (`src/bindings.rs`, copied from
-  `spikes/winui`; regenerate only with the same NuGet winmds). No XAML, C#, or C++.
-- Framework-dependent build: needs the Windows App Runtime 2.6.4 or newer (x64). This PC has 2.6.5.
-- Window is 1100x900. Menus: File > Open..., Reload, Close; View > Light theme, Dark theme. The
-  wheel scrolls, and `--zoom 1.5` scales the page (verified: showcase grows from 3020 px to
-  4592 px at 1.5). The page follows the Windows app theme at startup (`AppsUseLightTheme`), and
-  `--light` / `--dark` override it for screenshots.
-- **Scrolling and input**: the page is laid out 14 logical px narrower than the panel and the shell
-  paints its own scrollbar into that gutter (a hairline separator, a track and a thumb), because the
-  checked-in bindings have no `ScrollBar` control and cannot be regenerated without the NuGet winmds.
-  Home/End, the arrows (48 px), Page Up/Down and Space (90% of the viewport) scroll, and a press in
-  the gutter jumps to that point and starts a drag.
-- The menu labels are drawn by WinUI itself, and the default app theme is dark, which made them
-  white on the light page. `bindings.rs` now carries one hand-written helper, `set_requested_theme`,
-  that calls the `RequestedTheme` vtable slot the generator left unbound; the root grid is set to
-  Light or Dark with the page, and the View menu keeps them in step. Regenerating the bindings would
-  remove that helper, so it is duplicated there deliberately.
-- **Input arrives two ways, because WinUI moves it around.** Keys come through a thread-level
-  `WH_GETMESSAGE` hook: WinUI's content lives in child windows (`InputSiteWindowClass`,
-  `Microsoft.UI.Content.DesktopChildSiteBridge`) that take the keyboard, and subclassing those
-  window procedures with `SetWindowLongPtrW` is not durable - WinUI reinstalls its own and the
-  subclass silently stops being called after a resize. The hook filters by window (`GetAncestor`
-  must be our top-level window), so the file dialog's own message loop is untouched, and it swallows
-  the keys it uses by setting the message to `WM_NULL`. The scrollbar is driven by XAML pointer
-  events (`PointerPressed`/`PointerMoved`/`PointerReleased`), which the generator left as unbound
-  vtable slots; `bindings.rs` carries hand-written `pointer_*` helpers and `IPointerPoint::position`
-  for them. XAML reports the position in the panel's own logical px, so no window-coordinate maths is
-  involved.
-- After a *programmatic* resize from another process the app needs one click before keys reach it
-  again: WinUI loses the XAML keyboard focus and `SetForegroundWindow` does not restore it. A resize
-  with the mouse keeps the input focus, and a click fixes it, so this is a focus matter rather than
-  a hook one - verified by clicking after a resize and watching the next arrow key scroll again.
-- `src/render.rs` keeps the page in **two D3D11 textures** (see the virtualization section) and the
-  scrollbar in a 15 px strip beside it, so a scroll sends the band and a GPU copy of the rest instead
-  of the whole viewport. The page can be a few px wider than the width it was laid out for; the
-  scrollbar strip covers that overhang, because the bar has to sit at the panel's right edge.
-- `--trace` writes `mdview.trace.log` beside the exe, one line per frame with paint, upload, the rows
-  sent, present and total. `--measure` writes one `result=ok first_frame_ms=...` line and exits.
-- `--no-shift` sends every frame whole instead of using the shifted frame, which is the reference a
-  shifted frame has to match; `--scroll <device px>` starts partway down the page; `--scroll-steps
-  <n>` walks the page down `n` 40 px steps, one frame each, after the first frame; `--size
-  <w>x<h>` opens a larger window. The last three exist so a capture or a measurement needs no input
-  injection.
-- Measured on this PC (RTX 4070 Ti SUPER, 96 DPI): first frame at 263.5 ms from process start,
-  height pass 8.8 ms for the 1084 dip panel, parse 0.1 ms.
-- Checked by driving the running window with posted messages and real clicks: three Page Downs move
-  the page to the footnotes and the thumb to the bottom, a press-and-drag in the gutter lands
-  mid-document, File > Open... opens `GetOpenFileNameW` (class `#32770`, "Open") and typing a path in
-  it loads the file, Reload parses the document again, View > Dark theme repaints the page and the
-  menu bar dark, and Close closes the window.
-- Screenshots: `tests/golden/shell-winui-light.png`, `shell-winui-dark.png`, `shell-winui-images.png`.
+Everything below was measured on this PC (Windows 11, RTX 4070 Ti SUPER, 3440x1440 at 96 DPI) unless
+it says Linux; Linux numbers come from the test VM in section 5.
 
-## The Qt shell (`bins/mdv-qt`)
+---
 
-- Qt Widgets through CXX-Qt 0.10, ported from `spikes/qt-shell`: `src/qt/mod.rs` (the only module
-  with `unsafe`) and `src/qt/ffi.rs` (C++ declarations, no authored C++). `src/shell.rs` is
-  `#![forbid(unsafe_code)]`.
-- **This crate is excluded from the workspace** (`Cargo.toml`), because it needs a Qt installation
-  to build. It has its own `Cargo.lock` (the Qt-only graph, seeded from the spike's lock) and its
-  own target directory.
-- Window 1100x900, menus File > Open... and Quit, View > Light/Dark theme, Help > About, a status bar
-  with the file name and block count. `--zoom 1.5` scales the page (verified: showcase page grows
-  from 3020 px to 4596 px at 1.5). A file comes from the command line, File > Open... or is dropped
-  on the window (Qt file URIs, `%20` decoded).
-- `src/shell.rs` renders the page with `mdview-render` for the canvas width and device pixel ratio,
-  copies the visible slice into a BGRX buffer and blits it through QPainter with an identity
-  transform.
-- **Scrolling**: the wheel, a vertical `QScrollBar` beside the canvas (14 px wide, in a `QHBoxLayout`)
-  and the keyboard. The shell owns the offset: it sets the bar's range, page step and value while
-  painting, with a `syncing` flag so the bar's `valueChanged` does not echo back; a drag or a click in
-  the groove arrives through `valueChanged` and repaints. The canvas takes `Qt::StrongFocus`, so Home,
-  End, the arrows, Page Up/Down and Space work: arrows move 48 px, Page Up/Down and Space 90% of the
-  viewport, Home and End go to the ends.
-- **File > Open** is a `QFileDialog` built through the same `new_ptr` bridge (its four-argument
-  constructor; `QFileDialog::getOpenFileName` could not be bound because cxx takes its address and the
-  C++ signature has six parameters). It opens in the current document's directory with a
-  `Markdown (*.md *.markdown)` filter.
-- Build on this PC (Qt 6.9.3, MSVC 2022, installed at `C:\Qt\6.9.3\msvc2022_64` with `aqtinstall`):
+## 1. Where the project is on the plan
 
-  ```powershell
-  cd bins/mdv-qt
-  $env:PATH = "C:\Qt\6.9.3\msvc2022_64\bin;$env:PATH"
-  $env:QMAKE = "C:\Qt\6.9.3\msvc2022_64\bin\qmake.exe"
-  $env:CMAKE_PREFIX_PATH = "C:\Qt\6.9.3\msvc2022_64"
-  cargo build --release --offline
-  ```
+`docs/PLAN.md` has six phases (its "Phases" section). Phase 0 (spikes) and Phase 1 (core: parser,
+HTML mapping, autolink, slugs, doc model, find) are closed on earlier branches. **This branch is
+Phase 2, the headless renderer, and it is nearly done.**
 
-  Run it with the Qt `bin` directory on `PATH` so the Qt DLLs are found. In this sandbox `TEMP` and
-  `TMP` must point at a writable directory (e.g. `target/tmp`) or MSVC's `lib.exe` fails with
-  access denied; a normal shell does not need that.
-- Measured here: parse 0.1 ms, height pass 8.6 ms for the 1086 px canvas, page 3020 px.
-- Checked by driving the running Windows build: Page Down scrolls and the bar's thumb moves, a click
-  in the bar's groove jumps a page, File > Open... opens the dialog in `fixtures/` and loading
-  `linked.md` through it updates the title, the page and the status bar.
-- **Drag and drop** is reached through `--drop-test <path>`, which sends one `QDragEnterEvent` and
-  `QDropEvent` through the window and exits 0 when the dropped path was loaded. It exists because Qt
-  uses OLE drag and drop on Windows: the platform plugin has no `DragQueryFileW`, `DragAcceptFiles`
-  or `WM_DROPFILES` handling, so a posted `WM_DROPFILES` from another process is ignored. The check
-  passes on Windows and on the VM under Xvfb.
-- Screenshots: `tests/golden/shell-qt-light.png` (page top, scrollbar at zero), `shell-qt-scrolled.png`
-  (after a click in the bar), `shell-qt-open.png` (the Open dialog).
-- The crate emits seven `unnecessary unsafe block` warnings from the `pin!` macro; they predate this
-  work and are not errors.
-- **Both the Windows build and the Linux build now run.** The Linux build is built and run on the
-  test VM below (Qt 6.8.2, Debian 13), under Xvfb; see `tests/golden/shell-qt-linux.png`.
+| Phase 2 item | State |
+|---|---|
+| every block type laid out and painted | done |
+| themes, zoom, DPI scaling | done |
+| images (PNG/JPEG, limits, inline) | done; SVG is Phase 4 |
+| virtualized viewport, scroll budget | done: 0.2-2.6 ms per scroll frame (budget 4 ms at 150%, 8 ms at 4K) |
+| selection, link/anchor hit-testing | **not started** |
+| `<details>` toggling | **not started** |
+| exit gate: goldens approved by the user | **open**: the images in `tests/golden/` have not been approved yet |
 
-## The Linux test VM (`user@vm-host`)
+So the immediate queue is the two "not started" rows and the approval; then Phase 3 (Qt shell parity),
+Phase 4 (engine: math, Mermaid, highlighting, SVG), Phase 5 (WinUI parity, W1-W3), Phase 6 (polish,
+installer). The shells already exist and run, which is ahead of the plan's order - the user asked for
+the UIs early - so Phase 3 and 5 become "make the existing shells match the checklist" rather than
+"build them".
 
-The user gave this VM for Qt and Linux testing from 2026-11-07. It is Debian 13 (trixie), 20 cores,
-7.8 GB RAM, Xvfb, ImageMagick, and Rust 1.99.1 with `CARGO_HOME`/`CARGO_TARGET_DIR` under
-`/mnt/2b4bc8c0-.../` (global environment; the binary lands in `$CARGO_TARGET_DIR/release/`).
+## 2. Repository
 
-- Packages installed: `qt6-base-dev` (Qt 6.8.2), `libfontconfig1-dev`, `libxcb-cursor0`,
-  `libxkbcommon-x11-0`, `xvfb`, `imagemagick`, `fonts-noto-cjk`.
-- The source tree is copied with `tar` + SFTP (the helper `target/vm.py`, not committed) into
-  `~/mdview`. It is a snapshot: re-upload after changes. Two archives: the source (without
-  `spikes/`) and `spikes/parser/data`, which the spec tests read. The whole workspace does not
-  build on Linux because `bins/mdv-winui` is Windows-only, so Linux runs
-  `cargo test --release -p mdview-core -p mdview-render`; that now passes 7 core, 11 fuzz, 113
-  regression, 3 spec, the image-limit unit test and 6 render tests.
-- Build and run:
+- `Kaan88/markdown-viewer-rs`, private, branch `phase2-renderer`.
+- Recent commits: `09e5622` docs, `8442100` WinUI input, `5377a2b` band upload, `21d4f39` shifted
+  frame, `0013782` WinUI scrollbar/keys, `5e41238` Qt scrollbar/keys.
+- Workspace members: `crates/core`, `crates/render`, `bins/mdv-bench`, `bins/mdv-winui`.
+  `bins/mdv-qt` is **excluded** from the workspace because it needs Qt to build; it has its own
+  `Cargo.lock` and its own `target/`.
+- `spikes/` is throwaway reference code and is excluded from the workspace.
+- `target/` is git-ignored; the helper scripts in it (`vm.py`, `seed-lock.py`, `cap.ps1`) are **not
+  committed**. Section 5 and section 9 describe what they do in case they have to be rewritten.
 
-  ```sh
-  cd ~/mdview/bins/mdv-qt
-  export QMAKE=/usr/lib/qt6/bin/qmake6
-  export PATH=/usr/lib/qt6/bin:$PATH
-  cargo build --release
-  cd ~/mdview
-  Xvfb :99 -screen 0 1600x1200x24 &
-  DISPLAY=:99 "$CARGO_TARGET_DIR/release/mdview-qt" fixtures/showcase.md &
-  DISPLAY=:99 import -window root /tmp/shot.png
-  ```
+## 3. Build and test on Windows
 
-- First run: parse 0.1 ms, layout 26.8 ms, page 1100x3041 (Linux font metrics differ from Windows'
-  3020), page drawn and menus present. `tests/golden/shell-qt-linux.png` is that screen capture.
-- Chinese/Japanese text was tofu until `fonts-noto-cjk` was installed; the renderer's font stack has
-  a CJK fallback on Linux through fontconfig.
-- No window manager runs, so the window sits at 0,0 on the Xvfb root; that is fine for captures.
-- **X forwarding to the user's desktop:** MobaXterm's X server listens on `0.0.0.0:6000`, so the app
-  can be started with `DISPLAY=windows-host:0.0` (the Windows host's LAN address) and appears on the
-  user's screen, mouse and wheel included. Windows' OpenSSH `-X` does not work here: it cannot
-  generate the xauth cookie, so the VM's `DISPLAY` stays empty. Use the direct TCP display instead.
+Toolchain here: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msvc2022_64`.
 
-## Virtualized viewports (renderer API; shells not wired yet)
+```powershell
+cd C:\Users\kaank\Desktop\mv
+cargo test --release --offline --workspace     # 7 core, 11 fuzz, 113 regression, 3 spec,
+                                               # 2 render unit, 11 render integration
+cargo fmt --all --check
+cargo build --release --offline -p mdview-winui
+```
 
-- `crates/render` exposes `DocumentRenderer` (font and layout contexts plus the glyph cache kept warm
-  across frames), `layout(doc, options) -> PageLayout` (one height pass over every top-level block),
-  `view(doc, options, &PageLayout, top, height) -> Slice` (a fresh viewport-sized bitmap, used by
-  tests and one-shot callers) and `view_frame(...) -> &Frame` plus `frame()`, which keep one bitmap
-  between calls. `render` still paints a whole page for tests; `render_slice` is the one-shot
-  layout+view form.
-- **Scrolling shifts the frame**: `view_frame` keeps the last viewport bitmap and, when the new view
-  overlaps it, moves the surviving rows with one `copy_within` and repaints only the band that came
-  into view. The band is drawn on its own small bitmap and copied in, because a block can reach past
-  the band and would otherwise be blended twice on the overlap. A jump of a full viewport or more
-  falls back to a clear and a full repaint. A test compares shifted frames against a fresh `view` at
-  five scroll offsets, images included, and they are byte-identical.
-- Measured on `spikes/parser/data/generated_1mib.md` (1.0 MB, 25,060 blocks, 897,583 bytes of text,
-  583,619 px page): parse 8.3 ms; height pass 3.7 ms; scroll frames over 60 steps at 40 px, with the
-  per-block paint cache and the shifted frame: **0.2 ms mean, 0.4 ms worst at 780x900 (100%)**,
-  **0.6 mean, 1.0 worst at 1170x1350 (150%)**, 2.6 mean, 3.0 worst at 3840x2200 (4K, 150%). Glyph
-  cache 99% hit, peak 0.2 MiB. The bitmap is the viewport (2.8 MB) rather than the page (1.8 GB at
-  780x583,619x4).
-- The plan's budget is 4 ms p99 per scroll frame at 150% and 8 ms at 4K: **met** (1.0 and 3.0 ms
-  worst). The path there was 5.3 ms mean, then the `Bitmap::rrect` profile (code-block and table
-  backgrounds ran a `hypot` and a float blend on every pixel; 5.8 ms of a 6.5 ms frame), then the
-  band-shifting frame above: 6.6 -> 0.9 -> 0.2 ms at 100%, 8.1 -> 2.6 ms at 4K. `rrect` still has a
-  unit test against the old per-pixel form, and the four `tests/golden/showcase-*.png` images
-  regenerate byte-identical.
-- The shells still copy the whole viewport bitmap to the GPU every frame; only the renderer got
-  cheaper. That upload is now the next 4K item, not the drawing.
-- **The frame says what changed**: `Frame::band` is the row range painted this time (`None` when the
-  whole frame is new, `Some((0, 0))` when nothing changed at all) and `Frame::shift` is how far the
-  rows moved: row `r` of this frame was row `r + shift` of the previous one. A test rebuilds a frame
-  from the previous bitmap using only those two numbers and compares the bytes, which is the contract
-  the shells depend on.
-- **The WinUI shell now sends only the band.** The page lives in a pair of D3D11 textures instead of
-  a CPU buffer: a scroll copies the rows that stay on screen from one texture into the other on the
-  GPU (`CopySubresourceRegion`) and uploads only the new band (`UpdateSubresource` with a
-  `D3D11_BOX`), and the back buffer is filled from the page texture with one GPU copy per frame,
-  because a flip-model swap chain does not keep its contents. Measured on this PC in a 3384x1301
-  panel: a whole frame uploads in 2.6 ms, a 40-row scroll band in 0.0-0.2 ms, and the frame is
-  1.7-4.1 ms end to end (the 3-6 ms "present" in the trace is waiting for vsync). Verified by
-  capturing the same scroll offset reached two ways - six shifted band frames, and a fresh layout
-  sent whole - and comparing the pictures: identical below the title bar. The un-scrolled window is
-  byte-identical to `tests/golden/shell-winui-light.png`, and the dark and images goldens are
-  unchanged below the title bar.
-- Two bugs found on the way, both worth remembering. A flip-model back buffer alternates between
-  buffers, so *partially* writing it leaves the other buffer's pixels showing: the scrollbar strip,
-  which is narrow, is therefore sent whole every frame rather than only where the thumb moved. And
-  the page bitmap can be wider than `logical width - 14`, so a gutter strip placed at the page's
-  right edge was 6 px wide and clipped the scrollbar; the strip is now the bar's own column and
-  covers that overhang.
-- **Qt needs no band path.** The raster backend has no upload to save, and `drawImage` from the frame
-  bitmap only touches the pixels the paint event exposes. Measured on Windows: 0.5-0.7 ms per 48 px
-  scroll paint at 1086x846, and 2.0 ms at 3386x1327 (4.5 Mpx) - inside the 4 ms and 8 ms budgets.
-  Cutting it further would mean moving the backing store with `QWidget::scroll` before blitting the
-  band, which is another viewport-sized memmove on top of the renderer's own shift, so Qt keeps one
-  blit and its paint is timed in the trace output.
-- **Both shells are wired to this API**: each keeps a `DocumentRenderer` and a `PageLayout`, calls
-  `view_frame` per frame, blits from `frame()`, and scrolls without laying the page out again (checked
-  on the Qt shell: three Page Downs produce no further height pass). On this PC the height pass for
-  `generated_1mib.md` is 284 ms (Qt) and 287 ms (WinUI) at ~1100 dip, page 583,619 px; the first
-  WinUI frame arrives at 308 ms from process start (`--measure`).
-- Renderer scroll frames after the frame-delta work, `generated_1mib.md`, 60 steps of 40 px:
-  **0.2 ms mean / 0.8 worst at 780x900 (100%)**, **0.6 / 1.1 at 1170x1350 (150%)**, **2.6 / 3.4 at
-  3840x2200 (4K, 150%)**. Both plan budgets (4 ms p99 at 150%, 8 ms at 4K) are met.
+**Cargo cannot reach crates.io from this machine** (`schannel: AcquireCredentialsHandle failed:
+SEC_E_NO_CREDENTIALS`), so always pass `--offline`. If a dependency is missing from the cache,
+`target/seed-lock.py` (not committed) reads `Cargo.lock` files, writes the sparse index entry for
+every crate and downloads the locked `.crate` files:
 
-## What has and has not run
+```powershell
+python target/seed-lock.py Cargo.lock bins/mdv-qt/Cargo.lock spikes/qt-shell/Cargo.lock
+```
 
-Run on Windows: the WinUI spike (`spikes/winui`, framework build, `--measure`: result=ok at 259 ms),
-the WinUI shell on `fixtures/showcase.md` (wheel scrolling, real Page Down keys, system theme,
-`--light`/`--dark`, `--trace`, `--measure`, the shifted-frame path against a whole-frame reference),
-and the Qt shell on the same file (layout, first paint, wheel, scrollbar and keys). For the Qt shell
-the input was driven with real and posted Windows messages against the running window: Page Down
-moved the page and the thumb, a click in the scrollbar groove jumped a page, and File > Open...
-opened the dialog and loaded `linked.md` from it.
+All locks in use must be passed: the index cache is shared.
 
-Run on Linux: the Qt shell on the VM, built with Qt 6.8.2, drawn and captured under Xvfb (the
-screenshot shows the scrollbar in place).
+For MSVC builds inside the sandbox, point `TEMP`/`TMP` at a writable directory or `lib.exe` fails
+with access denied:
 
-Not tested by hand: the Qt View/Help menu items, the WinUI window resizing and reflow on both,
-DPI scaling other than 100%, and the Qt scrollbar and keys on Linux (only on Windows). The Qt drop
-handler is covered by `--drop-test`, which drives Qt's event path rather than an OLE drag from
-Explorer.
+```powershell
+$env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
+```
 
-## Linux target from Windows
+The Qt shell builds separately (section 8).
 
-`rustup target add x86_64-unknown-linux-gnu` works here (rustup's downloader works; cargo's does
-not). `cargo check --target x86_64-unknown-linux-gnu -p mdview-core` passes. The renderer does not
-check: `yeslogic-fontconfig-sys` wants `pkg-config` and a Linux sysroot. There is no Linux linker,
-so this could only ever prove compilation. Qt cannot be cross-compiled from this machine; the Qt
-shell above is a native Windows build of the same source.
+## 4. Running the shells on Windows
 
-## Cargo in this sandbox
+**WinUI** (`target/release/mdview-winui.exe`):
 
-Cargo cannot reach crates.io: `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`.
-Python's and `gh`'s TLS work. `target/seed-lock.py` (not committed) takes any number of `Cargo.lock`
-files, writes the complete sparse index cache entry for every crate and downloads the locked
-`.crate` files, so `cargo build --offline` works. It must be given every lock in use
-(`Cargo.lock`, `spikes/qt-shell/Cargo.lock`): the index cache is shared.
+| flag | meaning |
+|---|---|
+| `<file>` | document to open; without one, a built-in welcome page |
+| `--light` / `--dark` | override the system app theme, for screenshots |
+| `--zoom <x>` | page scale, 0.5-3.0 |
+| `--trace` | write `target/release/mdview.trace.log` (beside the exe), one line per frame |
+| `--measure` | first frame only, then write `measure.log` and exit 0 |
+| `--no-shift` | send every frame whole instead of using the shifted frame |
+| `--scroll <device px>` | start partway down the page |
+| `--scroll-steps <n>` | after the first frame, walk down `n` 40 px steps, one frame each |
+| `--size <w>x<h>` | logical window size (default 1100x900) |
 
-## Known gaps, in the order they matter
+`--no-shift`, `--scroll`, `--scroll-steps` and `--size` exist so a capture or a measurement needs no
+input injection; that matters, see section 9.
 
-- **Scroll budgets are met**: renderer frames are 0.2/0.8 ms at 100%, 0.6/1.1 at 150% and 2.6/3.4 at
-  4K (mean/worst), and the WinUI upload is a band rather than a viewport. What is left is present
-  pacing: a frame still waits for vsync (3-6 ms in the trace), so a 4K window shows a frame every
-  16.7 ms rather than sooner. That is the compositor's clock, not the renderer's.
-- **Images**: SVG (and anything but PNG/JPEG) is still a placeholder; `<picture>` light/dark sources
-  and `width`/`height` attributes are ignored; a blocked image is retried on every render. Decoded
-  images now live on the `DocumentRenderer` and are shared by every frame, which is what keeps them
-  in cached scroll frames (there is a test that fails without it).
-- **No selection, links, anchors or details toggling.** `BlockBox` is there for hit tests but unused.
-- **The WinUI scrollbar is drawn by the shell**, not by a WinUI control, because the checked-in
-  bindings have no `ScrollBar`. No find, tabs or document tree in either shell.
-- Table `colspan`/`rowspan` ignored; math, Mermaid and highlighting show source.
-- No bundled fonts, so goldens depend on system fonts.
+The frame trace reads like:
+
+```
+frame 1084x821: paint 0.5 upload 0.1 (band at 773 of 48 rows) present 0.3 total 0.9 ms
+```
+
+`paint` is the renderer, `upload` is everything sent to the GPU plus the back-buffer copy, the band
+is what was sent, and `present` is mostly waiting for vsync.
+
+**Qt** (`bins/mdv-qt/target/release/mdview-qt.exe`): `bins/mdv-qt` is excluded from the workspace, so
+build it from its own directory:
+
+```powershell
+cd bins\mdv-qt
+$env:PATH = "C:\Qt\6.9.3\msvc2022_64\bin;$env:PATH"
+$env:QMAKE = "C:\Qt\6.9.3\msvc2022_64\bin\qmake.exe"
+$env:CMAKE_PREFIX_PATH = "C:\Qt\6.9.3\msvc2022_64"
+$env:TEMP = "C:\Users\kaank\Desktop\mv\target\tmp"; $env:TMP = $env:TEMP
+cargo build --release --offline
+```
+
+Run it with Qt's `bin` on `PATH` so the DLLs resolve. Flags: `<file>`, `--light`/`--dark`,
+`--zoom <x>`, `--drop-test <path>` (sends one `QDragEnterEvent` and `QDropEvent` through the window
+and exits 0 when the dropped path was loaded; it exists because Qt uses OLE drag and drop on Windows,
+so a posted `WM_DROPFILES` from another process is ignored).
+
+## 5. Linux: the test VM
+
+The user gave this box for Qt and Linux testing: `user@vm-host`, password not recorded, Debian 13
+(trixie), 20 cores, 7.8 GB RAM. The user's X server is MobaXterm on the Windows host, which listens on
+`0.0.0.0:6000`, so a VM window can also be shown on the user's own screen:
+
+```sh
+DISPLAY=windows-host:0.0 /mnt/.../target/release/mdview-qt fixtures/showcase.md
+```
+
+`ssh -X` from Windows does not work (no xauth cookie); use that direct TCP display.
+
+`target/vm.py` (not committed, needs `paramiko`) runs commands and copies files over SSH; it reads
+`MDV_VM_HOST`, `MDV_VM_USER`, `MDV_VM_PASS` (defaults `vm-host`, `user`, none):
+
+```powershell
+python target/vm.py run "uname -a"
+python target/vm.py put C:\...\file.tar.gz /home/user/file.tar.gz
+python target/vm.py get /tmp/shot.png target/shot.png
+```
+
+Installed packages: `qt6-base-dev` (Qt 6.8.2), `libfontconfig1-dev`, `libxcb-cursor0`,
+`libxkbcommon-x11-0`, `xvfb`, `imagemagick`, `fonts-noto-cjk`.
+
+**Upload and build** (the tree is a snapshot; re-run after changes):
+
+```powershell
+cd C:\Users\kaank\Desktop\mv
+tar -czf target/mdv-src.tar.gz --exclude=.git --exclude=spikes --exclude=target --exclude=.dsh -C . .
+tar -czf target/spec-data.tar.gz -C spikes/parser data        # the spec suites read this
+python target/vm.py put target/mdv-src.tar.gz /home/user/mdview-src.tar.gz
+python target/vm.py put target/spec-data.tar.gz /home/user/spec-data.tar.gz
+```
+
+```sh
+python target/vm.py run "rm -rf ~/mdview && mkdir -p ~/mdview && tar -xzf ~/mdview-src.tar.gz -C ~/mdview && mkdir -p ~/mdview/spikes/parser && tar -xzf ~/spec-data.tar.gz -C ~/mdview/spikes/parser"
+```
+
+The VM's default `PATH` is already usable
+(`/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/cargo/bin:/usr/local/bin:/usr/bin:/bin`), so cargo and the
+usual tools are found without doing anything. The trap is adding Qt to it from PowerShell:
+`python target/vm.py run "... export PATH=/usr/lib/qt6/bin:$PATH"` in double quotes lets **PowerShell**
+expand `$PATH` (to nothing), which leaves the remote shell with `/usr/lib/qt6/bin:` and no `cargo` or
+`/usr/bin` at all. Either use single quotes in PowerShell so `$PATH` reaches bash, or spell the whole
+path out:
+
+```sh
+export PATH=/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/cargo/bin:/usr/lib/qt6/bin:/usr/local/bin:/usr/bin:/bin
+```
+
+Then:
+
+```sh
+cd ~/mdview/bins/mdv-qt && export QMAKE=/usr/lib/qt6/bin/qmake6 && cargo build --release
+cd ~/mdview && cargo test --release -p mdview-core -p mdview-render   # 7 core, 11 fuzz, 113
+                                                                      # regression, 3 spec, 2+11 render
+cd ~/mdview && xvfb-run -a /mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt \
+    --drop-test fixtures/linked.md                                   # prints "drop test ok: ..."
+```
+
+Capturing a Linux window (`Xvfb` has no window manager, so the window sits at 0,0):
+
+```sh
+Xvfb :99 -screen 0 1600x1200x24 &
+DISPLAY=:99 /mnt/.../target/release/mdview-qt fixtures/showcase.md & sleep 6
+DISPLAY=:99 import -window root /tmp/shot.png
+```
+
+Linux font metrics differ from Windows (the showcase page is 3041 px tall there, 3020 here), so Linux
+renders are for "does it run and look sane", not for golden comparison. CJK needed
+`fonts-noto-cjk`; the renderer's stack falls back through fontconfig.
+
+## 6. The renderer (`crates/render`)
+
+Headless: no window system, BGRA bitmaps, parley for layout, swash for raster.
+
+| Item | Meaning |
+|---|---|
+| `DocumentRenderer::new()` | font/layout contexts, glyph cache, per-block paint cache, decoded images, the frame; one per window, kept warm |
+| `.layout(doc, &Options) -> PageLayout` | one height pass over every top-level block; also stores each block's `y`/`height` and **clears the frame** |
+| `.view(doc, &Options, &PageLayout, top, height) -> Slice` | fresh viewport bitmap for one view; used by tests |
+| `.view_frame(...)-> &Frame` | draws into the frame kept between calls (this is what the shells use) |
+| `.frame() -> Option<&Frame>` | the frame `view_frame` drew last |
+| `.page(doc, &Options) -> Rendered` | the whole page in one bitmap; for tests and small documents |
+| `render`, `render_slice`, `render_view`, `layout` | one-shot forms |
+
+`Options { width, scale, theme, max_height, base_dir }`; `base_dir` is where relative image paths
+resolve. `Slice { bitmap, top, total_height, stats }`.
+
+**The frame delta is the contract the shells depend on.** `Frame` is `{ bitmap, top, stats, band,
+shift }`:
+
+- `band: Option<(u32, u32)>` - the rows of `bitmap` painted this time. `None` means the whole frame is
+  new (first frame, resize, zoom/theme change, or a jump of a viewport or more) and nothing from the
+  previous frame can be reused; `Some((0, 0))` means nothing changed.
+- `shift: i32` - row `r` of this frame was row `r + shift` of the previous one.
+
+Scrolling keeps the bitmap, moves the surviving rows with one `copy_within`, and paints only the band
+that came into view. The band is painted on its own small bitmap and copied in, because a block can
+reach past the band and would otherwise be blended twice on the overlap.
+
+Tests that pin this down (`crates/render/tests/render.rs`, 11 tests):
+
+- `a_shifted_frame_matches_a_fresh_view` - five scroll offsets, images included, byte-identical.
+- `a_scrolling_frame_reports_the_band_and_shift` - rebuilds each frame from the previous one using only
+  `band` and `shift` and compares bytes; also checks that a viewport jump reports `None`.
+- `a_cached_frame_still_draws_its_images` - fails if decoded images are not shared by the renderer.
+
+**Measured** (`spikes/parser/data/generated_1mib.md`: 1.0 MB, 25,060 blocks, 583,619 px page):
+
+```powershell
+cargo run --release --offline -p mdv-bench -- --input spikes/parser/data/generated_1mib.md `
+    --out target/tmp/bench.png --width 780 --viewport 900 --scale 1.0 --scroll 40 --repeat 60
+```
+
+`--viewport <height>` switches the bench to the scroll-frame path (the width comes from `--width`);
+`--scroll` is the starting offset and `--repeat` the number of 40 px steps. `--all` writes the four
+`showcase-*` goldens.
+
+| viewport | scroll frame, mean / worst |
+|---|---|
+| 780x900, 100% | 0.2 / 0.8 ms |
+| 1170x1350, 150% | 0.6 / 1.1 ms |
+| 3840x2200, 150% | 2.6 / 3.4 ms |
+
+Height pass 3.7-9.3 ms, glyph cache 92% hit, bitmap is the viewport rather than the page. Both plan
+budgets (4 ms p99 at 150%, 8 ms at 4K) are met with room.
+
+## 7. The WinUI shell (`bins/mdv-winui`)
+
+WinUI 3 with hand-generated Windows App SDK bindings, imperative code only, no XAML files, no C# or
+C++. Framework-dependent: it needs the Windows App Runtime 2.6.4 or newer (this PC has 2.6.5).
+Window 1100x900, a `MenuBar` (File > Open..., Reload, Close; View > Light theme, Dark theme) over one
+`SwapChainPanel`.
+
+| File | What is in it |
+|---|---|
+| `main.rs` | COM apartment, `Application::Start`, argument parsing, `App` overrides |
+| `ui.rs` | window, grid, menu, welcome page, input, the `Shell` state |
+| `render.rs` | the GPU page textures, band upload, scrollbar gutter, `Frame` consumption |
+| `bindings.rs` | generated bindings **plus** hand-written helpers (below); do not regenerate blindly |
+| `bootstrap.rs`, `diag.rs` | Windows App SDK bootstrap, trace and `--measure` output |
+
+**Pixels.** The page lives in a **pair of D3D11 textures** (`B8G8R8A8_UNORM`, `DEFAULT` usage, created
+through a hand-written `create_texture_2d`). A scroll frame:
+
+1. copies the rows that stay on screen from the texture holding the previous frame into the other one
+   with `CopySubresourceRegion`, offset by `shift`;
+2. uploads only the new band with `UpdateSubresource` and a `D3D11_BOX`;
+3. copies the page texture into the back buffer, one full-screen GPU copy, because a flip-model swap
+   chain does not keep its contents between frames - partial writes leave the other buffer showing;
+4. uploads the scrollbar strip.
+
+The scrollbar is **the shell's own**, 14 logical px in a gutter, because the checked-in bindings have
+no `ScrollBar` control and cannot be regenerated without the NuGet winmds. It is a 15 px strip (a hair
+line separator plus the bar) that is sent **whole** every frame, for the flip-model reason above. The
+page can be a few px wider than the width it was laid out for, and the strip covers that overhang: the
+bar has to sit at the panel's right edge, so placing the strip at the page's right edge instead clipped
+the bar to 6 px.
+
+**Input** arrives two ways, because WinUI moves it around:
+
+- **Keys** come from a thread-level `WH_GETMESSAGE` hook installed on the UI thread. WinUI's content
+  lives in child windows (`InputSiteWindowClass`, `Microsoft.UI.Content.DesktopChildSiteBridge`) that
+  take the keyboard, and subclassing those window procedures with `SetWindowLongPtrW` is not durable:
+  WinUI reinstalls its own and the subclass stops being called after a resize. The hook filters by
+  window (`GetAncestor(.., GA_ROOT)` must be our top-level window), so the file dialog's own message
+  loop is untouched, and it swallows the keys it uses by setting the message to `WM_NULL`.
+- **The scrollbar** is driven by XAML pointer events (`PointerPressed`/`PointerMoved`/
+  `PointerReleased`). The generator left those, and `IPointerPoint::Position`, as unbound vtable slots,
+  so `bindings.rs` has hand-written `pointer_pressed/moved/released` and `IPointerPoint::position`.
+  XAML reports the position in the panel's own logical px, so no window-coordinate maths is involved.
+
+Keys: Home/End, arrows (48 px), Page Up/Down and Space (90% of the viewport). Mouse: a press in the
+gutter jumps there and starts a drag; the drag follows the pointer.
+
+**Hand-written additions in `bindings.rs`** (regenerating would drop them):
+
+- `FrameworkElement::set_requested_theme` - the root grid is set Light/Dark with the page, otherwise
+  the menu labels stay white on a light page.
+- `ID3D11Device::create_texture_2d`, `ID3D11DeviceContext::copy_subresource_region`,
+  `D3D11_TEXTURE2D_DESC`, `D3D11_USAGE_*`, `D3D11_BIND_SHADER_RESOURCE`.
+- `IUIElement::pointer_pressed/moved/released`, `PointerPosition`, `IPointerPoint::position`.
+
+**Measured** on this PC: first frame 308 ms from process start (`--measure`), height pass 8.4-9.6 ms
+for a 1084 dip panel, parse 0.1 ms. In a 3384x1301 panel: a whole-frame upload is 2.6 ms, a 40-row
+scroll band 0.0-0.2 ms, a scroll frame 1.7-4.1 ms end to end (the 3-6 ms "present" in the trace is
+waiting for vsync).
+
+**Verified by driving the running window** (real keys and clicks, plus posted messages): three Page
+Downs reach the footnotes and the thumb reaches the bottom; a press in the gutter jumps and a drag
+lands mid-document; File > Open... opens `GetOpenFileNameW` (class `#32770`) and typing a path loads
+the file; Reload re-parses; View > Dark theme repaints page and menu bar; Close closes. The scrolled
+view reached by six band frames is byte-identical, below the title bar, to the same offset drawn by a
+fresh layout and sent whole (`--no-shift`), and the un-scrolled window is byte-identical to
+`tests/golden/shell-winui-light.png`.
+
+**Caveat:** after a *programmatic* resize from another process, the app needs one click before keys
+reach it again - WinUI loses the XAML keyboard focus and `SetForegroundWindow` does not restore it. A
+mouse resize keeps focus, and a click fixes it, so it is a focus matter, not a hook one.
+
+## 8. The Qt shell (`bins/mdv-qt`)
+
+Qt Widgets through CXX-Qt 0.10, ported from `spikes/qt-shell`: `src/qt/mod.rs` is the only module with
+`unsafe`, `src/qt/ffi.rs` holds the C++ declarations (no authored C++), `src/shell.rs` is
+`#![forbid(unsafe_code)]`.
+
+Menus File > Open... / Quit, View > Light/Dark theme, Help > About, a status bar with the file name and
+block count. A file comes from the command line, File > Open... (`QFileDialog` built through `new_ptr`,
+because `QFileDialog::getOpenFileName` cannot be bound - cxx takes its address and the C++ signature
+has six parameters) or a drop on the window (`%20` decoded).
+
+Scrolling: the wheel, a vertical `QScrollBar` in a `QHBoxLayout` (14 px), and the keyboard. The shell
+owns the offset, sets the bar's range/page step/value while painting with a `syncing` flag so
+`valueChanged` does not echo back, and a drag or a groove click arrives through `valueChanged`. The
+canvas takes `Qt::StrongFocus`, which is what makes Home/End/arrows/Page Up/Down/Space work.
+
+Painting: `paint` calls `view_frame`, then blits the frame bitmap through `QPainter` with an identity
+transform (`blit_painter`); `blit_direct` can write into the backing store instead. Each paint prints
+its cost:
+
+```
+mdview-qt: painted 1086x846 at scroll 96 in 0.7 ms, band 798+48, shifted 48
+```
+
+**No band path here, on purpose.** The raster backend has no upload to save and `drawImage` only
+touches the pixels the paint event exposes. Measured on Windows: 0.5-0.7 ms per 48 px scroll paint at
+1086x846, and 2.0 ms at 3386x1327 (4.5 Mpx) - inside the 4 ms and 8 ms budgets. Cutting it further
+would mean moving the backing store with `QWidget::scroll` before blitting the band, which is another
+viewport-sized memmove on top of the renderer's own shift, so it keeps one blit.
+
+A resize reflows: dragging the window to 3400x1380 relaid the page out in 0.9 ms and painted at
+3386x1327 (a whole frame, 4.9 ms), then 48 px scroll steps stayed at 2.0 ms.
+
+The crate emits seven `unnecessary unsafe block` warnings from the `pin!` macro; they predate this work
+and are not errors.
+
+## 9. Screenshots, goldens, and how to take them
+
+`tests/golden/`:
+
+| File | What it is |
+|---|---|
+| `showcase-{light,dark}@{1.0,1.5}.png` | the renderer on `fixtures/showcase.md`, from `mdv-bench --all` |
+| `images-light.png` | `fixtures/images.md`: a real PNG drawn as a block and inline, plus placeholders |
+| `shell-winui-{light,dark,images}.png` | the WinUI window at 1100x900, 100% DPI |
+| `shell-winui-scrolled.png` | the same window after six 40 px scroll frames (`--scroll-steps 6`) |
+| `shell-qt-{light,scrolled,open,images}.png` | the Qt window at the top, after a bar click, the Open dialog, images |
+| `shell-qt-linux.png` | the Qt shell built against Qt 6.8.2 on Debian 13 under Xvfb |
+| `shell-qt-1mb.png` | the Qt shell on the 1 MB generated document |
+
+**These are for review, not a pixel baseline yet.** They use this host's system fonts (Segoe UI,
+Consolas), so another machine or Linux will differ; the plan calls for bundled fonts and a tolerance
+before they become a suite. The four review images still have **not been approved by the user**.
+
+Renderer goldens regenerate byte-identically:
+
+```powershell
+cargo run --release --offline -p mdv-bench -- --all
+```
+
+Windows window captures go through `target/cap.ps1` (not committed; `Add-Type` + `PrintWindow` with
+flag 2 + `System.Drawing`; it restores and raises the window itself). The app has to be running, in a
+job that outlives the command:
+
+```powershell
+$job = Start-Job { & "C:\Users\kaank\Desktop\mv\target\release\mdview-winui.exe" `
+                    "C:\Users\kaank\Desktop\mv\fixtures\showcase.md" --light --trace }
+Start-Sleep -Seconds 5
+$p = Get-Process mdview-winui | Select-Object -First 1
+powershell -NoProfile -File target/cap.ps1 -Target $p.Id -Out target/shot.png -WaitSeconds 1
+Stop-Job $job; Remove-Job $job -Force; Get-Process mdview-winui -ErrorAction SilentlyContinue | Stop-Process -Force
+```
+
+For a window that has to be on top of other apps (for synthetic clicks), add
+`SetWindowPos($h, [IntPtr](-1), 40, 40, 1100, 900, 0x0040)` first and check the point with
+`WindowFromPoint`.
+
+Traps that cost time here:
+
+- **A GUI app started with `&` in a command that then finishes gets killed with the job.** Start it
+  with `Start-Job { & $exe @args }`, keep the job alive while capturing, then `Stop-Job` and
+  `Stop-Process`.
+- `PrintWindow` returns a black or stale frame if the window is minimised: `ShowWindow(h, 9)` first.
+- The window can be *behind another app* even when `SetForegroundWindow` succeeds, so a synthetic click
+  lands on whatever is on top. `SetWindowPos(h, -1, ...)` (topmost) before clicking, and check with
+  `WindowFromPoint` that the point is really ours.
+- The capture includes the 31 px title bar, which follows Windows and differs between runs. Compare the
+  client area, not the whole image: the page pixels are what the renderer owns.
+- `Get-Process mdview-winui | Select-Object -First 1` can pick a stale instance; stop them first.
+
+## 10. What has and has not run
+
+**Windows:** the whole workspace test suite; the WinUI shell on `fixtures/showcase.md` and
+`fixtures/images.md` with the wheel, real keys, scrollbar clicks and drags, both themes, `--zoom`,
+`--trace`, `--measure`, a live resize (2000x1250, reflowed to 1984x1171 with a whole-frame upload), and
+the shifted-frame path against a whole-frame reference; the Qt shell on the same files with layout,
+first paint, wheel, scrollbar, keys, File > Open..., themes, `--zoom`, a live resize to 3400x1380 and
+`--drop-test`.
+
+**Linux:** the Qt shell built with Qt 6.8.2 on the VM, run and captured under Xvfb, `--drop-test`
+passing, and `cargo test --release -p mdview-core -p mdview-render` passing.
+
+**Not run:** the Qt View/Help menu items; the Qt scrollbar and keys on Linux (Windows only); DPI scales
+other than 100% (zoom is tested, DPI scaling is not); a real OLE drag from Explorer (the drop test drives
+Qt's event path instead).
+
+## 11. Known gaps
+
+- **No selection, links, anchors, or `<details>` toggling.** `BlockBox` exists for this and is unused.
+- **SVG** (and anything that is not PNG/JPEG) is a placeholder; `<picture>` light/dark sources and
+  `width`/`height` attributes are ignored; a blocked image is retried on every render.
+- No find, tabs, folder tree, outline or recent files in either shell; no bundled fonts.
+- Table `colspan`/`rowspan` ignored; math, Mermaid and highlighting show their source (Phase 4).
 - The WinUI title bar follows Windows, not the in-app theme override.
+- The WinUI scrollbar is drawn by the shell, not a WinUI control (no `ScrollBar` in the bindings).
+- Scroll frames meet the budgets, but a frame still waits for vsync (3-6 ms in the trace): the
+  compositor's clock, not the renderer's.
 
-## What to do next
+## 12. What to do next
 
-1. Get the four `tests/golden/` images and the shell screenshots approved.
-2. Add selection and link/anchor hit-testing, then details toggling. `BlockBox` (block, y, height)
-   already comes out of a page render; the per-block paint cache in `DocumentRenderer` is where a
-   text run's `Rect` can be recorded for a hit test.
-3. Add SVG support when Phase 4 lands (the image cache is already shared across frames).
-4. Decide bundled fonts, then turn the goldens into a pixel suite.
-5. New WinUI input goes through the thread message hook (keys) or XAML events (pointer), not window
-   procedures: the hook sees every message this thread retrieves, so a new control's keys need a case
-   in `handle_message`, and a new pointer gesture needs another `pointer_*` handler.
+1. **Get the four `tests/golden/` images approved by the user** - it is the Phase 2 exit gate. Show
+   `showcase-{light,dark}@{1.0,1.5}.png` plus the shell captures and ask for a yes or a list of
+   changes.
+2. **Selection and link/anchor hit-testing.** Start in `crates/render`:
+   - `PageLayout` already stores every top-level block's extent (`spans: Vec<BlockBox>`) from the height
+     pass, but exposes only `total_height()` and `matches()`. Add an accessor and a `block_at(y)`.
+   - `Pager` (the layout+paint pass) keeps `blocks: Vec<BlockBox>` for the slice and a per-block paint
+     cache (`HashMap<u32, Vec<Paint>>`); a text run's rect has to be recorded there for a per-block hit
+     test, and the same map can carry link and anchor targets.
+   - The shells then need a selection model (anchor + focus in page coordinates, stored as
+     `(block, offset)` so it survives a re-layout) and a hover cursor over links. Keep the selection
+     out of the frame delta: `band`/`shift` describe the document, selection is drawn on top.
+3. **`<details>` toggling** after that: the doc model needs an open/closed flag per `<details>`, and the
+   height pass has to be invalidated for that block only (the paint cache is per block, so a rebuild is
+   cheap).
+4. **Phase 4, SVG**: a new `mdview-engine` process (the plan's Phase 4) that renders SVG with resvg; the
+   image cache is already shared across frames, so a decoded SVG slots into `images` where a PNG does.
+5. **Then the Qt/WinUI parity items** from `docs/PORT_CHECKLIST.md`: tabs, folder tree, outline, find,
+   recents, zoom limits, themes, focus mode, session restore.
+6. **Bundled fonts**, then turn the goldens into a real pixel suite (the plan's Phase 6).
 
-Every Qt/Linux change is now tested on the VM above as well as on Windows.
+Every Qt/Linux change is tested on the VM as well as on Windows, and nothing counts as working on
+Windows until it has run on Windows.
