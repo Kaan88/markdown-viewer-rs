@@ -3,7 +3,7 @@
 use crate::bindings::*;
 use crate::diag;
 use mdview_core::Document;
-use mdview_render::{Bitmap, Options, Theme, render};
+use mdview_render::{Bitmap, DocumentRenderer, Options, PageLayout, Theme};
 use std::ffi::c_void;
 use std::time::Instant;
 use windows_core::*;
@@ -88,6 +88,8 @@ pub struct Renderer {
     height: u32,
     pixels: Vec<u32>,
     page: Option<Page>,
+    page_layout: Option<PageLayout>,
+    renderer: DocumentRenderer,
     document: Option<Document>,
     base_dir: Option<std::path::PathBuf>,
     theme: Theme,
@@ -104,6 +106,8 @@ impl Renderer {
             height: 0,
             pixels: Vec::new(),
             page: None,
+            page_layout: None,
+            renderer: DocumentRenderer::new(),
             document: None,
             base_dir: None,
             theme: mdview_render::LIGHT,
@@ -115,19 +119,21 @@ impl Renderer {
         self.document = Some(document);
         self.base_dir = base_dir;
         self.page = None;
+        self.page_layout = None;
         self.scroll = 0.0;
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme;
         self.page = None;
+        self.page_layout = None;
     }
 
     pub fn scroll_by(&mut self, delta: f32) {
         let page_height = self
-            .page
+            .page_layout
             .as_ref()
-            .map_or(0.0, |page| page.bitmap.height as f32);
+            .map_or(0.0, |layout| layout.total_height());
         let max = (page_height - self.height as f32).max(0.0);
         self.scroll = (self.scroll + delta).clamp(0.0, max);
     }
@@ -147,17 +153,7 @@ impl Renderer {
         }
         let logical_width = element.ActualWidth()? as f32;
         let scale = scale_x as f32;
-        let stale = match &self.page {
-            None => true,
-            Some(page) => {
-                page.logical_width != logical_width
-                    || page.scale != scale
-                    || page.theme != self.theme.name
-            }
-        };
-        if stale {
-            self.layout(logical_width, scale);
-        }
+        self.refresh(logical_width, scale, height);
 
         unsafe {
             if self.swap_chain.is_none() {
@@ -209,13 +205,6 @@ impl Renderer {
             let resized = (width, height) != (self.width, self.height);
             self.width = width;
             self.height = height;
-            let page_height = self
-                .page
-                .as_ref()
-                .map_or(0.0, |page| page.bitmap.height as f32);
-            if self.scroll > (page_height - height as f32).max(0.0) {
-                self.scroll = (page_height - height as f32).max(0.0);
-            }
             if resized {
                 self.fill_background();
             }
@@ -234,31 +223,44 @@ impl Renderer {
         Ok(true)
     }
 
-    fn layout(&mut self, logical_width: f32, scale: f32) {
+    fn refresh(&mut self, logical_width: f32, scale: f32, height: u32) {
         let Some(document) = &self.document else {
             self.page = None;
+            self.page_layout = None;
             return;
         };
-        let started = Instant::now();
-        let rendered = render(
-            document,
-            &Options {
-                width: logical_width,
-                scale,
-                theme: self.theme,
-                // A guard against a bitmap too large to draw; virtualization replaces it.
-                max_height: Some(30_000.0),
-                base_dir: self.base_dir.clone(),
-            },
-        );
-        let ms = started.elapsed().as_secs_f64() * 1000.0;
-        diag::trace(&format!(
-            "layout {logical_width:.0} dip at scale {scale:.2}: {ms:.1} ms, \
-             content {} px, page {}x{}",
-            rendered.content_height, rendered.bitmap.width, rendered.bitmap.height
-        ));
+        let options = Options {
+            width: logical_width,
+            scale,
+            theme: self.theme,
+            max_height: None,
+            base_dir: self.base_dir.clone(),
+        };
+        let stale = self
+            .page_layout
+            .as_ref()
+            .is_none_or(|layout| !layout.matches(&options));
+        if stale {
+            let started = Instant::now();
+            let layout = self.renderer.layout(document, &options);
+            diag::trace(&format!(
+                "height pass {logical_width:.0} dip at scale {scale:.2}: {:.1} ms, page {:.0} px",
+                started.elapsed().as_secs_f64() * 1000.0,
+                layout.total_height()
+            ));
+            self.page_layout = Some(layout);
+        }
+        let Some(layout) = &self.page_layout else {
+            return;
+        };
+        self.scroll = self
+            .scroll
+            .clamp(0.0, (layout.total_height() - height as f32).max(0.0));
+        let slice = self
+            .renderer
+            .view(document, &options, layout, self.scroll, height as f32);
         self.page = Some(Page {
-            bitmap: rendered.bitmap,
+            bitmap: slice.bitmap,
             logical_width,
             scale,
             theme: self.theme.name,
@@ -296,8 +298,8 @@ impl Renderer {
         let source: &[u32] = unsafe {
             std::slice::from_raw_parts(page.bitmap.pixels.as_ptr().cast(), page_width * page_height)
         };
-        let top = self.scroll.round() as i64;
-        for y in 0..height {
+        let top = 0i64;
+        for y in 0..height.min(page_height) {
             let source_y = top + y as i64;
             if source_y < 0 || source_y >= page_height as i64 {
                 continue;

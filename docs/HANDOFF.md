@@ -121,10 +121,10 @@ The user gave this VM for Qt and Linux testing from 2026-11-07. It is Debian 13 
   than the page (1.8 GB at 780x583,619x4).
 - The plan's budget is 4 ms p99 per scroll frame at 150%. **Not met yet**: every frame re-shapes the
   visible blocks. Caching each block's laid-out text between frames is the next step.
-- The **Qt shell is wired to this API**: it keeps a `DocumentRenderer` and a `PageLayout`, paints
-  one viewport slice per frame, and scrolls without laying the page out again. On this PC it opens
-  `generated_1mib.md` in 284 ms (height pass at 1100 dip) with a 583,619 px page. The WinUI shell
-  still paints a whole page, capped at 30,000 px.
+- **Both shells are wired to this API**: each keeps a `DocumentRenderer` and a `PageLayout`, paints
+  one viewport slice per frame, and scrolls without laying the page out again. On this PC the height
+  pass for `generated_1mib.md` is 284 ms (Qt) and 287 ms (WinUI) at ~1100 dip, page 583,619 px; the
+  first WinUI frame arrives at 521 ms from process start.
 
 ## What has and has not run
 
@@ -156,9 +156,8 @@ files, writes the complete sparse index cache entry for every crate and download
 
 ## Known gaps, in the order they matter
 
-- **Virtualization is in Qt only.** The WinUI shell still paints a whole page (30,000 px cap).
-  Scroll frames average 5.9 ms on the 1 MB fixture against a 4 ms p99 budget, because visible
-  blocks are re-shaped every frame.
+- **Scroll frames are 5.9 ms on the 1 MB fixture** against a 4 ms p99 budget, because visible
+  blocks are re-shaped every frame; block layout caching is the fix.
 - **Images**: SVG (and anything but PNG/JPEG) is still a placeholder; images are decoded once per
   render rather than shared across renders; `<picture>` light/dark sources and `width`/`height`
   attributes are ignored; a blocked image is retried on every render.
@@ -172,8 +171,7 @@ files, writes the complete sparse index cache entry for every crate and download
 ## What to do next
 
 1. Get the four `tests/golden/` images and the shell screenshots approved.
-2. Wire the WinUI shell to `DocumentRenderer`/`PageLayout`, then cache laid-out blocks to reach
-   the 4 ms scroll budget.
+2. Cache laid-out blocks between frames to reach the 4 ms scroll budget.
 3. Add File > Open to the Qt shell, a scrollbar and keyboard scrolling to both.
 4. Add selection and link/anchor hit-testing, then details toggling.
 5. Add a shared image cache and SVG support when Phase 4 lands.
