@@ -37,10 +37,8 @@ approved by the user.
 - **Scrolling and input**: the page is laid out 14 logical px narrower than the panel and the shell
   paints its own scrollbar into that gutter (a hairline separator, a track and a thumb), because the
   checked-in bindings have no `ScrollBar` control and cannot be regenerated without the NuGet winmds.
-  Keys and scrollbar clicks arrive through a `SetWindowLongPtrW` hook on WinUI's own window
-  procedure: Home/End, the arrows (48 px), Page Up/Down and Space (90% of the viewport) scroll, and a
-  press in the gutter jumps to that point and starts a drag. Everything the hook does not consume is
-  passed to the previous procedure with `CallWindowProcW`.
+  Home/End, the arrows (48 px), Page Up/Down and Space (90% of the viewport) scroll, and a press in
+  the gutter jumps to that point and starts a drag.
 - The menu labels are drawn by WinUI itself, and the default app theme is dark, which made them
   white on the light page. `bindings.rs` now carries one hand-written helper, `set_requested_theme`,
   that calls the `RequestedTheme` vtable slot the generator left unbound; the root grid is set to
@@ -296,7 +294,8 @@ files, writes the complete sparse index cache entry for every crate and download
    text run's `Rect` can be recorded for a hit test.
 3. Add SVG support when Phase 4 lands (the image cache is already shared across frames).
 4. Decide bundled fonts, then turn the goldens into a pixel suite.
-5. Keep the WinUI window's child-window hooks in mind: any new WinUI control that wants raw input
-   arrives as another child window, and `build` hooks whatever exists at startup.
+5. New WinUI input goes through the thread message hook (keys) or XAML events (pointer), not window
+   procedures: the hook sees every message this thread retrieves, so a new control's keys need a case
+   in `handle_message`, and a new pointer gesture needs another `pointer_*` handler.
 
 Every Qt/Linux change is now tested on the VM above as well as on Windows.
