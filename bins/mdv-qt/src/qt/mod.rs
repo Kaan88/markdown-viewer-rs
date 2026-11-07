@@ -91,7 +91,8 @@ upcast_widget!(
     QTabWidget,
     QDockWidget,
     QTreeWidget,
-    QScrollBar
+    QScrollBar,
+    QToolBar
 );
 
 fn qs(s: &str) -> QString {
@@ -106,6 +107,10 @@ pub trait CanvasHandler {
     fn mouse_release(&self, x: f64, y: f64);
     fn wheel(&self, dx: i32, dy: i32);
     fn key(&self, code: i32);
+    /// Ctrl+F: show the find bar.
+    fn find(&self) {}
+    /// F3 and Shift+F3: step through matches.
+    fn find_step(&self, _delta: i32) {}
     fn drag_enter(&self, text: String) -> bool;
     fn dropped(&self, text: String);
     fn timer(&self, id: i32);
@@ -154,7 +159,22 @@ impl Canvas {
         }
     }
     unsafe fn key_press_event(self: Pin<&mut Self>, e: *mut QKeyEvent) {
-        self.handler().key((*e).key_code());
+        let modifiers = (*e).modifiers();
+        let code = (*e).key_code();
+        if modifiers.test_flag(KeyboardModifier::ControlModifier) && matches!(code, 0x46 | 0x66) {
+            self.handler().find();
+            return;
+        }
+        if code == 0x0100_0032 {
+            let step = if modifiers.test_flag(KeyboardModifier::ShiftModifier) {
+                -1
+            } else {
+                1
+            };
+            self.handler().find_step(step);
+            return;
+        }
+        self.handler().key(code);
     }
     unsafe fn drop_event(self: Pin<&mut Self>, e: *mut QDropEvent) {
         let text = (*(*e).mimeData()).text().to_string();
@@ -359,6 +379,12 @@ impl H<Canvas> {
 impl H<QWidget> {
     pub fn show(&self) {
         pin!(self).show()
+    }
+    pub fn set_visible(&self, visible: bool) {
+        pin!(self).set_visible(visible)
+    }
+    pub fn is_visible(&self) -> bool {
+        pin!(self).is_visible()
     }
     pub fn update(&self) {
         pin!(self).update()
@@ -599,6 +625,9 @@ impl H<QToolBar> {
     pub fn add_widget(&self, w: H<QWidget>) {
         unsafe { pin!(self).addWidget(w.0) };
     }
+    pub fn add_action(&self, t: &str) -> H<QAction> {
+        H(pin!(self).add_toolbar_action(&qs(t)))
+    }
 }
 impl H<QStatusBar> {
     pub fn message(&self, t: &str) {
@@ -611,6 +640,16 @@ impl H<QLineEdit> {
     }
     pub fn set_text(&self, t: &str) {
         pin!(self).setText(&qs(t))
+    }
+    pub fn set_placeholder(&self, t: &str) {
+        pin!(self).set_placeholder(&qs(t))
+    }
+    pub fn select_all(&self) {
+        pin!(self).select_all()
+    }
+    pub fn on_return_pressed(&self, f: impl FnMut() + 'static) {
+        let mut f = GuiThreadOnly(f);
+        pin!(self).on_return_pressed(move |_| f.get()()).release();
     }
     pub fn on_text_changed(&self, f: impl FnMut(String) + 'static) {
         let mut f = GuiThreadOnly(f);

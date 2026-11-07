@@ -42,6 +42,7 @@ windows_core::link!("advapi32.dll" "system" fn RegGetValueW(hkey: *mut c_void, s
 windows_core::link!("user32.dll" "system" fn SetWindowsHookExW(id: i32, proc: unsafe extern "system" fn(i32, usize, isize) -> isize, module: *mut c_void, thread: u32) -> *mut c_void);
 windows_core::link!("user32.dll" "system" fn CallNextHookEx(hook: *mut c_void, code: i32, wparam: usize, lparam: isize) -> isize);
 windows_core::link!("user32.dll" "system" fn GetAncestor(window: *mut c_void, flags: u32) -> *mut c_void);
+windows_core::link!("user32.dll" "system" fn GetKeyState(key: i32) -> i16);
 windows_core::link!("shell32.dll" "system" fn ShellExecuteW(window: *mut c_void, operation: PCWSTR, file: PCWSTR, parameters: PCWSTR, directory: PCWSTR, show: i32) -> isize);
 
 /// `GETMESSAGE` hook id, `PM_REMOVE`, `WM_NULL` and `GA_ROOT`, from winuser.h.
@@ -337,6 +338,10 @@ struct Shell {
     select_test: Cell<bool>,
     /// Toggle the first details after the first frame, for `--details-test`.
     details_test: Cell<bool>,
+    /// Find mode: the next typed characters build the query.
+    find_active: Cell<bool>,
+    /// Run the find check after the first frame, for `--find-test`.
+    find_test: Cell<bool>,
 }
 
 impl Shell {
@@ -345,10 +350,25 @@ impl Shell {
     fn handle_message(&self, window: *mut c_void, msg: u32, wparam: usize, _lparam: isize) -> bool {
         const WM_KEYDOWN: u32 = 0x0100;
         const WM_SYSKEYDOWN: u32 = 0x0104;
+        const WM_CHAR: u32 = 0x0102;
         match msg {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 const VK_ESCAPE: usize = 0x1b;
+                let ctrl = unsafe { GetKeyState(0x11) } < 0;
+                let shift = unsafe { GetKeyState(0x10) } < 0;
+                if ctrl && wparam == 0x46 {
+                    self.find_open();
+                    return true;
+                }
+                if wparam == 0x72 && self.find_active.get() {
+                    self.find_step(if shift { -1 } else { 1 });
+                    return true;
+                }
                 if wparam == VK_ESCAPE {
+                    if self.find_active.get() {
+                        self.find_close();
+                        return true;
+                    }
                     self.renderer.borrow_mut().set_selection(None);
                     self.show();
                     return true;
@@ -366,8 +386,96 @@ impl Shell {
                     false
                 }
             }
+            WM_CHAR => {
+                if !self.find_active.get() {
+                    return false;
+                }
+                match wparam {
+                    0x08 => {
+                        let mut query = self.renderer.borrow().find_query().to_string();
+                        query.pop();
+                        self.find_set_query(query);
+                    }
+                    0x0d | 0x0a => self.find_step(1),
+                    0x1b => self.find_close(),
+                    code => {
+                        if let Some(c) = char::from_u32(code as u32)
+                            && !c.is_control()
+                        {
+                            let mut query = self.renderer.borrow().find_query().to_string();
+                            query.push(c);
+                            self.find_set_query(query);
+                        }
+                    }
+                }
+                true
+            }
             _ => false,
         }
+    }
+
+    /// Ctrl+F: start a find. The next typed characters build the query; the title shows its state.
+    fn find_open(&self) {
+        self.find_active.set(true);
+        self.renderer.borrow_mut().find_update("");
+        self.refresh_find_title();
+        self.show();
+    }
+
+    fn find_close(&self) {
+        self.find_active.set(false);
+        self.renderer.borrow_mut().find_update("");
+        let name = self
+            .path
+            .borrow()
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "mdview".to_string());
+        _ = self.window.SetTitle(&format!("mdview - {name}"));
+        self.show();
+    }
+
+    fn find_set_query(&self, query: String) {
+        self.renderer.borrow_mut().find_update(&query);
+        self.refresh_find_title();
+        self.show();
+    }
+
+    fn find_step(&self, delta: i32) {
+        if !self.find_active.get() {
+            return;
+        }
+        self.renderer.borrow_mut().find_step(delta);
+        self.refresh_find_title();
+        self.show();
+    }
+
+    fn refresh_find_title(&self) {
+        let name = self
+            .path
+            .borrow()
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "mdview".to_string());
+        let (hits, current, capped) = self.renderer.borrow().find_summary();
+        let query = self.renderer.borrow().find_query().to_string();
+        let status = if query.is_empty() {
+            "type to search".to_string()
+        } else if hits == 0 {
+            "no matches".to_string()
+        } else {
+            format!(
+                "{} of {}{}",
+                current + 1,
+                hits,
+                if capped { "+" } else { "" }
+            )
+        };
+        _ = self
+            .window
+            .SetTitle(&format!("mdview - {name} — Find: {query} [{status}]"));
     }
 
     /// Follows the link or footnote under a click. A `#fragment` scrolls here, another Markdown
@@ -465,6 +573,28 @@ impl Shell {
                             )),
                             None => diag::trace("details test failed: no summary or no change"),
                         }
+                        self.show();
+                    }
+                    if self.find_test.get() {
+                        self.find_test.set(false);
+                        self.find_active.set(true);
+                        self.renderer.borrow_mut().find_update("");
+                        // Feed the same messages the keyboard hook sees, so this covers the input
+                        // path rather than calling the find API directly.
+                        for byte in b"Markdown" {
+                            self.handle_message(std::ptr::null_mut(), 0x0102, *byte as usize, 0);
+                        }
+                        let (hits, _, capped) = self.renderer.borrow().find_summary();
+                        let marks = self.renderer.borrow_mut().find_rect_count(false);
+                        self.handle_message(std::ptr::null_mut(), 0x0100, 0x72, 0);
+                        let (_, current, _) = self.renderer.borrow().find_summary();
+                        let current_rects = self.renderer.borrow_mut().find_rect_count(true);
+                        let ok = hits >= 2 && marks > 0 && current_rects > 0 && current == 1;
+                        diag::trace(&format!(
+                            "find test {}: {hits} matches, {marks} mark rects, \
+                             {current_rects} current rects, index {current}, capped {capped}",
+                            if ok { "ok" } else { "failed" }
+                        ));
                         self.show();
                     }
                     if diag::measuring() {
@@ -587,6 +717,26 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
     file.Items()?.Append(&close.cast::<MenuFlyoutItemBase>()?)?;
     menu.Items()?.Append(&file)?;
 
+    let edit = MenuBarItem::new()?;
+    edit.SetTitle("Edit")?;
+    let find = MenuFlyoutItem::new()?;
+    find.SetText("Find...\tCtrl+F")?;
+    let target = shell.clone();
+    find.Click(move |_, _| target.find_open())?.forget();
+    edit.Items()?.Append(&find.cast::<MenuFlyoutItemBase>()?)?;
+    let next = MenuFlyoutItem::new()?;
+    next.SetText("Find Next\tF3")?;
+    let target = shell.clone();
+    next.Click(move |_, _| target.find_step(1))?.forget();
+    edit.Items()?.Append(&next.cast::<MenuFlyoutItemBase>()?)?;
+    let previous = MenuFlyoutItem::new()?;
+    previous.SetText("Find Previous\tShift+F3")?;
+    let target = shell.clone();
+    previous.Click(move |_, _| target.find_step(-1))?.forget();
+    edit.Items()?
+        .Append(&previous.cast::<MenuFlyoutItemBase>()?)?;
+    menu.Items()?.Append(&edit)?;
+
     let view = MenuBarItem::new()?;
     view.SetTitle("View")?;
     for (title, theme) in [("Light theme", LIGHT), ("Dark theme", DARK)] {
@@ -638,6 +788,8 @@ pub struct Startup {
     pub select: bool,
     /// Toggle the first `<details>` after the first frame, for `--details-test`.
     pub details: bool,
+    /// Run the find check after the first frame, for `--find-test`.
+    pub find: bool,
 }
 
 pub fn build(
@@ -711,6 +863,8 @@ pub fn build(
         selection_moved: Cell::new(false),
         select_test: Cell::new(startup.select),
         details_test: Cell::new(startup.details),
+        find_active: Cell::new(false),
+        find_test: Cell::new(startup.find),
     });
     if let Some(path) = &file
         && let Err(e) = load(&shell, path)

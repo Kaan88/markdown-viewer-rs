@@ -92,6 +92,15 @@ enum Sent {
     Band(u32, u32),
 }
 
+/// The current find, as document offsets. `current` indexes `hits`.
+#[derive(Default)]
+struct Find {
+    query: String,
+    hits: Vec<(u32, u32)>,
+    current: usize,
+    capped: bool,
+}
+
 pub struct Renderer {
     gpu: Gpu,
     panel: SwapChainPanel,
@@ -117,6 +126,8 @@ pub struct Renderer {
     options: Option<Options>,
     /// The selection, as two offsets into `Document::text`.
     selection: Option<(u32, u32)>,
+    /// The current find query and matches.
+    find: Find,
     theme: Theme,
     zoom: f32,
     scroll: f32,
@@ -150,6 +161,7 @@ impl Renderer {
             base_dir: None,
             options: None,
             selection: None,
+            find: Find::default(),
             theme: mdview_render::LIGHT,
             zoom: 1.0,
             scroll: 0.0,
@@ -176,6 +188,7 @@ impl Renderer {
         self.page_layout = None;
         self.options = None;
         self.selection = None;
+        self.find = Find::default();
         self.scroll = 0.0;
         self.renderer.clear_details();
     }
@@ -185,6 +198,7 @@ impl Renderer {
         self.page_layout = None;
         self.options = None;
         self.selection = None;
+        self.find = Find::default();
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
@@ -192,6 +206,7 @@ impl Renderer {
         self.page_layout = None;
         self.options = None;
         self.selection = None;
+        self.find = Find::default();
     }
 
     pub fn scroll_by(&mut self, delta: f32) {
@@ -259,6 +274,11 @@ impl Renderer {
         if from == to {
             return Vec::new();
         }
+        self.rects_for(from.min(to), from.max(to))
+    }
+
+    /// The page rectangles a document range paints, whether or not it is selected.
+    fn rects_for(&mut self, from: u32, to: u32) -> Vec<Rect> {
         let Some(document) = self.document.as_ref() else {
             return Vec::new();
         };
@@ -269,7 +289,94 @@ impl Renderer {
             return Vec::new();
         };
         self.renderer
-            .selection_rects(document, options, layout, from.min(to), from.max(to))
+            .selection_rects(document, options, layout, from, to)
+    }
+
+    /// Runs find for `query` and jumps to the first hit. Returns hits, current index and whether a
+    /// limit stopped the search.
+    pub fn find_update(&mut self, query: &str) -> (usize, usize, bool) {
+        self.find.query = query.to_string();
+        self.find.hits.clear();
+        self.find.current = 0;
+        self.find.capped = false;
+        if query.is_empty() {
+            return (0, 0, false);
+        }
+        let result = {
+            let Some(document) = self.document.as_ref() else {
+                return (0, 0, false);
+            };
+            let renderer = &self.renderer;
+            mdview_core::find::find_visible(document, query, |block| {
+                renderer.details_open(document, block)
+            })
+        };
+        self.find.hits = result.hits.iter().map(|hit| (hit.start, hit.end)).collect();
+        self.find.capped = result.capped;
+        if !self.find.hits.is_empty() {
+            self.scroll_to_find(0);
+        }
+        (self.find.hits.len(), 0, self.find.capped)
+    }
+
+    /// Steps to the next (positive) or previous (negative) match, wrapping around.
+    pub fn find_step(&mut self, delta: i32) -> (usize, usize, bool) {
+        let len = self.find.hits.len();
+        if len == 0 {
+            return (0, 0, self.find.capped);
+        }
+        self.find.current =
+            (self.find.current as i64 + delta as i64).rem_euclid(len as i64) as usize;
+        let index = self.find.current;
+        self.scroll_to_find(index);
+        (len, index, self.find.capped)
+    }
+
+    pub fn find_summary(&self) -> (usize, usize, bool) {
+        (self.find.hits.len(), self.find.current, self.find.capped)
+    }
+
+    pub fn find_query(&self) -> &str {
+        &self.find.query
+    }
+
+    /// Number of highlight rectangles in the current matches, for the scripted find check.
+    pub fn find_rect_count(&mut self, current_only: bool) -> usize {
+        self.find_rects(current_only).len()
+    }
+
+    fn scroll_to_find(&mut self, index: usize) {
+        let Some(&(from, to)) = self.find.hits.get(index) else {
+            return;
+        };
+        if let Some(top) = self
+            .rects_for(from, to)
+            .iter()
+            .map(|rect| rect.y)
+            .reduce(f32::min)
+        {
+            self.scroll_to(top - 24.0 * self.scale);
+        }
+    }
+
+    /// The page rectangles of the matches; `current_only` selects the active one.
+    fn find_rects(&mut self, current_only: bool) -> Vec<Rect> {
+        if self.find.hits.is_empty() {
+            return Vec::new();
+        }
+        if current_only {
+            return self
+                .find
+                .hits
+                .get(self.find.current)
+                .copied()
+                .map(|(from, to)| self.rects_for(from, to))
+                .unwrap_or_default();
+        }
+        let hits: Vec<(u32, u32)> = self.find.hits.iter().take(400).copied().collect();
+        hits.into_iter()
+            .flat_map(|(from, to)| self.rects_for(from, to))
+            .collect()
     }
 
     /// Scrolls to a `#fragment` in the current document. False when no heading or anchor matches.
@@ -322,6 +429,7 @@ impl Renderer {
         self.renderer.set_details(block, !open);
         self.page_layout = None;
         self.selection = None;
+        self.find = Find::default();
         Some(!open)
     }
 
@@ -373,6 +481,7 @@ impl Renderer {
         let after = page.total_height();
         self.page_layout = Some(page);
         self.selection = None;
+        self.find = Find::default();
         Some((details, before, after, !open))
     }
 
@@ -534,7 +643,13 @@ impl Renderer {
             let sent = self.upload_page()?;
             let back_buffer: ID3D11Texture2D = swap_chain.GetBuffer(0)?;
             self.copy_page(&back_buffer)?;
-            self.overlay_selection(&back_buffer)?;
+            let marks = self.find_rects(false);
+            let current = self.find_rects(true);
+            let selection = self.selection_rects();
+            self.overlay_rects(&back_buffer, &marks, [255, 214, 0], 64.0 / 255.0)?;
+            self.overlay_rects(&back_buffer, &current, [255, 145, 0], 112.0 / 255.0)?;
+            let [r, g, b] = self.theme.accent;
+            self.overlay_rects(&back_buffer, &selection, [r, g, b], 72.0 / 255.0)?;
             self.upload_gutter(&back_buffer)?;
             let uploaded = uploading.elapsed();
             let presenting = Instant::now();
@@ -832,14 +947,16 @@ impl Renderer {
         }
     }
 
-    /// Draws the selection over the back buffer's copy of the page. The page texture itself stays
-    /// the document's pixels, so a selection never enters the frame delta or the scroll shift.
-    unsafe fn overlay_selection(&mut self, back_buffer: &ID3D11Texture2D) -> Result<()> {
+    /// Draws highlight rectangles over the back buffer's copy of the page. The page texture itself
+    /// stays the document's pixels, so marks never enter the frame delta or the scroll shift.
+    unsafe fn overlay_rects(
+        &mut self,
+        back_buffer: &ID3D11Texture2D,
+        rects: &[Rect],
+        [sr, sg, sb]: [u8; 3],
+        alpha: f32,
+    ) -> Result<()> {
         unsafe {
-            if self.selection.is_none() {
-                return Ok(());
-            }
-            let rects = self.selection_rects();
             if rects.is_empty() {
                 return Ok(());
             }
@@ -849,7 +966,7 @@ impl Renderer {
             let (width, rows) = (frame.bitmap.width as usize, frame.bitmap.height as usize);
             let mut spans = Vec::new();
             let (mut lo, mut hi) = (rows, 0usize);
-            for rect in &rects {
+            for rect in rects {
                 let top = ((rect.y - frame.top).floor().max(0.0) as usize).min(rows);
                 let bottom = ((rect.y + rect.h - frame.top).ceil().max(0.0) as usize).min(rows);
                 let x0 = (rect.x.max(0.0) as usize).min(width);
@@ -866,8 +983,6 @@ impl Renderer {
             }
             let mut strip = vec![0u8; width * (hi - lo) * 4];
             strip.copy_from_slice(&frame.bitmap.pixels[lo * width * 4..hi * width * 4]);
-            let [sr, sg, sb] = self.theme.accent;
-            let alpha = 72.0 / 255.0;
             let blend = |under: u8, over: u8| -> u8 {
                 let value = (under as f32 * (1.0 - alpha) + over as f32 * alpha).round();
                 value.clamp(0.0, 255.0) as u8

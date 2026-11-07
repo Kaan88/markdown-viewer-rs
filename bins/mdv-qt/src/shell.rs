@@ -33,8 +33,18 @@ const KEY_DOWN: i32 = 0x0100_0015;
 const KEY_PAGE_UP: i32 = 0x0100_0016;
 const KEY_PAGE_DOWN: i32 = 0x0100_0017;
 const KEY_SPACE: i32 = 0x20;
+const KEY_ESCAPE: i32 = 0x0100_0000;
 /// One arrow-key step, in device px.
 const STEP: f64 = 48.0;
+
+/// The current find, as document offsets. `current` is an index into `hits`, not a text offset.
+#[derive(Default)]
+struct Find {
+    query: String,
+    hits: Vec<(u32, u32)>,
+    current: usize,
+    capped: bool,
+}
 
 struct Shell {
     window: Cell<Option<H<QMainWindow>>>,
@@ -67,6 +77,10 @@ struct Shell {
     moved: Cell<bool>,
     /// A fragment to scroll to once the next layout exists, for links into another document.
     pending_anchor: RefCell<Option<String>>,
+    /// The find bar, its input and the current matches.
+    find_bar: Cell<Option<H<QToolBar>>>,
+    find_edit: Cell<Option<H<QLineEdit>>>,
+    find: RefCell<Find>,
 }
 
 impl Shell {
@@ -95,6 +109,9 @@ impl Shell {
             selecting: Cell::new(false),
             moved: Cell::new(false),
             pending_anchor: RefCell::new(None),
+            find_bar: Cell::new(None),
+            find_edit: Cell::new(None),
+            find: RefCell::new(Find::default()),
         }
     }
 
@@ -107,6 +124,137 @@ impl Shell {
     fn message(&self, text: &str) {
         if let Some(status) = self.status.get() {
             status.message(text);
+        }
+    }
+
+    /// Opens the find bar and puts the caret in its input.
+    fn show_find(&self) {
+        if let Some(bar) = self.find_bar.get() {
+            bar.widget().set_visible(true);
+        }
+        if let Some(edit) = self.find_edit.get() {
+            edit.widget().set_focus();
+            edit.select_all();
+        }
+    }
+
+    fn hide_find(&self) {
+        if let Some(bar) = self.find_bar.get() {
+            bar.widget().set_visible(false);
+        }
+        self.find.borrow_mut().hits.clear();
+        self.find.borrow_mut().query.clear();
+        if let Some(canvas) = self.canvas.get() {
+            canvas.widget().set_focus();
+        }
+        self.message("");
+        self.redraw();
+    }
+
+    /// Runs find for `query` and jumps to the first hit. Empty input clears the marks.
+    fn find_update(&self, query: &str) {
+        let mut find = self.find.borrow_mut();
+        find.query = query.to_string();
+        find.hits.clear();
+        find.current = 0;
+        find.capped = false;
+        if query.is_empty() {
+            drop(find);
+            self.message("");
+            self.redraw();
+            return;
+        }
+        let document = self.document.borrow();
+        let Some(document) = document.as_ref() else {
+            drop(find);
+            return;
+        };
+        let result = mdview_core::find::find_visible(document, query, |block| {
+            self.renderer.borrow().details_open(document, block)
+        });
+        find.hits = result.hits.iter().map(|hit| (hit.start, hit.end)).collect();
+        find.capped = result.capped;
+        let first = find.hits.first().copied();
+        let total = find.hits.len();
+        drop(document);
+        drop(find);
+        if let Some((from, to)) = first {
+            self.scroll_to_find_range(from, to);
+        }
+        self.find_status(total);
+        self.redraw();
+    }
+
+    fn find_step(&self, delta: i32) {
+        let current = {
+            let mut find = self.find.borrow_mut();
+            let len = find.hits.len();
+            if len == 0 {
+                return;
+            }
+            let step = (find.current as i64 + delta as i64).rem_euclid(len as i64);
+            find.current = step as usize;
+            find.current
+        };
+        let range = self.find.borrow().hits.get(current).copied();
+        if let Some((from, to)) = range {
+            self.scroll_to_find_range(from, to);
+        }
+        self.find_status(self.find.borrow().hits.len());
+        self.redraw();
+    }
+
+    fn find_status(&self, total: usize) {
+        let find = self.find.borrow();
+        if find.query.is_empty() {
+            self.message("");
+            return;
+        }
+        let text = if total == 0 {
+            "No matches".to_string()
+        } else {
+            format!(
+                "{} of {}{}",
+                find.current + 1,
+                total,
+                if find.capped { "+" } else { "" }
+            )
+        };
+        drop(find);
+        self.message(&format!("Find: {text}"));
+    }
+
+    /// The page rectangles of the matches. `current_only` selects the active one.
+    fn find_rects(&self, current_only: bool) -> Vec<Rect> {
+        let (hits, current) = {
+            let find = self.find.borrow();
+            (find.hits.clone(), find.current)
+        };
+        if hits.is_empty() {
+            return Vec::new();
+        }
+        if current_only {
+            return hits
+                .get(current)
+                .map(|&(from, to)| self.rects_for(from, to))
+                .unwrap_or_default();
+        }
+        // A pathological query can match thousands of times; drawing every match would make the
+        // overlay cost more than the page. The window is enough to see where the hits are.
+        hits.iter()
+            .take(400)
+            .flat_map(|&(from, to)| self.rects_for(from, to))
+            .collect()
+    }
+
+    fn scroll_to_find_range(&self, from: u32, to: u32) {
+        if let Some(top) = self
+            .rects_for(from, to)
+            .iter()
+            .map(|rect| rect.y)
+            .reduce(f32::min)
+        {
+            self.scroll_to_row(top);
         }
     }
 
@@ -129,6 +277,11 @@ impl Shell {
                 self.scroll.set(0.0);
                 self.selection.set(None);
                 self.anchor.set(None);
+                self.find.borrow_mut().query.clear();
+                self.find.borrow_mut().hits.clear();
+                if let Some(bar) = self.find_bar.get() {
+                    bar.widget().set_visible(false);
+                }
                 self.pending_anchor.borrow_mut().take();
                 *self.path.borrow_mut() = Some(path.to_path_buf());
                 let name = path
@@ -222,6 +375,15 @@ impl Shell {
 
     /// Home, End, the arrows and Page Up/Down, in device px.
     fn key(&self, code: i32) {
+        if code == KEY_ESCAPE
+            && self
+                .find_bar
+                .get()
+                .is_some_and(|bar| bar.widget().is_visible())
+        {
+            self.hide_find();
+            return;
+        }
         let viewport = self.viewport.get() as f64;
         match code {
             KEY_DOWN | KEY_RIGHT => self.scroll_to(self.scroll.get() + STEP),
@@ -578,7 +740,20 @@ impl CanvasHandler for Shell {
                 }
             );
         }
-        // The selection is drawn over the frame, which stays the document's pixels only.
+        // Find marks and the selection are drawn over the frame, which stays the document's pixels
+        // only.
+        let marks: Vec<(f64, f64, f64, f64)> = self
+            .find_rects(false)
+            .iter()
+            .map(|rect| (rect.x as f64, rect.y as f64, rect.w as f64, rect.h as f64))
+            .collect();
+        target.fill_rects(&marks, scroll, [255, 214, 0, 64]);
+        let current: Vec<(f64, f64, f64, f64)> = self
+            .find_rects(true)
+            .iter()
+            .map(|rect| (rect.x as f64, rect.y as f64, rect.w as f64, rect.h as f64))
+            .collect();
+        target.fill_rects(&current, scroll, [255, 145, 0, 112]);
         let rects: Vec<(f64, f64, f64, f64)> = self
             .selection_rects()
             .iter()
@@ -606,6 +781,14 @@ impl CanvasHandler for Shell {
 
     fn key(&self, code: i32) {
         Shell::key(self, code);
+    }
+
+    fn find(&self) {
+        self.show_find();
+    }
+
+    fn find_step(&self, delta: i32) {
+        Shell::find_step(self, delta);
     }
 
     fn drag_enter(&self, _text: String) -> bool {
@@ -660,6 +843,10 @@ enum Check {
     Link,
     /// Click a `<details>` summary and report the height change, then exit.
     Details,
+    /// Type in the find bar, step to the next match and report the marks, then exit.
+    Find,
+    /// The same, but leave the window open so a screenshot can show the find bar and marks.
+    FindHold,
 }
 
 /// Scripted checks through Qt's real mouse path, for `--select-test`, `--select-hold` and
@@ -671,6 +858,35 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
     };
     shell.ensure_layout();
     canvas.widget().repaint();
+    if matches!(check, Check::Find | Check::FindHold) {
+        shell.show_find();
+        let bar_visible = shell
+            .find_bar
+            .get()
+            .is_some_and(|bar| bar.widget().is_visible());
+        // Go through the line edit's textChanged signal, which is what typing uses.
+        if let Some(edit) = shell.find_edit.get() {
+            edit.set_text("Markdown");
+        }
+        let hits = shell.find.borrow().hits.len();
+        let marks = shell.find_rects(false).len();
+        let current = shell.find_rects(true).len();
+        shell.find_step(1);
+        let index = shell.find.borrow().current;
+        let ok = bar_visible && hits >= 2 && marks > 0 && current > 0 && index == 1;
+        println!(
+            "find test {}: {hits} matches, {marks} mark rects, {current} current rects, \
+             bar {bar_visible}, index {index}",
+            if ok { "ok" } else { "failed" }
+        );
+        if !ok {
+            std::process::exit(1);
+        }
+        if check == Check::FindHold {
+            return;
+        }
+        std::process::exit(0);
+    }
     let scale = shell.scale.get();
     let scroll = shell.scroll.get();
     let word = match check {
@@ -742,7 +958,7 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
             );
             std::process::exit(if ok { 0 } else { 1 });
         }
-        Check::Select | Check::Hold => {
+        Check::Select | Check::Hold | Check::Find | Check::FindHold => {
             canvas.send_mouse(EV_MOUSE_PRESS, x0, y0);
             canvas.send_mouse(EV_MOUSE_MOVE, x1, y0);
             canvas.send_mouse(EV_MOUSE_RELEASE, x1, y0);
@@ -806,6 +1022,37 @@ fn build(
     });
     let quit = file_menu.add_action("&Quit");
     quit.on_triggered(|_| std::process::exit(0));
+    let edit_menu = menus.add_menu("&Edit");
+    let find = edit_menu.add_action("&Find...\tCtrl+F");
+    let find_next = edit_menu.add_action("Find &Next\tF3");
+    let find_previous = edit_menu.add_action("Find &Previous\tShift+F3");
+    let s = shell.clone();
+    find.on_triggered(move |_| s.show_find());
+    let s = shell.clone();
+    find_next.on_triggered(move |_| s.find_step(1));
+    let s = shell.clone();
+    find_previous.on_triggered(move |_| s.find_step(-1));
+
+    let find_bar = window.add_tool_bar("Find");
+    find_bar.widget().set_visible(false);
+    let find_edit = H::<QLineEdit>::new();
+    find_edit.set_placeholder("Find in document");
+    find_bar.add_widget(find_edit.widget());
+    let previous = find_bar.add_action("Previous");
+    let next = find_bar.add_action("Next");
+    let close = find_bar.add_action("Close");
+    let s = shell.clone();
+    find_edit.on_text_changed(move |text| s.find_update(&text));
+    let s = shell.clone();
+    find_edit.on_return_pressed(move || s.find_step(1));
+    let s = shell.clone();
+    previous.on_triggered(move |_| s.find_step(-1));
+    let s = shell.clone();
+    next.on_triggered(move |_| s.find_step(1));
+    let s = shell.clone();
+    close.on_triggered(move |_| s.hide_find());
+    shell.find_bar.set(Some(find_bar));
+    shell.find_edit.set(Some(find_edit));
     let view_menu = menus.add_menu("&View");
     let light = view_menu.add_action("&Light theme");
     let dark = view_menu.add_action("&Dark theme");
@@ -854,10 +1101,6 @@ fn build(
     } else if shell.document.borrow().is_none() {
         *shell.document.borrow_mut() = Some(parse_bytes(WELCOME.as_bytes()));
         shell.redraw();
-    }
-
-    if let Some(check) = check {
-        run_check(shell, check);
     }
 
     // `--drop-test` sends one drop through the window's event path (Qt uses OLE, so a WM_DROPFILES
@@ -926,6 +1169,8 @@ pub fn run() -> i32 {
             "--select-hold" => check = Some(Check::Hold),
             "--link-test" => check = Some(Check::Link),
             "--details-test" => check = Some(Check::Details),
+            "--find-test" => check = Some(Check::Find),
+            "--find-hold" => check = Some(Check::FindHold),
             "--zoom" => {
                 zoom = args.next().expect("--zoom needs a number").parse().unwrap();
             }

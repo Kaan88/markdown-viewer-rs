@@ -162,6 +162,26 @@ pub mod ffi {
         #[qsignal]
         #[cxx_name = "textChanged"]
         fn text_changed(self: Pin<&mut QLineEdit>, text: &QString);
+        #[qsignal]
+        #[cxx_name = "returnPressed"]
+        fn return_pressed(self: Pin<&mut QLineEdit>);
+
+        // The find bar needs these; cxx-qt's generated header does not expose them by default.
+        #[rust_name = "set_visible"]
+        #[cxx_name = "setVisible"]
+        fn setVisibleWidget(self: Pin<&mut QWidget>, visible: bool);
+        #[rust_name = "is_visible"]
+        #[cxx_name = "isVisible"]
+        fn isVisibleWidget(self: &QWidget) -> bool;
+        #[rust_name = "set_placeholder"]
+        #[cxx_name = "setPlaceholderText"]
+        fn setPlaceholderText(self: Pin<&mut QLineEdit>, text: &QString);
+        #[rust_name = "select_all"]
+        #[cxx_name = "selectAll"]
+        fn selectAll(self: Pin<&mut QLineEdit>);
+        #[rust_name = "add_toolbar_action"]
+        #[cxx_name = "addAction"]
+        fn addActionToolbar(self: Pin<&mut QToolBar>, text: &QString) -> *mut QAction;
     }
 
     // The custom canvas: a QWidget subclass implemented in Rust.
@@ -373,6 +393,7 @@ pub mod ffi {
         // Keys
         #[rust_name = "key_code"]
         fn key(self: &QKeyEvent) -> i32;
+        fn modifiers(self: &QKeyEvent) -> KeyboardModifiers;
 
         // QTabWidget
         unsafe fn addTab(self: Pin<&mut QTabWidget>, w: *mut QWidget, label: &QString) -> i32;
