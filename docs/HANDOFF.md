@@ -109,6 +109,21 @@ The user gave this VM for Qt and Linux testing from 2026-11-07. It is Debian 13 
   user's screen, mouse and wheel included. Windows' OpenSSH `-X` does not work here: it cannot
   generate the xauth cookie, so the VM's `DISPLAY` stays empty. Use the direct TCP display instead.
 
+## Virtualized viewports (renderer API; shells not wired yet)
+
+- `crates/render` exposes `DocumentRenderer` (font and layout contexts plus the glyph cache kept warm
+  across frames), `layout(doc, options) -> PageLayout` (one height pass over every top-level block)
+  and `view(doc, options, &PageLayout, top, height) -> Slice` (one viewport-sized bitmap). `render`
+  still paints a whole page for tests; `render_slice` is the one-shot layout+view form.
+- Measured on `spikes/parser/data/generated_1mib.md` (1.0 MB, 25,060 blocks, 897,583 bytes of text,
+  583,619 px page): parse 8.3 ms; height pass 8.9 ms; 40 scroll frames at 780x900 at 100%: mean
+  5.9 ms, worst 7.8 ms; glyph cache 99% hit, peak 0.2 MiB. The bitmap is the viewport (2.8 MB) rather
+  than the page (1.8 GB at 780x583,619x4).
+- The plan's budget is 4 ms p99 per scroll frame at 150%. **Not met yet**: every frame re-shapes the
+  visible blocks. Caching each block's laid-out text between frames is the next step.
+- The shells still paint a whole page, capped at 30,000 px, so a 1 MB file cannot be opened in a
+  window yet. Wiring them to `DocumentRenderer` + `PageLayout` is what unlocks that.
+
 ## What has and has not run
 
 Run on Windows: the WinUI spike (`spikes/winui`, framework build, `--measure`: result=ok at 259 ms),
@@ -139,8 +154,9 @@ files, writes the complete sparse index cache entry for every crate and download
 
 ## Known gaps, in the order they matter
 
-- **No virtualization.** The whole document is laid out into one bitmap; the 1 MB scroll budget is
-  unmeasured, and the 30,000 px guard truncates very long files.
+- **Virtualization is renderer-only.** The viewport API exists and is measured, but both shells
+  still paint a whole page (30,000 px cap). Scroll frames average 5.9 ms on the 1 MB fixture
+  against a 4 ms p99 budget, because visible blocks are re-shaped every frame.
 - **Images**: SVG (and anything but PNG/JPEG) is still a placeholder; images are decoded once per
   render rather than shared across renders; `<picture>` light/dark sources and `width`/`height`
   attributes are ignored; a blocked image is retried on every render.
@@ -154,7 +170,8 @@ files, writes the complete sparse index cache entry for every crate and download
 ## What to do next
 
 1. Get the four `tests/golden/` images and the shell screenshots approved.
-2. Add virtualization and measure the 1 MB scroll budget in `mdv-bench`.
+2. Wire both shells to `DocumentRenderer`/`PageLayout` so 1 MB files open, and cache laid-out
+   blocks to reach the 4 ms scroll budget.
 3. Add File > Open to the Qt shell, a scrollbar and keyboard scrolling to both.
 4. Add selection and link/anchor hit-testing, then details toggling.
 5. Add a shared image cache and SVG support when Phase 4 lands.

@@ -1,7 +1,7 @@
 //! Pixel-level smoke tests for the headless renderer. The golden images are approved by eye; these
 //! catch a crash, a blank page, a lost theme and a lost clamp.
 
-use mdview_render::{DARK, LIGHT, Options, render};
+use mdview_render::{DARK, LIGHT, Options, render, render_slice};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> mdview_core::Document {
@@ -147,6 +147,40 @@ fn a_png_on_disk_is_drawn_inline() {
         "the image should take vertical space, content height {}",
         rendered.content_height
     );
+}
+
+#[test]
+fn a_slice_matches_the_same_rows_of_the_full_page() {
+    let doc = fixture("showcase.md");
+    let options = Options {
+        width: 780.0,
+        scale: 1.0,
+        theme: LIGHT,
+        max_height: None,
+        base_dir: None,
+    };
+    let full = render(&doc, &options);
+    assert!(full.bitmap.height > 700, "{}", full.bitmap.height);
+    let slice = render_slice(&doc, &options, 200.0, 300.0);
+    assert_eq!(slice.bitmap.width, full.bitmap.width);
+    assert_eq!(slice.bitmap.height, 300);
+    assert_eq!(slice.top, 200.0);
+    assert!(
+        (slice.total_height - full.content_height).abs() < 1.0,
+        "{} vs {}",
+        slice.total_height,
+        full.content_height
+    );
+    let width = full.bitmap.width as usize;
+    for row in 0..300usize {
+        let full_start = (200 + row) * width * 4;
+        let slice_start = row * width * 4;
+        assert_eq!(
+            &full.bitmap.pixels[full_start..full_start + width * 4],
+            &slice.bitmap.pixels[slice_start..slice_start + width * 4],
+            "row {row}"
+        );
+    }
 }
 
 #[test]

@@ -75,10 +75,119 @@ pub struct Rendered {
     pub stats: crate::text::CacheStats,
 }
 
+/// A viewport-sized piece of a document. `top` is the absolute device-px row the bitmap starts at,
+/// and `total_height` is the whole page, so the caller can size a scrollbar.
+pub struct Slice {
+    pub bitmap: Bitmap,
+    pub top: f32,
+    pub total_height: f32,
+    pub stats: crate::text::CacheStats,
+}
+
+/// Every top-level block's measured vertical extent, without any painting. Build it once per
+/// width/scale/theme and reuse it for scroll frames; a 1 MB document costs one height pass.
+pub struct PageLayout {
+    spans: Vec<BlockBox>,
+    footnotes_y: f32,
+    footnotes_height: f32,
+    total_height: f32,
+    width: f32,
+    scale: f32,
+    theme: &'static str,
+}
+
+impl PageLayout {
+    pub fn total_height(&self) -> f32 {
+        self.total_height
+    }
+
+    pub fn matches(&self, options: &Options) -> bool {
+        self.width == options.width
+            && (self.scale - options.scale).abs() < 0.001
+            && self.theme == options.theme.name
+    }
+}
+
+/// Measures the whole document without painting it.
+pub fn layout(doc: &Document, options: &Options) -> PageLayout {
+    DocumentRenderer::new().layout(doc, options)
+}
+
+/// Renders only the part of the document that reaches `top..top + height`, given a layout made
+/// earlier for the same width, scale and theme. Blocks above and below are not touched, so a scroll
+/// frame costs one viewport of bitmap and one viewport of text layout.
+pub fn render_view(
+    doc: &Document,
+    options: &Options,
+    page: &PageLayout,
+    top: f32,
+    height: f32,
+) -> Slice {
+    DocumentRenderer::new().view(doc, options, page, top, height)
+}
+
+/// Holds the font and layout contexts and the glyph cache across frames, so scrolling a document
+/// does not rebuild them (and keeps the glyph cache warm). One per window, or per benchmark.
+pub struct DocumentRenderer {
+    fonts: FontContext,
+    layouts: LayoutContext<Brush>,
+    engine: TextEngine,
+}
+
+impl Default for DocumentRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DocumentRenderer {
+    pub fn new() -> Self {
+        DocumentRenderer {
+            fonts: FontContext::new(),
+            layouts: LayoutContext::new(),
+            engine: TextEngine::new(4 << 20),
+        }
+    }
+
+    /// Measures the whole document. Do this once per width, scale and theme.
+    pub fn layout(&mut self, doc: &Document, options: &Options) -> PageLayout {
+        Pager::new(doc, options, &mut self.fonts, &mut self.layouts).measure_page()
+    }
+
+    /// Renders one viewport slice, reusing the contexts and glyph cache.
+    pub fn view(
+        &mut self,
+        doc: &Document,
+        options: &Options,
+        page: &PageLayout,
+        top: f32,
+        height: f32,
+    ) -> Slice {
+        debug_assert!(page.matches(options), "page layout for different options");
+        let height = height.max(1.0);
+        let top = top.clamp(0.0, (page.total_height - height).max(0.0));
+        let mut pager = Pager::new(doc, options, &mut self.fonts, &mut self.layouts);
+        pager.slice_page(page, top, height);
+        pager.finish_slice(top, height, page.total_height, &mut self.engine)
+    }
+
+    /// Paints the whole page into one bitmap. For tests and small documents; scrolling uses
+    /// [`layout`](Self::layout) and [`view`](Self::view).
+    pub fn page(&mut self, doc: &Document, options: &Options) -> Rendered {
+        let mut pager = Pager::new(doc, options, &mut self.fonts, &mut self.layouts);
+        pager.page();
+        pager.finish(&mut self.engine)
+    }
+}
+
+/// One-shot form of [`layout`] plus [`render_view`].
+pub fn render_slice(doc: &Document, options: &Options, top: f32, height: f32) -> Slice {
+    let page = layout(doc, options);
+    render_view(doc, options, &page, top, height)
+}
+
 pub fn render(doc: &Document, options: &Options) -> Rendered {
-    let mut pager = Pager::new(doc, options);
-    pager.page();
-    pager.finish()
+    DocumentRenderer::new().page(doc, options)
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -195,7 +304,7 @@ struct Txt {
     max: Option<f32>,
 }
 
-struct Pager<'a> {
+struct Pager<'a, 'b> {
     doc: &'a Document,
     theme: Theme,
     scale: f32,
@@ -205,8 +314,8 @@ struct Pager<'a> {
     y: f32,
     paints: Vec<Paint>,
     blocks: Vec<BlockBox>,
-    fonts: FontContext,
-    layouts: LayoutContext<Brush>,
+    fonts: &'b mut FontContext,
+    layouts: &'b mut LayoutContext<Brush>,
     base_dir: Option<PathBuf>,
     /// Decoded once per render; `None` remembers a file that will not load.
     images: HashMap<u32, Option<Rc<DecodedImage>>>,
@@ -216,8 +325,13 @@ fn brush(c: Color) -> Brush {
     [c[0], c[1], c[2], 255]
 }
 
-impl<'a> Pager<'a> {
-    fn new(doc: &'a Document, options: &Options) -> Self {
+impl<'a, 'b> Pager<'a, 'b> {
+    fn new(
+        doc: &'a Document,
+        options: &Options,
+        fonts: &'b mut FontContext,
+        layouts: &'b mut LayoutContext<Brush>,
+    ) -> Self {
         let scale = options.scale.max(0.1);
         let logical_width = options.width.max(120.0);
         let content = (logical_width - 2.0 * options.theme.margin)
@@ -237,8 +351,8 @@ impl<'a> Pager<'a> {
             y: 0.0,
             paints: Vec::new(),
             blocks: Vec::new(),
-            fonts: FontContext::new(),
-            layouts: LayoutContext::new(),
+            fonts,
+            layouts,
             base_dir: options.base_dir.clone(),
             images: HashMap::new(),
         }
@@ -1445,13 +1559,102 @@ impl<'a> Pager<'a> {
         }
     }
 
-    fn finish(mut self) -> Rendered {
+    /// Measures every top-level block without keeping its paints, so a viewport can be placed and
+    /// the total page height known without allocating a page-sized bitmap.
+    fn measure_page(mut self) -> PageLayout {
+        self.y = self.px(36.0);
+        let content = self.content_width();
+        let children: Vec<u32> = self.doc.children(NONE).collect();
+        let mut spans = Vec::with_capacity(children.len());
+        for block in children {
+            let y = self.y;
+            let mark = self.paints.len();
+            self.block(block, self.left, content, self.theme.text, 0);
+            spans.push(BlockBox {
+                block,
+                y,
+                height: self.y - y,
+            });
+            self.paints.truncate(mark);
+        }
+        let footnotes_y = self.y;
+        self.footnotes();
+        let footnotes_height = self.y - footnotes_y;
+        self.paints.clear();
+        let total_height = self.y + self.px(24.0);
+        PageLayout {
+            spans,
+            footnotes_y,
+            footnotes_height,
+            total_height,
+            width: self.width / self.scale,
+            scale: self.scale,
+            theme: self.theme.name,
+        }
+    }
+
+    /// Lays out and paints only the blocks that reach the viewport.
+    fn slice_page(&mut self, page: &PageLayout, top: f32, height: f32) {
+        self.y = self.px(36.0);
+        let content = self.content_width();
+        let bottom = top + height;
+        for span in &page.spans {
+            if span.y + span.height <= top || span.y >= bottom {
+                continue;
+            }
+            self.y = span.y;
+            self.block(span.block, self.left, content, self.theme.text, 0);
+        }
+        if page.footnotes_height > 0.0
+            && page.footnotes_y + page.footnotes_height > top
+            && page.footnotes_y < bottom
+        {
+            self.y = page.footnotes_y;
+            self.footnotes();
+        }
+    }
+
+    fn finish(mut self, engine: &mut TextEngine) -> Rendered {
         let content_height = self.y + self.px(24.0);
         let height = content_height.ceil().max(1.0) as u32;
         let width = self.width.round().max(1.0) as u32;
-        let mut bitmap = Bitmap::new(width, height);
-        bitmap.clear(self.theme.bg);
-        let mut engine = TextEngine::new(4 << 20);
+        let mut frame = Bitmap::new(width, height);
+        frame.clear(self.theme.bg);
+        let stats = self.draw(&mut frame, 0.0, engine);
+        Rendered {
+            bitmap: frame,
+            content_height,
+            blocks: self.blocks,
+            stats,
+        }
+    }
+
+    fn finish_slice(
+        mut self,
+        top: f32,
+        height: f32,
+        total_height: f32,
+        engine: &mut TextEngine,
+    ) -> Slice {
+        let rows = height.ceil().max(1.0) as u32;
+        let width = self.width.round().max(1.0) as u32;
+        let mut frame = Bitmap::new(width, rows);
+        frame.clear(self.theme.bg);
+        let stats = self.draw(&mut frame, top, engine);
+        Slice {
+            bitmap: frame,
+            top,
+            total_height,
+            stats,
+        }
+    }
+
+    fn draw(
+        &mut self,
+        frame: &mut Bitmap,
+        shift: f32,
+        engine: &mut TextEngine,
+    ) -> crate::text::CacheStats {
         for paint in self.paints.drain(..) {
             match paint {
                 Paint::Rect {
@@ -1461,27 +1664,22 @@ impl<'a> Pager<'a> {
                     h,
                     radius,
                     color,
-                } => bitmap.rrect(x, y, w, h, radius, color),
+                } => frame.rrect(x, y - shift, w, h, radius, color),
                 Paint::Line {
                     a,
                     b,
                     thickness,
                     color,
-                } => bitmap.line(a, b, thickness, color),
-                Paint::Text { layout, x, y } => engine.draw_layout(&mut bitmap, &layout, x, y),
+                } => frame.line((a.0, a.1 - shift), (b.0, b.1 - shift), thickness, color),
+                Paint::Text { layout, x, y } => engine.draw_layout(frame, &layout, x, y - shift),
                 Paint::Image { index, x, y, w, h } => {
                     if let Some(Some(image)) = self.images.get(&index) {
-                        bitmap.image(&image.rgba, image.width, image.height, x, y, w, h);
+                        frame.image(&image.rgba, image.width, image.height, x, y - shift, w, h);
                     }
                 }
             }
         }
-        Rendered {
-            bitmap,
-            content_height,
-            blocks: self.blocks,
-            stats: engine.stats,
-        }
+        engine.stats
     }
 }
 
