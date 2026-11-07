@@ -9,6 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::thread::JoinHandle;
 use windows_core::*;
 
@@ -38,6 +39,45 @@ windows_core::link!("user32.dll" "system" fn GetDpiForWindow(window: *mut c_void
 windows_core::link!("user32.dll" "system" fn SetWindowPos(window: *mut c_void, after: *mut c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32);
 windows_core::link!("comdlg32.dll" "system" fn GetOpenFileNameW(ofn: *mut OpenFileNameW) -> i32);
 windows_core::link!("advapi32.dll" "system" fn RegGetValueW(hkey: *mut c_void, subkey: PCWSTR, value: PCWSTR, flags: u32, ty: *mut u32, data: *mut c_void, size: *mut u32) -> i32);
+windows_core::link!("user32.dll" "system" fn SetWindowLongPtrW(window: *mut c_void, index: i32, value: isize) -> isize);
+windows_core::link!("user32.dll" "system" fn CallWindowProcW(previous: isize, window: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize);
+windows_core::link!("user32.dll" "system" fn GetClientRect(window: *mut c_void, rect: *mut Rect) -> i32);
+
+/// `GWLP_WNDPROC`
+const GWLP_WNDPROC: i32 = -4;
+
+#[repr(C)]
+#[derive(Default)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+thread_local! {
+    static SHELL: RefCell<Option<Rc<Shell>>> = const { RefCell::new(None) };
+}
+
+static PREVIOUS_PROC: AtomicIsize = AtomicIsize::new(0);
+
+/// WinUI's window procedure, wrapped so the shell sees keys and scrollbar clicks first.
+unsafe extern "system" fn window_proc(
+    window: *mut c_void,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
+    let handled = SHELL.with(|cell| match cell.borrow().as_ref() {
+        Some(shell) => shell.handle_message(window, msg, wparam, lparam),
+        None => false,
+    });
+    if handled {
+        return 0;
+    }
+    let previous = PREVIOUS_PROC.load(Ordering::Relaxed);
+    unsafe { CallWindowProcW(previous, window, msg, wparam, lparam) }
+}
 
 /// Follows the Windows app theme, the way the shell's own chrome does.
 fn system_theme() -> mdview_render::Theme {
@@ -194,9 +234,75 @@ struct Shell {
     renderer: RefCell<Renderer>,
     path: RefCell<Option<PathBuf>>,
     presented: Cell<bool>,
+    /// How far into the scrollbar thumb the drag started, in panel device px.
+    dragging: Cell<Option<f32>>,
 }
 
 impl Shell {
+    /// Keys and scrollbar clicks, before WinUI's own window procedure runs.
+    fn handle_message(&self, window: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> bool {
+        const WM_KEYDOWN: u32 = 0x0100;
+        const WM_SYSKEYDOWN: u32 = 0x0104;
+        const WM_MOUSEMOVE: u32 = 0x0200;
+        const WM_LBUTTONDOWN: u32 = 0x0201;
+        const WM_LBUTTONUP: u32 = 0x0202;
+        match msg {
+            WM_KEYDOWN | WM_SYSKEYDOWN => {
+                if self.renderer.borrow_mut().key(wparam as u32) {
+                    self.show();
+                    true
+                } else {
+                    false
+                }
+            }
+            WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP => {
+                let Some((x, y)) = self.panel_point(window, lparam) else {
+                    return false;
+                };
+                let Some(bar) = self.renderer.borrow().bar() else {
+                    return false;
+                };
+                if x < bar.x {
+                    return false;
+                }
+                match msg {
+                    WM_LBUTTONDOWN => {
+                        let grab = self.renderer.borrow_mut().press_on_bar(&bar, y);
+                        self.dragging.set(Some(grab));
+                        self.show();
+                        true
+                    }
+                    WM_MOUSEMOVE => match self.dragging.get() {
+                        Some(grab) => {
+                            self.renderer.borrow_mut().drag_to(&bar, y, grab);
+                            self.show();
+                            true
+                        }
+                        None => false,
+                    },
+                    _ => {
+                        self.dragging.set(None);
+                        false
+                    }
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Client coordinates to panel coordinates: the panel is the bottom row of the window.
+    fn panel_point(&self, window: *mut c_void, lparam: isize) -> Option<(f32, f32)> {
+        let mut rect = Rect::default();
+        if unsafe { GetClientRect(window, &mut rect) } == 0 {
+            return None;
+        }
+        let panel_height = self.renderer.borrow().viewport_height() as f32;
+        let panel_top = rect.bottom as f32 - panel_height;
+        let x = (lparam & 0xFFFF) as u16 as i16 as f32;
+        let y = ((lparam >> 16) & 0xFFFF) as u16 as i16 as f32;
+        Some((x, y - panel_top))
+    }
+
     fn show(&self) {
         match self.renderer.borrow_mut().draw() {
             Ok(true) => {
@@ -260,6 +366,14 @@ fn reload(shell: &Rc<Shell>) {
     }
 }
 
+/// Points WinUI's own chrome (the menu labels) at the same light or dark theme as the page, so the
+/// menu text is not white on a white bar.
+fn set_chrome_theme(root: &Grid, theme: mdview_render::Theme) -> Result<()> {
+    let element: FrameworkElement = root.cast()?;
+    element.set_requested_theme(if theme.name == "dark" { 2 } else { 1 })?;
+    Ok(())
+}
+
 /// The menu row sits on the window background, so paint it the page's colour.
 fn set_root_background(root: &Grid, theme: mdview_render::Theme) -> Result<()> {
     let brush = SolidColorBrush::new()?;
@@ -308,6 +422,7 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
         item.Click(move |_, _| {
             target.renderer.borrow_mut().set_theme(theme);
             _ = set_root_background(&target.root, theme);
+            _ = set_chrome_theme(&target.root, theme);
             target.show();
         })?
         .forget();
@@ -326,7 +441,8 @@ const WELCOME: &str = "\
 
 A Markdown viewer with its own renderer: Rust, WinUI 3 on Windows.
 
-**File > Open** opens a document. The wheel scrolls.
+**File > Open** opens a document. The wheel, the scrollbar, and Home/End, the arrows,
+Page Up/Down and Space scroll.
 
 - Headings, lists, tables, alerts and code blocks are drawn by `mdview-render`.
 - HTML is mapped, not laid out by a browser.
@@ -350,6 +466,7 @@ pub fn build(
     add_row(&root, GridUnitType::Auto, 1.0)?; // menu
     add_row(&root, GridUnitType::Star, 1.0)?; // page
     set_root_background(&root, theme)?;
+    set_chrome_theme(&root, theme)?;
 
     let panel = SwapChainPanel::new()?;
     // SwapChainPanel rejects Background. A transparent child is hit-testable, and its pointer
@@ -386,6 +503,7 @@ pub fn build(
         renderer: RefCell::new(renderer),
         path: RefCell::new(file.clone()),
         presented: Cell::new(false),
+        dragging: Cell::new(None),
     });
     if let Some(path) = &file
         && let Err(e) = load(&shell, path)
@@ -432,5 +550,23 @@ pub fn build(
     window.Closed(|_, _| diag::trace("window closed"))?.forget();
     window.Activate()?;
     diag::trace("Window activated");
+
+    let hwnd = winui_window();
+    if hwnd != 0 {
+        let previous = unsafe {
+            SetWindowLongPtrW(
+                hwnd as *mut c_void,
+                GWLP_WNDPROC,
+                window_proc as *const () as isize,
+            )
+        };
+        if previous != 0 {
+            PREVIOUS_PROC.store(previous, Ordering::Relaxed);
+            SHELL.with(|cell| *cell.borrow_mut() = Some(shell.clone()));
+            diag::trace("window procedure hooked for keys and the scrollbar");
+        } else {
+            diag::trace("SetWindowLongPtrW failed; keys and the scrollbar stay inert");
+        }
+    }
     Ok(())
 }

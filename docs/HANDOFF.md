@@ -30,15 +30,30 @@ approved by the user.
 - Window is 1100x900. Menus: File > Open..., Reload, Close; View > Light theme, Dark theme. The
   wheel scrolls, and `--zoom 1.5` scales the page (verified: showcase grows from 3020 px to
   4592 px at 1.5). The page follows the Windows app theme at startup (`AppsUseLightTheme`), and
-  `--light` / `--dark` override it for screenshots. The menu row is painted the page background.
+  `--light` / `--dark` override it for screenshots.
+- **Scrolling and input**: the page is laid out 14 logical px narrower than the panel and the shell
+  paints its own scrollbar into that gutter (a hairline separator, a track and a thumb), because the
+  checked-in bindings have no `ScrollBar` control and cannot be regenerated without the NuGet winmds.
+  Keys and scrollbar clicks arrive through a `SetWindowLongPtrW` hook on WinUI's own window
+  procedure: Home/End, the arrows (48 px), Page Up/Down and Space (90% of the viewport) scroll, and a
+  press in the gutter jumps to that point and starts a drag. Everything the hook does not consume is
+  passed to the previous procedure with `CallWindowProcW`.
+- The menu labels are drawn by WinUI itself, and the default app theme is dark, which made them
+  white on the light page. `bindings.rs` now carries one hand-written helper, `set_requested_theme`,
+  that calls the `RequestedTheme` vtable slot the generator left unbound; the root grid is set to
+  Light or Dark with the page, and the View menu keeps them in step. Regenerating the bindings would
+  remove that helper, so it is duplicated there deliberately.
 - `src/render.rs` keeps one laid-out `Bitmap` and copies the visible slice into the swap chain
   buffer each frame, 1:1 with physical pixels. Re-layout happens when the width, DPI scale or theme
   changes; `max_height` is capped at 30,000 logical px until virtualization exists.
 - `--trace` writes `mdview.trace.log` beside the exe; `--measure` writes one `result=ok` line and
   exits.
-- Measured on this PC (RTX 4070 Ti SUPER, 96 DPI): first frame at 251.9 ms from process start,
-  renderer layout 27.0 ms, parse 0.1 ms.
-- Screenshots: `tests/golden/shell-winui-light.png`, `tests/golden/shell-winui-dark.png`.
+- Measured on this PC (RTX 4070 Ti SUPER, 96 DPI): first frame at 263.5 ms from process start,
+  height pass 8.8 ms for the 1084 dip panel, parse 0.1 ms.
+- Checked by driving the running window with posted messages: three Page Downs move the page to the
+  footnotes and the thumb to the bottom, and a press-and-drag in the gutter lands mid-document.
+  File > Open and the View items are still only wired, not clicked.
+- Screenshots: `tests/golden/shell-winui-light.png`, `shell-winui-dark.png`, `shell-winui-images.png`.
 
 ## The Qt shell (`bins/mdv-qt`)
 
@@ -190,12 +205,14 @@ files, writes the complete sparse index cache entry for every crate and download
   4K against the plan's 8 ms. The per-block paint cache, the rect fast path and the wide fill are in;
   what remains is the full-viewport clear and the glyph blits, which need dirty-band scrolling (keep
   the previous frame, shift it, redraw only the newly exposed rows) rather than more micro-tuning.
-- **Images**: SVG (and anything but PNG/JPEG) is still a placeholder; images are decoded once per
-  render rather than shared across renders; `<picture>` light/dark sources and `width`/`height`
-  attributes are ignored; a blocked image is retried on every render.
+- **Images**: SVG (and anything but PNG/JPEG) is still a placeholder; `<picture>` light/dark sources
+  and `width`/`height` attributes are ignored; a blocked image is retried on every render. Decoded
+  images now live on the `DocumentRenderer` and are shared by every frame, which is what keeps them
+  in cached scroll frames (there is a test that fails without it).
 - **No selection, links, anchors or details toggling.** `BlockBox` is there for hit tests but unused.
-- **The WinUI shell still has no scrollbar and no keyboard scrolling**, and its File > Open, Reload and
-  theme menu items are wired but have not been clicked. No find, tabs or document tree in either shell.
+- **The WinUI File > Open, Reload and theme menu items are wired but have not been clicked**, and its
+  scrollbar is drawn by the shell rather than by a WinUI control. No find, tabs or document tree in
+  either shell.
 - Table `colspan`/`rowspan` ignored; math, Mermaid and highlighting show source.
 - No bundled fonts, so goldens depend on system fonts.
 - The WinUI title bar follows Windows, not the in-app theme override.
@@ -203,7 +220,8 @@ files, writes the complete sparse index cache entry for every crate and download
 ## What to do next
 
 1. Get the four `tests/golden/` images and the shell screenshots approved.
-2. Give the WinUI shell a scrollbar and keyboard scrolling, and click through its File and View menus.
+2. Click through the WinUI File and View menus, then the Qt drag and drop, which the Qt rework did not
+   re-test.
 3. Give the renderer a persistent frame plus dirty-band scrolling, for 4K and for the shells (they
    currently copy a full viewport bitmap every frame).
 4. Add selection and link/anchor hit-testing, then details toggling.

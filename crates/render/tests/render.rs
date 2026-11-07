@@ -150,6 +150,38 @@ fn a_png_on_disk_is_drawn_inline() {
 }
 
 #[test]
+fn a_cached_frame_still_draws_its_images() {
+    let dir = temp_dir("image-cached");
+    let path = dir.join("red.png");
+    write_red_png(&path);
+    let doc = mdview_core::parse("![red](red.png)\n");
+    let options = Options {
+        width: 400.0,
+        scale: 1.0,
+        theme: LIGHT,
+        max_height: None,
+        base_dir: Some(dir),
+    };
+    let mut renderer = DocumentRenderer::new();
+    let page = renderer.layout(&doc, &options);
+    let first = renderer.view(&doc, &options, &page, 0.0, 300.0);
+    // The second frame reuses the cached block paints, which must still find the decoded image.
+    let second = renderer.view(&doc, &options, &page, 0.0, 300.0);
+    let red = |pixels: &[u8]| {
+        pixels
+            .chunks_exact(4)
+            .filter(|p| p[2] > 180 && p[0] < 80 && p[1] < 80)
+            .count()
+    };
+    assert!(red(&first.bitmap.pixels) > 1000, "first frame has no image");
+    assert!(
+        red(&second.bitmap.pixels) > 1000,
+        "cached frame lost the image"
+    );
+    assert_eq!(second.bitmap.pixels, first.bitmap.pixels);
+}
+
+#[test]
 fn a_slice_matches_the_same_rows_of_the_full_page() {
     let doc = fixture("showcase.md");
     let options = Options {

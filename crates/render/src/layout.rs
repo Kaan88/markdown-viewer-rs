@@ -135,6 +135,8 @@ pub struct DocumentRenderer {
     /// Laid-out paints per top-level block, relative to the block's top, for scroll frames.
     cache: HashMap<u32, Vec<Paint>>,
     cache_key: Option<(f32, f32, &'static str)>,
+    /// Decoded images, shared by every frame so a cached paint can still find its pixels.
+    images: HashMap<u32, Option<Rc<DecodedImage>>>,
 }
 
 impl Default for DocumentRenderer {
@@ -151,14 +153,24 @@ impl DocumentRenderer {
             engine: TextEngine::new(4 << 20),
             cache: HashMap::new(),
             cache_key: None,
+            images: HashMap::new(),
         }
     }
 
     /// Measures the whole document. Do this once per width, scale and theme.
     pub fn layout(&mut self, doc: &Document, options: &Options) -> PageLayout {
         self.cache.clear();
+        self.images.clear();
         self.cache_key = Some((options.width, options.scale, options.theme.name));
-        Pager::new(doc, options, &mut self.fonts, &mut self.layouts, None).measure_page()
+        Pager::new(
+            doc,
+            options,
+            &mut self.fonts,
+            &mut self.layouts,
+            None,
+            &mut self.images,
+        )
+        .measure_page()
     }
 
     /// Renders one viewport slice, reusing the contexts and glyph cache.
@@ -176,6 +188,7 @@ impl DocumentRenderer {
         let key = (options.width, options.scale, options.theme.name);
         if self.cache_key != Some(key) {
             self.cache.clear();
+            self.images.clear();
             self.cache_key = Some(key);
         }
         let mut pager = Pager::new(
@@ -184,6 +197,7 @@ impl DocumentRenderer {
             &mut self.fonts,
             &mut self.layouts,
             Some(&mut self.cache),
+            &mut self.images,
         );
         pager.slice_page(page, top, height);
         pager.finish_slice(top, height, page.total_height, &mut self.engine)
@@ -192,7 +206,14 @@ impl DocumentRenderer {
     /// Paints the whole page into one bitmap. For tests and small documents; scrolling uses
     /// [`layout`](Self::layout) and [`view`](Self::view).
     pub fn page(&mut self, doc: &Document, options: &Options) -> Rendered {
-        let mut pager = Pager::new(doc, options, &mut self.fonts, &mut self.layouts, None);
+        let mut pager = Pager::new(
+            doc,
+            options,
+            &mut self.fonts,
+            &mut self.layouts,
+            None,
+            &mut self.images,
+        );
         pager.page();
         pager.finish(&mut self.engine)
     }
@@ -351,8 +372,9 @@ struct Pager<'a, 'b> {
     layouts: &'b mut LayoutContext<Brush>,
     cache: Option<&'b mut HashMap<u32, Vec<Paint>>>,
     base_dir: Option<PathBuf>,
-    /// Decoded once per render; `None` remembers a file that will not load.
-    images: HashMap<u32, Option<Rc<DecodedImage>>>,
+    /// Decoded images, owned by the `DocumentRenderer` so cached frames keep theirs. `None`
+    /// remembers a file that will not load.
+    images: &'b mut HashMap<u32, Option<Rc<DecodedImage>>>,
 }
 
 fn brush(c: Color) -> Brush {
@@ -366,6 +388,7 @@ impl<'a, 'b> Pager<'a, 'b> {
         fonts: &'b mut FontContext,
         layouts: &'b mut LayoutContext<Brush>,
         cache: Option<&'b mut HashMap<u32, Vec<Paint>>>,
+        images: &'b mut HashMap<u32, Option<Rc<DecodedImage>>>,
     ) -> Self {
         let scale = options.scale.max(0.1);
         let logical_width = options.width.max(120.0);
@@ -390,7 +413,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             layouts,
             cache,
             base_dir: options.base_dir.clone(),
-            images: HashMap::new(),
+            images,
         }
     }
 

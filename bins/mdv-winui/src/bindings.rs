@@ -5698,3 +5698,18 @@ impl windows_core::RuntimeType for XmlnsDefinition {
         b"struct(Microsoft.UI.Xaml.Markup.XmlnsDefinition;string;string)",
     );
 }
+
+impl FrameworkElement {
+    /// Sets FrameworkElement.RequestedTheme. The generated bindings leave the property as an
+    /// unbound vtable slot, so this calls it directly: 0 is Default, 1 Light, 2 Dark.
+    pub fn set_requested_theme(&self, theme: i32) -> windows_core::Result<()> {
+        unsafe {
+            let vtbl = windows_core::Interface::vtable(self);
+            let set: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                i32,
+            ) -> windows_core::HRESULT = core::mem::transmute(vtbl.SetRequestedTheme);
+            set(windows_core::Interface::as_raw(self), theme).ok()
+        }
+    }
+}
