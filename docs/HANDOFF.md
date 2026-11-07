@@ -343,8 +343,9 @@ line instead of hanging below it.
 The renderer turns an inline `$...$` span into one image atom, rendered at **twice the surrounding
 text size** so it stays crisp when a heading, table cell, footnote or zoom enlarges it; the box and
 baseline are halved back in `text_layout`. A `$$...$$` (or fenced ```math) block is a centred image
-with normal paragraph spacing. If the engine is missing, or RaTeX rejects the source, inline math
-falls back to its styled source text and a display block falls back to the old labelled code box.
+with normal paragraph spacing. If the engine is missing, RaTeX rejects the source, or the model marked
+the equation oversize, inline math falls back to its styled source text and a display block falls
+back to the old labelled code box.
 Building up a table cell used to drop its inline boxes entirely; `cell_inline` now shifts and keeps
 them, which is also what makes math and images inside tables work.
 

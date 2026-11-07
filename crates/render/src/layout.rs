@@ -1664,6 +1664,9 @@ impl<'a, 'b> Pager<'a, 'b> {
     /// there is no engine or TeX will not parse.
     fn math_block(&mut self, b: u32, left: f32, width: f32) -> bool {
         let block = self.doc.blocks[b as usize];
+        if matches!(block.kind, BlockKind::Math { oversize: Some(_) }) {
+            return false;
+        }
         let (start, end) = (block.text.start, block.text.end);
         let source = self.doc.text[start as usize..end as usize].trim();
         if source.is_empty() {
@@ -2245,9 +2248,12 @@ impl<'a, 'b> Pager<'a, 'b> {
 
     fn push_atom(&mut self, out: &mut Inline, kind: SpanKind, at: u32, end: u32) {
         match kind {
-            SpanKind::Math { display: false, .. } => {
+            SpanKind::Math {
+                display: false,
+                oversize,
+            } => {
                 let key = math_index(at);
-                if !self.images.contains_key(&key) {
+                if oversize.is_none() && !self.images.contains_key(&key) {
                     let source = self.doc.text.get(at as usize..end as usize).unwrap_or("");
                     // Twice the body size keeps the raster crisp when a heading or a zoom
                     // enlarges it; the box and baseline are halved back in `text_layout`.
@@ -2256,7 +2262,9 @@ impl<'a, 'b> Pager<'a, 'b> {
                         engine::render_math(source, false, size, self.theme.text).map(Rc::new);
                     self.images.insert(key, decoded);
                 }
-                if let Some(Some(image)) = self.images.get(&key) {
+                if oversize.is_none()
+                    && let Some(Some(image)) = self.images.get(&key)
+                {
                     let width = image.width as f32 / 2.0;
                     let height = image.height as f32 / 2.0;
                     let baseline = image.baseline as f32 / 2.0;
@@ -2270,7 +2278,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                     });
                     return;
                 }
-                // No engine, or TeX it could not parse: keep the source readable.
+                // No engine, oversize source, or TeX it could not parse: keep it readable.
                 let source = self.doc.text.get(at as usize..end as usize).unwrap_or("");
                 out.push_doc(
                     source,
