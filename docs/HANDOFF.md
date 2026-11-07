@@ -114,6 +114,7 @@ The Qt shell builds separately (section 8).
 | `--scroll <device px>` | start partway down the page |
 | `--scroll-steps <n>` | after the first frame, walk down `n` 40 px steps, one frame each |
 | `--select-test` | after the first frame, select the word "Markdown" and log the range and first rect to the trace |
+| `--find-test` | type "Markdown" through the find path, step to the second match and log the mark counts |
 | `--details-test` | after the first frame, toggle the first `<details>` and log the page height before and after |
 | `--size <w>x<h>` | logical window size (default 1100x900) |
 
@@ -215,6 +216,7 @@ cd ~/mdview && BIN=/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdvi
 xvfb-run -a $BIN fixtures/showcase.md --light --select-test          # "select test ok: ..."
 xvfb-run -a $BIN fixtures/showcase.md --light --link-test            # "link test ok: ..."
 xvfb-run -a $BIN fixtures/showcase.md --light --details-test         # "details test ok: ..."
+xvfb-run -a $BIN fixtures/showcase.md --light --find-test            # "find test ok: ..."
 ```
 
 The scripted checks print one line and exit; on this VM they report selection `7..15` ("Markdown"),
@@ -469,6 +471,15 @@ buffer** just before the gutter strip, so the page texture - and with it `band`/
 contains selection pixels. A details toggle drops the page layout, so the next frame measures it
 again.
 
+**Find.** Ctrl+F (or Edit > Find) starts find mode; `WM_CHAR` from the same thread hook appends the
+typed characters, Backspace deletes, Enter and F3 step forward and Shift+F3 steps back, and Escape
+closes. The renderer runs core `find_visible` with its own `<details>` state, scrolls the active match
+into view, and paints all marks (yellow) plus the current one (orange) through the same CPU overlay
+as the selection. This shell has no text-field binding in its trimmed `bindings.rs`, so the query and
+its `2 of 4` counter are shown in the **window title** (`mdview - file — Find: query [2 of 4]`)
+rather than in a find box. `--find-test` feeds WM_CHAR/WM_KEYDOWN messages through the hook and logs
+`find test ok: 4 matches, 4 mark rects, 1 current rects, index 1`.
+
 **Hand-written additions in `bindings.rs`** (regenerating would drop them):
 
 - `FrameworkElement::set_requested_theme` - the root grid is set Light/Dark with the page, otherwise
@@ -530,6 +541,13 @@ canvas's own mouse handlers for scripted checks. Those checks send events straig
 a synthetic press through the `QWindow` does not establish Qt's implicit grab, so the release never
 arrives that way, while `QApplication::sendEvent` on the canvas does reach `mouseReleaseEvent`.
 
+**Find.** Ctrl+F opens an Edit menu item and a `QToolBar` with a `QLineEdit`, Previous, Next and
+Close. Typing emits `textChanged`; the shell runs core `find_visible` with the renderer's `<details>`
+state, scrolls the first match into view and paints every match yellow and the active one orange
+after the page blit. Enter and Next step forward, Previous and Shift+F3 back, and the status bar
+shows `Find: 2 of 4` (`+` when `FIND_CAP` stopped the count). `--find-test` sets the line edit's text
+so the `textChanged` path runs, checks four marks and one current rectangle, and steps to index 1.
+
 **No band path here, on purpose.** The raster backend has no upload to save and `drawImage` only
 touches the pixels the paint event exposes. Measured on Windows: 0.5-0.7 ms per 48 px scroll paint at
 1086x846, and 2.0 ms at 3386x1327 (4.5 Mpx) - inside the 4 ms and 8 ms budgets. Cutting it further
@@ -568,6 +586,8 @@ and are not errors.
 | `shell-winui-mermaid.png` | the same view in WinUI, one engine process for every Mermaid block |
 | `shell-qt-highlight.png` | the Qt shell at scroll 500: the Rust block with syntect token colours |
 | `shell-winui-highlight.png` | the same view in WinUI |
+| `shell-qt-find.png` | the Qt find bar with "Markdown", four marks and `Find: 2 of 4` in the status bar |
+| `shell-winui-find.png` | the same matches in WinUI, with query and counter in the title |
 
 **These are for review, not a pixel baseline yet.** They use this host's system fonts (Segoe UI,
 Consolas), so another machine or Linux will differ; the plan calls for bundled fonts and a tolerance
@@ -625,7 +645,10 @@ and the shifted-frame path against a whole-frame reference; selection in both sh
 press-drag-release on the running window (a drag from the heading into the next paragraph, two
 selection rows) and a click on the `#diagrams` link, both captured; `<details>` toggling through
 `--details-test` in both shells (4085 -> 4139 px, the body appearing) and a WinUI capture of the
-open body. The Qt shell on the same files with layout,
+open body. Find in both shells: Qt `--find-test` sets the line edit's text and reports
+`4 matches, 4 mark rects, 1 current rects, bar true, index 1`; WinUI `--find-test` feeds WM_CHAR and
+F3 through the message hook and logs `4 matches, 4 mark rects, 1 current rects, index 1`; both
+captured with the marks visible. The Qt shell on the same files with layout,
 first paint, wheel, scrollbar, keys, File > Open..., themes, `--zoom`, `--scroll`, a live resize to
 3400x1380 and `--drop-test`. The SVG badge renders through `mdview-engine` in `mdv-bench` and both
 shells; with `MDV_ENGINE` pointing at a missing file the same view falls back to
@@ -645,7 +668,8 @@ source box. The fenced Rust block is tokenized in both themes in `mdv-bench` and
 
 **Linux:** the Qt shell built with Qt 6.8.2 on the VM, run and captured under Xvfb, `--drop-test`,
 `--select-test` (7..15 = "Markdown"), `--link-test` (scrolled to 1266 px) and `--details-test`
-(4109 -> 4163 px) passing, and `cargo test --release -p mdview-core -p mdview-render` passing
+(4109 -> 4163 px) passing, `--find-test` reporting four matches and four mark rects, and
+`cargo test --release -p mdview-core -p mdview-render` passing
 (18 render integration tests and the 10 render unit tests included). `mdv-bench fixtures/images.md`
 renders the SVG badge at 780x413 in
 11.4 ms with its text: the engine's font query now falls through Noto Sans, DejaVu Sans and the
@@ -673,6 +697,8 @@ Qt's event path instead).
 - Mermaid diagrams keep Mermaid's own light palette in the dark theme, and a long mindmap root can
   clip at the circle edge on Linux, where the real font is wider than merman's deterministic
   measurement. Diagram blocks are images, so they have no selection geometry either.
+- The WinUI find has no text box: its query and counter live in the window title, because the trimmed
+  `bindings.rs` has no `TextBox` event or text accessor. Qt has a real find bar.
 - The WinUI title bar follows Windows, not the in-app theme override.
 - The WinUI scrollbar is drawn by the shell, not a WinUI control (no `ScrollBar` in the bindings).
 - Scroll frames meet the budgets, but a frame still waits for vsync (3-6 ms in the trace): the
@@ -684,9 +710,9 @@ Qt's event path instead).
    `showcase-{light,dark}@{1.0,1.5}.png` plus the shell captures (including the selection,
    anchor, details, math, Mermaid and highlighting shots) and ask for a yes or a list of changes.
 2. **Phase 3/5 parity**: the Qt and WinUI items from `docs/PORT_CHECKLIST.md` - tabs, folder tree,
-   outline, find, recents, zoom limits, themes, focus mode, session restore. Selection, links,
-   `<details>`, math, diagrams and highlighting are done in both shells; copy to the clipboard and a
-   link context menu are the obvious next shell features.
+   outline, recents, zoom limits, themes, focus mode, session restore. Selection, links, `<details>`,
+   find, math, diagrams and highlighting are done in both shells; copy to the clipboard and a link
+   context menu are the obvious next shell features.
 3. **Bundled fonts**, then turn the goldens into a real pixel suite (the plan's Phase 6).
 
 Every Qt/Linux change is tested on the VM as well as on Windows, and nothing counts as working on

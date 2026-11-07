@@ -34,6 +34,8 @@ came from one shared engine process.
 sequence and class diagrams drawn by merman in both shells, again from the one engine process.
 `shell-qt-highlight.png` and `shell-winui-highlight.png` are the showcase at scroll 500, where the
 Rust fence is coloured by syntect in both shells.
+`shell-qt-find.png` and `shell-winui-find.png` show find for "Markdown": four hit rectangles and the
+second one active, with the Qt status bar and the WinUI title carrying `2 of 4`.
 
 Math and Mermaid changed the showcase: the page is now 4085 px at 100% (taller formula lines and
 diagram images instead of code boxes) and the Mathematics and Diagrams sections show rendered output,
