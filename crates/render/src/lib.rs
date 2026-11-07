@@ -3,6 +3,7 @@
 
 mod bitmap;
 mod engine;
+mod highlight;
 mod image;
 mod layout;
 mod text;

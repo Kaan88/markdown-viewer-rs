@@ -5,6 +5,7 @@
 
 use crate::bitmap::Bitmap;
 use crate::engine;
+use crate::highlight;
 use crate::image::{self, DecodedImage};
 use crate::text::{Brush, TextEngine};
 use crate::theme::{Color, DARK, LIGHT, Theme};
@@ -627,6 +628,8 @@ struct Style {
     small: bool,
     sub: bool,
     sup: bool,
+    /// A token colour from the syntax highlighter; overrides the theme text colour.
+    color: Option<Color>,
 }
 
 impl Style {
@@ -1148,6 +1151,9 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
             if style.muted {
                 builder.push(StyleProperty::Brush(brush(self.theme.muted)), range.clone());
+            }
+            if let Some(color) = style.color {
+                builder.push(StyleProperty::Brush(brush(color)), range.clone());
             }
             if style.code || style.kbd || style.math {
                 builder.push(
@@ -1764,14 +1770,29 @@ impl<'a, 'b> Pager<'a, 'b> {
         let source = self.doc.block_text(b).trim_end_matches('\n').to_string();
         let text_start = self.doc.blocks[b as usize].text.start;
         let mut inline = Inline::default();
-        inline.push_doc(
-            &source,
-            Style {
-                code: true,
-                ..Style::default()
-            },
-            text_start,
-        );
+        let dark = self.theme.name == "dark";
+        if let Some(tokens) = highlight::tokens(&source, label.as_deref(), dark) {
+            for token in tokens {
+                inline.push_doc(
+                    &source[token.range.clone()],
+                    Style {
+                        code: true,
+                        color: Some(token.color),
+                        ..Style::default()
+                    },
+                    text_start + token.range.start as u32,
+                );
+            }
+        } else {
+            inline.push_doc(
+                &source,
+                Style {
+                    code: true,
+                    ..Style::default()
+                },
+                text_start,
+            );
+        }
         let pad_x = self.px(16.0);
         let pad_y = self.px(13.0);
         let txt = Txt {

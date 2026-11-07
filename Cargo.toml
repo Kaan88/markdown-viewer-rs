@@ -25,3 +25,4 @@ opt-level = "s"
 bit-set = { path = "vendor/bit-set-0.8.0" }
 bit-vec = { path = "vendor/bit-vec-0.8.0" }
 quick-xml = { path = "vendor/quick-xml-0.42.0" }
+bincode = { path = "vendor/bincode-1.3.3" }
