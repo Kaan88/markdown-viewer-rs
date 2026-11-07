@@ -52,9 +52,7 @@ the UIs early - so Phase 3 and 5 become "make the existing shells match the chec
 ## 2. Repository
 
 - `Kaan88/markdown-viewer-rs`, private, branch `phase2-renderer`.
-- Recent commits: `a583c05` docs selection, `385ded5` WinUI selection/links, `5630e61` Qt
-  selection/links, `f212fe8` render hit testing, `556e5eb` docs. `git log --oneline -5` has the
-  exact tip.
+- Recent commits: `git log --oneline -5`; the tip is the shared lazy engine client and its docs.
 - Workspace members: `crates/core`, `crates/render`, `crates/engine`, `crates/engine-proto`,
   `bins/mdv-bench`, `bins/mdv-winui`. `crates/engine` is both a library and the `mdview-engine`
   binary. `bins/mdv-qt` is **excluded** from the workspace because it needs Qt to build; it has its
@@ -70,8 +68,8 @@ Toolchain here: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msv
 ```powershell
 cd C:\Users\kaank\Desktop\mv
 cargo test --release --offline --workspace     # 7 core, 11 fuzz, 113 regression, 3 spec,
-                                               # 4 engine, 4 engine-proto, 3 render unit,
-                                               # 17 render integration
+                                               # 4 engine, 4 engine-proto, 6 render unit
+                                               # (4 + 2 ignored deadline waits), 17 render integration
 cargo fmt --all --check
 cargo build --release --offline --workspace    # includes target/release/mdview-engine.exe
 cargo build --release --offline -p mdview-winui
@@ -209,7 +207,7 @@ cd ~/mdview/bins/mdv-qt && export QMAKE=/usr/lib/qt6/bin/qmake6 && cargo build -
 cd ~/mdview && cargo build --release -p mdview-engine      # for SVG images
 cd ~/mdview && cargo test --release -p mdview-core -p mdview-render -p mdview-engine -p mdview-engine-proto
                                                                       # 7 core, 11 fuzz, 113 regression,
-                                                                      # 3 spec, 4 engine, 4 proto, 2+17 render
+                                                                      # 3 spec, 4 engine, 4 proto, 6+17 render
 cd ~/mdview && xvfb-run -a /mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt \
     --drop-test fixtures/linked.md                                   # prints "drop test ok: ..."
 cd ~/mdview && BIN=/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt
@@ -330,22 +328,28 @@ budgets (4 ms p99 at 150%, 8 ms at 4K) are met with room.
 renders SVG with resvg 0.47 (0.49 is not in the offline cache; the API used here is unchanged), loads
 system fonts once per process, and clamps the raster to the renderer's 24 M pixel cap. Text falls
 back through the renderer's sans stack when usvg's default serif fallback is unavailable, which is
-what makes the badge's label appear on a minimal Debian install as well as on Windows. The renderer
-never links it: `crates/render/src/engine.rs` starts the process for an SVG, sends one job over the
-`crates/engine-proto` frame format, reads the reply with a 5 s deadline, and closes stdin so the
-engine exits. A missing engine, a timeout, a bad raster or a malformed SVG leaves the existing
-placeholder, so a hostile file can slow one image, not the viewer.
+what makes the badge's label appear on a minimal Debian install as well as on Windows.
+
+The renderer never links it: `crates/render/src/engine.rs` keeps **one shared process** in a global
+slot. The first SVG starts it and a worker thread owns its pipes; later jobs reuse it, so the font
+database is loaded once. Each job has a 5 s deadline. A pipe error (the engine's 10 s idle exit, or
+a crash) invalidates the slot and the same job retries once against a fresh process; a timeout also
+kills and reaps the process and returns a placeholder, so the next job starts clean. A missing
+engine, a bad raster or a malformed SVG leaves the existing placeholder, so a hostile file can slow
+one image, not the viewer.
 
 `image::load` sends anything whose first tag is `<svg` (after an optional XML declaration) to the
 engine; PNG and JPEG stay in-process. The binary is found through `MDV_ENGINE`, beside the current
 executable, or in `target/release` beside an ancestor, which covers the Qt shell building into its
 own `bins/mdv-qt/target/release`.
 
-Measured on this PC: the showcase badge (180x28, text) draws in both shells; `fixtures/images.md`
-through `mdv-bench` takes 18-53 ms including engine start and fontconfig (the wide range is the
-font cache warming). Each SVG currently starts its own process, so a page of many SVGs would pay
-that start repeatedly; a shared connection that keeps the engine for its 10 s idle window is the
-next step, and the engine already loops until idle or EOF.
+Measured on this PC: two consecutive 180x28 badge jobs took **13.2 ms then 2.4 ms with one engine
+start**; a deliberately stalled engine was killed at **5003.9 ms** and the next job started in
+13.4 ms; after **11 s idle** the next job took 15.7 ms and started exactly one fresh process.
+`fixtures/two-svg.md` (two badges) draws through `mdv-bench` in 24.8 ms. On the Linux VM the same
+checks report **5.2 ms then 0.8 ms**, a stalled job killed at **5003.0 ms** with a **3.6 ms**
+respawn, **3.7 ms** after 11 s idle, and **10.8 ms** for the two badges. The idle and stalled cases
+are `#[ignore]`d tests, because they wait out the real deadlines.
 
 ## 7. The WinUI shell (`bins/mdv-winui`)
 
@@ -497,6 +501,7 @@ and are not errors.
 | `shell-winui-details.png` | the WinUI window after `--details-test` opened the showcase `<details>` |
 | `shell-qt-svg.png` | the Qt shell at scroll 760: the showcase badge is an SVG, drawn by the engine |
 | `shell-winui-svg.png` | the same view in WinUI, with the engine running beside the shell |
+| `shell-winui-two-svg.png` | `fixtures/two-svg.md`: both badges from the one shared engine process |
 
 **These are for review, not a pixel baseline yet.** They use this host's system fonts (Segoe UI,
 Consolas), so another machine or Linux will differ; the plan calls for bundled fonts and a tolerance
@@ -553,7 +558,11 @@ open body. The Qt shell on the same files with layout,
 first paint, wheel, scrollbar, keys, File > Open..., themes, `--zoom`, `--scroll`, a live resize to
 3400x1380 and `--drop-test`. The SVG badge renders through `mdview-engine` in `mdv-bench` and both
 shells; with `MDV_ENGINE` pointing at a missing file the same view falls back to
-`[image: Native desktop badge]`.
+`[image: Native desktop badge]`. The shared client reuses one process across jobs (13.2 ms then
+2.4 ms), kills a stalled one at 5003.9 ms and respawns in 13.4 ms, and replaces the idle-exited
+process after 11 s in 15.7 ms; `fixtures/two-svg.md` draws both badges in 24.8 ms. In the running
+WinUI shell with `two-svg.md`, `Get-Process mdview-engine` counted 1 process three seconds in and 0
+after 15 s, while the window stayed open and both badges stayed drawn.
 
 **Linux:** the Qt shell built with Qt 6.8.2 on the VM, run and captured under Xvfb, `--drop-test`,
 `--select-test` (7..15 = "Markdown"), `--link-test` (scrolled to 1243 px) and `--details-test`
@@ -585,9 +594,9 @@ Qt's event path instead).
    `showcase-{light,dark}@{1.0,1.5}.png` plus the shell captures (including the new selection,
    anchor and details shots) and ask for a yes or a list of changes.
 2. **Phase 4, the rest**: math (RaTeX), Mermaid (merman, 8 families), and syntax highlighting
-   (syntect/two-face) join the engine, reusing the job/reply format and the 5 s deadline. SVG is
-   already done. The engine currently takes one job per process; a shared connection that keeps it
-   for the 10 s idle window is the next engine change, and the reason an SVG pays a start.
+   (syntect/two-face) join the engine, reusing the job/reply format, the shared process and the 5 s
+   deadline. SVG is already done. The client keeps the process warm; its idle exit and the
+   kill-and-respawn path are tested.
 3. **Then the Qt/WinUI parity items** from `docs/PORT_CHECKLIST.md`: tabs, folder tree, outline, find,
    recents, zoom limits, themes, focus mode, session restore. Selection and `<details>` are done in
    both shells; copy to the clipboard and a link context menu are the obvious next shell features.
