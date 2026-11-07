@@ -3,7 +3,7 @@
 use crate::bindings::*;
 use crate::diag;
 use mdview_core::Document;
-use mdview_render::{Bitmap, DocumentRenderer, Options, PageLayout, Theme};
+use mdview_render::{DocumentRenderer, Options, PageLayout, Theme};
 use std::ffi::c_void;
 use std::time::Instant;
 use windows_core::*;
@@ -74,11 +74,6 @@ pub fn create_gpu() -> Result<Gpu> {
     }
 }
 
-/// The visible slice of the page, ready to blit.
-struct Page {
-    bitmap: Bitmap,
-}
-
 pub struct Renderer {
     gpu: Gpu,
     panel: SwapChainPanel,
@@ -86,7 +81,6 @@ pub struct Renderer {
     width: u32,
     height: u32,
     pixels: Vec<u32>,
-    page: Option<Page>,
     page_layout: Option<PageLayout>,
     renderer: DocumentRenderer,
     document: Option<Document>,
@@ -107,7 +101,6 @@ impl Renderer {
             width: 0,
             height: 0,
             pixels: Vec::new(),
-            page: None,
             page_layout: None,
             renderer: DocumentRenderer::new(),
             document: None,
@@ -122,20 +115,17 @@ impl Renderer {
     pub fn set_document(&mut self, document: Document, base_dir: Option<std::path::PathBuf>) {
         self.document = Some(document);
         self.base_dir = base_dir;
-        self.page = None;
         self.page_layout = None;
         self.scroll = 0.0;
     }
 
     pub fn set_zoom(&mut self, zoom: f32) {
         self.zoom = zoom.clamp(0.5, 3.0);
-        self.page = None;
         self.page_layout = None;
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme;
-        self.page = None;
         self.page_layout = None;
     }
 
@@ -321,7 +311,6 @@ impl Renderer {
 
     fn refresh(&mut self, logical_width: f32, scale: f32, height: u32) {
         let Some(document) = &self.document else {
-            self.page = None;
             self.page_layout = None;
             return;
         };
@@ -352,12 +341,8 @@ impl Renderer {
         self.scroll = self
             .scroll
             .clamp(0.0, (layout.total_height() - height as f32).max(0.0));
-        let slice = self
-            .renderer
-            .view(document, &options, layout, self.scroll, height as f32);
-        self.page = Some(Page {
-            bitmap: slice.bitmap,
-        });
+        self.renderer
+            .view_frame(document, &options, layout, self.scroll, height as f32);
     }
 
     fn background(&self) -> u32 {
@@ -378,18 +363,27 @@ impl Renderer {
         if self.pixels.len() != self.width as usize * self.height as usize {
             self.fill_background();
         }
-        let Some(page) = &self.page else {
+        let Self {
+            pixels,
+            width,
+            height,
+            renderer,
+            ..
+        } = self;
+        let (width, height) = (*width as usize, *height as usize);
+        let Some(frame) = renderer.frame() else {
             return;
         };
-        let page_width = page.bitmap.width as usize;
-        let page_height = page.bitmap.height as usize;
-        let width = self.width as usize;
-        let height = self.height as usize;
+        let page_width = frame.bitmap.width as usize;
+        let page_height = frame.bitmap.height as usize;
         let copy_width = width.min(page_width);
         let left = 0;
         // The bitmap is BGRA bytes, which is what little-endian u32 0xAARRGGBB holds too.
         let source: &[u32] = unsafe {
-            std::slice::from_raw_parts(page.bitmap.pixels.as_ptr().cast(), page_width * page_height)
+            std::slice::from_raw_parts(
+                frame.bitmap.pixels.as_ptr().cast(),
+                page_width * page_height,
+            )
         };
         let top = 0i64;
         for y in 0..height.min(page_height) {
@@ -399,7 +393,7 @@ impl Renderer {
             }
             let start = source_y as usize * page_width;
             let destination = y * width + left;
-            self.pixels[destination..destination + copy_width]
+            pixels[destination..destination + copy_width]
                 .copy_from_slice(&source[start..start + copy_width]);
         }
         self.draw_bar();

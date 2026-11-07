@@ -142,7 +142,7 @@ fn run(
             let page = renderer.layout(doc, &options);
             let base = scroll.unwrap_or(0.0);
             let first = Instant::now();
-            let mut slice = renderer.view(doc, &options, &page, base, height);
+            renderer.view_frame(doc, &options, &page, base, height);
             let first_ms = first.elapsed().as_secs_f64() * 1000.0;
             let mut worst = 0.0f64;
             let mut sum = 0.0f64;
@@ -150,7 +150,7 @@ fn run(
             for frame in 1..repeat.max(1) {
                 let top = base + frame as f32 * 40.0;
                 let started = Instant::now();
-                slice = renderer.view(doc, &options, &page, top, height);
+                renderer.view_frame(doc, &options, &page, top, height);
                 let ms = started.elapsed().as_secs_f64() * 1000.0;
                 worst = worst.max(ms);
                 sum += ms;
@@ -160,11 +160,12 @@ fn run(
                 "height pass {first_ms:.1} ms; scroll frames worst {worst:.1} ms, mean {:.1} ms over {frames}",
                 sum / frames.max(1) as f64
             );
+            let frame = renderer.frame().expect("frame");
             (
-                slice.bitmap,
-                slice.total_height,
-                slice.stats,
-                format!(" scroll {:.0}..{:.0}", slice.top, slice.top + height),
+                frame.bitmap.clone(),
+                page.total_height(),
+                frame.stats,
+                format!(" scroll {:.0}..{:.0}", frame.top, frame.top + height),
             )
         }
         None => {

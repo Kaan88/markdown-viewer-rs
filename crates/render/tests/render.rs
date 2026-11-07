@@ -1,7 +1,7 @@
 //! Pixel-level smoke tests for the headless renderer. The golden images are approved by eye; these
 //! catch a crash, a blank page, a lost theme and a lost clamp.
 
-use mdview_render::{DARK, DocumentRenderer, LIGHT, Options, render, render_slice};
+use mdview_render::{DARK, DocumentRenderer, LIGHT, Options, render, render_slice, render_view};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> mdview_core::Document {
@@ -179,6 +179,33 @@ fn a_cached_frame_still_draws_its_images() {
         "cached frame lost the image"
     );
     assert_eq!(second.bitmap.pixels, first.bitmap.pixels);
+}
+
+#[test]
+fn a_shifted_frame_matches_a_fresh_view() {
+    let dir = temp_dir("frame-shift");
+    let path = dir.join("red.png");
+    write_red_png(&path);
+    let doc = mdview_core::parse(
+        "# Title\n\n![red](red.png)\n\nText under the image.\n\n## Next\n\nMore text here.\n",
+    );
+    let options = Options {
+        width: 420.0,
+        scale: 1.0,
+        theme: LIGHT,
+        max_height: None,
+        base_dir: Some(dir),
+    };
+    let mut renderer = DocumentRenderer::new();
+    let page = renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, &page, 0.0, 200.0);
+    // Small steps reuse the shifted frame; the long jumps force a full repaint.
+    for top in [37.0, 5.0, 300.0, 120.0, 0.0] {
+        renderer.view_frame(&doc, &options, &page, top, 200.0);
+        let frame = renderer.frame().expect("frame");
+        let fresh = render_view(&doc, &options, &page, frame.top, 200.0);
+        assert_eq!(frame.bitmap.pixels, fresh.bitmap.pixels, "top {top}");
+    }
 }
 
 #[test]

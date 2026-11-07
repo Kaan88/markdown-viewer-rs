@@ -1,6 +1,7 @@
 //! A CPU framebuffer in BGRA order, plus the handful of antialiased shapes the page needs.
 
 /// Opaque 8-bit BGRA pixels, top-down, stride `width * 4`. Alpha is always 255.
+#[derive(Clone)]
 pub struct Bitmap {
     pub width: u32,
     pub height: u32,

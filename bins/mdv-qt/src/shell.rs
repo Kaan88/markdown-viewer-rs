@@ -241,17 +241,19 @@ impl CanvasHandler for Shell {
         let Some(document) = &*self.document.borrow() else {
             return;
         };
-        let slice = self.renderer.borrow_mut().view(
+        self.renderer.borrow_mut().view_frame(
             document,
             &options,
             layout,
             scroll as f32,
             device_height as f32,
         );
+        let renderer = self.renderer.borrow();
+        let frame = renderer.frame().expect("frame");
         target.blit_painter(
-            &slice.bitmap.pixels,
-            slice.bitmap.width as i32,
-            slice.bitmap.height as i32,
+            &frame.bitmap.pixels,
+            frame.bitmap.width as i32,
+            frame.bitmap.height as i32,
             true,
         );
     }

@@ -151,28 +151,36 @@ The user gave this VM for Qt and Linux testing from 2026-11-07. It is Debian 13 
 ## Virtualized viewports (renderer API; shells not wired yet)
 
 - `crates/render` exposes `DocumentRenderer` (font and layout contexts plus the glyph cache kept warm
-  across frames), `layout(doc, options) -> PageLayout` (one height pass over every top-level block)
-  and `view(doc, options, &PageLayout, top, height) -> Slice` (one viewport-sized bitmap). `render`
-  still paints a whole page for tests; `render_slice` is the one-shot layout+view form.
+  across frames), `layout(doc, options) -> PageLayout` (one height pass over every top-level block),
+  `view(doc, options, &PageLayout, top, height) -> Slice` (a fresh viewport-sized bitmap, used by
+  tests and one-shot callers) and `view_frame(...) -> &Frame` plus `frame()`, which keep one bitmap
+  between calls. `render` still paints a whole page for tests; `render_slice` is the one-shot
+  layout+view form.
+- **Scrolling shifts the frame**: `view_frame` keeps the last viewport bitmap and, when the new view
+  overlaps it, moves the surviving rows with one `copy_within` and repaints only the band that came
+  into view. The band is drawn on its own small bitmap and copied in, because a block can reach past
+  the band and would otherwise be blended twice on the overlap. A jump of a full viewport or more
+  falls back to a clear and a full repaint. A test compares shifted frames against a fresh `view` at
+  five scroll offsets, images included, and they are byte-identical.
 - Measured on `spikes/parser/data/generated_1mib.md` (1.0 MB, 25,060 blocks, 897,583 bytes of text,
-  583,619 px page): parse 8.3 ms; height pass 3.7 ms; scroll frames over 60 steps at 40 px, after
-  caching each block's paints relative to its top: **0.9 ms mean, 1.1 ms worst at 780x900 (100%)**,
-  **2.2 mean, 2.6 worst at 1170x1350 (150%)**, 8.1 mean, 8.4 worst at 3840x2200 (4K, 150%). Glyph
+  583,619 px page): parse 8.3 ms; height pass 3.7 ms; scroll frames over 60 steps at 40 px, with the
+  per-block paint cache and the shifted frame: **0.2 ms mean, 0.4 ms worst at 780x900 (100%)**,
+  **0.6 mean, 1.0 worst at 1170x1350 (150%)**, 2.6 mean, 3.0 worst at 3840x2200 (4K, 150%). Glyph
   cache 99% hit, peak 0.2 MiB. The bitmap is the viewport (2.8 MB) rather than the page (1.8 GB at
   780x583,619x4).
-- The plan's budget is 4 ms p99 per scroll frame at 150%: **met** (2.6 ms worst). It was 5.3 ms mean
-  before the profile; the profile showed the cost was not text at all but `Bitmap::rrect`: code-block
-  and table backgrounds are rounded rectangles, and the old loop ran a `hypot` distance and a float
-  blend on every pixel of them (5.8 ms of a 6.5 ms frame). `rrect` now fills the fully covered part of
-  each row with a wide store and runs the distance formula only on the pixels the edges cut through.
-  A unit test compares it pixel for pixel against the old per-pixel form, and regenerating the four
-  `tests/golden/showcase-*.png` images still gives byte-identical files.
-- At 4K the frame is 8.1 ms against the plan's 8 ms: borderline. The clear (33 MB) and the glyph blits
-  are now the two big items, so the next win there is not drawing the whole viewport each frame.
-- **Both shells are wired to this API**: each keeps a `DocumentRenderer` and a `PageLayout`, paints
-  one viewport slice per frame, and scrolls without laying the page out again. On this PC the height
-  pass for `generated_1mib.md` is 284 ms (Qt) and 287 ms (WinUI) at ~1100 dip, page 583,619 px; the
-  first WinUI frame arrives at 521 ms from process start.
+- The plan's budget is 4 ms p99 per scroll frame at 150% and 8 ms at 4K: **met** (1.0 and 3.0 ms
+  worst). The path there was 5.3 ms mean, then the `Bitmap::rrect` profile (code-block and table
+  backgrounds ran a `hypot` and a float blend on every pixel; 5.8 ms of a 6.5 ms frame), then the
+  band-shifting frame above: 6.6 -> 0.9 -> 0.2 ms at 100%, 8.1 -> 2.6 ms at 4K. `rrect` still has a
+  unit test against the old per-pixel form, and the four `tests/golden/showcase-*.png` images
+  regenerate byte-identical.
+- The shells still copy the whole viewport bitmap to the GPU every frame; only the renderer got
+  cheaper. That upload is now the next 4K item, not the drawing.
+- **Both shells are wired to this API**: each keeps a `DocumentRenderer` and a `PageLayout`, calls
+  `view_frame` per frame, blits from `frame()`, and scrolls without laying the page out again (checked
+  on the Qt shell: three Page Downs produce no further height pass). On this PC the height pass for
+  `generated_1mib.md` is 284 ms (Qt) and 287 ms (WinUI) at ~1100 dip, page 583,619 px; the first
+  WinUI frame arrives at 521 ms from process start.
 
 ## What has and has not run
 
@@ -227,8 +235,8 @@ files, writes the complete sparse index cache entry for every crate and download
 ## What to do next
 
 1. Get the four `tests/golden/` images and the shell screenshots approved.
-2. Give the renderer a persistent frame plus dirty-band scrolling, for 4K and for the shells (they
-   currently copy a full viewport bitmap every frame).
+2. Upload only the changed band to the GPU in the shells (WinUI's `UpdateSubresource` box, a
+   `drawImage` sub-rect in Qt); the renderer already shifts its frame.
 3. Add selection and link/anchor hit-testing, then details toggling.
 4. Add SVG support when Phase 4 lands (the image cache is already shared across frames).
 5. Decide bundled fonts, then turn the goldens into a pixel suite.
