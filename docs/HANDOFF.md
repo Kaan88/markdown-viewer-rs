@@ -7,8 +7,10 @@ This document is the current state: what works, how to build and check it, the t
 and what to do next. `docs/PLAN.md` is the full plan (budgets, phases, gates). Read this file first,
 then the plan.
 
-**Branch:** `phase2-renderer`, tracking `origin/phase2-renderer`, HEAD `09e5622`, everything pushed.
-There is no CI: tests are run by hand before a push. Commit and push at milestones.
+**Branch:** `phase2-renderer`, tracking `origin/phase2-renderer`; the branch tip is pushed. Check
+`git log --oneline -5` for where it actually is - this file is updated at each milestone, so the
+commit that last changed it is the state it describes. There is no CI: tests are run by hand before a
+push. Commit and push at milestones.
 
 Working agreements (from `CLAUDE.md`): read this file before touching anything; commit and push as
 phases or milestones complete, not continuously, but do push, because the user checks GitHub; there is
