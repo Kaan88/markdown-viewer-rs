@@ -21,6 +21,9 @@ approved by the user.
   `fixtures/images.md`, golden `tests/golden/images-light.png`, and shell captures.
 - Workspace: 7 core, 11 fuzz, 113 regression, 3 spec, 6 render tests and the renderer's image-limit
   unit test pass; `cargo fmt --all` clean.
+- A scroll frame now reaches the WinUI window as a band: the renderer reports which rows it painted
+  and how far the rest moved, and the shell moves the rest with a GPU copy. See "Virtualized
+  viewports" below.
 
 ## The WinUI shell (`bins/mdv-winui`)
 
@@ -43,11 +46,24 @@ approved by the user.
   that calls the `RequestedTheme` vtable slot the generator left unbound; the root grid is set to
   Light or Dark with the page, and the View menu keeps them in step. Regenerating the bindings would
   remove that helper, so it is duplicated there deliberately.
-- `src/render.rs` keeps one laid-out `Bitmap` and copies the visible slice into the swap chain
-  buffer each frame, 1:1 with physical pixels. Re-layout happens when the width, DPI scale or theme
-  changes; `max_height` is capped at 30,000 logical px until virtualization exists.
-- `--trace` writes `mdview.trace.log` beside the exe; `--measure` writes one `result=ok` line and
-  exits.
+- **Keys and scrollbar clicks are heard through the child windows.** WinUI's content lives in child
+  windows (`InputSiteWindowClass`, `Microsoft.UI.Content.DesktopChildSiteBridge`,
+  `InputNonClientPointerSource`) and the keyboard goes to one of those, never to the top-level window:
+  hooking only the top-level window, as this shell first did, silently saw no key at all. `build`
+  now hooks the top-level window and every child, keeping each one's previous procedure so
+  `CallWindowProcW` still reaches WinUI. Verified with real Page Down presses: the page moves three
+  pages and the trace shows the band uploads.
+- `src/render.rs` keeps the page in **two D3D11 textures** (see the virtualization section) and the
+  scrollbar in a 15 px strip beside it, so a scroll sends the band and a GPU copy of the rest instead
+  of the whole viewport. The page can be a few px wider than the width it was laid out for; the
+  scrollbar strip covers that overhang, because the bar has to sit at the panel's right edge.
+- `--trace` writes `mdview.trace.log` beside the exe, one line per frame with paint, upload, the rows
+  sent, present and total. `--measure` writes one `result=ok first_frame_ms=...` line and exits.
+- `--no-shift` sends every frame whole instead of using the shifted frame, which is the reference a
+  shifted frame has to match; `--scroll <device px>` starts partway down the page; `--scroll-steps
+  <n>` walks the page down `n` 40 px steps, one frame each, after the first frame; `--size
+  <w>x<h>` opens a larger window. The last three exist so a capture or a measurement needs no input
+  injection.
 - Measured on this PC (RTX 4070 Ti SUPER, 96 DPI): first frame at 263.5 ms from process start,
   height pass 8.8 ms for the 1084 dip panel, parse 0.1 ms.
 - Checked by driving the running window with posted messages and real clicks: three Page Downs move
@@ -176,20 +192,52 @@ The user gave this VM for Qt and Linux testing from 2026-11-07. It is Debian 13 
   regenerate byte-identical.
 - The shells still copy the whole viewport bitmap to the GPU every frame; only the renderer got
   cheaper. That upload is now the next 4K item, not the drawing.
+- **The frame says what changed**: `Frame::band` is the row range painted this time (`None` when the
+  whole frame is new, `Some((0, 0))` when nothing changed at all) and `Frame::shift` is how far the
+  rows moved: row `r` of this frame was row `r + shift` of the previous one. A test rebuilds a frame
+  from the previous bitmap using only those two numbers and compares the bytes, which is the contract
+  the shells depend on.
+- **The WinUI shell now sends only the band.** The page lives in a pair of D3D11 textures instead of
+  a CPU buffer: a scroll copies the rows that stay on screen from one texture into the other on the
+  GPU (`CopySubresourceRegion`) and uploads only the new band (`UpdateSubresource` with a
+  `D3D11_BOX`), and the back buffer is filled from the page texture with one GPU copy per frame,
+  because a flip-model swap chain does not keep its contents. Measured on this PC in a 3384x1301
+  panel: a whole frame uploads in 2.6 ms, a 40-row scroll band in 0.0-0.2 ms, and the frame is
+  1.7-4.1 ms end to end (the 3-6 ms "present" in the trace is waiting for vsync). Verified by
+  capturing the same scroll offset reached two ways - six shifted band frames, and a fresh layout
+  sent whole - and comparing the pictures: identical below the title bar. The un-scrolled window is
+  byte-identical to `tests/golden/shell-winui-light.png`, and the dark and images goldens are
+  unchanged below the title bar.
+- Two bugs found on the way, both worth remembering. A flip-model back buffer alternates between
+  buffers, so *partially* writing it leaves the other buffer's pixels showing: the scrollbar strip,
+  which is narrow, is therefore sent whole every frame rather than only where the thumb moved. And
+  the page bitmap can be wider than `logical width - 14`, so a gutter strip placed at the page's
+  right edge was 6 px wide and clipped the scrollbar; the strip is now the bar's own column and
+  covers that overhang.
+- **Qt needs no band path.** The raster backend has no upload to save, and `drawImage` from the frame
+  bitmap only touches the pixels the paint event exposes. Measured on Windows: 0.5-0.7 ms per 48 px
+  scroll paint at 1086x846, and 2.0 ms at 3386x1327 (4.5 Mpx) - inside the 4 ms and 8 ms budgets.
+  Cutting it further would mean moving the backing store with `QWidget::scroll` before blitting the
+  band, which is another viewport-sized memmove on top of the renderer's own shift, so Qt keeps one
+  blit and its paint is timed in the trace output.
 - **Both shells are wired to this API**: each keeps a `DocumentRenderer` and a `PageLayout`, calls
   `view_frame` per frame, blits from `frame()`, and scrolls without laying the page out again (checked
   on the Qt shell: three Page Downs produce no further height pass). On this PC the height pass for
   `generated_1mib.md` is 284 ms (Qt) and 287 ms (WinUI) at ~1100 dip, page 583,619 px; the first
-  WinUI frame arrives at 521 ms from process start.
+  WinUI frame arrives at 308 ms from process start (`--measure`).
+- Renderer scroll frames after the frame-delta work, `generated_1mib.md`, 60 steps of 40 px:
+  **0.2 ms mean / 0.8 worst at 780x900 (100%)**, **0.6 / 1.1 at 1170x1350 (150%)**, **2.6 / 3.4 at
+  3840x2200 (4K, 150%)**. Both plan budgets (4 ms p99 at 150%, 8 ms at 4K) are met.
 
 ## What has and has not run
 
 Run on Windows: the WinUI spike (`spikes/winui`, framework build, `--measure`: result=ok at 259 ms),
-the WinUI shell on `fixtures/showcase.md` (wheel scrolling, system theme, `--light`/`--dark`,
-`--trace`), and the Qt shell on the same file (layout, first paint, wheel, scrollbar and keys). For
-the Qt shell the input was driven with real and posted Windows messages against the running window:
-Page Down moved the page and the thumb, a click in the scrollbar groove jumped a page, and
-File > Open... opened the dialog and loaded `linked.md` from it.
+the WinUI shell on `fixtures/showcase.md` (wheel scrolling, real Page Down keys, system theme,
+`--light`/`--dark`, `--trace`, `--measure`, the shifted-frame path against a whole-frame reference),
+and the Qt shell on the same file (layout, first paint, wheel, scrollbar and keys). For the Qt shell
+the input was driven with real and posted Windows messages against the running window: Page Down
+moved the page and the thumb, a click in the scrollbar groove jumped a page, and File > Open...
+opened the dialog and loaded `linked.md` from it.
 
 Run on Linux: the Qt shell on the VM, built with Qt 6.8.2, drawn and captured under Xvfb (the
 screenshot shows the scrollbar in place).
@@ -217,10 +265,10 @@ files, writes the complete sparse index cache entry for every crate and download
 
 ## Known gaps, in the order they matter
 
-- **Scroll frames meet the 4 ms p99 budget at 150%** (2.2 ms mean, 2.6 ms worst) but are 8.1 ms at
-  4K against the plan's 8 ms. The per-block paint cache, the rect fast path and the wide fill are in;
-  what remains is the full-viewport clear and the glyph blits, which need dirty-band scrolling (keep
-  the previous frame, shift it, redraw only the newly exposed rows) rather than more micro-tuning.
+- **Scroll budgets are met**: renderer frames are 0.2/0.8 ms at 100%, 0.6/1.1 at 150% and 2.6/3.4 at
+  4K (mean/worst), and the WinUI upload is a band rather than a viewport. What is left is present
+  pacing: a frame still waits for vsync (3-6 ms in the trace), so a 4K window shows a frame every
+  16.7 ms rather than sooner. That is the compositor's clock, not the renderer's.
 - **Images**: SVG (and anything but PNG/JPEG) is still a placeholder; `<picture>` light/dark sources
   and `width`/`height` attributes are ignored; a blocked image is retried on every render. Decoded
   images now live on the `DocumentRenderer` and are shared by every frame, which is what keeps them
@@ -235,10 +283,12 @@ files, writes the complete sparse index cache entry for every crate and download
 ## What to do next
 
 1. Get the four `tests/golden/` images and the shell screenshots approved.
-2. Upload only the changed band to the GPU in the shells (WinUI's `UpdateSubresource` box, a
-   `drawImage` sub-rect in Qt); the renderer already shifts its frame.
-3. Add selection and link/anchor hit-testing, then details toggling.
-4. Add SVG support when Phase 4 lands (the image cache is already shared across frames).
-5. Decide bundled fonts, then turn the goldens into a pixel suite.
+2. Add selection and link/anchor hit-testing, then details toggling. `BlockBox` (block, y, height)
+   already comes out of a page render; the per-block paint cache in `DocumentRenderer` is where a
+   text run's `Rect` can be recorded for a hit test.
+3. Add SVG support when Phase 4 lands (the image cache is already shared across frames).
+4. Decide bundled fonts, then turn the goldens into a pixel suite.
+5. Keep the WinUI window's child-window hooks in mind: any new WinUI control that wants raw input
+   arrives as another child window, and `build` hooks whatever exists at startup.
 
 Every Qt/Linux change is now tested on the VM above as well as on Windows.

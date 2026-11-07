@@ -241,6 +241,7 @@ impl CanvasHandler for Shell {
         let Some(document) = &*self.document.borrow() else {
             return;
         };
+        let started = std::time::Instant::now();
         self.renderer.borrow_mut().view_frame(
             document,
             &options,
@@ -255,6 +256,14 @@ impl CanvasHandler for Shell {
             frame.bitmap.width as i32,
             frame.bitmap.height as i32,
             true,
+        );
+        eprintln!(
+            "mdview-qt: painted {width}x{height} at scroll {scroll:.0} in {:.1} ms{}",
+            started.elapsed().as_secs_f64() * 1000.0,
+            match frame.band {
+                None => ", whole frame".to_string(),
+                Some((top, rows)) => format!(", band {top}+{rows}, shifted {}", frame.shift),
+            }
         );
     }
 

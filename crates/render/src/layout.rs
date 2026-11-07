@@ -86,11 +86,22 @@ pub struct Slice {
 
 /// A viewport-sized bitmap kept between frames. Scrolling shifts the rows that stay on screen and
 /// repaints only the band that came into view, so a frame costs a band rather than a viewport.
+///
+/// [`band`](Self::band) and [`shift`](Self::shift) describe the difference from the previous frame,
+/// which is what lets a window send only that difference to the GPU: the rows outside the band moved
+/// by `shift` rows, and the band rows are new. A caller that has lost its copy of the previous frame
+/// (a resize, a new device) must draw the whole frame; `band` is `None` in that case, and also for
+/// the first frame and for any jump of a viewport or more.
 pub struct Frame {
     pub bitmap: Bitmap,
     /// Absolute device-px row the bitmap's first row shows.
     pub top: f32,
     pub stats: crate::text::CacheStats,
+    /// Rows of `bitmap`, in bitmap rows, that were painted this frame. An empty range means the
+    /// frame is unchanged. `None` means the whole frame is new and nothing can be reused.
+    pub band: Option<(u32, u32)>,
+    /// Rows the content moved: row `r` of this frame was row `r + shift` of the previous one.
+    pub shift: i32,
 }
 
 /// Every top-level block's measured vertical extent, without any painting. Build it once per
@@ -255,9 +266,15 @@ impl DocumentRenderer {
             && frame.bitmap.height == rows
             && frame.top == top
         {
+            // Nothing changed, so there is nothing for the caller to send again.
+            let frame = self.frame.as_mut().expect("frame");
+            frame.band = Some((0, 0));
+            frame.shift = 0;
             return self.frame.as_ref().expect("frame");
         }
         let mut band = (top, rows as f32);
+        let mut shift = 0i32;
+        let mut whole = true;
         let same_size = self
             .frame
             .as_ref()
@@ -275,6 +292,9 @@ impl DocumentRenderer {
                 } else {
                     (top + rows as f32 + dy as f32, (-dy) as f32)
                 };
+                // Row `r` of the new frame was row `r - dy` of the old one.
+                shift = -(dy as i32);
+                whole = false;
             } else {
                 frame.bitmap.clear(background);
             }
@@ -286,6 +306,8 @@ impl DocumentRenderer {
                 bitmap,
                 top,
                 stats: crate::text::CacheStats::default(),
+                band: None,
+                shift: 0,
             });
             band = (top, rows as f32);
         }
@@ -309,7 +331,12 @@ impl DocumentRenderer {
             );
             stats
         };
-        self.frame.as_mut().expect("frame").stats = stats;
+        let first = (band.0 - frame_top).round().max(0.0) as u32;
+        let band_rows = (first, band.1.ceil().max(0.0) as u32);
+        let frame = self.frame.as_mut().expect("frame");
+        frame.stats = stats;
+        frame.band = (!whole).then_some(band_rows);
+        frame.shift = shift;
         self.frame.as_ref().expect("frame")
     }
 

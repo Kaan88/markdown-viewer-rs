@@ -9,7 +9,6 @@ use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicIsize, Ordering};
 use std::thread::JoinHandle;
 use windows_core::*;
 
@@ -34,6 +33,7 @@ fn place(panel: &Grid, child: &impl Interface, row: i32, column: i32) -> Result<
 
 windows_core::link!("kernel32.dll" "system" fn GetCurrentThreadId() -> u32);
 windows_core::link!("user32.dll" "system" fn EnumThreadWindows(thread: u32, callback: unsafe extern "system" fn(*mut c_void, isize) -> i32, param: isize) -> i32);
+windows_core::link!("user32.dll" "system" fn EnumChildWindows(parent: *mut c_void, callback: unsafe extern "system" fn(*mut c_void, isize) -> i32, param: isize) -> i32);
 windows_core::link!("user32.dll" "system" fn GetClassNameW(window: *mut c_void, name: *mut u16, capacity: i32) -> i32);
 windows_core::link!("user32.dll" "system" fn GetDpiForWindow(window: *mut c_void) -> u32);
 windows_core::link!("user32.dll" "system" fn SetWindowPos(window: *mut c_void, after: *mut c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32);
@@ -57,9 +57,20 @@ struct Rect {
 
 thread_local! {
     static SHELL: RefCell<Option<Rc<Shell>>> = const { RefCell::new(None) };
+    /// For every window we hooked, the procedure it had before, so unhandled messages still reach
+    /// WinUI. WinUI's content lives in child windows (`InputSite`, `DesktopChildSiteBridge`) and the
+    /// keyboard goes to those, not to the top-level window, so all of them are hooked.
+    static PREVIOUS: RefCell<Vec<(isize, isize)>> = const { RefCell::new(Vec::new()) };
 }
 
-static PREVIOUS_PROC: AtomicIsize = AtomicIsize::new(0);
+fn previous_proc(window: isize) -> isize {
+    PREVIOUS.with(|map| {
+        map.borrow()
+            .iter()
+            .find(|(hooked, _)| *hooked == window)
+            .map_or(0, |(_, previous)| *previous)
+    })
+}
 
 /// WinUI's window procedure, wrapped so the shell sees keys and scrollbar clicks first.
 unsafe extern "system" fn window_proc(
@@ -75,8 +86,17 @@ unsafe extern "system" fn window_proc(
     if handled {
         return 0;
     }
-    let previous = PREVIOUS_PROC.load(Ordering::Relaxed);
+    let previous = previous_proc(window as isize);
     unsafe { CallWindowProcW(previous, window, msg, wparam, lparam) }
+}
+
+unsafe extern "system" fn hook_one(window: *mut c_void, _: isize) -> i32 {
+    let previous =
+        unsafe { SetWindowLongPtrW(window, GWLP_WNDPROC, window_proc as *const () as isize) };
+    if previous != 0 && previous != window_proc as *const () as isize {
+        PREVIOUS.with(|map| map.borrow_mut().push((window as isize, previous)));
+    }
+    1
 }
 
 /// Follows the Windows app theme, the way the shell's own chrome does.
@@ -105,6 +125,11 @@ fn system_theme() -> mdview_render::Theme {
 
 const WINDOW_CLASS: &str = "WinUIDesktopWin32WindowClass";
 
+thread_local! {
+    /// Logical size of the window to open, so `--size` can make it big for a measurement.
+    static WINDOW_SIZE: Cell<(i32, i32)> = const { Cell::new((1100, 900)) };
+}
+
 unsafe extern "system" fn size_if_winui(window: *mut c_void, _: isize) -> i32 {
     const SWP_NOMOVE_NOZORDER_NOACTIVATE: u32 = 0x0002 | 0x0004 | 0x0010;
     let mut name = [0u16; 64];
@@ -113,7 +138,8 @@ unsafe extern "system" fn size_if_winui(window: *mut c_void, _: isize) -> i32 {
         return 1;
     }
     let dpi = unsafe { GetDpiForWindow(window) } as i32;
-    let (width, height) = (1100 * dpi / 96, 900 * dpi / 96);
+    let (logical_width, logical_height) = WINDOW_SIZE.with(|size| size.get());
+    let (width, height) = (logical_width * dpi / 96, logical_height * dpi / 96);
     let moved = unsafe {
         SetWindowPos(
             window,
@@ -154,7 +180,8 @@ fn winui_window() -> isize {
     found
 }
 
-fn set_window_size() {
+fn set_window_size(width: i32, height: i32) {
+    WINDOW_SIZE.with(|size| size.set((width, height)));
     unsafe { EnumThreadWindows(GetCurrentThreadId(), size_if_winui, 0) };
 }
 
@@ -236,6 +263,8 @@ struct Shell {
     presented: Cell<bool>,
     /// How far into the scrollbar thumb the drag started, in panel device px.
     dragging: Cell<Option<f32>>,
+    /// Remaining `--scroll-steps` steps, each taken after a frame has been drawn.
+    steps: Cell<u32>,
 }
 
 impl Shell {
@@ -248,7 +277,13 @@ impl Shell {
         const WM_LBUTTONUP: u32 = 0x0202;
         match msg {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
-                if self.renderer.borrow_mut().key(wparam as u32) {
+                let scrolled = self.renderer.borrow_mut().key(wparam as u32);
+                if scrolled {
+                    diag::trace(&format!(
+                        "key {:#04x} on window {window:p}, offset {:.0}",
+                        wparam,
+                        self.renderer.borrow().offset()
+                    ));
                     self.show();
                     true
                 } else {
@@ -304,10 +339,27 @@ impl Shell {
     }
 
     fn show(&self) {
-        match self.renderer.borrow_mut().draw() {
+        // The borrow ends before the match body, which scrolls and calls `show` again.
+        let drawn = self.renderer.borrow_mut().draw();
+        match drawn {
             Ok(true) => {
                 if !self.presented.replace(true) {
                     diag::trace("first frame presented");
+                    if diag::measuring() {
+                        // One line and out, so a script can time the first frame from process start.
+                        diag::measure_line(&format!(
+                            "result=ok first_frame_ms={:.1}",
+                            diag::since_process_start_ms()
+                        ));
+                        std::process::exit(0);
+                    }
+                }
+                // `--scroll-steps`: walk the page down one wheel-sized step per frame, so a
+                // screenshot shows a view reached by scrolling rather than by a fresh layout.
+                if self.steps.get() > 0 {
+                    self.steps.set(self.steps.get() - 1);
+                    self.renderer.borrow_mut().scroll_by(40.0);
+                    self.show();
                 }
             }
             Ok(false) => {}
@@ -449,18 +501,36 @@ Page Up/Down and Space scroll.
 - Nothing here is a webview.
 ";
 
+/// Options that exist for screenshots and tests rather than for users.
+#[derive(Clone, Copy)]
+pub struct Startup {
+    /// Let a scroll reuse the previous frame on the GPU; off for `--no-shift`.
+    pub shift: bool,
+    /// Scroll here once the page is laid out, for `--scroll`.
+    pub scroll: f32,
+    /// Scroll this many 40 px steps after the first frame, for `--scroll-steps`.
+    pub steps: u32,
+    /// Logical window size, for `--size`.
+    pub size: (i32, i32),
+}
+
 pub fn build(
     gpu: JoinHandle<Result<Gpu>>,
     file: Option<PathBuf>,
     theme: Option<mdview_render::Theme>,
     zoom: f32,
+    startup: Startup,
 ) -> Result<()> {
     let theme = theme.unwrap_or_else(system_theme);
     diag::trace(&format!("theme: {}", theme.name));
+    diag::trace(&format!(
+        "startup: shift={} scroll={} steps={}",
+        startup.shift, startup.scroll, startup.steps
+    ));
     let window = Window::new()?;
     diag::trace("Window created");
     window.SetTitle("mdview")?;
-    set_window_size();
+    set_window_size(startup.size.0, startup.size.1);
 
     let root = Grid::new()?;
     add_row(&root, GridUnitType::Auto, 1.0)?; // menu
@@ -494,6 +564,8 @@ pub fn build(
     let mut renderer = Renderer::new(gpu, panel.clone());
     renderer.set_theme(theme);
     renderer.set_zoom(zoom);
+    renderer.set_shift(startup.shift);
+    renderer.set_pending_scroll(startup.scroll);
     if file.is_none() {
         renderer.set_document(parse_bytes(WELCOME.as_bytes()), None);
     }
@@ -504,6 +576,7 @@ pub fn build(
         path: RefCell::new(file.clone()),
         presented: Cell::new(false),
         dragging: Cell::new(None),
+        steps: Cell::new(startup.steps),
     });
     if let Some(path) = &file
         && let Err(e) = load(&shell, path)
@@ -553,17 +626,18 @@ pub fn build(
 
     let hwnd = winui_window();
     if hwnd != 0 {
-        let previous = unsafe {
-            SetWindowLongPtrW(
-                hwnd as *mut c_void,
-                GWLP_WNDPROC,
-                window_proc as *const () as isize,
-            )
-        };
-        if previous != 0 {
-            PREVIOUS_PROC.store(previous, Ordering::Relaxed);
+        // The top-level window and every child of it: WinUI's content sits in a child window that
+        // takes the keyboard, and the pointer's coordinates there are already the XAML root's.
+        unsafe {
+            hook_one(hwnd as *mut c_void, 0);
+            EnumChildWindows(hwnd as *mut c_void, hook_one, 0);
+        }
+        let hooked = PREVIOUS.with(|map| map.borrow().len());
+        if hooked > 0 {
             SHELL.with(|cell| *cell.borrow_mut() = Some(shell.clone()));
-            diag::trace("window procedure hooked for keys and the scrollbar");
+            diag::trace(&format!(
+                "window procedures hooked for keys and the scrollbar: {hooked}"
+            ));
         } else {
             diag::trace("SetWindowLongPtrW failed; keys and the scrollbar stay inert");
         }

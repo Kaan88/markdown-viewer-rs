@@ -83,6 +83,38 @@ fn zoom_argument() -> f32 {
         .unwrap_or(1.0)
 }
 
+/// `--scroll <device px>`, so a screenshot can show the page partway down without driving input.
+fn scroll_argument() -> f32 {
+    let args: Vec<String> = std::env::args().collect();
+    args.iter()
+        .position(|arg| arg == "--scroll")
+        .and_then(|at| args.get(at + 1))
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0.0)
+}
+
+/// `--scroll-steps <n>`: walk the page down `n` 40 px steps, one frame each, after the first frame.
+fn steps_argument() -> u32 {
+    let args: Vec<String> = std::env::args().collect();
+    args.iter()
+        .position(|arg| arg == "--scroll-steps")
+        .and_then(|at| args.get(at + 1))
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0)
+}
+
+/// `--size <width>x<height>` in logical px, for measuring a large window.
+fn size_argument() -> (i32, i32) {
+    let args: Vec<String> = std::env::args().collect();
+    let parsed = args
+        .iter()
+        .position(|arg| arg == "--size")
+        .and_then(|at| args.get(at + 1))
+        .and_then(|value| value.split_once('x'))
+        .and_then(|(width, height)| Some((width.parse().ok()?, height.parse().ok()?)));
+    parsed.unwrap_or((1100, 900))
+}
+
 /// The first positional argument is the document to open; flags are handled by `diag`.
 fn document_argument() -> Option<PathBuf> {
     std::env::args()
@@ -118,6 +150,14 @@ fn run() -> Result<()> {
     let document = document_argument();
     let theme = theme_argument();
     let zoom = zoom_argument();
+    // A shifted frame has to look exactly like a whole one; `--no-shift` sends every frame whole,
+    // which is the picture to compare against.
+    let startup = ui::Startup {
+        shift: !std::env::args().any(|arg| arg == "--no-shift"),
+        scroll: scroll_argument(),
+        steps: steps_argument(),
+        size: size_argument(),
+    };
     let gpu = Rc::new(RefCell::new(Some(gpu)));
     // Application and UI state must outlive Start, which returns at process end.
     let keep_alive: Rc<RefCell<Vec<IInspectable>>> = Rc::default();
@@ -135,7 +175,7 @@ fn run() -> Result<()> {
             app.Resources()?.MergedDictionaries()?.Append(&controls)?;
             diag::trace("XamlControlsResources merged");
             let gpu = gpu.borrow_mut().take().expect("launched once");
-            ui::build(gpu, document.clone(), theme, zoom)
+            ui::build(gpu, document.clone(), theme, zoom, startup)
         });
         let composed = Application::compose(App {
             provider: RefCell::new(None),

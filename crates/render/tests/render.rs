@@ -209,6 +209,63 @@ fn a_shifted_frame_matches_a_fresh_view() {
 }
 
 #[test]
+fn a_scrolling_frame_reports_the_band_and_shift() {
+    let doc = fixture("showcase.md");
+    let options = Options {
+        width: 520.0,
+        scale: 1.0,
+        theme: LIGHT,
+        max_height: None,
+        base_dir: None,
+    };
+    let rows = 200.0;
+    let mut renderer = DocumentRenderer::new();
+    let page = renderer.layout(&doc, &options);
+    // The first frame is whole: a caller with no previous frame has nothing to reuse.
+    let frame = renderer.view_frame(&doc, &options, &page, 0.0, rows);
+    assert_eq!(frame.band, None);
+    assert_eq!(frame.shift, 0);
+    let mut last = frame.bitmap.pixels.clone();
+    let stride = frame.bitmap.width as usize * 4;
+    let count = frame.bitmap.height as usize;
+    for top in [40.0, 75.0, 30.0, 0.0, 120.0] {
+        let frame = renderer.view_frame(&doc, &options, &page, top, rows);
+        let (shift, band) = (
+            frame.shift,
+            frame.band.expect("a small step keeps the frame"),
+        );
+        let (first, height) = (band.0 as usize, band.1 as usize);
+        assert_ne!(shift, 0, "top {top} moved without saying so");
+        assert!(
+            first + height <= count,
+            "top {top}: band {band:?} off the frame"
+        );
+        // What a window does with the band: move its copy of the previous frame, paste the band.
+        let mut rebuilt = last.clone();
+        let moved = shift.unsigned_abs() as usize;
+        if shift > 0 {
+            rebuilt.copy_within(moved * stride.., 0);
+        } else {
+            rebuilt.copy_within(0..(count - moved) * stride, moved * stride);
+        }
+        let start = first * stride;
+        let end = start + height * stride;
+        rebuilt[start..end].copy_from_slice(&frame.bitmap.pixels[start..end]);
+        assert_eq!(rebuilt, frame.bitmap.pixels, "top {top}");
+        last = frame.bitmap.pixels.clone();
+    }
+    // A jump of a whole viewport cannot be shifted, so it is reported as a whole frame.
+    let frame = renderer.view_frame(&doc, &options, &page, 900.0, rows);
+    assert_eq!(frame.band, None);
+    assert_eq!(frame.shift, 0);
+    // The same view twice changed nothing, which an empty band says.
+    let top = frame.top;
+    let frame = renderer.view_frame(&doc, &options, &page, top, rows);
+    assert_eq!(frame.band, Some((0, 0)));
+    assert_eq!(frame.shift, 0);
+}
+
+#[test]
 fn a_slice_matches_the_same_rows_of_the_full_page() {
     let doc = fixture("showcase.md");
     let options = Options {

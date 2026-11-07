@@ -1,5 +1,11 @@
-//! The window's pixels: lays the document out with `mdview-render`, then copies the visible slice
-//! into a composition swap chain 1:1 with physical pixels.
+//! The window's pixels: lays the document out with `mdview-render`, then brings the GPU's copy of
+//! the viewport up to date at 1:1 with physical pixels.
+//!
+//! The page lives in a pair of D3D11 textures rather than in a CPU buffer, because the renderer
+//! reports what changed between frames ([`mdview_render::Frame::band`] and
+//! [`mdview_render::Frame::shift`]). A scroll frame therefore sends only the band that came into
+//! view and moves the rest with a GPU-side copy; the back buffer is filled from the page texture
+//! every frame, since a flip-model swap chain does not keep its contents.
 use crate::bindings::*;
 use crate::diag;
 use mdview_core::Document;
@@ -74,13 +80,34 @@ pub fn create_gpu() -> Result<Gpu> {
     }
 }
 
+/// How a frame reached the GPU, for the trace log.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Sent {
+    /// Everything, because the caller had nothing to reuse.
+    Whole,
+    /// Nothing: the frame did not change.
+    Nothing,
+    /// Just this many rows of the page, at this row.
+    Band(u32, u32),
+}
+
 pub struct Renderer {
     gpu: Gpu,
     panel: SwapChainPanel,
     swap_chain: Option<IDXGISwapChain1>,
     width: u32,
     height: u32,
-    pixels: Vec<u32>,
+    /// The page as the GPU has it: two textures, because a scroll moves one into the other.
+    pages: [Option<ID3D11Texture2D>; 2],
+    page_size: (u32, u32),
+    /// The texture holding the page this frame; the other one is the shift destination.
+    front: usize,
+    /// The scrollbar gutter, as a strip beside the page.
+    gutter: Vec<u32>,
+    gutter_x: u32,
+    gutter_width: u32,
+    /// A panel-sized background, for the frames before a document has been laid out.
+    blank: Vec<u32>,
     page_layout: Option<PageLayout>,
     renderer: DocumentRenderer,
     document: Option<Document>,
@@ -88,6 +115,11 @@ pub struct Renderer {
     theme: Theme,
     zoom: f32,
     scroll: f32,
+    /// Whether a scroll may reuse the previous frame on the GPU. `--no-shift` turns that off, which
+    /// is the reference a shifted frame has to match.
+    shift: bool,
+    /// An offset to scroll to as soon as the first layout exists, for `--scroll` and screenshots.
+    pending_scroll: Option<f32>,
     /// Device px per logical px of the last frame, for the scrollbar gutter.
     scale: f32,
 }
@@ -100,7 +132,13 @@ impl Renderer {
             swap_chain: None,
             width: 0,
             height: 0,
-            pixels: Vec::new(),
+            pages: [None, None],
+            page_size: (0, 0),
+            front: 0,
+            gutter: Vec::new(),
+            gutter_x: 0,
+            gutter_width: 0,
+            blank: Vec::new(),
             page_layout: None,
             renderer: DocumentRenderer::new(),
             document: None,
@@ -108,8 +146,21 @@ impl Renderer {
             theme: mdview_render::LIGHT,
             zoom: 1.0,
             scroll: 0.0,
+            shift: true,
+            pending_scroll: None,
             scale: 1.0,
         }
+    }
+
+    /// Turns the GPU-side shift off, so every frame is sent whole. Used by `--no-shift` to check
+    /// that a shifted frame is the same picture.
+    pub fn set_shift(&mut self, shift: bool) {
+        self.shift = shift;
+    }
+
+    /// Scrolls here once the page has been laid out, for `--scroll` and screenshots.
+    pub fn set_pending_scroll(&mut self, top: f32) {
+        self.pending_scroll = Some(top.max(0.0));
     }
 
     pub fn set_document(&mut self, document: Document, base_dir: Option<std::path::PathBuf>) {
@@ -135,6 +186,11 @@ impl Renderer {
 
     pub fn viewport_height(&self) -> u32 {
         self.height
+    }
+
+    /// The current scroll offset in device px.
+    pub fn offset(&self) -> f32 {
+        self.scroll
     }
 
     pub fn page_height(&self) -> f32 {
@@ -239,7 +295,9 @@ impl Renderer {
         let logical_width = element.ActualWidth()? as f32;
         let scale = scale_x as f32;
         self.scale = scale;
+        let started = Instant::now();
         self.refresh(logical_width, scale, height);
+        let painted = started.elapsed();
 
         unsafe {
             if self.swap_chain.is_none() {
@@ -288,23 +346,41 @@ impl Renderer {
                 })
                 .ok()?;
 
-            let resized = (width, height) != (self.width, self.height);
-            self.width = width;
-            self.height = height;
-            if resized {
-                self.fill_background();
+            if (width, height) != (self.width, self.height) {
+                // Every buffer of the old size is useless now, and so is the gutter strip.
+                self.width = width;
+                self.height = height;
+                self.pages = [None, None];
+                self.page_size = (0, 0);
             }
-            self.blit();
+            self.layout_gutter();
+            let uploading = Instant::now();
+            let sent = self.upload_page()?;
             let back_buffer: ID3D11Texture2D = swap_chain.GetBuffer(0)?;
-            self.gpu.context.UpdateSubresource(
-                &back_buffer,
-                0,
-                None,
-                self.pixels.as_ptr().cast(),
-                width * 4,
-                0,
-            );
+            self.copy_page(&back_buffer)?;
+            self.upload_gutter(&back_buffer)?;
+            let uploaded = uploading.elapsed();
+            let presenting = Instant::now();
             swap_chain.Present(1, 0).ok()?;
+            let presented = presenting.elapsed();
+            let total = started.elapsed();
+            let rows = match sent {
+                Sent::Whole => self.height,
+                Sent::Nothing => 0,
+                Sent::Band(_, rows) => rows,
+            };
+            diag::trace(&format!(
+                "frame {width}x{height}: paint {:.1} upload {:.1} ({} of {rows} rows) present {:.1} total {:.1} ms",
+                painted.as_secs_f64() * 1000.0,
+                uploaded.as_secs_f64() * 1000.0,
+                match sent {
+                    Sent::Whole => "whole".to_string(),
+                    Sent::Nothing => "no change".to_string(),
+                    Sent::Band(top, _) => format!("band at {top}"),
+                },
+                presented.as_secs_f64() * 1000.0,
+                total.as_secs_f64() * 1000.0,
+            ));
         }
         Ok(true)
     }
@@ -338,9 +414,11 @@ impl Renderer {
         let Some(layout) = &self.page_layout else {
             return;
         };
-        self.scroll = self
-            .scroll
-            .clamp(0.0, (layout.total_height() - height as f32).max(0.0));
+        let max_scroll = (layout.total_height() - height as f32).max(0.0);
+        if let Some(top) = self.pending_scroll.take() {
+            self.scroll = top.clamp(0.0, max_scroll);
+        }
+        self.scroll = self.scroll.clamp(0.0, max_scroll);
         self.renderer
             .view_frame(document, &options, layout, self.scroll, height as f32);
     }
@@ -350,57 +428,36 @@ impl Renderer {
         0xFF00_0000 | (r as u32) << 16 | (g as u32) << 8 | b as u32
     }
 
-    fn fill_background(&mut self) {
-        let background = self.background();
-        self.pixels
-            .resize(self.width as usize * self.height as usize, 0);
-        self.pixels.fill(background);
+    /// Where the gutter strip starts and how wide it is: the scrollbar's own column, which is also
+    /// as far as the page is copied. The page can be a few px wider than the width it was laid out
+    /// for, and the bar has to cover that overhang rather than be clipped by it.
+    fn layout_gutter(&mut self) {
+        // One px of the page's overhang becomes the hairline separator beside the bar.
+        let bar_x = self
+            .bar()
+            .map_or(self.width, |bar| (bar.x.max(0.0) as u32).saturating_sub(1))
+            .min(self.width);
+        if (bar_x, self.width - bar_x) != (self.gutter_x, self.gutter_width) {
+            self.gutter.clear();
+        }
+        self.gutter_x = bar_x;
+        self.gutter_width = self.width - bar_x;
+        let needed = self.gutter_width as usize * self.height as usize;
+        if self.gutter.len() != needed {
+            self.gutter = vec![0; needed];
+        }
+        self.draw_gutter();
     }
 
-    /// Copies the rows of the page that are in view. The page is centred if it is narrower than
-    /// the panel, which only happens when the two round differently.
-    fn blit(&mut self) {
-        if self.pixels.len() != self.width as usize * self.height as usize {
-            self.fill_background();
-        }
-        let Self {
-            pixels,
-            width,
-            height,
-            renderer,
-            ..
-        } = self;
-        let (width, height) = (*width as usize, *height as usize);
-        let Some(frame) = renderer.frame() else {
+    /// Paints the gutter strip: the page's background, a hairline separator and the thumb.
+    fn draw_gutter(&mut self) {
+        let height = self.height as usize;
+        let width = self.gutter_width as usize;
+        if width == 0 || height == 0 {
             return;
-        };
-        let page_width = frame.bitmap.width as usize;
-        let page_height = frame.bitmap.height as usize;
-        let copy_width = width.min(page_width);
-        let left = 0;
-        // The bitmap is BGRA bytes, which is what little-endian u32 0xAARRGGBB holds too.
-        let source: &[u32] = unsafe {
-            std::slice::from_raw_parts(
-                frame.bitmap.pixels.as_ptr().cast(),
-                page_width * page_height,
-            )
-        };
-        let top = 0i64;
-        for y in 0..height.min(page_height) {
-            let source_y = top + y as i64;
-            if source_y < 0 || source_y >= page_height as i64 {
-                continue;
-            }
-            let start = source_y as usize * page_width;
-            let destination = y * width + left;
-            pixels[destination..destination + copy_width]
-                .copy_from_slice(&source[start..start + copy_width]);
         }
-        self.draw_bar();
-    }
-
-    /// Paints the scrollbar gutter over the right edge: a hairline separator and a thumb.
-    fn draw_bar(&mut self) {
+        let background = self.background();
+        self.gutter.fill(background);
         let Some(bar) = self.bar() else {
             return;
         };
@@ -412,22 +469,217 @@ impl Renderer {
         };
         let separator = mix(0.10);
         let thumb = mix(0.30);
-        let width = self.width as usize;
-        let height = self.height as usize;
-        let x0 = bar.x.max(0.0) as usize;
-        let separator_x = x0.saturating_sub(1).min(width.saturating_sub(1));
-        for y in 0..height {
-            self.pixels[y * width + separator_x] = separator;
-        }
-        let left = (bar.x + bar.pad) as usize;
-        let right = ((bar.x + bar.width - bar.pad) as usize).min(width);
-        let top = (bar.thumb_y + bar.pad) as usize;
-        let bottom = ((bar.thumb_y + bar.thumb_height - bar.pad) as usize).min(height);
-        for y in top..bottom {
-            let row = y * width;
-            for x in left..right {
-                self.pixels[row + x] = thumb;
+        let left = self.gutter_x as usize;
+        if let Some(column) = (bar.x.max(0.0) as usize).checked_sub(1)
+            && column >= left
+            && column - left < width
+        {
+            for y in 0..height {
+                self.gutter[y * width + column - left] = separator;
             }
+        }
+        let Some((top, bottom)) = self.thumb_rows() else {
+            return;
+        };
+        let first = (bar.x + bar.pad) as usize;
+        let last = (bar.x + bar.width - bar.pad) as usize;
+        let first = first.saturating_sub(left).min(width);
+        let last = last.saturating_sub(left).min(width);
+        for y in top as usize..bottom as usize {
+            let row = y * width;
+            for x in first..last {
+                self.gutter[row + x] = thumb;
+            }
+        }
+    }
+
+    /// Rows of the panel the thumb covers, for deciding which gutter rows to re-send.
+    fn thumb_rows(&self) -> Option<(u32, u32)> {
+        let bar = self.bar()?;
+        let height = self.height;
+        let top = ((bar.thumb_y + bar.pad) as usize).min(height as usize) as u32;
+        let bottom =
+            ((bar.thumb_y + bar.thumb_height - bar.pad) as usize).min(height as usize) as u32;
+        (bottom > top).then_some((top, bottom))
+    }
+
+    /// Brings the page texture up to date with the renderer's frame. A scroll moves the rows that
+    /// stay on screen to the other texture and sends only the band that came into view.
+    unsafe fn upload_page(&mut self) -> Result<Sent> {
+        unsafe {
+            let Some(frame) = self.renderer.frame() else {
+                return Ok(Sent::Nothing);
+            };
+            let pixels = frame.bitmap.pixels.as_ptr().cast::<c_void>();
+            let (width, height) = (frame.bitmap.width, frame.bitmap.height);
+            let stride = width * 4;
+            let recreate = self.page_size != (width, height) || self.pages[0].is_none();
+            if recreate {
+                let desc = D3D11_TEXTURE2D_DESC {
+                    Width: width,
+                    Height: height,
+                    MipLevels: 1,
+                    ArraySize: 1,
+                    Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    SampleDesc: DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
+                    Usage: D3D11_USAGE_DEFAULT,
+                    BindFlags: D3D11_BIND_SHADER_RESOURCE,
+                    CPUAccessFlags: 0,
+                    MiscFlags: 0,
+                };
+                for page in &mut self.pages {
+                    *page = Some(self.gpu.device.create_texture_2d(&desc)?);
+                }
+                self.page_size = (width, height);
+                self.front = 0;
+            }
+            let front = self.pages[self.front]
+                .as_ref()
+                .expect("page texture")
+                .clone();
+            let Some(band) = frame.band.filter(|_| !recreate && self.shift) else {
+                self.gpu
+                    .context
+                    .UpdateSubresource(&front, 0, None, pixels, stride, 0);
+                return Ok(Sent::Whole);
+            };
+            let (top, rows) = band;
+            if rows == 0 {
+                return Ok(Sent::Nothing);
+            }
+            let boxed = |top: u32, rows: u32| D3D11_BOX {
+                left: 0,
+                top,
+                front: 0,
+                right: width,
+                bottom: top + rows,
+                back: 1,
+            };
+            let source = pixels.add(top as usize * stride as usize);
+            // Row `r` was row `r + shift`, so the rows that stay move by that much.
+            let shift = frame.shift;
+            if shift == 0 {
+                self.gpu.context.UpdateSubresource(
+                    &front,
+                    0,
+                    Some(&boxed(top, rows)),
+                    source,
+                    stride,
+                    0,
+                );
+                return Ok(Sent::Band(top, rows));
+            }
+            let moved = shift.unsigned_abs().min(height);
+            if moved == 0 || moved >= height {
+                // Not a shift the GPU can make; send the whole frame instead.
+                self.gpu
+                    .context
+                    .UpdateSubresource(&front, 0, None, pixels, stride, 0);
+                return Ok(Sent::Whole);
+            }
+            let other = 1 - self.front;
+            let destination = self.pages[other].as_ref().expect("page texture");
+            let (source_top, source_bottom, destination_top) = if shift > 0 {
+                (moved, height, 0)
+            } else {
+                (0, height - moved, moved)
+            };
+            let moved_box = D3D11_BOX {
+                left: 0,
+                top: source_top,
+                front: 0,
+                right: width,
+                bottom: source_bottom,
+                back: 1,
+            };
+            self.gpu.context.copy_subresource_region(
+                destination,
+                0,
+                0,
+                destination_top,
+                &front,
+                0,
+                Some(&moved_box),
+            );
+            self.gpu.context.UpdateSubresource(
+                destination,
+                0,
+                Some(&boxed(top, rows)),
+                source,
+                stride,
+                0,
+            );
+            self.front = other;
+            Ok(Sent::Band(top, rows))
+        }
+    }
+
+    /// Fills the back buffer with the page, one GPU copy, or with plain background before there is
+    /// a page to show.
+    unsafe fn copy_page(&mut self, back_buffer: &ID3D11Texture2D) -> Result<()> {
+        unsafe {
+            let Some(page) = self.pages[self.front].clone() else {
+                let len = self.width as usize * self.height as usize;
+                self.blank.resize(len, 0);
+                let background = self.background();
+                self.blank.fill(background);
+                self.gpu.context.UpdateSubresource(
+                    back_buffer,
+                    0,
+                    None,
+                    self.blank.as_ptr().cast(),
+                    self.width * 4,
+                    0,
+                );
+                return Ok(());
+            };
+            let (width, height) = self.page_size;
+            let rows = height.min(self.height);
+            let columns = width.min(self.gutter_x);
+            let boxed = D3D11_BOX {
+                left: 0,
+                top: 0,
+                front: 0,
+                right: columns,
+                bottom: rows,
+                back: 1,
+            };
+            self.gpu
+                .context
+                .copy_subresource_region(back_buffer, 0, 0, 0, &page, 0, Some(&boxed));
+            Ok(())
+        }
+    }
+
+    /// Sends the gutter strip. It is narrow enough to send whole, and it has to be: a flip-model
+    /// back buffer alternates between two buffers, so any rows left unwritten would show the other
+    /// buffer's contents.
+    unsafe fn upload_gutter(&mut self, back_buffer: &ID3D11Texture2D) -> Result<()> {
+        unsafe {
+            let (width, height) = (self.gutter_width, self.height);
+            if width == 0 || height == 0 {
+                return Ok(());
+            }
+            let boxed = D3D11_BOX {
+                left: self.gutter_x,
+                top: 0,
+                front: 0,
+                right: self.gutter_x + width,
+                bottom: height,
+                back: 1,
+            };
+            self.gpu.context.UpdateSubresource(
+                back_buffer,
+                0,
+                Some(&boxed),
+                self.gutter.as_ptr().cast(),
+                width * 4,
+                0,
+            );
+            Ok(())
         }
     }
 }

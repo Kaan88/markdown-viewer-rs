@@ -5713,3 +5713,98 @@ impl FrameworkElement {
         }
     }
 }
+
+/// How a D3D11 texture may be used. `DEFAULT` is GPU memory the CPU writes through
+/// `UpdateSubresource`, which is what the page texture needs.
+pub type D3D11_USAGE = i32;
+pub const D3D11_USAGE_DEFAULT: D3D11_USAGE = 0;
+pub const D3D11_BIND_SHADER_RESOURCE: u32 = 8;
+
+/// `D3D11_TEXTURE2D_DESC`, from d3d11.h; the generated bindings only carry the interfaces.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct D3D11_TEXTURE2D_DESC {
+    pub Width: u32,
+    pub Height: u32,
+    pub MipLevels: u32,
+    pub ArraySize: u32,
+    pub Format: DXGI_FORMAT,
+    pub SampleDesc: DXGI_SAMPLE_DESC,
+    pub Usage: D3D11_USAGE,
+    pub BindFlags: u32,
+    pub CPUAccessFlags: u32,
+    pub MiscFlags: u32,
+}
+
+// Hand-written, like `set_requested_theme` above: the generator left these two methods as unbound
+// vtable slots, and regenerating the bindings would drop these again.
+impl ID3D11Device {
+    /// Creates a texture the CPU writes with `UpdateSubresource` and the GPU copies from.
+    pub unsafe fn create_texture_2d(
+        &self,
+        desc: &D3D11_TEXTURE2D_DESC,
+    ) -> windows_core::Result<ID3D11Texture2D> {
+        unsafe {
+            let vtbl = windows_core::Interface::vtable(self);
+            let create: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *const D3D11_TEXTURE2D_DESC,
+                *const core::ffi::c_void,
+                *mut *mut core::ffi::c_void,
+            ) -> windows_core::HRESULT = core::mem::transmute(vtbl.CreateTexture2D);
+            let mut texture = core::mem::zeroed();
+            create(
+                windows_core::Interface::as_raw(self),
+                desc,
+                core::ptr::null(),
+                &mut texture,
+            )
+            .ok()?;
+            windows_core::imp::Type::from_abi(texture)
+        }
+    }
+}
+
+impl ID3D11DeviceContext {
+    /// GPU-side copy of a box of one resource into another, which is how a scroll moves the page
+    /// texture without sending the moved rows over PCIe again.
+    pub unsafe fn copy_subresource_region<P0, P1>(
+        &self,
+        dst: P0,
+        dst_subresource: u32,
+        dst_x: u32,
+        dst_y: u32,
+        src: P1,
+        src_subresource: u32,
+        src_box: Option<*const D3D11_BOX>,
+    ) where
+        P0: windows_core::Param<ID3D11Resource>,
+        P1: windows_core::Param<ID3D11Resource>,
+    {
+        unsafe {
+            let vtbl = windows_core::Interface::vtable(self);
+            let copy: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *mut core::ffi::c_void,
+                u32,
+                u32,
+                u32,
+                u32,
+                *mut core::ffi::c_void,
+                u32,
+                *const D3D11_BOX,
+            ) = core::mem::transmute(vtbl.CopySubresourceRegion);
+            copy(
+                windows_core::Interface::as_raw(self),
+                dst.param().abi(),
+                dst_subresource,
+                dst_x,
+                dst_y,
+                0,
+                src.param().abi(),
+                src_subresource,
+                src_box.unwrap_or(core::mem::zeroed()) as _,
+            );
+        }
+    }
+}

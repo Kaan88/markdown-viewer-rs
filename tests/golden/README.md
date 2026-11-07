@@ -7,7 +7,8 @@ for the real golden suite.
 
 `shell-winui-light.png` and `shell-winui-dark.png` are captures of `mdview-winui.exe` at 1100x900 on
 Windows 11, DPI scale 100%, taken with the `--light` and `--dark` flags; both show the shell's own
-scrollbar in the right-hand gutter.
+scrollbar in the right-hand gutter. `shell-winui-scrolled.png` is the same window after six 40 px
+scroll frames (`--scroll-steps 6`), so it is the view the shifted-frame path produces.
 `shell-qt-light.png` and `shell-qt-scrolled.png` are captures of `mdview-qt.exe` (the Qt variant,
 built against Qt 6.9.3 for MSVC) at the same size, at the top and after a click in its scrollbar.
 `shell-qt-open.png` is the Qt File > Open dialog, opened in `fixtures/`.
