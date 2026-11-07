@@ -1,7 +1,8 @@
 # Handoff
 
 `mdview` is a Rust remake of `Kaan88/markdown-viewer-cpp`: a Markdown viewer with its own renderer,
-**WinUI 3 on Windows** and **Qt Widgets (CXX-Qt) on Linux**, no webview, no authored C++ or XAML.
+**WinUI 3 on Windows** and **Qt Widgets (CXX-Qt) on Linux**, no webview; the only authored C++ is the
+three-line Qt clipboard shim.
 
 This document is the current state: what works, how to build and check it, the traps already found,
 and what to do next. `docs/PLAN.md` is the full plan (budgets, phases, gates). Read this file first,
@@ -35,7 +36,7 @@ Phase 2, the headless renderer, and it is nearly done.**
 | themes, zoom, DPI scaling | done |
 | images (PNG/JPEG, limits, inline) | done; SVG, math and Mermaid draw through `mdview-engine` |
 | virtualized viewport, scroll budget | done: 0.2-2.6 ms per scroll frame (budget 4 ms at 150%, 8 ms at 4K) |
-| selection, link/anchor hit-testing | done in the renderer and both shells; no clipboard copy yet |
+| selection, link/anchor hit-testing | done in the renderer and both shells; Ctrl+C copies the selection |
 | `<details>` toggling | done: a summary click flips it in both shells; view state lives in the renderer |
 | exit gate: goldens approved by the user | **open**: the images in `tests/golden/` have not been approved yet |
 
@@ -116,6 +117,7 @@ The Qt shell builds separately (section 8).
 | `--select-test` | after the first frame, select the word "Markdown" and log the range and first rect to the trace |
 | `--find-test` | type "Markdown" through the find path, step to the second match and log the mark counts |
 | `--outline-test` | scroll to the "Diagrams" heading through the outline and log the heading count |
+| `--copy-test` | select "Markdown", copy it and read the clipboard back |
 | `--details-test` | after the first frame, toggle the first `<details>` and log the page height before and after |
 | `--size <w>x<h>` | logical window size (default 1100x900) |
 
@@ -219,6 +221,7 @@ xvfb-run -a $BIN fixtures/showcase.md --light --link-test            # "link tes
 xvfb-run -a $BIN fixtures/showcase.md --light --details-test         # "details test ok: ..."
 xvfb-run -a $BIN fixtures/showcase.md --light --find-test            # "find test ok: ..."
 xvfb-run -a $BIN fixtures/showcase.md --light --outline-test         # "outline test ok: ..."
+xvfb-run -a $BIN fixtures/showcase.md --light --copy-test            # "copy test ok: ..."
 ```
 
 The scripted checks print one line and exit; on this VM they report selection `7..15` ("Markdown"),
@@ -499,6 +502,11 @@ from `Document::headings` on every load, indents children with spaces, and each 
 block with `PageLayout::y_of`. `--outline-test` reports `15 headings, scrolled to 1242, expected
 Some(1242.0)`.
 
+**Clipboard.** Ctrl+C and Edit > Copy write the selected bytes through the Win32 clipboard
+(`OpenClipboard`/`GlobalAlloc`/`SetClipboardData`), since the trimmed bindings have no WinRT
+`DataPackage`. `--copy-test` selects "Markdown", copies and reads it back:
+`copy test ok: Some((7, 15)), clipboard Some("Markdown")`.
+
 **Hand-written additions in `bindings.rs`** (regenerating would drop them):
 
 - `FrameworkElement::set_requested_theme` - the root grid is set Light/Dark with the page, otherwise
@@ -527,8 +535,10 @@ mouse resize keeps focus, and a click fixes it, so it is a focus matter, not a h
 ## 8. The Qt shell (`bins/mdv-qt`)
 
 Qt Widgets through CXX-Qt 0.10, ported from `spikes/qt-shell`: `src/qt/mod.rs` is the only module with
-`unsafe`, `src/qt/ffi.rs` holds the C++ declarations (no authored C++), `src/shell.rs` is
-`#![forbid(unsafe_code)]`.
+`unsafe`, `src/qt/ffi.rs` holds the C++ declarations, `src/shell.rs` is
+`#![forbid(unsafe_code)]`. `src/qt/clipboard.h` is the only authored C++: cxx cannot express
+`QApplication::clipboard()` as a static factory or pick between `QClipboard`'s `text`/`setText`
+overloads, so it wraps those three calls.
 
 Menus File > Open... / Quit, View > Light/Dark theme, Help > About, a status bar with the file name and
 block count. A file comes from the command line, File > Open... (`QFileDialog` built through `new_ptr`,
@@ -573,6 +583,10 @@ showcase shows all 15 headings. `itemClicked` maps the clicked `QTreeWidgetItem`
 scrolls with `PageLayout::y_of`. The dock starts hidden, rebuilds on every load, and
 `--outline-test` opens it, checks 15 headings and that scrolling to "Diagrams" lands on 1242 px
 (1266 on Linux).
+
+**Clipboard.** Ctrl+C and Edit > Copy pass the selection's byte range to `QClipboard`, and the status
+bar says `Copied 8 characters`. `--copy-test` selects "Markdown", copies it and reads the clipboard
+back: `copy test ok: "Markdown" at 7..15, clipboard 8 chars`.
 
 **No band path here, on purpose.** The raster backend has no upload to save and `drawImage` only
 touches the pixels the paint event exposes. Measured on Windows: 0.5-0.7 ms per 48 px scroll paint at
@@ -678,7 +692,8 @@ open body. Find in both shells: Qt `--find-test` sets the line edit's text and r
 F3 through the message hook and logs `4 matches, 4 mark rects, 1 current rects, index 1`; both
 captured with the marks visible. Outline in both shells: Qt `--outline-test` reports
 `15 headings, dock true, scrolled to 1242`, WinUI `15 headings, scrolled to 1242`, and both
-captured. The Qt shell on the same files with layout,
+captured. Clipboard: Qt copies 7..15 ("Markdown") and reads back 8 characters; WinUI logs
+`copy: 8 characters` and `clipboard Some("Markdown")`. The Qt shell on the same files with layout,
 first paint, wheel, scrollbar, keys, File > Open..., themes, `--zoom`, `--scroll`, a live resize to
 3400x1380 and `--drop-test`. The SVG badge renders through `mdview-engine` in `mdv-bench` and both
 shells; with `MDV_ENGINE` pointing at a missing file the same view falls back to
@@ -699,8 +714,8 @@ source box. The fenced Rust block is tokenized in both themes in `mdv-bench` and
 **Linux:** the Qt shell built with Qt 6.8.2 on the VM, run and captured under Xvfb, `--drop-test`,
 `--select-test` (7..15 = "Markdown"), `--link-test` (scrolled to 1266 px) and `--details-test`
 (4095 -> 4149 px) passing, `--find-test` reporting four matches and four mark rects,
-`--outline-test` reporting 15 headings scrolled to 1266, and
-`cargo test --release -p mdview-core -p mdview-render` passing
+`--outline-test` reporting 15 headings scrolled to 1266, `--copy-test` reading "Markdown" back from
+the clipboard, and `cargo test --release -p mdview-core -p mdview-render` passing
 (18 render integration tests and the 10 render unit tests included). `mdv-bench fixtures/images.md`
 renders the SVG badge at 780x413 in
 11.4 ms with its text: the engine's font query now falls through Noto Sans, DejaVu Sans and the
@@ -741,8 +756,8 @@ Qt's event path instead).
    anchor, details, math, Mermaid and highlighting shots) and ask for a yes or a list of changes.
 2. **Phase 3/5 parity**: the Qt and WinUI items from `docs/PORT_CHECKLIST.md` - tabs, folder tree,
    recents, zoom limits, themes, focus mode, session restore. Selection, links, `<details>`, find,
-   outline, math, diagrams and highlighting are done in both shells; copy to the clipboard and a link
-   context menu are the obvious next shell features.
+   outline, clipboard copy, math, diagrams and highlighting are done in both shells; a link context
+   menu and document tabs are the obvious next shell features.
 3. **Bundled fonts**, then turn the goldens into a real pixel suite (the plan's Phase 6).
 
 Every Qt/Linux change is tested on the VM as well as on Windows, and nothing counts as working on
