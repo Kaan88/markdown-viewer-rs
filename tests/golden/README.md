@@ -41,7 +41,8 @@ Math and Mermaid changed the showcase: the page is now 4085 px at 100% (taller f
 diagram images instead of code boxes) and the Mathematics and Diagrams sections show rendered output,
 so the four `showcase-*` images were regenerated. The engine must be built (or `MDV_ENGINE` set) when
 regenerating, because SVG, math and Mermaid go through it. Syntax highlighting changed only the Rust
-block's glyph colours, so the page height stayed 4085 px.
+block's glyph colours, so the page height stayed 4085 px. Mermaid diagrams now sit on a light card in
+the dark images, gantt section labels clear the task bars, and mindmap labels match their node size.
 
 `images-light.png` is `fixtures/images.md` through `mdv-bench`: a real PNG drawn as a block and
 inline, a missing file's placeholder, and the SVG badge that the engine now draws in the last line.
