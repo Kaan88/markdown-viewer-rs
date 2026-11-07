@@ -36,6 +36,8 @@ sequence and class diagrams drawn by merman in both shells, again from the one e
 Rust fence is coloured by syntect in both shells.
 `shell-qt-find.png` and `shell-winui-find.png` show find for "Markdown": four hit rectangles and the
 second one active, with the Qt status bar and the WinUI title carrying `2 of 4`.
+`shell-qt-outline.png` shows the Qt outline dock with all 15 headings, scrolled to Diagrams;
+`shell-winui-outline.png` shows the same jump with the Outline menu in the bar.
 
 Math and Mermaid changed the showcase: the page is now 4071 px at 100% (taller formula lines and
 diagram images instead of code boxes) and the Mathematics and Diagrams sections show rendered output,

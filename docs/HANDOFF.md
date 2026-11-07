@@ -115,6 +115,7 @@ The Qt shell builds separately (section 8).
 | `--scroll-steps <n>` | after the first frame, walk down `n` 40 px steps, one frame each |
 | `--select-test` | after the first frame, select the word "Markdown" and log the range and first rect to the trace |
 | `--find-test` | type "Markdown" through the find path, step to the second match and log the mark counts |
+| `--outline-test` | scroll to the "Diagrams" heading through the outline and log the heading count |
 | `--details-test` | after the first frame, toggle the first `<details>` and log the page height before and after |
 | `--size <w>x<h>` | logical window size (default 1100x900) |
 
@@ -217,6 +218,7 @@ xvfb-run -a $BIN fixtures/showcase.md --light --select-test          # "select t
 xvfb-run -a $BIN fixtures/showcase.md --light --link-test            # "link test ok: ..."
 xvfb-run -a $BIN fixtures/showcase.md --light --details-test         # "details test ok: ..."
 xvfb-run -a $BIN fixtures/showcase.md --light --find-test            # "find test ok: ..."
+xvfb-run -a $BIN fixtures/showcase.md --light --outline-test         # "outline test ok: ..."
 ```
 
 The scripted checks print one line and exit; on this VM they report selection `7..15` ("Markdown"),
@@ -491,6 +493,12 @@ its `2 of 4` counter are shown in the **window title** (`mdview - file — Find:
 rather than in a find box. `--find-test` feeds WM_CHAR/WM_KEYDOWN messages through the hook and logs
 `find test ok: 4 matches, 4 mark rects, 1 current rects, index 1`.
 
+**Outline.** The trimmed WinUI bindings have no usable `ItemInvoked`/`TextBlock` support for a
+sidebar, so the outline is a top-level **Outline menu**. `refresh_outline` clears and rebuilds it
+from `Document::headings` on every load, indents children with spaces, and each item scrolls to its
+block with `PageLayout::y_of`. `--outline-test` reports `15 headings, scrolled to 1242, expected
+Some(1242.0)`.
+
 **Hand-written additions in `bindings.rs`** (regenerating would drop them):
 
 - `FrameworkElement::set_requested_theme` - the root grid is set Light/Dark with the page, otherwise
@@ -559,6 +567,13 @@ after the page blit. Enter and Next step forward, Previous and Shift+F3 back, an
 shows `Find: 2 of 4` (`+` when `FIND_CAP` stopped the count). `--find-test` sets the line edit's text
 so the `textChanged` path runs, checks four marks and one current rectangle, and steps to index 1.
 
+**Outline.** View > Outline toggles a left `QDockWidget` with a `QTreeWidget`. `Document::headings`
+supplies level, title and block; levels nest into parent/child items and the tree is expanded, so the
+showcase shows all 15 headings. `itemClicked` maps the clicked `QTreeWidgetItem` back to its block and
+scrolls with `PageLayout::y_of`. The dock starts hidden, rebuilds on every load, and
+`--outline-test` opens it, checks 15 headings and that scrolling to "Diagrams" lands on 1242 px
+(1266 on Linux).
+
 **No band path here, on purpose.** The raster backend has no upload to save and `drawImage` only
 touches the pixels the paint event exposes. Measured on Windows: 0.5-0.7 ms per 48 px scroll paint at
 1086x846, and 2.0 ms at 3386x1327 (4.5 Mpx) - inside the 4 ms and 8 ms budgets. Cutting it further
@@ -599,6 +614,8 @@ and are not errors.
 | `shell-winui-highlight.png` | the same view in WinUI |
 | `shell-qt-find.png` | the Qt find bar with "Markdown", four marks and `Find: 2 of 4` in the status bar |
 | `shell-winui-find.png` | the same matches in WinUI, with query and counter in the title |
+| `shell-qt-outline.png` | the Qt outline dock with all 15 headings, scrolled to Diagrams |
+| `shell-winui-outline.png` | WinUI after the same outline jump, with the Outline menu in the menu bar |
 
 **These are for review, not a pixel baseline yet.** They use this host's system fonts (Segoe UI,
 Consolas), so another machine or Linux will differ; the plan calls for bundled fonts and a tolerance
@@ -659,7 +676,9 @@ selection rows) and a click on the `#diagrams` link, both captured; `<details>` 
 open body. Find in both shells: Qt `--find-test` sets the line edit's text and reports
 `4 matches, 4 mark rects, 1 current rects, bar true, index 1`; WinUI `--find-test` feeds WM_CHAR and
 F3 through the message hook and logs `4 matches, 4 mark rects, 1 current rects, index 1`; both
-captured with the marks visible. The Qt shell on the same files with layout,
+captured with the marks visible. Outline in both shells: Qt `--outline-test` reports
+`15 headings, dock true, scrolled to 1242`, WinUI `15 headings, scrolled to 1242`, and both
+captured. The Qt shell on the same files with layout,
 first paint, wheel, scrollbar, keys, File > Open..., themes, `--zoom`, `--scroll`, a live resize to
 3400x1380 and `--drop-test`. The SVG badge renders through `mdview-engine` in `mdv-bench` and both
 shells; with `MDV_ENGINE` pointing at a missing file the same view falls back to
@@ -679,7 +698,8 @@ source box. The fenced Rust block is tokenized in both themes in `mdv-bench` and
 
 **Linux:** the Qt shell built with Qt 6.8.2 on the VM, run and captured under Xvfb, `--drop-test`,
 `--select-test` (7..15 = "Markdown"), `--link-test` (scrolled to 1266 px) and `--details-test`
-(4095 -> 4149 px) passing, `--find-test` reporting four matches and four mark rects, and
+(4095 -> 4149 px) passing, `--find-test` reporting four matches and four mark rects,
+`--outline-test` reporting 15 headings scrolled to 1266, and
 `cargo test --release -p mdview-core -p mdview-render` passing
 (18 render integration tests and the 10 render unit tests included). `mdv-bench fixtures/images.md`
 renders the SVG badge at 780x413 in
@@ -707,7 +727,8 @@ Qt's event path instead).
   equation numbering or copy-as-TeX.
 - Diagram blocks are images, so they have no selection geometry.
 - The WinUI find has no text box: its query and counter live in the window title, because the trimmed
-  `bindings.rs` has no `TextBox` event or text accessor. Qt has a real find bar.
+  `bindings.rs` has no `TextBox` event or text accessor. Qt has a real find bar, and the WinUI
+  outline is a menu rather than a dock.
 - The WinUI title bar follows Windows, not the in-app theme override.
 - The WinUI scrollbar is drawn by the shell, not a WinUI control (no `ScrollBar` in the bindings).
 - Scroll frames meet the budgets, but a frame still waits for vsync (3-6 ms in the trace): the
@@ -719,8 +740,8 @@ Qt's event path instead).
    `showcase-{light,dark}@{1.0,1.5}.png` plus the shell captures (including the selection,
    anchor, details, math, Mermaid and highlighting shots) and ask for a yes or a list of changes.
 2. **Phase 3/5 parity**: the Qt and WinUI items from `docs/PORT_CHECKLIST.md` - tabs, folder tree,
-   outline, recents, zoom limits, themes, focus mode, session restore. Selection, links, `<details>`,
-   find, math, diagrams and highlighting are done in both shells; copy to the clipboard and a link
+   recents, zoom limits, themes, focus mode, session restore. Selection, links, `<details>`, find,
+   outline, math, diagrams and highlighting are done in both shells; copy to the clipboard and a link
    context menu are the obvious next shell features.
 3. **Bundled fonts**, then turn the goldens into a real pixel suite (the plan's Phase 6).
 
