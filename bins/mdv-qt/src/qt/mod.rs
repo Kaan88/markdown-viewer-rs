@@ -104,6 +104,15 @@ fn qs(s: &str) -> QString {
     QString::from(s)
 }
 
+/// Copies text to the system clipboard.
+pub fn set_clipboard(text: &str) {
+    set_clipboard_text(&qs(text));
+}
+
+pub fn read_clipboard() -> String {
+    clipboard_text().to_string()
+}
+
 /// Events the shell can observe on the canvas. All safe Rust on the other side.
 pub trait CanvasHandler {
     fn paint(&self, target: &mut PaintTarget<'_>);
@@ -116,6 +125,8 @@ pub trait CanvasHandler {
     fn find(&self) {}
     /// F3 and Shift+F3: step through matches.
     fn find_step(&self, _delta: i32) {}
+    /// Ctrl+C: copy the selection.
+    fn copy(&self) {}
     fn drag_enter(&self, text: String) -> bool;
     fn dropped(&self, text: String);
     fn timer(&self, id: i32);
@@ -166,6 +177,10 @@ impl Canvas {
     unsafe fn key_press_event(self: Pin<&mut Self>, e: *mut QKeyEvent) {
         let modifiers = (*e).modifiers();
         let code = (*e).key_code();
+        if modifiers.test_flag(KeyboardModifier::ControlModifier) && matches!(code, 0x43 | 0x63) {
+            self.handler().copy();
+            return;
+        }
         if modifiers.test_flag(KeyboardModifier::ControlModifier) && matches!(code, 0x46 | 0x66) {
             self.handler().find();
             return;

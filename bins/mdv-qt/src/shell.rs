@@ -531,6 +531,28 @@ impl Shell {
         self.rects_for(from, to)
     }
 
+    /// Copies the selected document text to the system clipboard.
+    fn copy_selection(&self) {
+        let Some((from, to)) = self.selection.get() else {
+            self.message("Copy: no selection");
+            return;
+        };
+        let (from, to) = (from.min(to) as usize, from.max(to) as usize);
+        if from == to {
+            self.message("Copy: no selection");
+            return;
+        }
+        let text = {
+            let document = self.document.borrow();
+            let Some(document) = document.as_ref() else {
+                return;
+            };
+            document.text[from..to].to_string()
+        };
+        set_clipboard(&text);
+        self.message(&format!("Copied {} characters", text.chars().count()));
+    }
+
     /// The page rectangles a range would paint, whether or not it is the current selection.
     fn rects_for(&self, from: u32, to: u32) -> Vec<Rect> {
         if from == to {
@@ -875,6 +897,10 @@ impl CanvasHandler for Shell {
         Shell::find_step(self, delta);
     }
 
+    fn copy(&self) {
+        self.copy_selection();
+    }
+
     fn drag_enter(&self, _text: String) -> bool {
         true
     }
@@ -935,6 +961,8 @@ enum Check {
     Outline,
     /// The same, but leave the window open so a screenshot can show the dock.
     OutlineHold,
+    /// Copy the selected word and read it back from the clipboard, then exit.
+    Copy,
 }
 
 /// Scripted checks through Qt's real mouse path, for `--select-test`, `--select-hold` and
@@ -974,6 +1002,32 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
             return;
         }
         std::process::exit(0);
+    }
+    if check == Check::Copy {
+        let range = {
+            let document = shell.document.borrow();
+            document.as_ref().and_then(|document| {
+                document
+                    .text
+                    .find("Markdown")
+                    .map(|at| (at as u32, (at + "Markdown".len()) as u32))
+            })
+        };
+        let Some((from, to)) = range else {
+            println!("copy test failed: no word");
+            std::process::exit(1);
+        };
+        shell.selection.set(Some((from, to)));
+        shell.copy_selection();
+        let copied = read_clipboard();
+        let ok = copied == "Markdown";
+        println!(
+            "copy test {}: {:?} at {from}..{to}, clipboard {} chars",
+            if ok { "ok" } else { "failed" },
+            copied,
+            copied.chars().count()
+        );
+        std::process::exit(if ok { 0 } else { 1 });
     }
     if matches!(check, Check::Outline | Check::OutlineHold) {
         shell.show_outline(true);
@@ -1098,7 +1152,8 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
         | Check::Find
         | Check::FindHold
         | Check::Outline
-        | Check::OutlineHold => {
+        | Check::OutlineHold
+        | Check::Copy => {
             canvas.send_mouse(EV_MOUSE_PRESS, x0, y0);
             canvas.send_mouse(EV_MOUSE_MOVE, x1, y0);
             canvas.send_mouse(EV_MOUSE_RELEASE, x1, y0);
@@ -1172,6 +1227,9 @@ fn build(
     find_next.on_triggered(move |_| s.find_step(1));
     let s = shell.clone();
     find_previous.on_triggered(move |_| s.find_step(-1));
+    let copy = edit_menu.add_action("&Copy\tCtrl+C");
+    let s = shell.clone();
+    copy.on_triggered(move |_| s.copy_selection());
 
     let find_bar = window.add_tool_bar("Find");
     find_bar.widget().set_visible(false);
@@ -1334,6 +1392,7 @@ pub fn run() -> i32 {
             "--find-hold" => check = Some(Check::FindHold),
             "--outline-test" => check = Some(Check::Outline),
             "--outline-hold" => check = Some(Check::OutlineHold),
+            "--copy-test" => check = Some(Check::Copy),
             "--zoom" => {
                 zoom = args.next().expect("--zoom needs a number").parse().unwrap();
             }

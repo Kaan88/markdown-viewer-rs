@@ -250,6 +250,14 @@ impl Renderer {
         self.selection = selection;
     }
 
+    /// The selected text, for the clipboard.
+    pub fn selection_text(&self) -> Option<String> {
+        let (from, to) = self.selection?;
+        let document = self.document.as_ref()?;
+        let (from, to) = (from.min(to) as usize, from.max(to) as usize);
+        (from < to).then(|| document.text[from..to].to_string())
+    }
+
     /// Selects the first occurrence of a word in the document, for `--select-test`.
     pub fn select_word(&mut self, word: &str) -> Option<(u32, u32)> {
         let start = {

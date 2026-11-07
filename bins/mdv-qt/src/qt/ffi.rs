@@ -35,6 +35,7 @@ pub mod ffi {
 
     unsafe extern "C++" {
         include!("cxx-qt-lib/common.h");
+        include!("clipboard.h");
         include!("cxx-qt-lib/qstring.h");
         include!("cxx-qt-lib/qstringlist.h");
         include!("cxx-qt-lib/qimage.h");
@@ -103,6 +104,7 @@ pub mod ffi {
         include!(<QtWidgets/QHBoxLayout>);
         include!(<QtWidgets/QScrollBar>);
         include!(<QtGui/QAction>);
+        include!(<QtGui/QClipboard>);
         include!(<QtGui/QWindow>);
         include!(<QtCore/QMimeData>);
 
@@ -196,6 +198,12 @@ pub mod ffi {
         #[rust_name = "add_toolbar_action"]
         #[cxx_name = "addAction"]
         fn addActionToolbar(self: Pin<&mut QToolBar>, text: &QString) -> *mut QAction;
+        #[rust_name = "clipboard_text"]
+        #[cxx_name = "mdview_clipboard_text"]
+        fn clipboardText() -> QString;
+        #[rust_name = "set_clipboard_text"]
+        #[cxx_name = "mdview_set_clipboard_text"]
+        fn setClipboardText(text: &QString);
     }
 
     // The custom canvas: a QWidget subclass implemented in Rust.

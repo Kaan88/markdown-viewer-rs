@@ -43,6 +43,15 @@ windows_core::link!("user32.dll" "system" fn SetWindowsHookExW(id: i32, proc: un
 windows_core::link!("user32.dll" "system" fn CallNextHookEx(hook: *mut c_void, code: i32, wparam: usize, lparam: isize) -> isize);
 windows_core::link!("user32.dll" "system" fn GetAncestor(window: *mut c_void, flags: u32) -> *mut c_void);
 windows_core::link!("user32.dll" "system" fn GetKeyState(key: i32) -> i16);
+windows_core::link!("user32.dll" "system" fn OpenClipboard(owner: *mut c_void) -> i32);
+windows_core::link!("user32.dll" "system" fn CloseClipboard() -> i32);
+windows_core::link!("user32.dll" "system" fn EmptyClipboard() -> i32);
+windows_core::link!("user32.dll" "system" fn SetClipboardData(format: u32, data: *mut c_void) -> *mut c_void);
+windows_core::link!("user32.dll" "system" fn GetClipboardData(format: u32) -> *mut c_void);
+windows_core::link!("kernel32.dll" "system" fn GlobalAlloc(flags: u32, bytes: usize) -> *mut c_void);
+windows_core::link!("kernel32.dll" "system" fn GlobalLock(mem: *mut c_void) -> *mut c_void);
+windows_core::link!("kernel32.dll" "system" fn GlobalUnlock(mem: *mut c_void) -> i32);
+windows_core::link!("kernel32.dll" "system" fn GlobalFree(mem: *mut c_void) -> *mut c_void);
 windows_core::link!("shell32.dll" "system" fn ShellExecuteW(window: *mut c_void, operation: PCWSTR, file: PCWSTR, parameters: PCWSTR, directory: PCWSTR, show: i32) -> isize);
 
 /// `GETMESSAGE` hook id, `PM_REMOVE`, `WM_NULL` and `GA_ROOT`, from winuser.h.
@@ -344,6 +353,8 @@ struct Shell {
     find_test: Cell<bool>,
     /// Run the outline check after the first frame, for `--outline-test`.
     outline_test: Cell<bool>,
+    /// Run the clipboard check after the first frame, for `--copy-test`.
+    copy_test: Cell<bool>,
     /// The Outline menu, rebuilt when a document loads.
     outline_menu: RefCell<Option<MenuBarItem>>,
     outline_entries: Cell<usize>,
@@ -363,6 +374,10 @@ impl Shell {
                 let shift = unsafe { GetKeyState(0x10) } < 0;
                 if ctrl && wparam == 0x46 {
                     self.find_open();
+                    return true;
+                }
+                if ctrl && matches!(wparam, 0x43 | 0x63) {
+                    self.copy_selection();
                     return true;
                 }
                 if wparam == 0x72 && self.find_active.get() {
@@ -454,6 +469,18 @@ impl Shell {
         self.renderer.borrow_mut().find_step(delta);
         self.refresh_find_title();
         self.show();
+    }
+
+    fn copy_selection(&self) {
+        let Some(text) = self.renderer.borrow().selection_text() else {
+            diag::trace("copy: no selection");
+            return;
+        };
+        if set_clipboard_text(&text) {
+            diag::trace(&format!("copy: {} characters", text.chars().count()));
+        } else {
+            diag::trace("copy: clipboard unavailable");
+        }
     }
 
     fn refresh_find_title(&self) {
@@ -622,6 +649,18 @@ impl Shell {
                         ));
                         self.show();
                     }
+                    if self.copy_test.get() {
+                        self.copy_test.set(false);
+                        let range = self.renderer.borrow_mut().select_word("Markdown");
+                        self.copy_selection();
+                        let copied = clipboard_text();
+                        let ok = copied.as_deref() == Some("Markdown");
+                        diag::trace(&format!(
+                            "copy test {}: {range:?}, clipboard {copied:?}",
+                            if ok { "ok" } else { "failed" }
+                        ));
+                        self.show();
+                    }
                     if diag::measuring() {
                         // One line and out, so a script can time the first frame from process start.
                         diag::measure_line(&format!(
@@ -693,6 +732,66 @@ fn reload(shell: &Rc<Shell>) {
     match load(shell, &path) {
         Ok(()) => shell.show(),
         Err(e) => diag::error_box(&e),
+    }
+}
+
+/// Clipboard formats used by the Win32 fallback; WinRT clipboard needs bindings this shell trims.
+const CF_UNICODETEXT: u32 = 13;
+const GMEM_MOVEABLE: u32 = 2;
+
+fn set_clipboard_text(text: &str) -> bool {
+    let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return false;
+        }
+        _ = EmptyClipboard();
+        let handle = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2);
+        if handle.is_null() {
+            _ = CloseClipboard();
+            return false;
+        }
+        let target = GlobalLock(handle);
+        if target.is_null() {
+            _ = GlobalFree(handle);
+            _ = CloseClipboard();
+            return false;
+        }
+        std::ptr::copy_nonoverlapping(wide.as_ptr(), target.cast::<u16>(), wide.len());
+        _ = GlobalUnlock(handle);
+        if SetClipboardData(CF_UNICODETEXT, handle).is_null() {
+            _ = GlobalFree(handle);
+            _ = CloseClipboard();
+            return false;
+        }
+        _ = CloseClipboard();
+        true
+    }
+}
+
+fn clipboard_text() -> Option<String> {
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return None;
+        }
+        let handle = GetClipboardData(CF_UNICODETEXT);
+        if handle.is_null() {
+            _ = CloseClipboard();
+            return None;
+        }
+        let source = GlobalLock(handle).cast::<u16>();
+        if source.is_null() {
+            _ = CloseClipboard();
+            return None;
+        }
+        let mut len = 0;
+        while *source.add(len) != 0 {
+            len += 1;
+        }
+        let text = String::from_utf16_lossy(std::slice::from_raw_parts(source, len));
+        _ = GlobalUnlock(handle);
+        _ = CloseClipboard();
+        Some(text)
     }
 }
 
@@ -801,6 +900,11 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
     previous.Click(move |_, _| target.find_step(-1))?.forget();
     edit.Items()?
         .Append(&previous.cast::<MenuFlyoutItemBase>()?)?;
+    let copy = MenuFlyoutItem::new()?;
+    copy.SetText("Copy\tCtrl+C")?;
+    let target = shell.clone();
+    copy.Click(move |_, _| target.copy_selection())?.forget();
+    edit.Items()?.Append(&copy.cast::<MenuFlyoutItemBase>()?)?;
     menu.Items()?.Append(&edit)?;
 
     let outline = MenuBarItem::new()?;
@@ -864,6 +968,8 @@ pub struct Startup {
     pub find: bool,
     /// Run the outline check after the first frame, for `--outline-test`.
     pub outline: bool,
+    /// Run the clipboard check after the first frame, for `--copy-test`.
+    pub copy: bool,
 }
 
 pub fn build(
@@ -940,6 +1046,7 @@ pub fn build(
         find_active: Cell::new(false),
         find_test: Cell::new(startup.find),
         outline_test: Cell::new(startup.outline),
+        copy_test: Cell::new(startup.copy),
         outline_menu: RefCell::new(None),
         outline_entries: Cell::new(0),
     });
