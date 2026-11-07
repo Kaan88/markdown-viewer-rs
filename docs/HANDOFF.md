@@ -48,13 +48,23 @@ approved by the user.
 - **This crate is excluded from the workspace** (`Cargo.toml`), because it needs a Qt installation
   to build. It has its own `Cargo.lock` (the Qt-only graph, seeded from the spike's lock) and its
   own target directory.
-- Window 1100x900, menus File > Quit, View > Light/Dark theme, Help > About, a status bar with the
-  file name and block count. `--zoom 1.5` scales the page (verified: showcase page grows from
-  3020 px to 4596 px at 1.5). A file comes from the command line or is dropped on the window
-  (Qt file URIs, `%20` decoded). There is no File > Open dialog yet.
+- Window 1100x900, menus File > Open... and Quit, View > Light/Dark theme, Help > About, a status bar
+  with the file name and block count. `--zoom 1.5` scales the page (verified: showcase page grows
+  from 3020 px to 4596 px at 1.5). A file comes from the command line, File > Open... or is dropped
+  on the window (Qt file URIs, `%20` decoded).
 - `src/shell.rs` renders the page with `mdview-render` for the canvas width and device pixel ratio,
   copies the visible slice into a BGRX buffer and blits it through QPainter with an identity
-  transform. The wheel moves the scroll offset and repaints.
+  transform.
+- **Scrolling**: the wheel, a vertical `QScrollBar` beside the canvas (14 px wide, in a `QHBoxLayout`)
+  and the keyboard. The shell owns the offset: it sets the bar's range, page step and value while
+  painting, with a `syncing` flag so the bar's `valueChanged` does not echo back; a drag or a click in
+  the groove arrives through `valueChanged` and repaints. The canvas takes `Qt::StrongFocus`, so Home,
+  End, the arrows, Page Up/Down and Space work: arrows move 48 px, Page Up/Down and Space 90% of the
+  viewport, Home and End go to the ends.
+- **File > Open** is a `QFileDialog` built through the same `new_ptr` bridge (its four-argument
+  constructor; `QFileDialog::getOpenFileName` could not be bound because cxx takes its address and the
+  C++ signature has six parameters). It opens in the current document's directory with a
+  `Markdown (*.md *.markdown)` filter.
 - Build on this PC (Qt 6.9.3, MSVC 2022, installed at `C:\Qt\6.9.3\msvc2022_64` with `aqtinstall`):
 
   ```powershell
@@ -68,9 +78,14 @@ approved by the user.
   Run it with the Qt `bin` directory on `PATH` so the Qt DLLs are found. In this sandbox `TEMP` and
   `TMP` must point at a writable directory (e.g. `target/tmp`) or MSVC's `lib.exe` fails with
   access denied; a normal shell does not need that.
-- Measured here: parse 0.1 ms, layout 27.0 ms at 1100 dip, 100% scale, page 1100x3020; window opens
-  with the page drawn and the wheel scrolls it (checked from screenshots).
-- Screenshots: `tests/golden/shell-qt-light.png` (page top) and `shell-qt-scrolled.png`.
+- Measured here: parse 0.1 ms, height pass 8.6 ms for the 1086 px canvas, page 3020 px.
+- Checked by driving the running Windows build: Page Down scrolls and the bar's thumb moves, a click
+  in the bar's groove jumps a page, File > Open... opens the dialog in `fixtures/` and loading
+  `linked.md` through it updates the title, the page and the status bar.
+- Screenshots: `tests/golden/shell-qt-light.png` (page top, scrollbar at zero), `shell-qt-scrolled.png`
+  (after a click in the bar), `shell-qt-open.png` (the Open dialog).
+- The crate emits seven `unnecessary unsafe block` warnings from the `pin!` macro; they predate this
+  work and are not errors.
 - **Both the Windows build and the Linux build now run.** The Linux build is built and run on the
   test VM below (Qt 6.8.2, Debian 13), under Xvfb; see `tests/golden/shell-qt-linux.png`.
 
@@ -141,13 +156,17 @@ The user gave this VM for Qt and Linux testing from 2026-11-07. It is Debian 13 
 
 Run on Windows: the WinUI spike (`spikes/winui`, framework build, `--measure`: result=ok at 259 ms),
 the WinUI shell on `fixtures/showcase.md` (wheel scrolling, system theme, `--light`/`--dark`,
-`--trace`), and the Qt shell on the same file (layout, first paint, wheel scrolling).
+`--trace`), and the Qt shell on the same file (layout, first paint, wheel, scrollbar and keys). For
+the Qt shell the input was driven with real and posted Windows messages against the running window:
+Page Down moved the page and the thumb, a click in the scrollbar groove jumped a page, and
+File > Open... opened the dialog and loaded `linked.md` from it.
 
-Run on Linux: the Qt shell on the VM, built with Qt 6.8.2, drawn and captured under Xvfb.
+Run on Linux: the Qt shell on the VM, built with Qt 6.8.2, drawn and captured under Xvfb (the
+screenshot shows the scrollbar in place).
 
 Not tested by hand: the WinUI File > Open dialog and View theme items (wired, not clicked); the Qt
-menus (Quit, Light/Dark, About) and drag and drop; window resizing and reflow on both; DPI scaling
-other than 100%; keyboard input (neither shell has any).
+View/Help menu items and drag and drop since the scrollbar landed; window resizing and reflow on
+both; DPI scaling other than 100%; the Qt scrollbar and keys on Linux (only on Windows).
 
 ## Linux target from Windows
 
@@ -175,8 +194,8 @@ files, writes the complete sparse index cache entry for every crate and download
   render rather than shared across renders; `<picture>` light/dark sources and `width`/`height`
   attributes are ignored; a blocked image is retried on every render.
 - **No selection, links, anchors or details toggling.** `BlockBox` is there for hit tests but unused.
-- **No scrollbar or keyboard** in either shell; the wheel is the only scroll input. No File > Open in
-  the Qt shell; no find, tabs or tree in either.
+- **The WinUI shell still has no scrollbar and no keyboard scrolling**, and its File > Open, Reload and
+  theme menu items are wired but have not been clicked. No find, tabs or document tree in either shell.
 - Table `colspan`/`rowspan` ignored; math, Mermaid and highlighting show source.
 - No bundled fonts, so goldens depend on system fonts.
 - The WinUI title bar follows Windows, not the in-app theme override.
@@ -184,7 +203,7 @@ files, writes the complete sparse index cache entry for every crate and download
 ## What to do next
 
 1. Get the four `tests/golden/` images and the shell screenshots approved.
-2. Add File > Open to the Qt shell, a scrollbar and keyboard scrolling to both.
+2. Give the WinUI shell a scrollbar and keyboard scrolling, and click through its File and View menus.
 3. Give the renderer a persistent frame plus dirty-band scrolling, for 4K and for the shells (they
    currently copy a full viewport bitmap every frame).
 4. Add selection and link/anchor hit-testing, then details toggling.

@@ -6,7 +6,7 @@
 use crate::qt::ffi::*;
 use crate::qt::*;
 use mdview_core::parse_bytes;
-use mdview_render::{Bitmap, DocumentRenderer, Options, PageLayout, Theme, DARK, LIGHT};
+use mdview_render::{DocumentRenderer, Options, PageLayout, Theme, DARK, LIGHT};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -19,8 +19,22 @@ A Markdown viewer with its own renderer.
 Open a document by passing it on the command line, or dropping it on the window.
 
 - Headings, lists, tables, alerts and code blocks are drawn by `mdview-render`.
-- The wheel scrolls.
+- The wheel, the scrollbar, and Home/End, the arrows, Page Up/Down and Space scroll.
+- File > Open picks a file.
 ";
+
+/// Qt key codes, for the keys the canvas handles.
+const KEY_HOME: i32 = 0x0100_0010;
+const KEY_END: i32 = 0x0100_0011;
+const KEY_LEFT: i32 = 0x0100_0012;
+const KEY_UP: i32 = 0x0100_0013;
+const KEY_RIGHT: i32 = 0x0100_0014;
+const KEY_DOWN: i32 = 0x0100_0015;
+const KEY_PAGE_UP: i32 = 0x0100_0016;
+const KEY_PAGE_DOWN: i32 = 0x0100_0017;
+const KEY_SPACE: i32 = 0x20;
+/// One arrow-key step, in device px.
+const STEP: f64 = 48.0;
 
 struct Shell {
     window: Cell<Option<H<QMainWindow>>>,
@@ -31,6 +45,9 @@ struct Shell {
     renderer: RefCell<DocumentRenderer>,
     path: RefCell<Option<PathBuf>>,
     scroll: Cell<f64>,
+    scrollbar: Cell<Option<H<QScrollBar>>>,
+    /// Set while the shell moves the scrollbar itself, so its signal does not echo back.
+    syncing: Cell<bool>,
     viewport: Cell<i32>,
     theme: Cell<Theme>,
     zoom: Cell<f64>,
@@ -47,6 +64,8 @@ impl Shell {
             renderer: RefCell::new(DocumentRenderer::new()),
             path: RefCell::new(None),
             scroll: Cell::new(0.0),
+            scrollbar: Cell::new(None),
+            syncing: Cell::new(false),
             viewport: Cell::new(0),
             theme: Cell::new(theme),
             zoom: Cell::new(zoom),
@@ -134,6 +153,56 @@ impl Shell {
             .map_or(0.0, |layout| layout.total_height());
         (total - viewport as f32).max(0.0) as f64
     }
+
+    /// Moves the scroll offset, keeping the scrollbar and the canvas in step.
+    fn scroll_to(&self, value: f64) {
+        let next = value.clamp(0.0, self.scroll_max(self.viewport.get()));
+        if next != self.scroll.get() {
+            self.scroll.set(next);
+            self.sync_scrollbar_value();
+            self.redraw();
+        }
+    }
+
+    /// Keeps the scrollbar's position in step without the change echoing back.
+    fn sync_scrollbar_value(&self) {
+        let Some(bar) = self.scrollbar.get() else {
+            return;
+        };
+        let value = self.scroll.get().round() as i32;
+        if bar.value() != value {
+            self.syncing.set(true);
+            bar.set_value(value);
+            self.syncing.set(false);
+        }
+    }
+
+    /// Sizes the scrollbar to the page and the viewport, and places it at the current offset.
+    fn sync_scrollbar_range(&self, viewport: i32) {
+        let Some(bar) = self.scrollbar.get() else {
+            return;
+        };
+        self.syncing.set(true);
+        bar.set_range(0, self.scroll_max(viewport).ceil() as i32);
+        bar.set_page_step(viewport);
+        bar.set_single_step(STEP as i32);
+        self.syncing.set(false);
+        self.sync_scrollbar_value();
+    }
+
+    /// Home, End, the arrows and Page Up/Down, in device px.
+    fn key(&self, code: i32) {
+        let viewport = self.viewport.get() as f64;
+        match code {
+            KEY_DOWN | KEY_RIGHT => self.scroll_to(self.scroll.get() + STEP),
+            KEY_UP | KEY_LEFT => self.scroll_to(self.scroll.get() - STEP),
+            KEY_PAGE_DOWN | KEY_SPACE => self.scroll_to(self.scroll.get() + viewport * 0.9),
+            KEY_PAGE_UP => self.scroll_to(self.scroll.get() - viewport * 0.9),
+            KEY_HOME => self.scroll_to(0.0),
+            KEY_END => self.scroll_to(f64::MAX),
+            _ => {}
+        }
+    }
 }
 
 impl CanvasHandler for Shell {
@@ -165,6 +234,7 @@ impl CanvasHandler for Shell {
         }
         let scroll = self.scroll.get().clamp(0.0, self.scroll_max(device_height));
         self.scroll.set(scroll);
+        self.sync_scrollbar_range(device_height);
         let Some(layout) = &*self.layout.borrow() else {
             return;
         };
@@ -191,12 +261,11 @@ impl CanvasHandler for Shell {
     fn mouse_move(&self, _x: f64, _y: f64) {}
 
     fn wheel(&self, _dx: i32, dy: i32) {
-        let maximum = self.scroll_max(self.viewport.get());
-        let next = (self.scroll.get() - dy as f64 * 0.75).clamp(0.0, maximum);
-        if next != self.scroll.get() {
-            self.scroll.set(next);
-            self.redraw();
-        }
+        self.scroll_to(self.scroll.get() - dy as f64 * 0.75);
+    }
+
+    fn key(&self, code: i32) {
+        Shell::key(self, code);
     }
 
     fn drag_enter(&self, _text: String) -> bool {
@@ -248,6 +317,22 @@ fn build(shell: &Rc<Shell>, file: Option<PathBuf>) {
 
     let menus = window.menu_bar();
     let file_menu = menus.add_menu("&File");
+    let open = file_menu.add_action("&Open...");
+    let s = shell.clone();
+    open.on_triggered(move |_| {
+        let dir = s
+            .path
+            .borrow()
+            .as_ref()
+            .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_default();
+        if let Some(window) = s.window.get() {
+            if let Some(path) = choose_file(window.widget(), &dir) {
+                s.load(&path);
+            }
+        }
+    });
     let quit = file_menu.add_action("&Quit");
     quit.on_triggered(|_| std::process::exit(0));
     let view_menu = menus.add_menu("&View");
@@ -268,13 +353,28 @@ fn build(shell: &Rc<Shell>, file: Option<PathBuf>) {
 
     let canvas = H::<Canvas>::new(shell.clone() as Rc<dyn CanvasHandler>);
     canvas.widget().accept_drops();
+    canvas.widget().set_focus_policy(11); // Qt::StrongFocus, so the keys arrive
     let page = new_plain_widget();
-    layout_with_margins(page, canvas.widget(), 0, 0);
+    let bar = H::<QScrollBar>::vertical(page);
+    bar.widget().fix_width(14);
+    let s = shell.clone();
+    bar.on_value_changed(move |value| {
+        if s.syncing.get() {
+            return;
+        }
+        s.scroll.set(value as f64);
+        s.redraw();
+    });
+    layout_row(page, canvas.widget(), bar.widget());
     window.set_central(page);
     shell.canvas.set(Some(canvas));
+    shell.scrollbar.set(Some(bar));
     shell.window.set(Some(window));
     shell.status.set(Some(window.status_bar()));
     window.widget().show();
+    if let Some(canvas) = shell.canvas.get() {
+        canvas.widget().set_focus();
+    }
 
     shell.message("Drag a Markdown file here, or pass one on the command line");
     if let Some(path) = file {

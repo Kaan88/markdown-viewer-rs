@@ -31,6 +31,8 @@ trivial_cxx!(ScrollPhase, "Qt::ScrollPhase");
 trivial_cxx!(EventType, "QEvent::Type");
 trivial_cxx!(TimerType, "Qt::TimerType");
 trivial_cxx!(Alignment, "Qt::Alignment");
+trivial_cxx!(Orientation, "Qt::Orientation");
+trivial_cxx!(FocusPolicy, "Qt::FocusPolicy");
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -87,7 +89,8 @@ upcast_widget!(
     QLineEdit,
     QTabWidget,
     QDockWidget,
-    QTreeWidget
+    QTreeWidget,
+    QScrollBar
 );
 
 fn qs(s: &str) -> QString {
@@ -100,6 +103,7 @@ pub trait CanvasHandler {
     fn mouse_press(&self, x: f64, y: f64);
     fn mouse_move(&self, x: f64, y: f64);
     fn wheel(&self, dx: i32, dy: i32);
+    fn key(&self, code: i32);
     fn drag_enter(&self, text: String) -> bool;
     fn dropped(&self, text: String);
     fn timer(&self, id: i32);
@@ -142,6 +146,9 @@ impl Canvas {
         if self.handler().drag_enter(text) {
             Pin::new_unchecked(&mut *e).acceptProposedAction();
         }
+    }
+    unsafe fn key_press_event(self: Pin<&mut Self>, e: *mut QKeyEvent) {
+        self.handler().key((*e).key_code());
     }
     unsafe fn drop_event(self: Pin<&mut Self>, e: *mut QDropEvent) {
         let text = (*(*e).mimeData()).text().to_string();
@@ -304,6 +311,12 @@ impl H<QWidget> {
     pub fn track_mouse(&self) {
         pin!(self).setMouseTracking(true)
     }
+    pub fn set_focus_policy(&self, p: u32) {
+        pin!(self).setFocusPolicy(FocusPolicy(p))
+    }
+    pub fn set_focus(&self) {
+        pin!(self).setFocus()
+    }
     pub fn fix_width(&self, w: i32) {
         pin!(self).setMinimumWidth(w);
         pin!(self).setMaximumWidth(w);
@@ -318,6 +331,62 @@ impl H<QWidget> {
         let o = unsafe { d.mapTo(win, &QPoint::new(d.width() / 2, d.height() / 2)) };
         (o.x() as f64, o.y() as f64)
     }
+}
+
+impl H<QScrollBar> {
+    /// Qt::Vertical
+    pub fn vertical(parent: H<QWidget>) -> Self {
+        H(unsafe { new_scroll_bar(Orientation(2), parent.0) })
+    }
+    pub fn set_range(&self, min: i32, max: i32) {
+        pin!(self).setRange(min, max)
+    }
+    pub fn set_value(&self, v: i32) {
+        pin!(self).setValue(v)
+    }
+    pub fn value(&self) -> i32 {
+        unsafe { &*self.0 }.value()
+    }
+    pub fn set_page_step(&self, step: i32) {
+        pin!(self).setPageStep(step)
+    }
+    pub fn set_single_step(&self, step: i32) {
+        pin!(self).setSingleStep(step)
+    }
+    pub fn on_value_changed(&self, f: impl FnMut(i32) + 'static) {
+        let mut f = GuiThreadOnly(f);
+        pin!(self)
+            .on_value_changed(move |_, v| f.get()(v))
+            .release();
+    }
+}
+
+/// The system file chooser, starting in `dir`. `None` when the user cancels.
+pub fn choose_file(parent: H<QWidget>, dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let caption = qs("Open Markdown file");
+    let start = qs(&dir.display().to_string());
+    let filter = qs("Markdown (*.md *.markdown);;All files (*)");
+    let dialog = H(unsafe { new_file_dialog(parent.0, &caption, &start, &filter) });
+    if dialog.0.is_null() {
+        return None;
+    }
+    if pin!(dialog).exec_dialog() == 0 {
+        return None;
+    }
+    let files = unsafe { &*dialog.0 }.selected_files();
+    let first = files.get(0)?;
+    let chosen = first.to_string();
+    (!chosen.is_empty()).then(|| std::path::PathBuf::from(chosen))
+}
+
+/// Gives `w` a horizontal layout with `left` taking the space and `right` beside it.
+pub fn layout_row(w: H<QWidget>, left: H<QWidget>, right: H<QWidget>) {
+    let l = unsafe { new_hbox(w.0) };
+    let mut p = unsafe { Pin::new_unchecked(&mut *l) };
+    p.as_mut().hbox_set_margins(0, 0, 0, 0);
+    p.as_mut().hbox_set_spacing(0);
+    unsafe { p.as_mut().hbox_add_widget(left.0, 1, Alignment(0)) };
+    unsafe { p.as_mut().hbox_add_widget(right.0, 0, Alignment(0)) };
 }
 
 pub fn new_plain_widget() -> H<QWidget> {

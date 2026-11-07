@@ -8,7 +8,8 @@ for the real golden suite.
 `shell-winui-light.png` and `shell-winui-dark.png` are screen captures of `mdview-winui.exe` at
 1100x900 on Windows 11, DPI scale 100%, taken with the `--light` and `--dark` flags.
 `shell-qt-light.png` and `shell-qt-scrolled.png` are captures of `mdview-qt.exe` (the Qt variant,
-built against Qt 6.9.3 for MSVC) at the same size, before and after wheel scrolling.
+built against Qt 6.9.3 for MSVC) at the same size, at the top and after a click in its scrollbar.
+`shell-qt-open.png` is the Qt File > Open dialog, opened in `fixtures/`.
 `shell-qt-linux.png` is the same shell built against Qt 6.8.2 on Debian 13, running under Xvfb on
 the test VM. They are evidence that both shells run, not a baseline.
 

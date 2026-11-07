@@ -22,6 +22,8 @@ pub mod ffi {
         type ScrollPhase = crate::qt::ScrollPhase;
         type TimerType = crate::qt::TimerType;
         type Alignment = crate::qt::Alignment;
+        type Orientation = crate::qt::Orientation;
+        type FocusPolicy = crate::qt::FocusPolicy;
     }
 
     #[namespace = "QEvent"]
@@ -33,10 +35,12 @@ pub mod ffi {
     unsafe extern "C++" {
         include!("cxx-qt-lib/common.h");
         include!("cxx-qt-lib/qstring.h");
+        include!("cxx-qt-lib/qstringlist.h");
         include!("cxx-qt-lib/qimage.h");
         include!("cxx-qt-lib/qpoint.h");
         include!("cxx-qt-lib/qpointf.h");
         type QString = cxx_qt_lib::QString;
+        type QStringList = cxx_qt_lib::QStringList;
         type qsizetype = crate::qt::QSizeType;
         type QImage = cxx_qt_lib::QImage;
         type QPoint = cxx_qt_lib::QPoint;
@@ -46,14 +50,17 @@ pub mod ffi {
         include!(<QtGui/QTransform>);
         include!(<QtGui/QPaintEvent>);
         include!(<QtGui/QMouseEvent>);
+        include!(<QtGui/QKeyEvent>);
         include!(<QtGui/QWheelEvent>);
         include!(<QtGui/QDragEnterEvent>);
         include!(<QtGui/QDropEvent>);
         include!(<QtGui/QBackingStore>);
         include!(<QtCore/QTimerEvent>);
         include!(<QtCore/QEvent>);
+        include!(<QtWidgets/QFileDialog>);
         type QPaintEvent;
         type QMouseEvent;
+        type QKeyEvent;
         type QWheelEvent;
         type QDragEnterEvent;
         type QDropEvent;
@@ -83,6 +90,8 @@ pub mod ffi {
         include!(<QtWidgets/QTreeWidget>);
         include!(<QtWidgets/QStatusBar>);
         include!(<QtWidgets/QVBoxLayout>);
+        include!(<QtWidgets/QHBoxLayout>);
+        include!(<QtWidgets/QScrollBar>);
         include!(<QtGui/QAction>);
         include!(<QtGui/QWindow>);
         include!(<QtCore/QMimeData>);
@@ -125,10 +134,21 @@ pub mod ffi {
         #[qobject]
         type QVBoxLayout;
         #[qobject]
+        type QHBoxLayout;
+        #[qobject]
+        #[base = QWidget]
+        type QScrollBar;
+        #[qobject]
+        type QFileDialog;
+        #[qobject]
         type QAction;
 
         #[qsignal]
         fn triggered(self: Pin<&mut QAction>, checked: bool);
+        #[qsignal]
+        #[rust_name = "value_changed"]
+        #[cxx_name = "valueChanged"]
+        fn valueChanged(self: Pin<&mut QScrollBar>, value: i32);
         #[qsignal]
         #[cxx_name = "textChanged"]
         fn text_changed(self: Pin<&mut QLineEdit>, text: &QString);
@@ -158,6 +178,9 @@ pub mod ffi {
         #[cxx_override]
         #[cxx_name = "dropEvent"]
         unsafe fn drop_event(self: Pin<&mut Self>, e: *mut QDropEvent);
+        #[cxx_override]
+        #[cxx_name = "keyPressEvent"]
+        unsafe fn key_press_event(self: Pin<&mut Self>, e: *mut QKeyEvent);
         #[cxx_override]
         #[cxx_name = "timerEvent"]
         unsafe fn timer_event(self: Pin<&mut Self>, e: *mut QTimerEvent);
@@ -192,6 +215,17 @@ pub mod ffi {
         fn new_ptr() -> *mut QTreeWidget;
         #[rust_name = "new_vbox"]
         unsafe fn new_ptr(parent: *mut QWidget) -> *mut QVBoxLayout;
+        #[rust_name = "new_hbox"]
+        unsafe fn new_ptr(parent: *mut QWidget) -> *mut QHBoxLayout;
+        #[rust_name = "new_scroll_bar"]
+        unsafe fn new_ptr(orientation: Orientation, parent: *mut QWidget) -> *mut QScrollBar;
+        #[rust_name = "new_file_dialog"]
+        unsafe fn new_ptr(
+            parent: *mut QWidget,
+            caption: &QString,
+            dir: &QString,
+            filter: &QString,
+        ) -> *mut QFileDialog;
         #[rust_name = "new_dock"]
         unsafe fn new_ptr(title: &QString, parent: *mut QWidget) -> *mut QDockWidget;
         #[rust_name = "new_tree_item"]
@@ -269,6 +303,8 @@ pub mod ffi {
         fn setMouseTracking(self: Pin<&mut QWidget>, on: bool);
         fn setMinimumWidth(self: Pin<&mut QWidget>, w: i32);
         fn setMaximumWidth(self: Pin<&mut QWidget>, w: i32);
+        fn setFocusPolicy(self: Pin<&mut QWidget>, p: FocusPolicy);
+        fn setFocus(self: Pin<&mut QWidget>);
         fn windowHandle(self: &QWidget) -> *mut QWindow;
         fn devicePixelRatioF(self: &QWidget) -> f64;
         fn window(self: &QWidget) -> *mut QWidget;
@@ -304,6 +340,23 @@ pub mod ffi {
         // QLineEdit
         fn setText(self: Pin<&mut QLineEdit>, t: &QString);
 
+        // QFileDialog
+        #[rust_name = "exec_dialog"]
+        fn exec(self: Pin<&mut QFileDialog>) -> i32;
+        #[rust_name = "selected_files"]
+        fn selectedFiles(self: &QFileDialog) -> QStringList;
+
+        // QScrollBar
+        fn setRange(self: Pin<&mut QScrollBar>, min: i32, max: i32);
+        fn setValue(self: Pin<&mut QScrollBar>, v: i32);
+        fn value(self: &QScrollBar) -> i32;
+        fn setPageStep(self: Pin<&mut QScrollBar>, step: i32);
+        fn setSingleStep(self: Pin<&mut QScrollBar>, step: i32);
+
+        // Keys
+        #[rust_name = "key_code"]
+        fn key(self: &QKeyEvent) -> i32;
+
         // QTabWidget
         unsafe fn addTab(self: Pin<&mut QTabWidget>, w: *mut QWidget, label: &QString) -> i32;
 
@@ -321,6 +374,19 @@ pub mod ffi {
         #[rust_name = "layout_add_widget"]
         unsafe fn addWidget(
             self: Pin<&mut QVBoxLayout>,
+            w: *mut QWidget,
+            stretch: i32,
+            a: Alignment,
+        );
+
+        // QHBoxLayout
+        #[rust_name = "hbox_set_margins"]
+        fn setContentsMargins(self: Pin<&mut QHBoxLayout>, l: i32, t: i32, r: i32, b: i32);
+        #[rust_name = "hbox_set_spacing"]
+        fn setSpacing(self: Pin<&mut QHBoxLayout>, s: i32);
+        #[rust_name = "hbox_add_widget"]
+        unsafe fn addWidget(
+            self: Pin<&mut QHBoxLayout>,
             w: *mut QWidget,
             stretch: i32,
             a: Alignment,
