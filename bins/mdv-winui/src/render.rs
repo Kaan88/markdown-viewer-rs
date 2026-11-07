@@ -93,6 +93,7 @@ pub struct Renderer {
     document: Option<Document>,
     base_dir: Option<std::path::PathBuf>,
     theme: Theme,
+    zoom: f32,
     scroll: f32,
 }
 
@@ -111,6 +112,7 @@ impl Renderer {
             document: None,
             base_dir: None,
             theme: mdview_render::LIGHT,
+            zoom: 1.0,
             scroll: 0.0,
         }
     }
@@ -121,6 +123,12 @@ impl Renderer {
         self.page = None;
         self.page_layout = None;
         self.scroll = 0.0;
+    }
+
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.zoom = zoom.clamp(0.5, 3.0);
+        self.page = None;
+        self.page_layout = None;
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
@@ -230,8 +238,8 @@ impl Renderer {
             return;
         };
         let options = Options {
-            width: logical_width,
-            scale,
+            width: logical_width / self.zoom,
+            scale: scale * self.zoom,
             theme: self.theme,
             max_height: None,
             base_dir: self.base_dir.clone(),

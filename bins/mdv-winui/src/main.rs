@@ -74,6 +74,15 @@ impl IXamlMetadataProvider_Impl for App_Impl {
     }
 }
 
+fn zoom_argument() -> f32 {
+    let args: Vec<String> = std::env::args().collect();
+    args.iter()
+        .position(|arg| arg == "--zoom")
+        .and_then(|at| args.get(at + 1))
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1.0)
+}
+
 /// The first positional argument is the document to open; flags are handled by `diag`.
 fn document_argument() -> Option<PathBuf> {
     std::env::args()
@@ -108,6 +117,7 @@ fn run() -> Result<()> {
 
     let document = document_argument();
     let theme = theme_argument();
+    let zoom = zoom_argument();
     let gpu = Rc::new(RefCell::new(Some(gpu)));
     // Application and UI state must outlive Start, which returns at process end.
     let keep_alive: Rc<RefCell<Vec<IInspectable>>> = Rc::default();
@@ -116,6 +126,7 @@ fn run() -> Result<()> {
         let gpu = gpu.clone();
         let document = document.clone();
         let theme = theme;
+        let zoom = zoom;
         let app_slot: Rc<RefCell<Option<Application>>> = Rc::default();
         let launch_slot = app_slot.clone();
         let on_launched = Box::new(move || -> Result<()> {
@@ -124,7 +135,7 @@ fn run() -> Result<()> {
             app.Resources()?.MergedDictionaries()?.Append(&controls)?;
             diag::trace("XamlControlsResources merged");
             let gpu = gpu.borrow_mut().take().expect("launched once");
-            ui::build(gpu, document.clone(), theme)
+            ui::build(gpu, document.clone(), theme, zoom)
         });
         let composed = Application::compose(App {
             provider: RefCell::new(None),

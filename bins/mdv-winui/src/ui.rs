@@ -337,6 +337,7 @@ pub fn build(
     gpu: JoinHandle<Result<Gpu>>,
     file: Option<PathBuf>,
     theme: Option<mdview_render::Theme>,
+    zoom: f32,
 ) -> Result<()> {
     let theme = theme.unwrap_or_else(system_theme);
     diag::trace(&format!("theme: {}", theme.name));
@@ -375,6 +376,7 @@ pub fn build(
         .map_err(|_| Error::new(HRESULT(0x8000_FFFFu32 as i32), "device thread panicked"))??;
     let mut renderer = Renderer::new(gpu, panel.clone());
     renderer.set_theme(theme);
+    renderer.set_zoom(zoom);
     if file.is_none() {
         renderer.set_document(parse_bytes(WELCOME.as_bytes()), None);
     }

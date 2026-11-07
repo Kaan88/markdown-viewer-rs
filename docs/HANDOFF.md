@@ -28,7 +28,8 @@ approved by the user.
   `spikes/winui`; regenerate only with the same NuGet winmds). No XAML, C#, or C++.
 - Framework-dependent build: needs the Windows App Runtime 2.6.4 or newer (x64). This PC has 2.6.5.
 - Window is 1100x900. Menus: File > Open..., Reload, Close; View > Light theme, Dark theme. The
-  wheel scrolls. The page follows the Windows app theme at startup (`AppsUseLightTheme`), and
+  wheel scrolls, and `--zoom 1.5` scales the page (verified: showcase grows from 3020 px to
+  4592 px at 1.5). The page follows the Windows app theme at startup (`AppsUseLightTheme`), and
   `--light` / `--dark` override it for screenshots. The menu row is painted the page background.
 - `src/render.rs` keeps one laid-out `Bitmap` and copies the visible slice into the swap chain
   buffer each frame, 1:1 with physical pixels. Re-layout happens when the width, DPI scale or theme
