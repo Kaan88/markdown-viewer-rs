@@ -1,67 +1,97 @@
-# Handoff: Phase 1 audit fixes complete
+# Handoff: Phase 2 renderer and the first WinUI window
 
-**Branch:** `phase1-audit-fixes`, based on `main` at `4127954`. The work is committed and pushed on this branch. [PLAN.md](PLAN.md), [AUDIT_PHASE1.md](AUDIT_PHASE1.md), [COVERAGE.md](COVERAGE.md) and [PORT_CHECKLIST.md](PORT_CHECKLIST.md) now agree with the code; where they disagree with this file, this file is current.
+**Branch:** `phase2-renderer`, from `phase1-audit-fixes` (pushed at `633c0a8`). The renderer and the
+first Windows shell are a checkpoint commit here; nothing is pushed. The four review images in
+`tests/golden/` still have not been approved by the user.
 
 ## State
 
-- The core crate's tests pass **on Windows**: 7 core, 11 fuzz, 113 regression and 3 spec tests, release profile. The fuzz and regression counts grew on this branch because every behaviour changed by the audit now has a test that fails if it reverts; the alert, implied-block and CRLF tests were mutation-checked by reverting the fix and watching them fail.
-- The spec suites still pass with 645/652 CommonMark and 665/672 GFM, the same 7 listed exceptions each.
-- Every finding the Phase 1 audit confirmed is either fixed with a regression test or listed as a known gap in `COVERAGE.md`. `AUDIT_PHASE1.md`'s table has a last column saying which, per finding.
-- `cargo fmt --all` is clean and the build has no warnings. There is still no CI, so run the tests yourself.
+- Phase 1 closed: core audit fixes, tests and docs on `phase1-audit-fixes`. Suite passes on Windows:
+  7 core, 11 fuzz, 113 regression, 3 spec, release profile. Spec counts stay 645/652 CommonMark and
+  665/672 GFM.
+- Phase 2: `crates/render` lays the document model out and paints a BGRA bitmap with no window
+  system; `bins/mdv-bench` writes PNGs. `fixtures/showcase.md` (66 blocks) lays out in about 27 ms at
+  1084 logical px and 100% scale, 3020 px tall, in both themes.
+- **New: `bins/mdv-winui` is the first real window.** It runs on this PC, opens a Markdown file,
+  draws the page through the renderer into a `SwapChainPanel`, and scrolls with the wheel. This is
+  the first time WinUI has run on real Windows (the G8 spike had only run in a VM).
+- Workspace: 7 core, 11 fuzz, 113 regression, 3 spec, 4 render tests pass; `cargo fmt --all` clean.
 
-## Windows setup
+## The WinUI shell (`bins/mdv-winui`)
 
-`cargo test` works from a plain shell now. The test helpers ask for a directory under `%TEMP%` first and fall back to a workspace-local `target/tmp` when that is not writable. On this host the DSH file sandbox blocks writes outside the workspace even when the runtime context says `danger-full-access`, so the fallback is what runs here; PowerShell and Rust probes confirmed it is an environment limit, not a repo bug.
+- WinUI 3 with hand-generated Windows App SDK bindings (`src/bindings.rs`, copied from
+  `spikes/winui`; regenerate only with the same NuGet winmds). No XAML, C#, or C++.
+- Framework-dependent build: needs the Windows App Runtime 2.6.4 or newer (x64). This PC has 2.6.5.
+  The self-contained staging from the spike was not carried over; that needs the NuGet packages.
+- Window is 1100x900. Menus: File > Open..., Reload, Close; View > Light theme, Dark theme. The
+  wheel scrolls. The page follows the Windows app theme at startup (`AppsUseLightTheme`), and
+  `--light` / `--dark` override it for screenshots.
+- `src/render.rs` keeps one laid-out `Bitmap` and copies the visible slice into the swap chain
+  buffer each frame, 1:1 with physical pixels. Re-layout happens when the width, DPI scale or theme
+  changes; `max_height` is capped at 30,000 logical px as a guard until virtualization exists.
+- `--trace` writes `mdview.trace.log` beside the exe; `--measure` writes one `result=ok` line with
+  first-frame time and private bytes, then exits.
+- Measured on this PC (RTX 4070 Ti SUPER, 96 DPI): first frame at 251.9 ms from process start,
+  renderer layout 27.0 ms, parse 0.1 ms; `--measure` reports first frame at 259.3 ms in the spike and
+  251.9 ms here, both including DLL loading.
+- Screenshots: `tests/golden/shell-winui-light.png`, `tests/golden/shell-winui-dark.png`.
 
-Setting `TMP`/`TEMP` to `target\tmp` still works but is no longer needed:
+## What has and has not run
 
-```powershell
-New-Item -ItemType Directory -Force target\tmp | Out-Null
-$env:TMP = (Resolve-Path target\tmp).Path
-$env:TEMP = $env:TMP
-cargo test --release -p mdview-core
-```
+Run on Windows: the WinUI spike (`spikes/winui`, framework build, `--measure`: result=ok at 259 ms,
+private 168 MB with the real GPU), the new shell at 1100x900 with `fixtures/showcase.md`, wheel
+scrolling, system-theme selection, `--light`/`--dark`, `--trace`, `--measure`.
 
-A debug `cargo test -p mdview-core` also passes; the fuzz suite is simply slower (about 45 s against about 6 s in release).
+Not tested yet by hand: the File > Open dialog and the View theme items were wired but not clicked;
+resize reflow and DPI scaling other than 100%; keyboard input (there is none yet); the spike's
+self-contained flavor.
 
-Other setup notes:
+## Qt on Windows, in progress
 
-- Git's schannel backend fails in this sandbox with `SEC_E_NO_CREDENTIALS`; use `gh auth token` plus `-c http.sslBackend=openssl`. The remote URL in `.git/config` is the plain HTTPS URL, so no token is stored there. `gh api markdown` works normally and was used for every GitHub comparison.
-- Cargo network access and the MSVC toolchain (Rust 1.99.1) work.
+The user asked to "compile linux variant on windows for testing", so the Qt shell is being brought
+up on Windows as well:
 
-## What this branch changed, by audit finding
+- Qt 6.9.3 for MSVC 2022 is installed at `C:\Qt\6.9.3\msvc2022_64` with `aqtinstall` (qtbase only).
+  `aqt` is in the Python user install; it also installed `cmake` and `ninja` wheels.
+- `cxx-qt` 0.10 and its closure were fetched into the cargo cache (the same Python seeding trick as
+  the text dependencies; script is `target/seed-lock.py`, not committed).
+- `spikes/qt-shell` is the reference bridge (`src/qt/mod.rs` wrapper and `ffi.rs` C++ declarations).
+  It contains Linux-only pieces (`libc::clock_gettime`, `libc::_exit`, `/proc` timing) that a Windows
+  build must not use.
+- **Nothing Qt has been built on Windows yet.** This section is the current attempt, not a result.
 
-The full per-finding list is in `AUDIT_PHASE1.md`. The user-visible decisions are these:
+## Linux target from Windows
 
-- **Raw HTML.** `script`, `style` and `iframe` show as literal text, as GitHub's tag filter does. `object`, `embed`, `head` and `template` are dropped as tags with their children kept, so an `<object>` fallback shows. A raw `<input>` is ignored; Markdown task boxes still draw.
-- **Alerts.** A blank quote line between the marker and a heading, rule or `***` keeps the alert; `---`/`===`/`-`/`--` directly under the marker turn that line into a setext heading. A `#x` line plus `---` is setext text, not ATX. An empty body made only of inline HTML (`<i></i>`, `<a href=x></a>`, `<img>`, `<p></p>`, `<span></span>`) keeps the alert, while a comment, unknown tag, `<a>` without href or raw `<input>` does not. A `<td>`/`<th>` resets the `<div>`, list and quote ancestors; `<details>` still rejects inside a cell.
-- **Tables and lists.** An implied row, cell or item whose subtree has no text and no atoms is dropped, so empty tags no longer add phantom rows, columns or marker-less items.
-- **Lengths and images.** `width`/`height` follow the HTML dimension rule (`10em` is 10, `+5` and `.5` are no length, `50 %` is 50px). `colspan`/`rowspan` accept a leading `+`. Image dimensions clamp to 2000 on both axes together; table attributes keep 12000.
-- **Pictures.** A `<source>` counts only as a direct child of a `<picture>`, only for its first `<img>`, and only while the picture's block is open; the first matching source wins.
-- **Footnotes.** References inside a skipped duplicate definition are numbered, as on GitHub. A definition flattened at `MAX_BLOCK_DEPTH` sets `defined` but keeps `block == NONE`. The fuzz bound and its comment now say `MAX_BLOCK_DEPTH + 5`.
-- **Private-use characters.** `can_hide` tests the whole `SWAP_PREFIX` range (U+E000 to U+E03F), so a document's own characters survive a rejected `$` or alert.
-- **Find.** A CRLF pair in a query is one break, not two spaces. A multi-line selection from a code block or across two paragraphs still never matches; that and the real budget condition are listed in `COVERAGE.md`.
-- **Dead code.** `Tag::DropContent`, the `Pending` machinery, `wait_for_inline_closer`, `Tokenizer::skip_past_close` and `find_close_tag` are gone.
+`rustup target add x86_64-unknown-linux-gnu` works in this shell (rustup's downloader is fine, only
+cargo's is not). `cargo check --target x86_64-unknown-linux-gnu -p mdview-core` passes. The renderer
+does not check yet: `yeslogic-fontconfig-sys` needs `pkg-config` and a Linux sysroot, and there is no
+Linux linker here, so this only ever proves compilation, never a runnable Linux binary. Qt cannot be
+cross-compiled from this machine at all.
 
-## Decisions recorded
+## Cargo in this sandbox
 
-- **Footnote relocation is the Phase 2 renderer's job.** Core keeps each definition where it was written. The renderer draws the end-of-document list in order of first reference, skips `FootnoteDefinition` blocks in flow, and does not draw unreferenced ones (number 0). Until then, find and the block order see mid-file and unreferenced definitions. This is in `COVERAGE.md` under "Decided, work left for later phases".
-- **Two alert gaps are documented, not fixed**: a marker that is not on the quote's first line (`> ` blank or `> <!-- c -->` before `> [!NOTE]`), and a marker that is also a reference label (`[!NOTE]: /u`). Both are in `COVERAGE.md`'s known gaps.
-- **`tests-parity #10` is accepted**: no value assertion can distinguish the fewer-allocations change on the bare-URL path, and the test says so.
-- The script/style/iframe question from the old handoff is closed: literal text, implemented, tested.
-- No test was added for a pure constant-factor slowdown at 256 KiB; the new `scaling_holds_at_the_file_limit` test covers the 16 MiB end, not a fixed 2x.
+Cargo cannot reach crates.io: `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`.
+Python's and `gh`'s TLS work. New dependencies were fetched with `target/seed-lock.py` (takes any
+`Cargo.lock`, writes the sparse index cache and `.crate` files in cargo's layout), so plain
+`cargo build`/`cargo test` work with `--offline`. If another dependency appears, seed it the same way.
 
-## Still valid from the previous handoff
+## Known gaps, in the order they matter
 
-- Decisions are unchanged: WinUI 3 on Windows, Qt Widgets through CXX-Qt on Linux, custom renderer, no webview, Windows 11 only, no screen-reader work, private repo, no CI, all authored code in Rust.
-- Coverage exclusions in `COVERAGE.md` remain accepted unless the user says otherwise.
-- Text must use `Format::CustomSubpixel([0.3, 0.0, -0.3])`, not `Format::Subpixel`. The renderer still needs the regression test.
-- Nothing counts as working on Windows until it has run on Windows; the core now has, the WinUI spike and shell have not.
-- The user wants a window they can open real files in as soon as the renderer can draw a page. The phase-order question from the old handoff (Phase 2 then a first WinUI window, instead of the plan's Qt-first order) is **still unanswered** and is the first thing to settle next.
-- `spikes/winui/W0.md` is still the first-run checklist; the spike's Linux build scripts have not been ported to Windows.
+- **No virtualization.** The whole document is laid out into one bitmap; the 1 MB scroll budget is
+  unmeasured, and the 30,000 px guard truncates very long files.
+- **Images** are `[image: alt]`; no PNG/JPEG/SVG loading, limits or cache.
+- **No selection, links, anchors or details toggling.** `BlockBox` is there for hit tests but unused.
+- **No scrollbar**, find box, tabs or tree; the wheel is the only scroll input, and there is no
+  keyboard handling.
+- Table `colspan`/`rowspan` ignored; math, Mermaid and highlighting show source.
+- No bundled fonts, so goldens depend on system fonts.
+- The window's title bar follows Windows, not the in-app theme override, so `--dark` on a light
+  desktop leaves a light title bar (and the reverse).
 
 ## What to do next
 
-1. Settle the order: Phase 2 renderer (WinUI first?) against the plan's Qt-first order, and tell the user what they get first.
-2. Build the Phase 2 renderer against the model in `crates/core/src/model.rs`, including the footnote end list and the `CustomSubpixel` text format.
-3. Open a WinUI window on a real file. `spikes/winui/W0.md` is the checklist; nothing in the shell has run on Windows yet.
+1. Finish the Qt shell on Windows (or report the exact blocker) and show both windows to the user.
+2. Get the four `tests/golden/` images and the two shell screenshots approved.
+3. Add image loading and drawing; then virtualization and the 1 MB budget.
+4. Add selection and link/anchor hit-testing, then details toggling and a scrollbar.
+5. Decide bundled fonts, then turn the goldens into a pixel suite.

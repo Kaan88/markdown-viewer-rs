@@ -1,0 +1,9 @@
+[package]
+name = "mdv-bench"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+mdview-core = { path = "../../crates/core" }
+mdview-render = { path = "../../crates/render" }

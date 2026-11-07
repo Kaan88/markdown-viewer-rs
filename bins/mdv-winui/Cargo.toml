@@ -1,0 +1,20 @@
+[package]
+name = "mdview-winui"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "mdview-winui"
+path = "src/main.rs"
+
+[dependencies]
+mdview-core = { path = "../../crates/core" }
+mdview-render = { path = "../../crates/render" }
+
+# The Windows App SDK projection is hand-generated (see `src/bindings.rs`), so only the support
+# crates it was generated against are needed here.
+windows-core = { version = "=0.100.0", default-features = false, features = ["std"] }
+windows-link = "=0.100.0"
+windows-collections = { version = "=0.100.0", features = ["std"] }
+windows-reference = { version = "=0.100.0", features = ["std"] }
