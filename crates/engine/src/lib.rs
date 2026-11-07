@@ -1,7 +1,7 @@
 //! The engine's rasterizers. The viewer talks to this through `mdview-engine-proto`, never by
 //! linking it, so a malformed document cannot take the viewer down and the memory goes back when
 //! the process exits. resvg draws SVG; RaTeX lays out TeX and hands the display list to the same
-//! resvg path. Mermaid and highlighting join them in later Phase 4 slices.
+//! resvg path. Syntax highlighting joins them in a later Phase 4 slice.
 
 /// Straight-alpha RGBA, row-major, the shape the renderer's image cache takes. `baseline` is the
 /// distance from the top of the raster to the text baseline, in pixels.
@@ -50,6 +50,21 @@ pub fn render_svg(
     max_pixels: u64,
     options: &resvg::usvg::Options,
 ) -> Result<Image, String> {
+    render_svg_at(bytes, 1.0, max_pixels, options)
+}
+
+/// The same rasterizer at a requested scale, for diagrams that should stay crisp when the viewer
+/// draws them at device pixel ratios above 1. The pixel cap still wins.
+pub fn render_svg_at(
+    bytes: &[u8],
+    requested_scale: f32,
+    max_pixels: u64,
+    options: &resvg::usvg::Options,
+) -> Result<Image, String> {
+    if !requested_scale.is_finite() || requested_scale <= 0.0 {
+        return Err("bad render scale".to_string());
+    }
+    let requested_scale = f64::from(requested_scale.clamp(0.05, 8.0));
     let tree =
         resvg::usvg::Tree::from_data(bytes, options).map_err(|e| format!("invalid SVG: {e}"))?;
     let size = tree.size();
@@ -57,14 +72,15 @@ pub fn render_svg(
     if !(width.is_finite() && height.is_finite()) || width <= 0.0 || height <= 0.0 {
         return Err("SVG has no size".to_string());
     }
-    let natural = width as f64 * height as f64;
-    let scale = if natural > max_pixels as f64 {
+    let natural = width as f64 * height as f64 * requested_scale * requested_scale;
+    let shrink = if natural > max_pixels as f64 {
         (max_pixels as f64 / natural).sqrt()
     } else {
         1.0
     };
-    let raster_width = (width as f64 * scale).round().max(1.0) as u32;
-    let raster_height = (height as f64 * scale).round().max(1.0) as u32;
+    let scale = requested_scale * shrink;
+    let raster_width = (width as f64 * scale).floor().max(1.0) as u32;
+    let raster_height = (height as f64 * scale).floor().max(1.0) as u32;
     if raster_width as u64 * raster_height as u64 > max_pixels {
         return Err("SVG is too large".to_string());
     }
@@ -87,6 +103,98 @@ pub fn render_svg(
         baseline: raster_height,
         rgba,
     })
+}
+
+/// Draws a Mermaid diagram through merman and the resvg rasterizer. `scale` is device pixels per
+/// SVG unit; the viewer asks for twice its scale and halves the box, like math.
+pub fn render_mermaid(
+    source: &str,
+    scale: f32,
+    max_pixels: u64,
+    options: &resvg::usvg::Options,
+) -> Result<Image, String> {
+    use merman::{OperationControl, RenderOutput, RenderRequest, Renderer, SvgRequest};
+
+    // Mermaid defaults to HTML labels in `foreignObject`, which resvg cannot draw; its SVG text
+    // fallback positions some families inside the node but shifts class, ER and mindmap labels off
+    // the left edge. Asking for native text labels avoids both problems. The directive comes
+    // first, so a document's own `%%{init: ...}%%` can still override it.
+    let source = format!(
+        "%%{{init: {{\"themeVariables\": {{\"fontSize\": \"11px\"}}, \"htmlLabels\": false, \"flowchart\": {{\"htmlLabels\": false}}}}}}%%\n{source}"
+    );
+    let output = Renderer::new()
+        .render(RenderRequest::svg(
+            &source,
+            OperationControl::new(),
+            SvgRequest {
+                // Families that still emit HTML labels get a `<text>` overlay from this pipeline.
+                // `inline_label_uses` below then moves that text out of the nested `<defs>` SVG,
+                // which resvg does not draw.
+                pipeline: Some(merman::svg::SvgPipeline::readable()),
+                ..Default::default()
+            },
+        ))
+        .map_err(|e| format!("mermaid: {e}"))?;
+    let RenderOutput::Svg(Some(svg)) = output else {
+        return Err("mermaid found no diagram".to_string());
+    };
+    let svg = inline_label_uses(svg.svg());
+    render_svg_at(svg.as_bytes(), scale, max_pixels, options)
+}
+
+/// Replaces `<use href="#mindmap-foreignobject-label-N">` with the fallback `<text>` that the
+/// readable pipeline put inside the referenced `<defs>` group. resvg does not draw labels through a
+/// `<use>` of a nested `<svg>`; inlining the text at the use site keeps the label group's transform.
+fn inline_label_uses(svg: &str) -> String {
+    const PREFIX: &str = "merman-foreignobject-label-";
+    let mut labels: Vec<(String, String)> = Vec::new();
+    let mut rest = svg;
+    while let Some(found) = rest.find("<g id=\"") {
+        let after = &rest[found + 7..];
+        let Some(quote) = after.find('"') else { break };
+        let id = &after[..quote];
+        if !id.starts_with(PREFIX) {
+            rest = &after[quote..];
+            continue;
+        }
+        let Some(text_start) = after.find("<text ") else {
+            break;
+        };
+        let Some(text_end) = after[text_start..].find("</text>") else {
+            break;
+        };
+        let end = text_start + text_end + "</text>".len();
+        labels.push((id.to_string(), after[text_start..end].to_string()));
+        rest = &after[end..];
+    }
+    if labels.is_empty() {
+        return svg.to_string();
+    }
+    let mut out = String::with_capacity(svg.len());
+    let mut rest = svg;
+    while let Some(found) = rest.find("<use ") {
+        out.push_str(&rest[..found]);
+        let after = &rest[found..];
+        let Some(end) = after.find("/>") else {
+            out.push_str(after);
+            return out;
+        };
+        let tag = &after[..end + 2];
+        let mut replaced = false;
+        for (id, text) in &labels {
+            if tag.contains(&format!("href=\"#{id}\"")) {
+                out.push_str(text);
+                replaced = true;
+                break;
+            }
+        }
+        if !replaced {
+            out.push_str(tag);
+        }
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Draws a TeX formula through RaTeX and the same resvg rasterizer. `font_size` is device pixels
@@ -204,6 +312,52 @@ mod tests {
         .expect("it renders smaller");
         assert!(image.width as u64 * image.height as u64 <= 1_000_000);
         assert!(image.width >= 900 && image.width <= 1001, "{}", image.width);
+    }
+
+    #[test]
+    fn the_eight_showcase_diagram_families_render() {
+        let options = options();
+        let sources = [
+            ("flowchart", "flowchart LR\n A[Start] --> B[Done]"),
+            ("sequence", "sequenceDiagram\n A->>B: Hi"),
+            ("class", "classDiagram\n class A\n A : +run()"),
+            ("state", "stateDiagram-v2\n [*] --> Idle\n Idle --> [*]"),
+            ("er", "erDiagram\n CUSTOMER ||--o{ ORDER : places"),
+            (
+                "gantt",
+                "gantt\n title Plan\n dateFormat YYYY-MM-DD\n section One\n Task :a1, 2026-01-01, 2d",
+            ),
+            ("pie", "pie title Files\n \"Rust\" : 70\n \"Docs\" : 30"),
+            ("mindmap", "mindmap\n root((Plan))\n  Docs\n  Code"),
+        ];
+        for (name, source) in sources {
+            let image = render_mermaid(source, 1.0, 24_000_000, &options)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(
+                image.width > 20 && image.height > 20,
+                "{name}: {}x{}",
+                image.width,
+                image.height
+            );
+            let inked = image.rgba.chunks_exact(4).filter(|p| p[3] > 0).count();
+            assert!(inked > 100, "{name}: {inked} inked pixels");
+        }
+    }
+
+    #[test]
+    fn a_scaled_diagram_is_larger_but_under_the_cap() {
+        let options = options();
+        let one = render_mermaid("flowchart LR\n A-->B", 1.0, 24_000_000, &options).unwrap();
+        let two = render_mermaid("flowchart LR\n A-->B", 2.0, 24_000_000, &options).unwrap();
+        assert!(two.width > one.width && two.height > one.height);
+        let capped = render_mermaid("flowchart LR\n A-->B", 8.0, 1_000_000, &options).unwrap();
+        assert!(capped.width as u64 * capped.height as u64 <= 1_000_000);
+    }
+
+    #[test]
+    fn text_that_is_not_a_diagram_is_an_error() {
+        let options = options();
+        assert!(render_mermaid("hello, not a diagram", 1.0, 24_000_000, &options).is_err());
     }
 
     #[test]

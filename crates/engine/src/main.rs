@@ -3,8 +3,8 @@
 //! its memory returns to the system.
 
 use mdview_engine_proto::{
-    KIND_MATH, KIND_SVG, Reply, Request, STATUS_BAD_REQUEST, STATUS_FAILED, read_math_request,
-    read_request, write_reply,
+    KIND_MATH, KIND_MERMAID, KIND_SVG, Reply, Request, STATUS_BAD_REQUEST, STATUS_FAILED,
+    read_math_request, read_mermaid_request, read_request, write_reply,
 };
 use std::io::{self, BufReader, BufWriter};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -77,6 +77,16 @@ fn handle(request: &Request, options: &resvg::usvg::Options) -> Reply {
                 Ok(image) => {
                     Reply::ok_with_baseline(image.width, image.height, image.baseline, image.rgba)
                 }
+                Err(_) => Reply::failed(STATUS_FAILED),
+            }
+        }
+        KIND_MERMAID => {
+            let Some(mermaid) = read_mermaid_request(&request.payload) else {
+                return Reply::failed(STATUS_BAD_REQUEST);
+            };
+            match mdview_engine::render_mermaid(mermaid.source, mermaid.scale, MAX_PIXELS, options)
+            {
+                Ok(image) => Reply::ok(image.width, image.height, image.rgba),
                 Err(_) => Reply::failed(STATUS_FAILED),
             }
         }

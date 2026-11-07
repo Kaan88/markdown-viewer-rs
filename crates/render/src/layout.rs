@@ -1,7 +1,7 @@
 //! Lays the document model out in one top-down pass and paints it into a bitmap: blocks are
 //! virtualized, scroll frames reuse the previous bitmap's rows, and every laid-out text run keeps
 //! its caret stops so a click can be turned back into a document offset, a link or a selection.
-//! Images are drawn through parley inline boxes; math and diagrams still show their source.
+//! Images are drawn through parley inline boxes; math and diagrams are engine-rendered images.
 
 use crate::bitmap::Bitmap;
 use crate::engine;
@@ -673,9 +673,15 @@ struct ImageBox {
 /// Math images live above the file-image indices in the shared cache, keyed by the source's
 /// document offset (there is at most one math span per offset).
 const MATH_INDEX: u32 = 0x8000_0000;
+/// Diagrams get their own band, in case a diagram and a math block ever share an offset.
+const DIAGRAM_INDEX: u32 = 0x4000_0000;
 
 fn math_index(offset: u32) -> u32 {
     MATH_INDEX | (offset & 0x7fff_ffff)
+}
+
+fn diagram_index(offset: u32) -> u32 {
+    DIAGRAM_INDEX | (offset & 0x3fff_ffff)
 }
 
 impl Inline {
@@ -1068,7 +1074,9 @@ impl<'a, 'b> Pager<'a, 'b> {
                 } else {
                     self.doc.str(lang).to_string()
                 };
-                self.code_block(b, left, width, Some(label));
+                if !self.diagram_block(b, left, width) {
+                    self.code_block(b, left, width, Some(label));
+                }
             }
             BlockKind::Math { .. } => {
                 if !self.math_block(b, left, width) {
@@ -1658,6 +1666,55 @@ impl<'a, 'b> Pager<'a, 'b> {
                 self.emit(&inline, layout, left, y + self.px(1.0), size);
             }
         }
+    }
+
+    /// Draws a Mermaid diagram block as a centred image. `false` hands it back to the source view
+    /// when the engine is missing or the source does not parse.
+    fn diagram_block(&mut self, b: u32, left: f32, width: f32) -> bool {
+        let block = self.doc.blocks[b as usize];
+        if matches!(
+            block.kind,
+            BlockKind::Diagram {
+                oversize: Some(_),
+                ..
+            }
+        ) {
+            return false;
+        }
+        let (start, end) = (block.text.start, block.text.end);
+        let source = self.doc.text[start as usize..end as usize].trim();
+        if source.is_empty() {
+            return false;
+        }
+        let key = diagram_index(start);
+        if !self.images.contains_key(&key) {
+            // Twice the device scale, so 150% zoom and high DPI stay sharp; the box is halved.
+            let scale = 2.0 * self.scale;
+            let decoded = engine::render_mermaid(source, scale).map(Rc::new);
+            self.images.insert(key, decoded);
+        }
+        let Some((image_w, image_h)) = self
+            .images
+            .get(&key)
+            .and_then(|slot| slot.as_ref())
+            .map(|image| (image.width as f32 / 2.0, image.height as f32 / 2.0))
+        else {
+            return false;
+        };
+        let avail = (width - 2.0 * self.px(16.0)).max(1.0);
+        let shrink = (avail / image_w).min(1.0);
+        let (w, h) = (image_w * shrink, image_h * shrink);
+        let x = left + ((width - w) / 2.0).round();
+        let y = self.y + self.px(8.0);
+        self.paints.push(Paint::Image {
+            index: key,
+            x,
+            y,
+            w,
+            h,
+        });
+        self.y = y + h + self.px(16.0);
+        true
     }
 
     /// Draws a `$$...$$` block as a centred formula. `false` hands it back to the source view when

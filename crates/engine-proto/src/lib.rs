@@ -15,6 +15,8 @@ use std::io::{self, Read, Write};
 pub const KIND_SVG: u32 = 1;
 /// The math job: a small math header (font size, display flag, colour) and then TeX source.
 pub const KIND_MATH: u32 = 2;
+/// The Mermaid job: a scale factor and then the diagram source.
+pub const KIND_MERMAID: u32 = 3;
 
 pub const STATUS_OK: u32 = 0;
 /// The request or its kind was not understood.
@@ -115,6 +117,31 @@ pub fn read_math_request(payload: &[u8]) -> Option<MathRequest<'_>> {
         color,
         source,
     })
+}
+
+/// A Mermaid source and the device scale its raster should use.
+pub struct MermaidRequest<'a> {
+    pub scale: f32,
+    pub source: &'a str,
+}
+
+/// Encodes a Mermaid payload: the scale factor, then the source.
+pub fn mermaid_payload(scale: f32, source: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(4 + source.len());
+    payload.extend_from_slice(&scale.to_le_bytes());
+    payload.extend_from_slice(source.as_bytes());
+    payload
+}
+
+/// Decodes a Mermaid payload. `None` when it is too short, the scale is unusable or the source is
+/// not UTF-8.
+pub fn read_mermaid_request(payload: &[u8]) -> Option<MermaidRequest<'_>> {
+    let scale = f32::from_le_bytes(payload.get(0..4)?.try_into().ok()?);
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    let source = std::str::from_utf8(payload.get(4..)?).ok()?;
+    Some(MermaidRequest { scale, source })
 }
 
 pub fn write_request(w: &mut impl Write, request: &Request) -> io::Result<()> {
@@ -273,6 +300,15 @@ mod tests {
         assert_eq!(parsed.color, [1, 2, 3]);
         assert_eq!(parsed.source, "x^2");
         assert!(read_math_request(&payload[..MATH_HEADER - 1]).is_none());
+    }
+
+    #[test]
+    fn a_mermaid_payload_round_trips() {
+        let payload = mermaid_payload(2.5, "flowchart LR\nA-->B");
+        let parsed = read_mermaid_request(&payload).expect("the payload parses");
+        assert_eq!(parsed.scale, 2.5);
+        assert_eq!(parsed.source, "flowchart LR\nA-->B");
+        assert!(read_mermaid_request(&[1, 2]).is_none());
     }
 
     #[test]

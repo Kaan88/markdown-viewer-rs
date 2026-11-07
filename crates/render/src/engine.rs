@@ -10,7 +10,8 @@
 
 use crate::image::{DecodedImage, MAX_PIXELS};
 use mdview_engine_proto::{
-    KIND_MATH, KIND_SVG, MAX_REPLY, Request, STATUS_OK, math_payload, read_reply, write_request,
+    KIND_MATH, KIND_MERMAID, KIND_SVG, MAX_REPLY, Request, STATUS_OK, math_payload,
+    mermaid_payload, read_reply, write_request,
 };
 use std::io;
 use std::path::PathBuf;
@@ -146,6 +147,16 @@ pub fn render_math(
         return None;
     }
     let reply = submit(KIND_MATH, math_payload(font_size, display, color, source))?;
+    decode(reply)
+}
+
+/// Renders a Mermaid diagram. `scale` is device pixels per SVG unit; the renderer asks for twice
+/// its own scale and halves the box, as it does for math.
+pub fn render_mermaid(source: &str, scale: f32) -> Option<DecodedImage> {
+    if !scale.is_finite() || scale < 0.1 || scale > 8.0 {
+        return None;
+    }
+    let reply = submit(KIND_MERMAID, mermaid_payload(scale, source))?;
     decode(reply)
 }
 
@@ -285,6 +296,22 @@ mod tests {
             image.baseline,
             image.height
         );
+        assert!(
+            image.rgba.chunks_exact(4).any(|p| p[3] > 0),
+            "the raster has ink"
+        );
+    }
+
+    #[test]
+    fn a_diagram_comes_back() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if engine_path().is_none() {
+            eprintln!("skipping: no mdview-engine beside the test binary");
+            return;
+        }
+        let image = render_mermaid("flowchart LR\n A[Start] --> B[Done]", 2.0)
+            .expect("the diagram renders");
+        assert!(image.width > 100 && image.height > 30);
         assert!(
             image.rgba.chunks_exact(4).any(|p| p[3] > 0),
             "the raster has ink"
