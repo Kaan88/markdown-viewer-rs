@@ -6,7 +6,7 @@
 use crate::qt::ffi::*;
 use crate::qt::*;
 use mdview_core::parse_bytes;
-use mdview_render::{render, Bitmap, Options, Theme, DARK, LIGHT};
+use mdview_render::{Bitmap, DocumentRenderer, Options, PageLayout, Theme, DARK, LIGHT};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -22,20 +22,13 @@ Open a document by passing it on the command line, or dropping it on the window.
 - The wheel scrolls.
 ";
 
-/// One laid-out page, replaced when the viewport width, display scale or theme changes.
-struct Page {
-    bitmap: Bitmap,
-    width: i32,
-    scale: f64,
-    theme: &'static str,
-}
-
 struct Shell {
     window: Cell<Option<H<QMainWindow>>>,
     canvas: Cell<Option<H<Canvas>>>,
     status: Cell<Option<H<QStatusBar>>>,
     document: RefCell<Option<mdview_core::Document>>,
-    page: RefCell<Option<Page>>,
+    layout: RefCell<Option<PageLayout>>,
+    renderer: RefCell<DocumentRenderer>,
     path: RefCell<Option<PathBuf>>,
     scroll: Cell<f64>,
     viewport: Cell<i32>,
@@ -49,7 +42,8 @@ impl Shell {
             canvas: Cell::new(None),
             status: Cell::new(None),
             document: RefCell::new(None),
-            page: RefCell::new(None),
+            layout: RefCell::new(None),
+            renderer: RefCell::new(DocumentRenderer::new()),
             path: RefCell::new(None),
             scroll: Cell::new(0.0),
             viewport: Cell::new(0),
@@ -83,7 +77,7 @@ impl Shell {
                     started.elapsed().as_secs_f64() * 1000.0
                 );
                 *self.document.borrow_mut() = Some(document);
-                *self.page.borrow_mut() = None;
+                *self.layout.borrow_mut() = None;
                 self.scroll.set(0.0);
                 *self.path.borrow_mut() = Some(path.to_path_buf());
                 let name = path
@@ -114,51 +108,28 @@ impl Shell {
         }
     }
 
-    fn layout(&self, width: i32, scale: f64) {
-        let Some(document) = &*self.document.borrow() else {
-            return;
-        };
-        let theme = self.theme.get();
-        let started = std::time::Instant::now();
-        let rendered = render(
-            document,
-            &Options {
-                width: width as f32,
-                scale: scale as f32,
-                theme,
-                // A guard until virtualization exists; a very long file is cut off here.
-                max_height: Some(30_000.0),
-                base_dir: self
-                    .path
-                    .borrow()
-                    .as_ref()
-                    .and_then(|path| path.parent().map(|parent| parent.to_path_buf())),
-            },
-        );
-        eprintln!(
-            "mdview-qt: layout {width} dip at {scale:.2} scale in {:.1} ms, content {} px, page {}x{}",
-            started.elapsed().as_secs_f64() * 1000.0,
-            rendered.content_height,
-            rendered.bitmap.width,
-            rendered.bitmap.height
-        );
-        *self.page.borrow_mut() = Some(Page {
-            bitmap: rendered.bitmap,
-            width,
-            scale,
-            theme: theme.name,
-        });
+    fn options(&self, width: i32, scale: f64) -> Options {
+        Options {
+            width: width as f32,
+            scale: scale as f32,
+            theme: self.theme.get(),
+            max_height: None,
+            base_dir: self
+                .path
+                .borrow()
+                .as_ref()
+                .and_then(|path| path.parent().map(|parent| parent.to_path_buf())),
+        }
     }
 
-    fn page_is_stale(&self, width: i32, scale: f64) -> bool {
-        match &*self.page.borrow() {
-            None => true,
-            Some(page) => {
-                page.width != width
-                    || (page.scale - scale).abs() > 0.001
-                    || page.theme != self.theme.get().name
-            }
-        }
+    /// The largest useful scroll offset, from the measured page and the visible height.
+    fn scroll_max(&self, viewport: i32) -> f64 {
+        let total = self
+            .layout
+            .borrow()
+            .as_ref()
+            .map_or(0.0, |layout| layout.total_height());
+        (total - viewport as f32).max(0.0) as f64
     }
 }
 
@@ -169,42 +140,47 @@ impl CanvasHandler for Shell {
             return;
         }
         let scale = target.dpr();
-        let device_width = (width as f64 * scale).ceil() as i32;
         let device_height = (height as f64 * scale).ceil() as i32;
         self.viewport.set(device_height);
-        if self.page_is_stale(width, scale) {
-            self.layout(width, scale);
+        let options = self.options(width, scale);
+        let stale = match &*self.layout.borrow() {
+            None => true,
+            Some(page) => !page.matches(&options),
+        };
+        if stale {
+            let Some(document) = &*self.document.borrow() else {
+                return;
+            };
+            let started = std::time::Instant::now();
+            let page = self.renderer.borrow_mut().layout(document, &options);
+            eprintln!(
+                "mdview-qt: height pass {width} dip at {scale:.2} scale in {:.1} ms, page {:.0} px",
+                started.elapsed().as_secs_f64() * 1000.0,
+                page.total_height()
+            );
+            *self.layout.borrow_mut() = Some(page);
         }
-        let page = self.page.borrow();
-        let Some(page) = page.as_ref() else {
+        let scroll = self.scroll.get().clamp(0.0, self.scroll_max(device_height));
+        self.scroll.set(scroll);
+        let Some(layout) = &*self.layout.borrow() else {
             return;
         };
-        let theme = self.theme.get();
-        let [r, g, b] = theme.bg;
-        let background = [b, g, r, 255];
-        let mut buffer = vec![0u8; (device_width * device_height * 4) as usize];
-        for pixel in buffer.chunks_exact_mut(4) {
-            pixel.copy_from_slice(&background);
-        }
-        let page_width = page.bitmap.width as i32;
-        let page_height = page.bitmap.height as i32;
-        let maximum = (page_height - device_height).max(0) as f64;
-        let scroll = self.scroll.get().clamp(0.0, maximum).round() as i64;
-        self.scroll.set(scroll as f64);
-        let copy_width = page_width.min(device_width);
-        let left = (device_width - copy_width) / 2;
-        for y in 0..device_height {
-            let source_y = scroll + y as i64;
-            if source_y < 0 || source_y >= page_height as i64 {
-                continue;
-            }
-            let source = ((source_y as i32 * page_width) * 4) as usize;
-            let destination = ((y * device_width + left) * 4) as usize;
-            let bytes = (copy_width * 4) as usize;
-            buffer[destination..destination + bytes]
-                .copy_from_slice(&page.bitmap.pixels[source..source + bytes]);
-        }
-        target.blit_painter(&buffer, device_width, device_height, true);
+        let Some(document) = &*self.document.borrow() else {
+            return;
+        };
+        let slice = self.renderer.borrow_mut().view(
+            document,
+            &options,
+            layout,
+            scroll as f32,
+            device_height as f32,
+        );
+        target.blit_painter(
+            &slice.bitmap.pixels,
+            slice.bitmap.width as i32,
+            slice.bitmap.height as i32,
+            true,
+        );
     }
 
     fn mouse_press(&self, _x: f64, _y: f64) {}
@@ -212,12 +188,7 @@ impl CanvasHandler for Shell {
     fn mouse_move(&self, _x: f64, _y: f64) {}
 
     fn wheel(&self, _dx: i32, dy: i32) {
-        let page_height = self
-            .page
-            .borrow()
-            .as_ref()
-            .map_or(0, |page| page.bitmap.height as i32);
-        let maximum = (page_height - self.viewport.get()).max(0) as f64;
+        let maximum = self.scroll_max(self.viewport.get());
         let next = (self.scroll.get() - dy as f64 * 0.75).clamp(0.0, maximum);
         if next != self.scroll.get() {
             self.scroll.set(next);
@@ -287,7 +258,7 @@ fn build(shell: &Rc<Shell>, file: Option<PathBuf>) {
         let s = shell.clone();
         action.on_triggered(move |_| {
             s.theme.set(theme);
-            *s.page.borrow_mut() = None;
+            *s.layout.borrow_mut() = None;
             s.redraw();
         });
     }
