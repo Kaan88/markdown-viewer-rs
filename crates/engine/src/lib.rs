@@ -110,6 +110,7 @@ pub fn render_svg_at(
 pub fn render_mermaid(
     source: &str,
     scale: f32,
+    dark: bool,
     max_pixels: u64,
     options: &resvg::usvg::Options,
 ) -> Result<Image, String> {
@@ -119,11 +120,14 @@ pub fn render_mermaid(
     // fallback positions some families inside the node but shifts class, ER and mindmap labels off
     // the left edge. Asking for native text labels avoids both problems. The directive comes
     // first, so a document's own `%%{init: ...}%%` can still override it.
-    let source = format!(
-        "%%{{init: {{\"themeVariables\": {{\"fontSize\": \"11px\"}}, \"htmlLabels\": false, \
-         \"flowchart\": {{\"htmlLabels\": false}}, \
-         \"gantt\": {{\"leftPadding\": 150, \"gridLineStartPadding\": 35}}}}}}%%\n{source}"
-    );
+    let init = if dark {
+        // Mermaid's stock dark theme draws #333 nodes on our #202020 page, so outlines, gantt bars
+        // and pie slices nearly vanish. These overrides keep the palette dark but lift the contrast.
+        r##"{"theme":"dark","themeVariables":{"fontSize":"11px","background":"#202020","primaryColor":"#3d4654","primaryTextColor":"#e4e4e4","primaryBorderColor":"#9aa4b2","lineColor":"#c8d0da","secondaryColor":"#3a3a44","tertiaryColor":"#2b2b2b","mainBkg":"#3d4654","nodeBorder":"#9aa4b2","clusterBkg":"#2b2b2b","textColor":"#e4e4e4","titleColor":"#f5f5f5","edgeLabelBackground":"#202020","sectionBkgColor":"#2b2b2b","altSectionBkgColor":"#242424","taskBkgColor":"#4b5563","taskBorderColor":"#9aa4b2","taskTextColor":"#ffffff","taskTextOutsideColor":"#e4e4e4","gridColor":"#4a4a4a","pie1":"#5b6b82","pie2":"#7c5c8a","pie3":"#2f6f6f","pie4":"#8a6d3b"},"htmlLabels":false,"flowchart":{"htmlLabels":false},"gantt":{"leftPadding":150,"gridLineStartPadding":35,"useWidth":900}}"##
+    } else {
+        r##"{"theme":"default","themeVariables":{"fontSize":"11px"},"htmlLabels":false,"flowchart":{"htmlLabels":false},"gantt":{"leftPadding":150,"gridLineStartPadding":35,"useWidth":900}}"##
+    };
+    let source = format!("%%{{init: {init}}}%%\n{source}");
     let output = Renderer::new()
         .render(RenderRequest::svg(
             &source,
@@ -368,7 +372,7 @@ mod tests {
             ("mindmap", "mindmap\n root((Plan))\n  Docs\n  Code"),
         ];
         for (name, source) in sources {
-            let image = render_mermaid(source, 1.0, 24_000_000, &options)
+            let image = render_mermaid(source, 1.0, false, 24_000_000, &options)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(
                 image.width > 20 && image.height > 20,
@@ -382,19 +386,33 @@ mod tests {
     }
 
     #[test]
+    fn the_dark_palette_differs_from_light() {
+        let options = options();
+        let light =
+            render_mermaid("flowchart LR\n A-->B", 1.0, false, 24_000_000, &options).unwrap();
+        let dark = render_mermaid("flowchart LR\n A-->B", 1.0, true, 24_000_000, &options).unwrap();
+        assert_eq!((light.width, light.height), (dark.width, dark.height));
+        assert_ne!(
+            light.rgba, dark.rgba,
+            "the dark theme should change the palette"
+        );
+    }
+
+    #[test]
     fn a_scaled_diagram_is_larger_but_under_the_cap() {
         let options = options();
-        let one = render_mermaid("flowchart LR\n A-->B", 1.0, 24_000_000, &options).unwrap();
-        let two = render_mermaid("flowchart LR\n A-->B", 2.0, 24_000_000, &options).unwrap();
+        let one = render_mermaid("flowchart LR\n A-->B", 1.0, false, 24_000_000, &options).unwrap();
+        let two = render_mermaid("flowchart LR\n A-->B", 2.0, false, 24_000_000, &options).unwrap();
         assert!(two.width > one.width && two.height > one.height);
-        let capped = render_mermaid("flowchart LR\n A-->B", 8.0, 1_000_000, &options).unwrap();
+        let capped =
+            render_mermaid("flowchart LR\n A-->B", 8.0, false, 1_000_000, &options).unwrap();
         assert!(capped.width as u64 * capped.height as u64 <= 1_000_000);
     }
 
     #[test]
     fn text_that_is_not_a_diagram_is_an_error() {
         let options = options();
-        assert!(render_mermaid("hello, not a diagram", 1.0, 24_000_000, &options).is_err());
+        assert!(render_mermaid("hello, not a diagram", 1.0, false, 24_000_000, &options).is_err());
     }
 
     #[test]

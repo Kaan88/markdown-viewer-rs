@@ -152,11 +152,11 @@ pub fn render_math(
 
 /// Renders a Mermaid diagram. `scale` is device pixels per SVG unit; the renderer asks for twice
 /// its own scale and halves the box, as it does for math.
-pub fn render_mermaid(source: &str, scale: f32) -> Option<DecodedImage> {
+pub fn render_mermaid(source: &str, scale: f32, dark: bool) -> Option<DecodedImage> {
     if !scale.is_finite() || scale < 0.1 || scale > 8.0 {
         return None;
     }
-    let reply = submit(KIND_MERMAID, mermaid_payload(scale, source))?;
+    let reply = submit(KIND_MERMAID, mermaid_payload(scale, dark, source))?;
     decode(reply)
 }
 
@@ -309,7 +309,7 @@ mod tests {
             eprintln!("skipping: no mdview-engine beside the test binary");
             return;
         }
-        let image = render_mermaid("flowchart LR\n A[Start] --> B[Done]", 2.0)
+        let image = render_mermaid("flowchart LR\n A[Start] --> B[Done]", 2.0, false)
             .expect("the diagram renders");
         assert!(image.width > 100 && image.height > 30);
         assert!(

@@ -15,8 +15,10 @@ use std::io::{self, Read, Write};
 pub const KIND_SVG: u32 = 1;
 /// The math job: a small math header (font size, display flag, colour) and then TeX source.
 pub const KIND_MATH: u32 = 2;
-/// The Mermaid job: a scale factor and then the diagram source.
+/// The Mermaid job: a scale factor, a dark-theme flag, then the diagram source.
 pub const KIND_MERMAID: u32 = 3;
+/// Scale (4 bytes) and the dark flag (1 byte) before the source.
+pub const MERMAID_HEADER: usize = 5;
 
 pub const STATUS_OK: u32 = 0;
 /// The request or its kind was not understood.
@@ -122,13 +124,15 @@ pub fn read_math_request(payload: &[u8]) -> Option<MathRequest<'_>> {
 /// A Mermaid source and the device scale its raster should use.
 pub struct MermaidRequest<'a> {
     pub scale: f32,
+    pub dark: bool,
     pub source: &'a str,
 }
 
-/// Encodes a Mermaid payload: the scale factor, then the source.
-pub fn mermaid_payload(scale: f32, source: &str) -> Vec<u8> {
-    let mut payload = Vec::with_capacity(4 + source.len());
+/// Encodes a Mermaid payload: the scale factor, the dark flag, then the source.
+pub fn mermaid_payload(scale: f32, dark: bool, source: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(MERMAID_HEADER + source.len());
     payload.extend_from_slice(&scale.to_le_bytes());
+    payload.push(u8::from(dark));
     payload.extend_from_slice(source.as_bytes());
     payload
 }
@@ -140,8 +144,13 @@ pub fn read_mermaid_request(payload: &[u8]) -> Option<MermaidRequest<'_>> {
     if !scale.is_finite() || scale <= 0.0 {
         return None;
     }
-    let source = std::str::from_utf8(payload.get(4..)?).ok()?;
-    Some(MermaidRequest { scale, source })
+    let dark = *payload.get(4)? != 0;
+    let source = std::str::from_utf8(payload.get(MERMAID_HEADER..)?).ok()?;
+    Some(MermaidRequest {
+        scale,
+        dark,
+        source,
+    })
 }
 
 pub fn write_request(w: &mut impl Write, request: &Request) -> io::Result<()> {
@@ -304,9 +313,10 @@ mod tests {
 
     #[test]
     fn a_mermaid_payload_round_trips() {
-        let payload = mermaid_payload(2.5, "flowchart LR\nA-->B");
+        let payload = mermaid_payload(2.5, true, "flowchart LR\nA-->B");
         let parsed = read_mermaid_request(&payload).expect("the payload parses");
         assert_eq!(parsed.scale, 2.5);
+        assert!(parsed.dark);
         assert_eq!(parsed.source, "flowchart LR\nA-->B");
         assert!(read_mermaid_request(&[1, 2]).is_none());
     }

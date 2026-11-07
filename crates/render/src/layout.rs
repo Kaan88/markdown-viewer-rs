@@ -1696,7 +1696,8 @@ impl<'a, 'b> Pager<'a, 'b> {
         if !self.images.contains_key(&key) {
             // Twice the device scale, so 150% zoom and high DPI stay sharp; the box is halved.
             let scale = 2.0 * self.scale;
-            let decoded = engine::render_mermaid(source, scale).map(Rc::new);
+            let dark = self.theme.name == "dark";
+            let decoded = engine::render_mermaid(source, scale, dark).map(Rc::new);
             self.images.insert(key, decoded);
         }
         let Some((image_w, image_h)) = self
@@ -1712,19 +1713,6 @@ impl<'a, 'b> Pager<'a, 'b> {
         let (w, h) = (image_w * shrink, image_h * shrink);
         let x = left + ((width - w) / 2.0).round();
         let y = self.y + self.px(8.0);
-        // Mermaid's light palette is what the engine renders; on a dark page its black arrows,
-        // axis labels and gantt section names would disappear. A light card keeps them readable.
-        if self.theme.name == "dark" {
-            let pad = self.px(10.0);
-            self.paints.push(Paint::Rect {
-                x: x - pad,
-                y: y - pad,
-                w: w + 2.0 * pad,
-                h: h + 2.0 * pad,
-                radius: self.px(6.0),
-                color: [250, 250, 250],
-            });
-        }
         self.paints.push(Paint::Image {
             index: key,
             x,

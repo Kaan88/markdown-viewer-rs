@@ -84,8 +84,13 @@ fn handle(request: &Request, options: &resvg::usvg::Options) -> Reply {
             let Some(mermaid) = read_mermaid_request(&request.payload) else {
                 return Reply::failed(STATUS_BAD_REQUEST);
             };
-            match mdview_engine::render_mermaid(mermaid.source, mermaid.scale, MAX_PIXELS, options)
-            {
+            match mdview_engine::render_mermaid(
+                mermaid.source,
+                mermaid.scale,
+                mermaid.dark,
+                MAX_PIXELS,
+                options,
+            ) {
                 Ok(image) => Reply::ok(image.width, image.height, image.rgba),
                 Err(_) => Reply::failed(STATUS_FAILED),
             }
