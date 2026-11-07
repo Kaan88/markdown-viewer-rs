@@ -37,12 +37,13 @@ Rust fence is coloured by syntect in both shells.
 `shell-qt-find.png` and `shell-winui-find.png` show find for "Markdown": four hit rectangles and the
 second one active, with the Qt status bar and the WinUI title carrying `2 of 4`.
 
-Math and Mermaid changed the showcase: the page is now 4085 px at 100% (taller formula lines and
+Math and Mermaid changed the showcase: the page is now 4071 px at 100% (taller formula lines and
 diagram images instead of code boxes) and the Mathematics and Diagrams sections show rendered output,
 so the four `showcase-*` images were regenerated. The engine must be built (or `MDV_ENGINE` set) when
 regenerating, because SVG, math and Mermaid go through it. Syntax highlighting changed only the Rust
-block's glyph colours, so the page height stayed 4085 px. Mermaid diagrams now sit on a light card in
-the dark images, gantt section labels clear the task bars, and mindmap labels match their node size.
+block's glyph colours, so the page height stayed 4071 px. Dark images use Mermaid's dark palette with
+contrast overrides, gantt section labels clear the task bars and date ticks no longer collide, and
+mindmap labels match their node size.
 
 `images-light.png` is `fixtures/images.md` through `mdv-bench`: a real PNG drawn as a block and
 inline, a missing file's placeholder, and the SVG badge that the engine now draws in the last line.
@@ -66,3 +67,4 @@ cargo run --release -p mdv-bench -- --all
 which writes the same four `showcase-*.png` files under `target/goldens/`. `--input`, `--out`,
 `--width`, `--scale`, `--theme` and `--max-height` render one page; `--width` with `--viewport`,
 `--scroll` and `--repeat` measures scroll frames instead (see `docs/HANDOFF.md`, section 6).
+

@@ -69,7 +69,7 @@ Toolchain here: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msv
 ```powershell
 cd C:\Users\kaank\Desktop\mv
 cargo test --release --offline --workspace     # 7 core, 11 fuzz, 113 regression, 3 spec,
-                                               # 11 engine, 7 engine-proto, 10 render unit
+                                               # 12 engine, 7 engine-proto, 10 render unit
                                                # (10 + 2 ignored deadline waits), 18 render integration
 cargo fmt --all --check
 cargo build --release --offline --workspace    # includes target/release/mdview-engine.exe
@@ -209,7 +209,7 @@ cd ~/mdview/bins/mdv-qt && export QMAKE=/usr/lib/qt6/bin/qmake6 && cargo build -
 cd ~/mdview && cargo build --release -p mdview-engine      # for SVG, math and Mermaid
 cd ~/mdview && cargo test --release -p mdview-core -p mdview-render -p mdview-engine -p mdview-engine-proto
                                                                       # 7 core, 11 fuzz, 113 regression,
-                                                                      # 3 spec, 11 engine, 7 proto, 10+18 render
+                                                                      # 3 spec, 12 engine, 7 proto, 10+18 render
 cd ~/mdview && xvfb-run -a /mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt \
     --drop-test fixtures/linked.md                                   # prints "drop test ok: ..."
 cd ~/mdview && BIN=/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt
@@ -230,7 +230,7 @@ DISPLAY=:99 /mnt/.../target/release/mdview-qt fixtures/showcase.md & sleep 6
 DISPLAY=:99 import -window root /tmp/shot.png
 ```
 
-Linux font metrics differ from Windows (the showcase page is 4109 px tall there, 4085 here), so Linux
+Linux font metrics differ from Windows (the showcase page is 4095 px tall there, 4071 here), so Linux
 renders are for "does it run and look sane", not for golden comparison. CJK needed
 `fonts-noto-cjk`; the renderer's stack falls back through fontconfig.
 
@@ -352,28 +352,31 @@ back to the old labelled code box.
 Building up a table cell used to drop its inline boxes entirely; `cell_inline` now shifts and keeps
 them, which is also what makes math and images inside tables work.
 
-Mermaid is the third job kind. `KIND_MERMAID` carries a device scale and the diagram source. merman
-0.9.3 is built with **only the eight families the showcase uses** plus SVG (`diagram-flowchart`,
-sequence, class, state, er, gantt, pie, mindmap), not ELK, Cytoscape or math labels; it emits SVG and
-`render_svg_at` rasterizes it at twice the device scale. Three output fixes matter. Mermaid defaults
-to HTML labels inside `foreignObject`, which resvg cannot draw, so the engine prepends an init
-directive asking for native text labels. Families that still emit HTML labels (mindmap) get the
-`readable` pipeline's `<text>` fallback; that fallback sits in a nested `<defs>` SVG behind a `<use>`,
-which resvg also skips, so `inline_label_uses` inlines the text at the use site. Finally,
-`themeVariables.fontSize` is 11 px: merman measures labels deterministically, and the engine's real
-font (DejaVu on Linux, Arial/Segoe on Windows) is wider, so full size overflowed node widths. The
-fallback text from the readable pipeline still carried Mermaid's default `font-size: 16px`, so
-`inline_label_uses` rewrites that to 11 px; at 16 the mindmap labels spilled out of their circles and
-boxes. Gantt gets `leftPadding: 150`, because at the default 75 a section name as long as
-"Documentation" ran under the first task bar. The inline copy is compressed to 85% around its own
-anchor (`transform` on the `<text>`): DejaVu is wider than merman's deterministic metrics, and the
-nested label SVG's `overflow: hidden` clipped the first and last letters. Label ids differ by family
-(`mindmap-foreignobject-label-N`), so the matcher keys on that common suffix.
+Mermaid is the third job kind. `KIND_MERMAID` carries a device scale, a dark-theme flag and the
+diagram source. merman 0.9.3 is built with **only the eight families the showcase uses** plus SVG
+(`diagram-flowchart`, sequence, class, state, er, gantt, pie, mindmap), not ELK, Cytoscape or math
+labels; it emits SVG and `render_svg_at` rasterizes it at twice the device scale. Three output fixes
+matter. Mermaid defaults to HTML labels inside `foreignObject`, which resvg cannot draw, so the
+engine prepends an init directive asking for native text labels. Families that still emit HTML labels
+(mindmap) get the `readable` pipeline's `<text>` fallback; that fallback sits in a nested `<defs>`
+SVG behind a `<use>`, which resvg also skips, so `inline_label_uses` inlines the text at the use
+site. Finally, `themeVariables.fontSize` is 11 px: merman measures labels deterministically, and the
+engine's real font (DejaVu on Linux, Arial/Segoe on Windows) is wider, so full size overflowed node
+widths. The fallback text from the readable pipeline still carried Mermaid's default
+`font-size: 16px`, so `inline_label_uses` rewrites that to 11 px; at 16 the mindmap labels spilled out
+of their circles and boxes. Gantt gets `leftPadding: 150`, because at the default 75 a section name
+as long as "Documentation" ran under the first task bar, and `useWidth: 900`, because DejaVu's
+`2026-11-02` ticks collided at the default 800. The inline copy is compressed to 85% around
+its own anchor (`transform` on the `<text>`): DejaVu is wider than merman's deterministic metrics,
+and the nested label SVG's `overflow: hidden` clipped the first and last letters. Label ids differ by
+family (`mindmap-foreignobject-label-N`), so the matcher keys on that common suffix.
 
-The renderer turns a Mermaid block into a **centred image**, shrunk to the content width; an oversize
-or unparseable diagram falls back to the labelled source box. Diagrams keep Mermaid's own light
-palette in both themes; on the dark theme a light card is painted behind each diagram, because black
-arrows, gantt axes and section labels vanish on the dark page.
+The dark job asks for Mermaid's `dark` theme with contrast overrides: `#3d4654` nodes, `#9aa4b2`
+borders, `#c8d0da` edges, light text, and brighter gantt/pie variables. Stock dark drew `#333`
+shapes on the `#202020` page, so outlines and bars nearly disappeared. The renderer turns a Mermaid
+block into a **centred image**, shrunk to the content width; an oversize or unparseable diagram falls
+back to the labelled source box. The image keeps its transparent background and is drawn straight on
+the page in both themes.
 
 ### Syntax highlighting (in-process)
 
@@ -600,7 +603,7 @@ and are not errors.
 **These are for review, not a pixel baseline yet.** They use this host's system fonts (Segoe UI,
 Consolas), so another machine or Linux will differ; the plan calls for bundled fonts and a tolerance
 before they become a suite. The four review images still have **not been approved by the user**.
-Math and Mermaid changed the showcase page from 3020 to **4085 px** here (taller inline formulas and
+Math and Mermaid changed the showcase page from 3020 to **4071 px** here (taller inline formulas and
 diagram images instead of code boxes), so the four `showcase-*` files were regenerated with the
 engine built; they are the current review copies. Syntax highlighting changed only the glyph colours
 in the Rust block, so the page height stayed the same and the four images were regenerated again.
@@ -652,7 +655,7 @@ and the shifted-frame path against a whole-frame reference; selection in both sh
 `y_of` reports for the Diagrams heading), plus a captured `--select-hold`; WinUI through a real
 press-drag-release on the running window (a drag from the heading into the next paragraph, two
 selection rows) and a click on the `#diagrams` link, both captured; `<details>` toggling through
-`--details-test` in both shells (4085 -> 4139 px, the body appearing) and a WinUI capture of the
+`--details-test` in both shells (4071 -> 4125 px, the body appearing) and a WinUI capture of the
 open body. Find in both shells: Qt `--find-test` sets the line edit's text and reports
 `4 matches, 4 mark rects, 1 current rects, bar true, index 1`; WinUI `--find-test` feeds WM_CHAR and
 F3 through the message hook and logs `4 matches, 4 mark rects, 1 current rects, index 1`; both
@@ -676,7 +679,7 @@ source box. The fenced Rust block is tokenized in both themes in `mdv-bench` and
 
 **Linux:** the Qt shell built with Qt 6.8.2 on the VM, run and captured under Xvfb, `--drop-test`,
 `--select-test` (7..15 = "Markdown"), `--link-test` (scrolled to 1266 px) and `--details-test`
-(4109 -> 4163 px) passing, `--find-test` reporting four matches and four mark rects, and
+(4095 -> 4149 px) passing, `--find-test` reporting four matches and four mark rects, and
 `cargo test --release -p mdview-core -p mdview-render` passing
 (18 render integration tests and the 10 render unit tests included). `mdv-bench fixtures/images.md`
 renders the SVG badge at 780x413 in
@@ -684,8 +687,8 @@ renders the SVG badge at 780x413 in
 other names in the renderer's stack because fontdb reports no generic `sans-serif` face there.
 `mdv-bench fixtures/math.md` draws all seven formulas at 780x631 in 14.7 ms, `fixtures/diagrams.md`
 draws the five families at 780x1722 in 59.9 ms, the full showcase with highlighted code and all
-eight diagrams renders at 780x4109 in 132.1 ms, and the engine and protocol test binaries pass on
-the VM (11 and 7).
+eight diagrams renders at 780x4095 in 114.8 ms, and the engine and protocol test binaries pass on
+the VM (12 and 7).
 
 **Not run:** the Qt View/Help menu items; the Qt scrollbar and keys on Linux (Windows only); DPI scales
 other than 100% (zoom is tested, DPI scaling is not); a real OLE drag from Explorer (the drop test drives
@@ -702,8 +705,7 @@ Qt's event path instead).
   theme text colour, and unknown languages or blocks over 256 KiB stay plain.
 - Math blocks are images: dragging across a display equation selects nothing, and there is no
   equation numbering or copy-as-TeX.
-- Diagram blocks are images, so they have no selection geometry. They use Mermaid's light palette in
-  both themes; on the dark theme they sit on a light card so arrows and labels stay visible.
+- Diagram blocks are images, so they have no selection geometry.
 - The WinUI find has no text box: its query and counter live in the window title, because the trimmed
   `bindings.rs` has no `TextBox` event or text accessor. Qt has a real find bar.
 - The WinUI title bar follows Windows, not the in-app theme override.
@@ -724,6 +726,8 @@ Qt's event path instead).
 
 Every Qt/Linux change is tested on the VM as well as on Windows, and nothing counts as working on
 Windows until it has run on Windows.
+
+
 
 
 
