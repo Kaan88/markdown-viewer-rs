@@ -14,6 +14,8 @@ pub const MAX_PIXELS: u64 = 24_000_000;
 pub struct DecodedImage {
     pub width: u32,
     pub height: u32,
+    /// Distance from the top to the text baseline; the bottom for images without one.
+    pub baseline: u32,
     pub rgba: Vec<u8>,
 }
 
@@ -85,6 +87,7 @@ fn decode_png(bytes: &[u8]) -> Option<DecodedImage> {
     Some(DecodedImage {
         width,
         height,
+        baseline: height,
         rgba,
     })
 }
@@ -117,6 +120,7 @@ fn decode_jpeg(bytes: &[u8]) -> Option<DecodedImage> {
     Some(DecodedImage {
         width,
         height,
+        baseline: height,
         rgba,
     })
 }

@@ -4,6 +4,7 @@
 //! Images are drawn through parley inline boxes; math and diagrams still show their source.
 
 use crate::bitmap::Bitmap;
+use crate::engine;
 use crate::image::{self, DecodedImage};
 use crate::text::{Brush, TextEngine};
 use crate::theme::{Color, DARK, LIGHT, Theme};
@@ -656,13 +657,25 @@ struct Inline {
     origins: Vec<(Range<usize>, u32, bool)>,
 }
 
-/// One inline image: its text offset, the image it draws and its natural device-px size.
+/// One inline image: its text offset, the image it draws, its size in device px and, for math, the
+/// distance from its top to the baseline.
 #[derive(Clone, Copy)]
 struct ImageBox {
     at: usize,
     index: u32,
     width: f32,
     height: f32,
+    baseline: Option<f32>,
+    /// End of the TeX source in the document for a math box; zero for a file image.
+    math_end: u32,
+}
+
+/// Math images live above the file-image indices in the shared cache, keyed by the source's
+/// document offset (there is at most one math span per offset).
+const MATH_INDEX: u32 = 0x8000_0000;
+
+fn math_index(offset: u32) -> u32 {
+    MATH_INDEX | (offset & 0x7fff_ffff)
 }
 
 impl Inline {
@@ -1057,7 +1070,11 @@ impl<'a, 'b> Pager<'a, 'b> {
                 };
                 self.code_block(b, left, width, Some(label));
             }
-            BlockKind::Math { .. } => self.code_block(b, left, width, Some("math".to_string())),
+            BlockKind::Math { .. } => {
+                if !self.math_block(b, left, width) {
+                    self.code_block(b, left, width, Some("math".to_string()));
+                }
+            }
             BlockKind::ThematicBreak => {
                 self.y += self.px(8.0);
                 let h = self.hair();
@@ -1141,11 +1158,40 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
         }
         for image in &inline.boxes {
-            let (mut width, mut height) = (image.width, image.height);
+            let (mut width, mut height, mut baseline) = (image.width, image.height, image.baseline);
+            if image.math_end != 0 {
+                // The probe in `push_atom` used the body size. A heading, table cell or footnote
+                // asks for another size; render at that one so it stays sharp.
+                let target = (txt.size * 2.0 * self.scale).clamp(8.0, 512.0);
+                let probe = self.theme.body_size * 2.0 * self.scale;
+                let start = (image.index & 0x7fff_ffff) as usize;
+                if (target - probe).abs() > 0.01 {
+                    let source = self
+                        .doc
+                        .text
+                        .get(start..image.math_end as usize)
+                        .unwrap_or("")
+                        .to_string();
+                    let decoded =
+                        engine::render_math(&source, false, target, txt.color).map(Rc::new);
+                    self.images.insert(image.index, decoded);
+                }
+                if let Some(Some(math)) = self.images.get(&image.index) {
+                    width = math.width as f32 / 2.0;
+                    height = math.height as f32 / 2.0;
+                    baseline = Some(math.baseline as f32 / 2.0);
+                } else {
+                    width = 0.0;
+                    height = 0.0;
+                    baseline = None;
+                }
+            }
             if let Some(max) = txt.max
                 && width > max
             {
-                height *= max / width;
+                let shrink = max / width;
+                height *= shrink;
+                baseline = baseline.map(|b| b * shrink);
                 width = max;
             }
             builder.push_inline_box(InlineBox {
@@ -1154,7 +1200,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 index: image.at,
                 width,
                 height,
-                baseline: None,
+                baseline,
                 vertical_align: VerticalAlign::BASELINE,
             });
         }
@@ -1614,6 +1660,46 @@ impl<'a, 'b> Pager<'a, 'b> {
         }
     }
 
+    /// Draws a `$$...$$` block as a centred formula. `false` hands it back to the source view when
+    /// there is no engine or TeX will not parse.
+    fn math_block(&mut self, b: u32, left: f32, width: f32) -> bool {
+        let block = self.doc.blocks[b as usize];
+        let (start, end) = (block.text.start, block.text.end);
+        let source = self.doc.text[start as usize..end as usize].trim();
+        if source.is_empty() {
+            return false;
+        }
+        let key = math_index(start);
+        if !self.images.contains_key(&key) {
+            // Display style runs a little larger than body text, and twice that keeps it crisp.
+            let size = self.theme.body_size * 1.15 * 2.0 * self.scale;
+            let decoded = engine::render_math(source, true, size, self.theme.text).map(Rc::new);
+            self.images.insert(key, decoded);
+        }
+        let Some((image_w, image_h)) = self
+            .images
+            .get(&key)
+            .and_then(|slot| slot.as_ref())
+            .map(|image| (image.width as f32 / 2.0, image.height as f32 / 2.0))
+        else {
+            return false;
+        };
+        let avail = (width - 2.0 * self.px(16.0)).max(1.0);
+        let shrink = (avail / image_w).min(1.0);
+        let (w, h) = (image_w * shrink, image_h * shrink);
+        let x = left + ((width - w) / 2.0).round();
+        let y = self.y + self.px(10.0);
+        self.paints.push(Paint::Image {
+            index: key,
+            x,
+            y,
+            w,
+            h,
+        });
+        self.y = y + h + self.px(18.0);
+        true
+    }
+
     fn code_block(&mut self, b: u32, left: f32, width: f32, label: Option<String>) {
         let source = self.doc.block_text(b).trim_end_matches('\n').to_string();
         let text_start = self.doc.blocks[b as usize].text.start;
@@ -1942,15 +2028,21 @@ impl<'a, 'b> Pager<'a, 'b> {
         let mut first = true;
         for leaf in leaves {
             let inline = self.inline_of(leaf);
-            if inline.text.is_empty() {
+            if inline.text.is_empty() && inline.boxes.is_empty() {
                 continue;
             }
             if !first {
                 merged.push(" ", Style::default());
             }
+            let start = merged.text.len();
             for (range, style) in &inline.runs {
                 let at = inline.doc_at(range.start).unwrap_or(0);
                 merged.push_doc(&inline.text[range.clone()], *style, at);
+            }
+            // `inline_of` measured boxes in this leaf's own text; shift them into the merged text.
+            for mut image in inline.boxes {
+                image.at += start;
+                merged.boxes.push(image);
             }
             first = false;
         }
@@ -2074,12 +2166,13 @@ impl<'a, 'b> Pager<'a, 'b> {
         let src = &self.doc.text[base..end];
         let mut cuts = vec![base, end];
         let mut spans: Vec<(usize, usize, SpanKind)> = Vec::new();
-        let mut atoms: Vec<(usize, SpanKind)> = Vec::new();
+        let mut atoms: Vec<(usize, usize, SpanKind)> = Vec::new();
+        let mut math_ranges: Vec<(usize, usize)> = Vec::new();
         for span in &self.doc.spans[block.spans.usize()] {
             let (start, stop) = (span.start as usize, span.end as usize);
             if start == stop {
                 if start >= base && start <= end {
-                    atoms.push((start, span.kind));
+                    atoms.push((start, start, span.kind));
                     cuts.push(start);
                 }
                 continue;
@@ -2088,7 +2181,13 @@ impl<'a, 'b> Pager<'a, 'b> {
             if start < stop {
                 cuts.push(start);
                 cuts.push(stop);
-                spans.push((start, stop, span.kind));
+                if matches!(span.kind, SpanKind::Math { display: false, .. }) {
+                    // Inline math becomes one image atom: no source text reaches the line.
+                    atoms.push((start, stop, span.kind));
+                    math_ranges.push((start, stop));
+                } else {
+                    spans.push((start, stop, span.kind));
+                }
             }
         }
         cuts.sort_unstable();
@@ -2096,9 +2195,9 @@ impl<'a, 'b> Pager<'a, 'b> {
         let mut out = Inline::default();
         for i in 0..cuts.len() {
             let at = cuts[i];
-            for (position, kind) in &atoms {
+            for (position, end, kind) in &atoms {
                 if *position == at {
-                    self.push_atom(&mut out, *kind, *position as u32);
+                    self.push_atom(&mut out, *kind, *position as u32, *end as u32);
                 }
             }
             if i + 1 == cuts.len() {
@@ -2106,6 +2205,12 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
             let to = cuts[i + 1];
             if to <= at {
+                continue;
+            }
+            if math_ranges
+                .iter()
+                .any(|(start, end)| at >= *start && at < *end)
+            {
                 continue;
             }
             let style = self.style_at(&spans, at);
@@ -2138,8 +2243,44 @@ impl<'a, 'b> Pager<'a, 'b> {
         style
     }
 
-    fn push_atom(&mut self, out: &mut Inline, kind: SpanKind, at: u32) {
+    fn push_atom(&mut self, out: &mut Inline, kind: SpanKind, at: u32, end: u32) {
         match kind {
+            SpanKind::Math { display: false, .. } => {
+                let key = math_index(at);
+                if !self.images.contains_key(&key) {
+                    let source = self.doc.text.get(at as usize..end as usize).unwrap_or("");
+                    // Twice the body size keeps the raster crisp when a heading or a zoom
+                    // enlarges it; the box and baseline are halved back in `text_layout`.
+                    let size = self.theme.body_size * 2.0 * self.scale;
+                    let decoded =
+                        engine::render_math(source, false, size, self.theme.text).map(Rc::new);
+                    self.images.insert(key, decoded);
+                }
+                if let Some(Some(image)) = self.images.get(&key) {
+                    let width = image.width as f32 / 2.0;
+                    let height = image.height as f32 / 2.0;
+                    let baseline = image.baseline as f32 / 2.0;
+                    out.boxes.push(ImageBox {
+                        at: out.text.len(),
+                        index: key,
+                        width,
+                        height,
+                        baseline: Some(baseline),
+                        math_end: end,
+                    });
+                    return;
+                }
+                // No engine, or TeX it could not parse: keep the source readable.
+                let source = self.doc.text.get(at as usize..end as usize).unwrap_or("");
+                out.push_doc(
+                    source,
+                    Style {
+                        math: true,
+                        ..Style::default()
+                    },
+                    at,
+                );
+            }
             SpanKind::Image(index) => {
                 if let Some(image) = self.image(index) {
                     let width = image.width as f32 * self.scale;
@@ -2149,6 +2290,8 @@ impl<'a, 'b> Pager<'a, 'b> {
                         index,
                         width,
                         height,
+                        baseline: None,
+                        math_end: 0,
                     });
                     return;
                 }

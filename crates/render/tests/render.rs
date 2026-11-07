@@ -44,6 +44,37 @@ fn renders_the_showcase_at_both_themes_and_scales() {
 }
 
 #[test]
+fn a_table_cell_draws_its_inline_image() {
+    // `cell_inline` rebuilds a cell from its leaves; it used to drop their image boxes, which
+    // blanked math and images inside table cells.
+    let dir = temp_dir("table-image");
+    std::fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/assets/badge.png"),
+        dir.join("badge.png"),
+    )
+    .unwrap();
+    let doc = mdview_core::parse("| Header |\n|---|\n| ![badge](badge.png) |\n");
+    let rendered = render(
+        &doc,
+        &Options {
+            width: 780.0,
+            scale: 1.0,
+            theme: LIGHT,
+            max_height: None,
+            base_dir: Some(dir.clone()),
+        },
+    );
+    let blue = rendered
+        .bitmap
+        .pixels
+        .chunks_exact(4)
+        // The frame is BGRA.
+        .filter(|p| p[0] > 140 && p[2] < 40 && p[1] > 80)
+        .count();
+    assert!(blue > 1000, "badge pixels in the table: {blue}");
+}
+
+#[test]
 fn a_checked_task_box_draws_in_the_accent_colour() {
     let doc = mdview_core::parse("- [x] done\n- [ ] open\n");
     let rendered = render(&doc, &Options::light());

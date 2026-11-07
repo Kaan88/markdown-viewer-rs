@@ -9,7 +9,9 @@
 //! `MDV_ENGINE` overrides the search.
 
 use crate::image::{DecodedImage, MAX_PIXELS};
-use mdview_engine_proto::{KIND_SVG, MAX_REPLY, Request, STATUS_OK, read_reply, write_request};
+use mdview_engine_proto::{
+    KIND_MATH, KIND_SVG, MAX_REPLY, Request, STATUS_OK, math_payload, read_reply, write_request,
+};
 use std::io;
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -33,6 +35,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 static STARTS: AtomicU64 = AtomicU64::new(0);
 
 struct Job {
+    kind: u32,
     payload: Vec<u8>,
     reply: Sender<Option<Reply>>,
 }
@@ -89,7 +92,7 @@ fn worker(
             write_request(
                 &mut stdin,
                 &Request {
-                    kind: KIND_SVG,
+                    kind: job.kind,
                     payload: job.payload,
                 },
             )?;
@@ -127,6 +130,26 @@ fn invalidate(handle: &Handle) {
 /// Renders SVG bytes through the shared engine. `None` when the engine is missing, times out,
 /// fails, or returns something the image cache cannot use.
 pub fn render_svg(bytes: &[u8]) -> Option<DecodedImage> {
+    let reply = submit(KIND_SVG, bytes.to_vec())?;
+    decode(reply)
+}
+
+/// Renders a TeX formula. `font_size` is device pixels per em; `display` asks for display style,
+/// otherwise inline text style. `color` is RGB, because the theme's text colour is the formula's.
+pub fn render_math(
+    source: &str,
+    display: bool,
+    font_size: f32,
+    color: [u8; 3],
+) -> Option<DecodedImage> {
+    if !font_size.is_finite() || font_size < 4.0 || font_size > 512.0 {
+        return None;
+    }
+    let reply = submit(KIND_MATH, math_payload(font_size, display, color, source))?;
+    decode(reply)
+}
+
+fn submit(kind: u32, payload: Vec<u8>) -> Option<mdview_engine_proto::Reply> {
     for _ in 0..ATTEMPTS {
         let handle = {
             let mut slot = shared();
@@ -137,7 +160,8 @@ pub fn render_svg(bytes: &[u8]) -> Option<DecodedImage> {
         };
         let (sender, receiver) = mpsc::channel();
         let job = Job {
-            payload: bytes.to_vec(),
+            kind,
+            payload: payload.clone(),
             reply: sender,
         };
         if handle.tx.send(job).is_err() {
@@ -146,7 +170,7 @@ pub fn render_svg(bytes: &[u8]) -> Option<DecodedImage> {
             continue;
         }
         match receiver.recv_timeout(DEADLINE) {
-            Ok(Some(reply)) => return decode(reply),
+            Ok(Some(reply)) => return Some(reply),
             // An engine that died between jobs, or one the worker lost: retry once.
             Ok(None) | Err(RecvTimeoutError::Disconnected) => {
                 invalidate(&handle);
@@ -174,6 +198,7 @@ fn decode(reply: Reply) -> Option<DecodedImage> {
     Some(DecodedImage {
         width: reply.width,
         height: reply.height,
+        baseline: reply.baseline,
         rgba: reply.rgba,
     })
 }
@@ -239,6 +264,31 @@ mod tests {
         // When the workspace build is present a garbage job fails cleanly; when it is absent the
         // search returns nothing. Either way there is no panic and no image.
         assert!(render_svg(b"not an svg").is_none());
+    }
+
+    #[test]
+    fn a_formula_comes_back_with_a_baseline() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if engine_path().is_none() {
+            eprintln!("skipping: no mdview-engine beside the test binary");
+            return;
+        }
+        let image = render_math("x_i^2 + 1", false, 32.0, [0, 0, 0]).expect("the formula renders");
+        assert!(image.width > 10 && image.height > 10);
+        assert_eq!(
+            image.rgba.len(),
+            image.width as usize * image.height as usize * 4
+        );
+        assert!(
+            image.baseline > 0 && image.baseline <= image.height,
+            "baseline {} in {} px",
+            image.baseline,
+            image.height
+        );
+        assert!(
+            image.rgba.chunks_exact(4).any(|p| p[3] > 0),
+            "the raster has ink"
+        );
     }
 
     #[test]

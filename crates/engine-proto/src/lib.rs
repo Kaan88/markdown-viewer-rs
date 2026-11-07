@@ -1,14 +1,20 @@
 //! The wire format between the viewer and `mdview-engine`.
 //!
 //! A job is a header of `kind` and payload length as little-endian `u32`s, then the payload. A
-//! reply is `status`, `width`, `height`, pixel-buffer length as a `u64`, then straight-alpha RGBA.
-//! Both sides are written by hand: the engine is a separate process with a hard deadline, so the
-//! format stays small and versionless until there is a second job family.
+//! reply is `status`, `width`, `height`, `baseline`, pixel-buffer length as a `u64`, then
+//! straight-alpha RGBA. Both sides are written by hand: the engine is a separate process with a
+//! hard deadline, so the format stays small and versionless until there is a second job family.
+//!
+//! `baseline` is the distance from the top of the raster to the text baseline, in pixels. It is
+//! what lets inline math sit on the line instead of hanging below it; images that do not care
+//! leave it at the bottom.
 
 use std::io::{self, Read, Write};
 
 /// The SVG job: the payload is the file's bytes, the reply is the raster.
 pub const KIND_SVG: u32 = 1;
+/// The math job: a small math header (font size, display flag, colour) and then TeX source.
+pub const KIND_MATH: u32 = 2;
 
 pub const STATUS_OK: u32 = 0;
 /// The request or its kind was not understood.
@@ -16,30 +22,56 @@ pub const STATUS_BAD_REQUEST: u32 = 1;
 /// The job ran but the input could not be rendered.
 pub const STATUS_FAILED: u32 = 2;
 
-/// A request payload is a document, and the document cap is 12 MiB; the extra room is for a future
-/// job that carries a snippet rather than a file.
+/// A request payload is a document, and the document cap is 12 MiB; the extra room is for a
+/// snippet job rather than a file.
 pub const MAX_REQUEST: u32 = 16 * 1024 * 1024;
 /// The renderer's image cap: 24 M pixels at four bytes.
 pub const MAX_REPLY: u64 = 24_000_000 * 4;
+
+/// The fixed part of a `KIND_MATH` payload: font size in device pixels per em, a display flag, and
+/// the RGB text colour. The TeX source is the rest.
+pub const MATH_HEADER: usize = 4 + 1 + 3;
 
 pub struct Request {
     pub kind: u32,
     pub payload: Vec<u8>,
 }
 
+/// A decoded math job, as the engine reads it.
+pub struct MathRequest<'a> {
+    pub font_size: f32,
+    pub display: bool,
+    pub color: [u8; 3],
+    pub source: &'a str,
+}
+
 pub struct Reply {
     pub status: u32,
     pub width: u32,
     pub height: u32,
+    pub baseline: u32,
     pub rgba: Vec<u8>,
 }
 
 impl Reply {
+    /// A raster that sits at the bottom of its box, which is right for images and wrong for math.
     pub fn ok(width: u32, height: u32, rgba: Vec<u8>) -> Reply {
         Reply {
             status: STATUS_OK,
             width,
             height,
+            baseline: height,
+            rgba,
+        }
+    }
+
+    /// A raster with a baseline measured from its top, for inline math.
+    pub fn ok_with_baseline(width: u32, height: u32, baseline: u32, rgba: Vec<u8>) -> Reply {
+        Reply {
+            status: STATUS_OK,
+            width,
+            height,
+            baseline: baseline.min(height),
             rgba,
         }
     }
@@ -49,9 +81,40 @@ impl Reply {
             status,
             width: 0,
             height: 0,
+            baseline: 0,
             rgba: Vec::new(),
         }
     }
+}
+
+/// Encodes the math payload: the fixed header, then the TeX source.
+pub fn math_payload(font_size: f32, display: bool, color: [u8; 3], source: &str) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(MATH_HEADER + source.len());
+    payload.extend_from_slice(&font_size.to_le_bytes());
+    payload.push(u8::from(display));
+    payload.extend_from_slice(&color);
+    payload.extend_from_slice(source.as_bytes());
+    payload
+}
+
+/// Decodes a math payload. `None` when it is too short or its source is not UTF-8.
+pub fn read_math_request(payload: &[u8]) -> Option<MathRequest<'_>> {
+    if payload.len() < MATH_HEADER {
+        return None;
+    }
+    let font_size = f32::from_le_bytes(payload[0..4].try_into().ok()?);
+    if !font_size.is_finite() || font_size <= 0.0 {
+        return None;
+    }
+    let display = payload[4] != 0;
+    let color = [payload[5], payload[6], payload[7]];
+    let source = std::str::from_utf8(&payload[MATH_HEADER..]).ok()?;
+    Some(MathRequest {
+        font_size,
+        display,
+        color,
+        source,
+    })
 }
 
 pub fn write_request(w: &mut impl Write, request: &Request) -> io::Result<()> {
@@ -101,13 +164,14 @@ pub fn write_reply(w: &mut impl Write, reply: &Reply) -> io::Result<()> {
     w.write_all(&reply.status.to_le_bytes())?;
     w.write_all(&reply.width.to_le_bytes())?;
     w.write_all(&reply.height.to_le_bytes())?;
+    w.write_all(&reply.baseline.to_le_bytes())?;
     w.write_all(&length.to_le_bytes())?;
     w.write_all(&reply.rgba)?;
     w.flush()
 }
 
 pub fn read_reply(r: &mut impl Read) -> io::Result<Reply> {
-    let mut header = [0u8; 20];
+    let mut header = [0u8; 24];
     let read = read_frame_start(r, &mut header)?;
     if read != header.len() {
         return Err(io::Error::new(
@@ -118,7 +182,8 @@ pub fn read_reply(r: &mut impl Read) -> io::Result<Reply> {
     let status = u32::from_le_bytes(header[0..4].try_into().expect("four bytes"));
     let width = u32::from_le_bytes(header[4..8].try_into().expect("four bytes"));
     let height = u32::from_le_bytes(header[8..12].try_into().expect("four bytes"));
-    let length = u64::from_le_bytes(header[12..20].try_into().expect("eight bytes"));
+    let baseline = u32::from_le_bytes(header[12..16].try_into().expect("four bytes"));
+    let length = u64::from_le_bytes(header[16..24].try_into().expect("eight bytes"));
     if length > MAX_REPLY {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -131,6 +196,7 @@ pub fn read_reply(r: &mut impl Read) -> io::Result<Reply> {
         status,
         width,
         height,
+        baseline,
         rgba,
     })
 }
@@ -182,7 +248,31 @@ mod tests {
         let reply = read_reply(&mut Cursor::new(buffer)).unwrap();
         assert_eq!(reply.status, STATUS_OK);
         assert_eq!((reply.width, reply.height), (2, 1));
+        assert_eq!(reply.baseline, 1);
         assert_eq!(reply.rgba, rgba);
+    }
+
+    #[test]
+    fn a_baseline_round_trips() {
+        let mut buffer = Vec::new();
+        write_reply(
+            &mut buffer,
+            &Reply::ok_with_baseline(10, 20, 15, vec![0; 10 * 20 * 4]),
+        )
+        .unwrap();
+        let reply = read_reply(&mut Cursor::new(buffer)).unwrap();
+        assert_eq!(reply.baseline, 15);
+    }
+
+    #[test]
+    fn a_math_payload_round_trips() {
+        let payload = math_payload(32.0, true, [1, 2, 3], "x^2");
+        let parsed = read_math_request(&payload).expect("the payload parses");
+        assert_eq!(parsed.font_size, 32.0);
+        assert!(parsed.display);
+        assert_eq!(parsed.color, [1, 2, 3]);
+        assert_eq!(parsed.source, "x^2");
+        assert!(read_math_request(&payload[..MATH_HEADER - 1]).is_none());
     }
 
     #[test]
