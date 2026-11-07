@@ -1,0 +1,17 @@
+[package]
+name = "mdview-engine"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "mdview_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mdview-engine"
+path = "src/main.rs"
+
+[dependencies]
+mdview-engine-proto = { path = "../engine-proto" }
+resvg = "=0.47.0"

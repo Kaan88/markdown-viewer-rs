@@ -616,6 +616,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mdview-engine-proto"
+version = "0.1.0"
+
+[[package]]
 name = "mdview-qt"
 version = "0.1.0"
 dependencies = [
@@ -632,6 +636,7 @@ name = "mdview-render"
 version = "0.1.0"
 dependencies = [
  "mdview-core",
+ "mdview-engine-proto",
  "parley",
  "png",
  "swash",

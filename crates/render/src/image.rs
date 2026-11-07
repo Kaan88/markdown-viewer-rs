@@ -1,4 +1,5 @@
-//! Decodes the images a document points at. PNG and JPEG now; SVG waits for Phase 4.
+//! Decodes the images a document points at. PNG and JPEG in-process; SVG through
+//! `mdview-engine`, so its rasterizer and fonts never live in the viewer.
 //!
 //! The plan caps an image at 12 MiB on disk and 24 M pixels once decoded, so a document cannot make
 //! the viewer allocate without bound. Anything over a limit, unreadable, or in another format is
@@ -26,9 +27,20 @@ pub fn load(path: &Path) -> Option<DecodedImage> {
         decode_png(&bytes)
     } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
         decode_jpeg(&bytes)
+    } else if looks_like_svg(&bytes) {
+        crate::engine::render_svg(&bytes)
     } else {
         None
     }
+}
+
+/// A text file whose first tag is `<svg`: XML declarations, comments and whitespace may come
+/// first, and there is no binary signature to rely on.
+fn looks_like_svg(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(1024)];
+    let text = String::from_utf8_lossy(head);
+    let trimmed = text.trim_start_matches('\u{feff}').trim_start();
+    trimmed.starts_with('<') && trimmed.contains("<svg")
 }
 
 fn fits(width: u32, height: u32) -> bool {

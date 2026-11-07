@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/render", "bins/mdv-bench", "bins/mdv-winui"]
+members = ["crates/core", "crates/render", "crates/engine", "crates/engine-proto", "bins/mdv-bench", "bins/mdv-winui"]
 exclude = ["spikes", "bins/mdv-qt"]
 
 [workspace.package]
@@ -14,3 +14,7 @@ lto = "fat"
 codegen-units = 1
 strip = "symbols"
 panic = "unwind"
+
+# The engine is a separate process that starts on demand; code size matters more than its speed.
+[profile.release.package.mdview-engine]
+opt-level = "s"

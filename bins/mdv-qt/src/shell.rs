@@ -780,6 +780,7 @@ fn build(
     file: Option<PathBuf>,
     drop_test: Option<PathBuf>,
     check: Option<Check>,
+    scroll: f64,
 ) {
     let window = H::<QMainWindow>::new();
     window.widget().set_title("mdview");
@@ -862,7 +863,13 @@ fn build(
     // `--drop-test` sends one drop through the window's event path (Qt uses OLE, so a WM_DROPFILES
     // from another process never arrives) and exits with the result, for scripted checks.
     if let Some(check) = check {
+        if scroll > 0.0 {
+            shell.scroll.set(scroll);
+        }
         run_check(shell, check);
+    } else if scroll > 0.0 {
+        shell.scroll.set(scroll);
+        shell.redraw();
     }
     if let Some(target) = drop_test {
         let (x, y) = canvas.widget().center_in_window();
@@ -902,11 +909,19 @@ pub fn run() -> i32 {
     let mut check = None;
     let mut theme = LIGHT;
     let mut zoom = 1.0f64;
+    let mut scroll = 0.0f64;
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--light" => theme = LIGHT,
             "--dark" => theme = DARK,
+            "--scroll" => {
+                scroll = args
+                    .next()
+                    .expect("--scroll needs a number")
+                    .parse()
+                    .unwrap();
+            }
             "--select-test" => check = Some(Check::Select),
             "--select-hold" => check = Some(Check::Hold),
             "--link-test" => check = Some(Check::Link),
@@ -924,5 +939,5 @@ pub fn run() -> i32 {
         }
     }
     let shell = Rc::new(Shell::new(theme, zoom.clamp(0.5, 3.0)));
-    run_app(move || build(&shell, file, drop_test, check))
+    run_app(move || build(&shell, file, drop_test, check, scroll))
 }
