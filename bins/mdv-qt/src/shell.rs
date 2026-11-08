@@ -6,7 +6,9 @@
 use crate::qt::ffi::*;
 use crate::qt::*;
 use mdview_core::commands::strings;
+use mdview_core::files::{canonical_or_absolute, tab_labels};
 use mdview_core::links::{classify_link, LinkAction};
+use mdview_core::session::{Recents, Session};
 use mdview_core::parse_bytes;
 use mdview_render::{DocumentRenderer, Hit, Options, PageLayout, Rect, Theme, DARK, LIGHT};
 use std::cell::{Cell, RefCell};
@@ -36,6 +38,12 @@ const KEY_PAGE_UP: i32 = 0x0100_0016;
 const KEY_PAGE_DOWN: i32 = 0x0100_0017;
 const KEY_SPACE: i32 = 0x20;
 const KEY_ESCAPE: i32 = 0x0100_0000;
+const KEY_TAB: i32 = 0x0100_0001;
+/// Shift+Tab arrives as Backtab.
+const KEY_BACKTAB: i32 = 0x0100_0002;
+const KEY_F4: i32 = 0x0100_0033;
+const KEY_O: i32 = 0x4f;
+const KEY_W: i32 = 0x57;
 /// One arrow-key step, in device px.
 const STEP: f64 = 48.0;
 
@@ -48,7 +56,27 @@ struct Find {
     capped: bool,
 }
 
+/// A tab's state while another tab is showing. The showing tab's state lives in `Shell`'s own
+/// fields, so everything that reads the page keeps working; switching swaps the two.
+struct Page {
+    path: PathBuf,
+    document: Option<mdview_core::Document>,
+    renderer: DocumentRenderer,
+    scroll: f64,
+    selection: Option<(u32, u32)>,
+}
+
 struct Shell {
+    /// Open documents in tab order, and which one is showing. `None` shows the empty page.
+    pages: RefCell<Vec<Page>>,
+    current: Cell<Option<usize>>,
+    tab_bar: Cell<Option<H<QTabBar>>>,
+    /// Set while the shell changes the tab bar itself, so its signals do not re-enter.
+    tabs_busy: Cell<bool>,
+    recent: RefCell<Recents>,
+    /// The saved session, kept so keys this shell does not use round-trip. `None` with the
+    /// session off (`--no-session` and the scripted checks).
+    session: RefCell<Option<(PathBuf, Session)>>,
     window: Cell<Option<H<QMainWindow>>>,
     canvas: Cell<Option<H<Canvas>>>,
     status: Cell<Option<H<QStatusBar>>>,
@@ -93,6 +121,12 @@ struct Shell {
 impl Shell {
     fn new(theme: Theme, zoom: f64) -> Shell {
         Shell {
+            pages: RefCell::new(Vec::new()),
+            current: Cell::new(None),
+            tab_bar: Cell::new(None),
+            tabs_busy: Cell::new(false),
+            recent: RefCell::new(Recents::default()),
+            session: RefCell::new(None),
             window: Cell::new(None),
             canvas: Cell::new(None),
             status: Cell::new(None),
@@ -329,8 +363,22 @@ impl Shell {
         }
     }
 
-    fn load(&self, path: &Path) {
-        match std::fs::read(path) {
+    /// Opens `path` in a new tab, or switches to the tab that already shows it. Adds it to Recent
+    /// either way. False when the file could not be read.
+    fn open(&self, path: &Path) -> bool {
+        let path = canonical_or_absolute(path);
+        let existing = self
+            .pages
+            .borrow()
+            .iter()
+            .position(|page| same_file(&page.path, &path));
+        if let Some(index) = existing {
+            self.recent.borrow_mut().add(path);
+            self.switch_to(index);
+            self.save_session();
+            return true;
+        }
+        match std::fs::read(&path) {
             Ok(bytes) => {
                 let started = std::time::Instant::now();
                 let document = parse_bytes(&bytes);
@@ -342,33 +390,272 @@ impl Shell {
                     document.warnings.len(),
                     started.elapsed().as_secs_f64() * 1000.0
                 );
-                *self.document.borrow_mut() = Some(document);
-                self.renderer.borrow_mut().clear_details();
-                *self.layout.borrow_mut() = None;
-                self.scroll.set(0.0);
-                self.selection.set(None);
-                self.anchor.set(None);
-                self.find.borrow_mut().query.clear();
-                self.find.borrow_mut().hits.clear();
-                if let Some(bar) = self.find_bar.get() {
-                    bar.widget().set_visible(false);
-                }
-                self.pending_anchor.borrow_mut().take();
-                self.build_outline();
-                *self.path.borrow_mut() = Some(path.to_path_buf());
-                let name = path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string());
-                self.set_title(&name);
-                self.message(&format!("{name}: {} blocks", self.blocks()));
-                self.redraw();
+                self.recent.borrow_mut().add(path.clone());
+                let index = self.add_page(path, document);
+                self.switch_to(index);
+                self.save_session();
+                true
             }
             Err(e) => {
                 self.message(&format!("{}: {e}", path.display()));
                 eprintln!("mdview-qt: {}: {e}", path.display());
+                false
             }
         }
+    }
+
+    /// Appends a tab without showing it, and returns its index.
+    fn add_page(&self, path: PathBuf, document: mdview_core::Document) -> usize {
+        let index = {
+            let mut pages = self.pages.borrow_mut();
+            pages.push(Page {
+                path,
+                document: Some(document),
+                renderer: DocumentRenderer::new(),
+                scroll: 0.0,
+                selection: None,
+            });
+            pages.len() - 1
+        };
+        if let Some(bar) = self.tab_bar.get() {
+            self.tabs_busy.set(true);
+            bar.add("");
+            self.tabs_busy.set(false);
+        }
+        self.relabel();
+        index
+    }
+
+    /// Restores a saved tab. A file that is gone still gets its tab, saying so, as the original did.
+    fn restore_page(&self, path: &Path) {
+        let path = canonical_or_absolute(path);
+        if self
+            .pages
+            .borrow()
+            .iter()
+            .any(|page| same_file(&page.path, &path))
+        {
+            return;
+        }
+        let document = match std::fs::read(&path) {
+            Ok(bytes) => parse_bytes(&bytes),
+            Err(_) => {
+                let name = file_name(&path);
+                parse_bytes(format!("# {name}\n\n{}\n", strings::FILE_NOT_FOUND).as_bytes())
+            }
+        };
+        self.add_page(path, document);
+    }
+
+    /// Selects tab `index` in the bar and shows it.
+    fn switch_to(&self, index: usize) {
+        if let Some(bar) = self.tab_bar.get() {
+            self.tabs_busy.set(true);
+            bar.set_current(index);
+            self.tabs_busy.set(false);
+        }
+        self.activate(index);
+    }
+
+    /// Shows tab `index`, keeping the state of the tab it replaces.
+    fn activate(&self, index: usize) {
+        if self.current.get() == Some(index) || index >= self.pages.borrow().len() {
+            return;
+        }
+        self.stash();
+        self.current.set(Some(index));
+        let (path, document, renderer, scroll, selection) = {
+            let mut pages = self.pages.borrow_mut();
+            let page = &mut pages[index];
+            (
+                page.path.clone(),
+                page.document.take(),
+                std::mem::take(&mut page.renderer),
+                page.scroll,
+                page.selection,
+            )
+        };
+        *self.document.borrow_mut() = document;
+        *self.renderer.borrow_mut() = renderer;
+        let name = file_name(&path);
+        *self.path.borrow_mut() = Some(path);
+        self.show_page(scroll, selection);
+        self.set_title(&name);
+        self.message(&format!("{name}: {} blocks", self.blocks()));
+    }
+
+    /// Moves the showing tab's state back into its `Page`.
+    fn stash(&self) {
+        let Some(index) = self.current.get() else {
+            return;
+        };
+        let mut pages = self.pages.borrow_mut();
+        let Some(page) = pages.get_mut(index) else {
+            return;
+        };
+        page.document = self.document.borrow_mut().take();
+        page.renderer = std::mem::take(&mut *self.renderer.borrow_mut());
+        page.scroll = self.scroll.get();
+        page.selection = self.selection.get();
+    }
+
+    /// Resets what belongs to the page on screen: layout, find, outline, pending jumps.
+    fn show_page(&self, scroll: f64, selection: Option<(u32, u32)>) {
+        *self.layout.borrow_mut() = None;
+        self.scroll.set(scroll);
+        self.selection.set(selection);
+        self.anchor.set(None);
+        self.find.borrow_mut().query.clear();
+        self.find.borrow_mut().hits.clear();
+        if let Some(bar) = self.find_bar.get() {
+            bar.widget().set_visible(false);
+        }
+        self.pending_anchor.borrow_mut().take();
+        self.build_outline();
+        self.redraw();
+    }
+
+    /// Closes tab `index`. The last one closing shows the empty page; the app stays open.
+    fn close_tab(&self, index: usize) {
+        if index >= self.pages.borrow().len() {
+            return;
+        }
+        match self.current.get() {
+            // The showing tab's state is in `Shell` and is simply replaced, so nothing to stash.
+            Some(current) if current == index => self.current.set(None),
+            Some(current) if current > index => self.current.set(Some(current - 1)),
+            _ => {}
+        }
+        self.pages.borrow_mut().remove(index);
+        let next = self.tab_bar.get().and_then(|bar| {
+            self.tabs_busy.set(true);
+            bar.remove(index);
+            self.tabs_busy.set(false);
+            bar.current()
+        });
+        self.relabel();
+        if self.pages.borrow().is_empty() {
+            self.show_empty(strings::STATUS_ALL_CLOSED);
+        } else if self.current.get().is_none() {
+            let last = self.pages.borrow().len() - 1;
+            self.activate(next.unwrap_or(index).min(last));
+        }
+        self.save_session();
+    }
+
+    fn close_all(&self) {
+        while !self.pages.borrow().is_empty() {
+            let last = self.pages.borrow().len() - 1;
+            self.close_tab(last);
+        }
+    }
+
+    /// Ctrl+Tab and Ctrl+Shift+Tab: the next or previous tab, wrapping. Nothing with one tab.
+    fn cycle(&self, delta: isize) {
+        let count = self.pages.borrow().len();
+        let Some(current) = self.current.get() else {
+            return;
+        };
+        if count > 1 {
+            let next = (current as isize + delta).rem_euclid(count as isize) as usize;
+            self.switch_to(next);
+        }
+    }
+
+    /// A tab was dragged from `from` to `to`; the pages follow, and so does the current index.
+    fn tab_moved(&self, from: usize, to: usize) {
+        {
+            let mut pages = self.pages.borrow_mut();
+            if from >= pages.len() || to >= pages.len() {
+                return;
+            }
+            let page = pages.remove(from);
+            pages.insert(to, page);
+        }
+        if let Some(current) = self.current.get() {
+            let moved = if current == from {
+                to
+            } else if from < current && current <= to {
+                current - 1
+            } else if to <= current && current < from {
+                current + 1
+            } else {
+                current
+            };
+            self.current.set(Some(moved));
+        }
+        self.save_session();
+    }
+
+    /// Tab titles from core: repeated filenames gain parent folders until they differ.
+    fn relabel(&self) {
+        let Some(bar) = self.tab_bar.get() else {
+            return;
+        };
+        let paths: Vec<PathBuf> = self.pages.borrow().iter().map(|p| p.path.clone()).collect();
+        for (index, label) in tab_labels(&paths).iter().enumerate() {
+            if index < bar.count() {
+                bar.set_label(index, label, &paths[index].display().to_string());
+            }
+        }
+    }
+
+    /// The page shown with no tab open.
+    fn show_empty(&self, status: &str) {
+        self.current.set(None);
+        *self.path.borrow_mut() = None;
+        *self.document.borrow_mut() = Some(parse_bytes(WELCOME.as_bytes()));
+        *self.renderer.borrow_mut() = DocumentRenderer::new();
+        self.show_page(0.0, None);
+        if let Some(window) = self.window.get() {
+            window.widget().set_title(&strings::window_title(None));
+        }
+        self.message(status);
+    }
+
+    /// Writes tabs, the current tab and Recent at once, so a crash loses nothing.
+    fn save_session(&self) {
+        let mut session = self.session.borrow_mut();
+        let Some((path, session)) = session.as_mut() else {
+            return;
+        };
+        session.tabs = self.pages.borrow().iter().map(|p| p.path.clone()).collect();
+        session.active = self.current.get().unwrap_or(0);
+        session.recent = self.recent.borrow().clone();
+        if let Err(e) = session.save(path) {
+            eprintln!("mdview-qt: could not save {}: {e}", path.display());
+        }
+    }
+
+    /// Rebuilds File > Open recent as it opens, so missing files are marked as of now.
+    fn fill_recent(self: &Rc<Self>, menu: H<QMenu>) {
+        menu.clear();
+        let entries = self.recent.borrow().entries();
+        if entries.is_empty() {
+            menu.add_action(strings::RECENT_EMPTY).set_enabled(false);
+        }
+        for entry in entries {
+            let action = menu.add_action(&entry.label.replace('&', "&&"));
+            action.set_tool_tip(&entry.path.display().to_string());
+            let s = self.clone();
+            action.on_triggered(move |_| {
+                if entry.missing {
+                    s.recent.borrow_mut().remove(&entry.path);
+                    s.save_session();
+                    s.message(strings::RECENT_REMOVED_MISSING);
+                } else {
+                    s.open(&entry.path);
+                }
+            });
+        }
+        menu.add_separator();
+        let clear = menu.add_action("&Clear recent files");
+        let s = self.clone();
+        clear.on_triggered(move |_| {
+            s.recent.borrow_mut().clear();
+            s.save_session();
+            s.message(strings::RECENT_CLEARED);
+        });
     }
 
     fn blocks(&self) -> usize {
@@ -711,7 +998,9 @@ impl Shell {
             self.message(&format!("not a file: {}", resolved.display()));
             return;
         }
-        self.load(&resolved);
+        if !self.open(&resolved) {
+            return;
+        }
         if let Some(fragment) = fragment {
             self.pending_anchor.borrow_mut().replace(fragment);
         }
@@ -884,6 +1173,35 @@ impl CanvasHandler for Shell {
         self.copy_selection();
     }
 
+    fn control_key(&self, code: i32, shift: bool) -> bool {
+        match code {
+            KEY_TAB => self.cycle(1),
+            KEY_BACKTAB => self.cycle(-1),
+            KEY_W if shift => self.close_all(),
+            KEY_W | KEY_F4 => {
+                if let Some(current) = self.current.get() {
+                    self.close_tab(current);
+                }
+            }
+            KEY_O => {
+                if let Some(window) = self.window.get() {
+                    let dir = self
+                        .path
+                        .borrow()
+                        .as_ref()
+                        .and_then(|path| path.parent().map(Path::to_path_buf))
+                        .or_else(|| std::env::current_dir().ok())
+                        .unwrap_or_default();
+                    if let Some(path) = choose_file(window.widget(), &dir) {
+                        self.open(&path);
+                    }
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
     fn drag_enter(&self, _text: String) -> bool {
         true
     }
@@ -902,7 +1220,7 @@ impl CanvasHandler for Shell {
             }
         };
         if path.is_file() {
-            self.load(&path);
+            self.open(&path);
         } else {
             self.message(&format!("not a file: {}", path.display()));
         }
@@ -933,6 +1251,92 @@ enum Check {
     OutlineHold,
     /// Copy the selected word and read it back from the clipboard, then exit.
     Copy,
+    /// Open, switch, cycle and close tabs and check what each shows, then exit.
+    Tabs,
+}
+
+/// `--tabs-test`: with one document open, opens `linked.md` beside it, switches back by opening the
+/// first again, cycles with Ctrl+Tab, closes both, and checks tabs, scroll, labels and Recent.
+fn run_tabs_check(shell: &Rc<Shell>) -> ! {
+    let mut failures = Vec::new();
+    let mut expect = |ok: bool, what: String| {
+        if !ok {
+            failures.push(what);
+        }
+    };
+    let Some(first) = shell.path.borrow().clone() else {
+        println!("tabs test failed: start with a document");
+        std::process::exit(1);
+    };
+    let bar = shell.tab_bar.get().expect("tab bar");
+    let other = first.with_file_name("linked.md");
+    shell.scroll_to(500.0);
+    let scrolled = shell.scroll.get();
+    expect(scrolled > 0.0, format!("first page did not scroll ({scrolled})"));
+    shell.open(&other);
+    expect(shell.pages.borrow().len() == 2, "second tab not added".into());
+    expect(shell.current.get() == Some(1), "second tab not current".into());
+    expect(bar.count() == 2 && bar.current() == Some(1), "bar out of step after open".into());
+    expect(shell.scroll.get() == 0.0, "new tab did not start at the top".into());
+    shell.open(&first);
+    expect(shell.pages.borrow().len() == 2, "reopening added a duplicate".into());
+    expect(shell.current.get() == Some(0), "reopening did not switch".into());
+    expect(
+        shell.scroll.get() == scrolled,
+        format!("scroll not kept: {} vs {scrolled}", shell.scroll.get()),
+    );
+    expect(
+        bar.text(0) == "showcase.md" && bar.text(1) == "linked.md",
+        format!("labels {:?} {:?}", bar.text(0), bar.text(1)),
+    );
+    shell.control_key(KEY_TAB, false);
+    expect(shell.current.get() == Some(1) && bar.current() == Some(1), "Ctrl+Tab".into());
+    shell.control_key(KEY_TAB, false);
+    expect(shell.current.get() == Some(0), "Ctrl+Tab did not wrap".into());
+    shell.control_key(KEY_BACKTAB, true);
+    expect(shell.current.get() == Some(1), "Ctrl+Shift+Tab".into());
+    shell.tab_moved(1, 0);
+    expect(
+        shell.current.get() == Some(0) && shell.pages.borrow()[0].path == canonical_or_absolute(&other),
+        "move did not carry the current tab".into(),
+    );
+    shell.tab_moved(0, 1);
+    shell.control_key(KEY_W, false);
+    expect(
+        shell.pages.borrow().len() == 1
+            && shell.path.borrow().as_deref().is_some_and(|p| same_file(p, &first)),
+        "Ctrl+W closed the wrong tab".into(),
+    );
+    expect(shell.current.get() == Some(0) && bar.count() == 1, "after close".into());
+    shell.control_key(KEY_W, true);
+    expect(shell.pages.borrow().is_empty() && bar.count() == 0, "Ctrl+Shift+W".into());
+    expect(shell.path.borrow().is_none(), "empty page still has a path".into());
+    expect(shell.blocks() > 0, "empty page shows nothing".into());
+    let recent: Vec<PathBuf> = shell.recent.borrow().paths().to_vec();
+    expect(
+        recent.len() == 2 && same_file(&recent[0], &first),
+        format!("recent {recent:?}"),
+    );
+    if failures.is_empty() {
+        println!("tabs test ok: 2 tabs, scroll {scrolled} kept, recent {}", recent.len());
+        std::process::exit(0);
+    }
+    println!("tabs test failed: {}", failures.join("; "));
+    std::process::exit(1);
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    if cfg!(windows) {
+        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    } else {
+        a == b
+    }
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 /// Scripted checks through Qt's real mouse path, for `--select-test`, `--select-hold` and
@@ -944,6 +1348,9 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
     };
     shell.ensure_layout();
     canvas.widget().repaint();
+    if check == Check::Tabs {
+        run_tabs_check(shell);
+    }
     if matches!(check, Check::Find | Check::FindHold) {
         shell.show_find();
         let bar_visible = shell
@@ -1123,7 +1530,8 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
         | Check::FindHold
         | Check::Outline
         | Check::OutlineHold
-        | Check::Copy => {
+        | Check::Copy
+        | Check::Tabs => {
             canvas.send_mouse(EV_MOUSE_PRESS, x0, y0);
             canvas.send_mouse(EV_MOUSE_MOVE, x1, y0);
             canvas.send_mouse(EV_MOUSE_RELEASE, x1, y0);
@@ -1158,7 +1566,7 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
 
 fn build(
     shell: &Rc<Shell>,
-    file: Option<PathBuf>,
+    files: Vec<PathBuf>,
     drop_test: Option<PathBuf>,
     check: Option<Check>,
     scroll: f64,
@@ -1169,7 +1577,7 @@ fn build(
 
     let menus = window.menu_bar();
     let file_menu = menus.add_menu("&File");
-    let open = file_menu.add_action("&Open...");
+    let open = file_menu.add_action("&Open...\tCtrl+O");
     let s = shell.clone();
     open.on_triggered(move |_| {
         let dir = s
@@ -1181,10 +1589,28 @@ fn build(
             .unwrap_or_default();
         if let Some(window) = s.window.get() {
             if let Some(path) = choose_file(window.widget(), &dir) {
-                s.load(&path);
+                s.open(&path);
             }
         }
     });
+    let recent_menu = file_menu.add_menu("Open &recent");
+    recent_menu.show_tool_tips();
+    let s = shell.clone();
+    recent_menu.on_about_to_show(move || s.fill_recent(recent_menu));
+    // Filled once now too, so the submenu is never empty before its first opening.
+    shell.fill_recent(recent_menu);
+    file_menu.add_separator();
+    let close_tab = file_menu.add_action("&Close tab\tCtrl+W");
+    let s = shell.clone();
+    close_tab.on_triggered(move |_| {
+        if let Some(current) = s.current.get() {
+            s.close_tab(current);
+        }
+    });
+    let close_all = file_menu.add_action("Close &all tabs\tCtrl+Shift+W");
+    let s = shell.clone();
+    close_all.on_triggered(move |_| s.close_all());
+    file_menu.add_separator();
     let quit = file_menu.add_action("&Quit");
     quit.on_triggered(|_| std::process::exit(0));
     let edit_menu = menus.add_menu("&Edit");
@@ -1274,7 +1700,31 @@ fn build(
         s.redraw();
     });
     layout_row(page, canvas.widget(), bar.widget());
-    window.set_central(page);
+    let tabs = H::<QTabBar>::new();
+    let s = shell.clone();
+    tabs.on_current_changed(move |index| {
+        if let Ok(index) = usize::try_from(index) {
+            if !s.tabs_busy.get() {
+                s.activate(index);
+            }
+        }
+    });
+    let s = shell.clone();
+    tabs.on_close_requested(move |index| {
+        if let Ok(index) = usize::try_from(index) {
+            s.close_tab(index);
+        }
+    });
+    let s = shell.clone();
+    tabs.on_moved(move |from, to| {
+        if let (Ok(from), Ok(to)) = (usize::try_from(from), usize::try_from(to)) {
+            s.tab_moved(from, to);
+        }
+    });
+    shell.tab_bar.set(Some(tabs));
+    let central = new_plain_widget();
+    layout_column(central, tabs.widget(), page);
+    window.set_central(central);
     shell.canvas.set(Some(canvas));
     shell.scrollbar.set(Some(bar));
     shell.window.set(Some(window));
@@ -1284,12 +1734,23 @@ fn build(
         canvas.widget().set_focus();
     }
 
-    shell.message("Drag a Markdown file here, or pass one on the command line");
-    if let Some(path) = file {
-        shell.load(&path);
-    } else if shell.document.borrow().is_none() {
-        *shell.document.borrow_mut() = Some(parse_bytes(WELCOME.as_bytes()));
-        shell.redraw();
+    // Saved tabs come back first, without reordering Recent; files on the command line follow.
+    let saved = shell.session.borrow().as_ref().map(|(_, s)| s.clone());
+    if let Some(saved) = saved {
+        *shell.recent.borrow_mut() = saved.recent.clone();
+        for path in &saved.tabs {
+            shell.restore_page(path);
+        }
+        if !shell.pages.borrow().is_empty() {
+            let last = shell.pages.borrow().len() - 1;
+            shell.switch_to(saved.active.min(last));
+        }
+    }
+    for path in &files {
+        shell.open(path);
+    }
+    if shell.pages.borrow().is_empty() {
+        shell.show_empty(strings::STATUS_STARTUP);
     }
 
     // `--drop-test` sends one drop through the window's event path (Qt uses OLE, so a WM_DROPFILES
@@ -1310,7 +1771,11 @@ fn build(
             .widget()
             .window_handle()
             .map(|window| window.send_drag_and_drop(x, y, &text));
-        let loaded = shell.path.borrow().as_deref() == Some(target.as_path());
+        let loaded = shell
+            .path
+            .borrow()
+            .as_deref()
+            .is_some_and(|path| same_file(path, &canonical_or_absolute(&target)));
         match sent {
             Some((entered, dropped)) if loaded => {
                 println!(
@@ -1334,9 +1799,11 @@ fn build(
     }
 }
 
-/// `mdview-qt [FILE] [--light|--dark] [--select-test|--select-hold|--link-test]`.
+/// `mdview-qt [FILE...] [--light|--dark] [--no-session] [--select-test|--link-test|...]`.
+/// `MDVIEW_SETTINGS` names the session file instead of the per-user default.
 pub fn run() -> i32 {
-    let mut file = None;
+    let mut files = Vec::new();
+    let mut use_session = true;
     let mut drop_test = None;
     let mut check = None;
     let mut theme = LIGHT;
@@ -1363,6 +1830,8 @@ pub fn run() -> i32 {
             "--outline-test" => check = Some(Check::Outline),
             "--outline-hold" => check = Some(Check::OutlineHold),
             "--copy-test" => check = Some(Check::Copy),
+            "--tabs-test" => check = Some(Check::Tabs),
+            "--no-session" => use_session = false,
             "--zoom" => {
                 zoom = args.next().expect("--zoom needs a number").parse().unwrap();
             }
@@ -1371,10 +1840,23 @@ pub fn run() -> i32 {
                     args.next().expect("--drop-test needs a path"),
                 ));
             }
-            other if !other.starts_with("--") => file = Some(PathBuf::from(other)),
+            other if !other.starts_with("--") => files.push(PathBuf::from(other)),
             other => eprintln!("mdview-qt: ignoring {other}"),
         }
     }
     let shell = Rc::new(Shell::new(theme, zoom.clamp(0.5, 3.0)));
-    run_app(move || build(&shell, file, drop_test, check, scroll))
+    // Scripted checks start from a known state, so they never read or write the user's session
+    // unless `MDVIEW_SETTINGS` points them at a scratch one.
+    let explicit = std::env::var_os("MDVIEW_SETTINGS").map(PathBuf::from);
+    let scripted = check.is_some() || drop_test.is_some();
+    let settings = match explicit {
+        Some(path) => Some(path),
+        None if scripted => None,
+        None => mdview_core::session::default_settings_path(),
+    };
+    if let Some(path) = settings.filter(|_| use_session) {
+        let saved = Session::load(&path);
+        *shell.session.borrow_mut() = Some((path, saved));
+    }
+    run_app(move || build(&shell, files, drop_test, check, scroll))
 }

@@ -99,6 +99,7 @@ upcast_widget!(
     QMainWindow,
     QLineEdit,
     QTabWidget,
+    QTabBar,
     QDockWidget,
     QTreeWidget,
     QScrollBar,
@@ -141,6 +142,10 @@ pub trait CanvasHandler {
     fn find_step(&self, _delta: i32) {}
     /// Ctrl+C: copy the selection.
     fn copy(&self) {}
+    /// Any other key with Ctrl held. True when the shell used it.
+    fn control_key(&self, _code: i32, _shift: bool) -> bool {
+        false
+    }
     fn drag_enter(&self, text: String) -> bool;
     fn dropped(&self, text: String);
     fn timer(&self, id: i32);
@@ -197,6 +202,14 @@ impl Canvas {
         }
         if modifiers.test_flag(KeyboardModifier::ControlModifier) && matches!(code, 0x46 | 0x66) {
             self.handler().find();
+            return;
+        }
+        if modifiers.test_flag(KeyboardModifier::ControlModifier)
+            && self.handler().control_key(
+                code,
+                modifiers.test_flag(KeyboardModifier::ShiftModifier),
+            )
+        {
             return;
         }
         if code == 0x0100_0032 {
@@ -646,7 +659,32 @@ impl H<QMenu> {
         H(pin!(self).addAction(&qs(t)))
     }
 }
+impl H<QMenu> {
+    pub fn add_menu(&self, t: &str) -> H<QMenu> {
+        H(pin!(self).menu_add_menu(&qs(t)))
+    }
+    /// Deletes every action in the menu.
+    pub fn clear(&self) {
+        pin!(self).menu_clear()
+    }
+    pub fn add_separator(&self) {
+        pin!(self).menu_add_separator();
+    }
+    pub fn show_tool_tips(&self) {
+        pin!(self).menu_set_tool_tips_visible(true)
+    }
+    pub fn on_about_to_show(&self, f: impl FnMut() + 'static) {
+        let mut f = GuiThreadOnly(f);
+        pin!(self).on_about_to_show(move |_| f.get()()).release();
+    }
+}
 impl H<QAction> {
+    pub fn set_enabled(&self, on: bool) {
+        pin!(self).action_set_enabled(on)
+    }
+    pub fn set_tool_tip(&self, t: &str) {
+        pin!(self).action_set_tool_tip(&qs(t))
+    }
     pub fn on_triggered(&self, f: impl FnMut(bool) + 'static) {
         let mut f = GuiThreadOnly(f);
         pin!(self).on_triggered(move |_, c| f.get()(c)).release();
@@ -698,6 +736,58 @@ impl H<QTabWidget> {
     }
     pub fn add_tab(&self, w: H<QWidget>, label: &str) {
         unsafe { pin!(self).addTab(w.0, &qs(label)) };
+    }
+}
+/// A document tab bar: closable, movable, hidden while it holds one tab. Its signals fire inside
+/// the calls that change it too (adding the first tab, removing the current one), so callers must
+/// not hold borrows across `add`, `remove` or `set_current`.
+impl H<QTabBar> {
+    pub fn new() -> Self {
+        let bar = H(new_tab_bar());
+        pin!(bar).bar_set_document_mode(true);
+        pin!(bar).bar_set_closable(true);
+        pin!(bar).bar_set_movable(true);
+        pin!(bar).bar_set_auto_hide(true);
+        pin!(bar).bar_set_expanding(false);
+        bar.widget().set_focus_policy(0); // Qt::NoFocus: keys stay with the page
+        bar
+    }
+    pub fn add(&self, label: &str) {
+        pin!(self).bar_add_tab(&qs(label));
+    }
+    pub fn remove(&self, index: usize) {
+        pin!(self).bar_remove_tab(index as i32)
+    }
+    pub fn set_current(&self, index: usize) {
+        pin!(self).bar_set_current(index as i32)
+    }
+    /// `None` with no tabs.
+    pub fn current(&self) -> Option<usize> {
+        usize::try_from(unsafe { &*self.0 }.bar_current()).ok()
+    }
+    pub fn count(&self) -> usize {
+        unsafe { &*self.0 }.bar_count().max(0) as usize
+    }
+    pub fn text(&self, index: usize) -> String {
+        unsafe { &*self.0 }.bar_tab_text(index as i32).to_string()
+    }
+    pub fn set_label(&self, index: usize, text: &str, tip: &str) {
+        pin!(self).bar_set_text(index as i32, &qs(text));
+        pin!(self).bar_set_tool_tip(index as i32, &qs(tip));
+    }
+    pub fn on_current_changed(&self, f: impl FnMut(i32) + 'static) {
+        let mut f = GuiThreadOnly(f);
+        pin!(self).on_current_changed(move |_, i| f.get()(i)).release();
+    }
+    pub fn on_close_requested(&self, f: impl FnMut(i32) + 'static) {
+        let mut f = GuiThreadOnly(f);
+        pin!(self)
+            .on_tab_close_requested(move |_, i| f.get()(i))
+            .release();
+    }
+    pub fn on_moved(&self, f: impl FnMut(i32, i32) + 'static) {
+        let mut f = GuiThreadOnly(f);
+        pin!(self).on_tab_moved(move |_, a, b| f.get()(a, b)).release();
     }
 }
 impl H<QDockWidget> {
@@ -770,6 +860,16 @@ impl Tree {
             })
             .release();
     }
+}
+
+/// Gives `w` a vertical layout with `top` at its natural height above `rest`.
+pub fn layout_column(w: H<QWidget>, top: H<QWidget>, rest: H<QWidget>) {
+    let l = unsafe { new_vbox(w.0) };
+    let mut p = unsafe { Pin::new_unchecked(&mut *l) };
+    p.as_mut().setContentsMargins(0, 0, 0, 0);
+    p.as_mut().setSpacing(0);
+    unsafe { p.as_mut().layout_add_widget(top.0, 0, Alignment(0)) };
+    unsafe { p.as_mut().layout_add_widget(rest.0, 1, Alignment(0)) };
 }
 
 /// Gives `w` a layout placing `child` at an exact logical offset.

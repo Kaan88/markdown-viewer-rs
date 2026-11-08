@@ -769,6 +769,20 @@ Qt's event path instead).
    recents, zoom limits, themes, focus mode, session restore. Selection, links, `<details>`, find,
    outline, clipboard copy, math, diagrams and highlighting are done in both shells; a link context
    menu and document tabs are the obvious next shell features.
+   - **Qt tabs, Recent and session: done 2026-11-08.** `bins/mdv-qt/src/shell.rs`: a `QTabBar`
+     (document mode, closable, movable, auto-hidden with one tab) above one canvas. The showing tab's
+     state lives in `Shell`'s fields; other tabs sit in `Page`s and `activate` swaps them, so
+     scroll, selection and opened `<details>` survive a switch. Opening an open file switches to
+     it; labels come from core's `tab_labels`; closing the last tab shows the empty page. Ctrl+O,
+     Ctrl+W/Ctrl+F4, Ctrl+Shift+W, Ctrl+Tab and Ctrl+Shift+Tab work. File > Open recent is rebuilt
+     as it opens (missing entries are marked, and clicking one removes it), plus Clear recent files.
+     The session (`tabs`, `active`, `recent`) is saved after every open, close and move, not only on
+     exit, and saved tabs reopen at startup, missing ones with the not-found text. `MDVIEW_SETTINGS`
+     names the file; `--no-session` turns it off; scripted checks never touch the user's file.
+     `--tabs-test` checks it and passes on Windows and on the VM (xvfb). Not done yet: the tab
+     context menu, the Manage recent dialog, and session restore of theme and zoom.
+   - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
+     swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.
    Bundling would let the golden comparison in `crates/render/tests/golden.rs` run on Linux too;
    today it runs on Windows only.

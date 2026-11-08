@@ -102,6 +102,7 @@ pub mod ffi {
         include!(<QtWidgets/QToolBar>);
         include!(<QtWidgets/QLineEdit>);
         include!(<QtWidgets/QTabWidget>);
+        include!(<QtWidgets/QTabBar>);
         include!(<QtWidgets/QDockWidget>);
         include!(<QtWidgets/QTreeWidget>);
         include!(<QtWidgets/QStatusBar>);
@@ -139,6 +140,9 @@ pub mod ffi {
         #[qobject]
         #[base = QWidget]
         type QTabWidget;
+        #[qobject]
+        #[base = QWidget]
+        type QTabBar;
         #[qobject]
         #[base = QWidget]
         type QDockWidget;
@@ -179,6 +183,80 @@ pub mod ffi {
             item: *mut QTreeWidgetItem,
             column: i32,
         );
+
+        #[qsignal]
+        #[cxx_name = "currentChanged"]
+        fn current_changed(self: Pin<&mut QTabBar>, index: i32);
+        #[qsignal]
+        #[cxx_name = "tabCloseRequested"]
+        fn tab_close_requested(self: Pin<&mut QTabBar>, index: i32);
+        #[qsignal]
+        #[cxx_name = "tabMoved"]
+        fn tab_moved(self: Pin<&mut QTabBar>, from: i32, to: i32);
+        #[qsignal]
+        #[cxx_name = "aboutToShow"]
+        fn about_to_show(self: Pin<&mut QMenu>);
+
+        // QTabBar
+        #[rust_name = "bar_add_tab"]
+        #[cxx_name = "addTab"]
+        fn addTabBar(self: Pin<&mut QTabBar>, label: &QString) -> i32;
+        #[rust_name = "bar_remove_tab"]
+        #[cxx_name = "removeTab"]
+        fn removeTabBar(self: Pin<&mut QTabBar>, index: i32);
+        #[rust_name = "bar_set_current"]
+        #[cxx_name = "setCurrentIndex"]
+        fn setCurrentIndexBar(self: Pin<&mut QTabBar>, index: i32);
+        #[rust_name = "bar_current"]
+        #[cxx_name = "currentIndex"]
+        fn currentIndexBar(self: &QTabBar) -> i32;
+        #[rust_name = "bar_count"]
+        #[cxx_name = "count"]
+        fn countBar(self: &QTabBar) -> i32;
+        #[rust_name = "bar_set_text"]
+        #[cxx_name = "setTabText"]
+        fn setTabTextBar(self: Pin<&mut QTabBar>, index: i32, text: &QString);
+        #[rust_name = "bar_set_tool_tip"]
+        #[cxx_name = "setTabToolTip"]
+        fn setTabToolTipBar(self: Pin<&mut QTabBar>, index: i32, text: &QString);
+        #[rust_name = "bar_tab_text"]
+        #[cxx_name = "tabText"]
+        fn tabTextBar(self: &QTabBar, index: i32) -> QString;
+        #[rust_name = "bar_set_closable"]
+        #[cxx_name = "setTabsClosable"]
+        fn setTabsClosableBar(self: Pin<&mut QTabBar>, on: bool);
+        #[rust_name = "bar_set_movable"]
+        #[cxx_name = "setMovable"]
+        fn setMovableBar(self: Pin<&mut QTabBar>, on: bool);
+        #[rust_name = "bar_set_document_mode"]
+        #[cxx_name = "setDocumentMode"]
+        fn setDocumentModeBar(self: Pin<&mut QTabBar>, on: bool);
+        #[rust_name = "bar_set_auto_hide"]
+        #[cxx_name = "setAutoHide"]
+        fn setAutoHideBar(self: Pin<&mut QTabBar>, on: bool);
+        #[rust_name = "bar_set_expanding"]
+        #[cxx_name = "setExpanding"]
+        fn setExpandingBar(self: Pin<&mut QTabBar>, on: bool);
+
+        // QMenu submenus, rebuilt as they open
+        #[rust_name = "menu_add_menu"]
+        #[cxx_name = "addMenu"]
+        fn addMenuMenu(self: Pin<&mut QMenu>, title: &QString) -> *mut QMenu;
+        #[rust_name = "menu_clear"]
+        #[cxx_name = "clear"]
+        fn clearMenu(self: Pin<&mut QMenu>);
+        #[rust_name = "menu_add_separator"]
+        #[cxx_name = "addSeparator"]
+        fn addSeparatorMenu(self: Pin<&mut QMenu>) -> *mut QAction;
+        #[rust_name = "menu_set_tool_tips_visible"]
+        #[cxx_name = "setToolTipsVisible"]
+        fn setToolTipsVisibleMenu(self: Pin<&mut QMenu>, on: bool);
+        #[rust_name = "action_set_enabled"]
+        #[cxx_name = "setEnabled"]
+        fn setEnabledAction(self: Pin<&mut QAction>, on: bool);
+        #[rust_name = "action_set_tool_tip"]
+        #[cxx_name = "setToolTip"]
+        fn setToolTipAction(self: Pin<&mut QAction>, tip: &QString);
 
         #[rust_name = "clear_tree"]
         #[cxx_name = "clear"]
@@ -276,6 +354,8 @@ pub mod ffi {
         fn new_ptr() -> *mut QWidget;
         #[rust_name = "new_tabs"]
         fn new_ptr() -> *mut QTabWidget;
+        #[rust_name = "new_tab_bar"]
+        fn new_ptr() -> *mut QTabBar;
         #[rust_name = "new_line_edit"]
         fn new_ptr() -> *mut QLineEdit;
         #[rust_name = "new_tree"]
