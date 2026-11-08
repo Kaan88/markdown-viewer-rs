@@ -773,8 +773,15 @@ Qt's event path instead).
    menu and document tabs are the obvious next shell features.
 3. **Bundled fonts** (a size and licence decision for the user), which would let the golden
    comparison in `crates/render/tests/golden.rs` run on Linux too; it runs on Windows today.
-4. **Linux check of the 2026-11-08 review fixes**: the Qt changes (outline `Tree`, clipboard without
-   C++, core link rules, drop handling) were built and run on Windows only, not on the VM.
+4. The 2026-11-08 review fixes were checked on the VM: `cargo test --release -p mdview-core -p
+   mdview-render -p mdview-engine -p mdview-engine-proto -- --include-ignored` passes (the golden
+   compare skips there), the Qt shell builds against Qt 6.8.2 with no authored C++, and its
+   `--copy-test`, `--outline-test`, `--find-test`, `--link-test`, `--select-test` and
+   `--details-test` all report ok under `xvfb-run`. Not exercised on Linux: a real outline click
+   after a rebuild, and a file drop (both covered on Windows or by code review only). On the VM,
+   `CARGO_TARGET_DIR` is `/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target`, so binaries land there,
+   not under `bins/mdv-qt/target`; and from PowerShell, upload a script instead of passing
+   double-quoted commands to `vm.py run` (PowerShell 5.1 mangles them).
 
 Every Qt/Linux change is tested on the VM as well as on Windows, and nothing counts as working on
 Windows until it has run on Windows.
