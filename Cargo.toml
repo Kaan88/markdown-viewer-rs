@@ -18,11 +18,3 @@ panic = "unwind"
 # The engine is a separate process that starts on demand; code size matters more than its speed.
 [profile.release.package.mdview-engine]
 opt-level = "s"
-
-# The offline index here lists bit-set 0.10 but ratex-parser's fancy-regex needs 0.8, whose
-# crate is in the local cache. Vendoring that one crate keeps the offline build working.
-[patch.crates-io]
-bit-set = { path = "vendor/bit-set-0.8.0" }
-bit-vec = { path = "vendor/bit-vec-0.8.0" }
-quick-xml = { path = "vendor/quick-xml-0.42.0" }
-bincode = { path = "vendor/bincode-1.3.3" }

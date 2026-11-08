@@ -80,16 +80,11 @@ cargo build --release --offline -p mdview-winui
 The shells look for `mdview-engine` beside themselves or in a `target/release` above them, so build
 the workspace (or set `MDV_ENGINE`) before opening a document with SVG or math.
 
-**Cargo cannot reach crates.io from this machine** (`schannel: AcquireCredentialsHandle failed:
-SEC_E_NO_CREDENTIALS`), so always pass `--offline`. If a dependency is missing from the cache,
-`target/seed-lock.py` (not committed) reads `Cargo.lock` files, writes the sparse index entry for
-every crate and downloads the locked `.crate` files:
-
-```powershell
-python target/seed-lock.py Cargo.lock bins/mdv-qt/Cargo.lock spikes/qt-shell/Cargo.lock
-```
-
-All locks in use must be passed: the index cache is shared.
+**crates.io.** It was unreachable from this machine for a while (`schannel:
+AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`) and works again as of 2026-11-08. With the
+crates cached, `--offline` still builds. A stale local index can fail to resolve locked versions
+(it once reported only `bincode` 2.0); the `Cargo.lock` entries are what count, so a build without
+`--offline` refreshes the index.
 
 For MSVC builds inside the sandbox, point `TEMP`/`TMP` at a writable directory or `lib.exe` fails
 with access denied:
@@ -410,12 +405,17 @@ engine; PNG and JPEG stay in-process. The binary is found through `MDV_ENGINE`, 
 executable, or in `target/release` beside an ancestor, which covers the Qt shell building into its
 own `bins/mdv-qt/target/release`.
 
-**Offline build note.** The local registry index lists `bit-set` 0.10 and `bit-vec` 0.9, but
-`ratex-parser`'s `fancy-regex` needs 0.8; their 0.8 crates were in the cache. merman also needs
-`quick-xml` 0.42, which the index only lists as 0.41, and syntect needs `bincode` 1.3, listed only as
-2.0. The crates are extracted under `vendor/` and pinned with `[patch.crates-io]` in the workspace
-`Cargo.toml` so `--offline` resolves. `bins/mdv-qt` is a separate workspace and carries the same four
-pins.
+**Dependencies.** `bit-set`/`bit-vec` 0.8 (for `ratex-parser`'s `fancy-regex`), `quick-xml` 0.42
+(merman) and `bincode` 1.3.3 (syntect) come from crates.io, pinned in both lock files with checksums
+checked against the index. An earlier `vendor/` copy and its `[patch.crates-io]` pins, which existed
+only to get past a stale offline index, were removed; the vendored sources were identical to the
+published crates.
+
+**Watchdog.** Besides the client's 5 s kill, the engine ends itself (exit code 3) when one job runs
+past 6 s, so a parser that hangs after the viewer itself crashed cannot leave an orphan process.
+Between jobs a closed stdin ends it, and 10 s idle does too. `MDV_ENGINE_STALL` makes every job hang,
+which the client deadline tests and `crates/engine/tests/watchdog.rs` use (both `#[ignore]`d for
+their waits; run them with `-- --include-ignored`).
 
 Measured on this PC: two consecutive 180x28 badge jobs took **13.2 ms then 2.4 ms with one engine
 start**; a deliberately stalled engine was killed at **5003.9 ms** and the next job started in

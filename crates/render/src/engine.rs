@@ -392,7 +392,7 @@ mod tests {
             return;
         }
         reset_engine();
-        // The engine honours MDV_ENGINE_STALL before it reads a job, which is how this test hangs
+        // The engine honours MDV_ENGINE_STALL by hanging every job, which is how this test hangs
         // one without a special job kind in the protocol.
         unsafe { std::env::set_var("MDV_ENGINE_STALL", "1") };
         let started = Instant::now();
