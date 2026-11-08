@@ -2,9 +2,13 @@
 //! scrolling it. Text selection, links and the tree come later.
 use crate::bindings::*;
 use crate::diag;
-use crate::render::{Gpu, Renderer};
+use crate::render::{Gpu, PageState, Renderer};
+use crate::tabs;
+use mdview_core::commands::strings;
+use mdview_core::files::{canonical_or_absolute, tab_labels};
 use mdview_core::links::{LinkAction, classify_link};
 use mdview_core::parse_bytes;
+use mdview_core::session::{Recents, Session};
 use mdview_render::{DARK, LIGHT};
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
@@ -229,11 +233,39 @@ fn file_dialog() -> Option<PathBuf> {
     (length > 0).then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..length])))
 }
 
+/// A tab. The showing tab's document state lives in the `Renderer`; the others keep theirs here,
+/// and `activate` swaps them, as the Qt shell does.
+struct Page {
+    path: PathBuf,
+    item: TabViewItem,
+    label: String,
+    state: Option<PageState>,
+}
+
 struct Shell {
     window: Window,
     root: Grid,
     renderer: RefCell<Renderer>,
+    /// The showing tab's file; `None` on the empty page.
     path: RefCell<Option<PathBuf>>,
+    /// Tab headers only; the one panel below draws whichever page is current.
+    tab_view: TabView,
+    /// The page panel, to give the keyboard back after a tab or menu click.
+    page: UIElement,
+    /// Open documents in tab order, and which one is showing. `None` shows the empty page.
+    pages: RefCell<Vec<Page>>,
+    current: Cell<Option<usize>>,
+    /// Set while the shell changes the TabView itself: XAML raises SelectionChanged synchronously
+    /// inside Append, RemoveAt and SelectedIndex, and those must not re-enter.
+    tabs_busy: Cell<bool>,
+    recent: RefCell<Recents>,
+    /// The saved session and where it lives. `None` with the session off (`--no-session`, and
+    /// scripted checks unless `MDVIEW_SETTINGS` is set).
+    session: RefCell<Option<(PathBuf, Session)>>,
+    /// The Recent menu, rebuilt whenever Recent changes.
+    recent_menu: RefCell<Option<MenuBarItem>>,
+    /// Run the tabs check after the first frame, for `--tabs-test`.
+    tabs_test: Cell<bool>,
     presented: Cell<bool>,
     /// How far into the scrollbar thumb the drag started, in panel device px.
     dragging: Cell<Option<f32>>,
@@ -268,11 +300,34 @@ struct Shell {
 impl Shell {
     /// A key no control handled, from the root's `KeyDown`. Returns true when the shell used it.
     fn key(&self, wparam: usize) -> bool {
+        let ctrl = unsafe { GetKeyState(0x11) } < 0;
+        let shift = unsafe { GetKeyState(0x10) } < 0;
+        self.key_with(wparam, ctrl, shift)
+    }
+
+    /// `key` with the modifiers given, so the scripted checks can press Ctrl+Shift+Tab.
+    fn key_with(&self, wparam: usize, ctrl: bool, shift: bool) -> bool {
         {
             {
                 const VK_ESCAPE: usize = 0x1b;
-                let ctrl = unsafe { GetKeyState(0x11) } < 0;
-                let shift = unsafe { GetKeyState(0x10) } < 0;
+                const VK_TAB: usize = 0x09;
+                const VK_F4: usize = 0x73;
+                if ctrl && wparam == 0x4f {
+                    self.open_dialog();
+                    return true;
+                }
+                if ctrl && (wparam == 0x57 || (wparam == VK_F4 && !shift)) {
+                    if shift {
+                        self.close_all();
+                    } else if let Some(current) = self.current.get() {
+                        self.close_tab(current);
+                    }
+                    return true;
+                }
+                if ctrl && wparam == VK_TAB {
+                    self.cycle(if shift { -1 } else { 1 });
+                    return true;
+                }
                 if ctrl && wparam == 0x46 {
                     self.find_open();
                     return true;
@@ -467,13 +522,494 @@ impl Shell {
             return;
         }
         // Lay the new document out first, then jump: `scroll_to_fragment` needs a page.
-        if load(self, &resolved).is_ok() {
+        if self.open(&resolved) {
             self.show();
             if let Some(fragment) = fragment {
                 self.renderer.borrow_mut().scroll_to_fragment(&fragment);
             }
             self.show();
         }
+    }
+
+    /// Opens `path` in a new tab, or switches to the tab that already shows it. Adds it to Recent
+    /// either way. False when the file could not be read.
+    fn open(&self, path: &Path) -> bool {
+        let path = canonical_or_absolute(path);
+        let existing = self
+            .pages
+            .borrow()
+            .iter()
+            .position(|page| same_file(&page.path, &path));
+        if let Some(index) = existing {
+            self.recent.borrow_mut().add(path);
+            self.switch_to(index);
+            self.save_session();
+            return true;
+        }
+        match read_document(&path) {
+            Ok(document) => {
+                self.recent.borrow_mut().add(path.clone());
+                let index = self.add_page(path, document);
+                self.switch_to(index);
+                self.save_session();
+                true
+            }
+            Err(e) => {
+                diag::error_box(&e);
+                false
+            }
+        }
+    }
+
+    /// File > Open and Ctrl+O.
+    fn open_dialog(&self) {
+        if let Some(path) = file_dialog() {
+            self.open(&path);
+        }
+        self.focus_page();
+    }
+
+    /// Appends a tab without showing it, and returns its index.
+    fn add_page(&self, path: PathBuf, document: mdview_core::Document) -> usize {
+        let item = match TabViewItem::new() {
+            Ok(item) => item,
+            Err(e) => diag::fatal("TabViewItem", &e),
+        };
+        let base_dir = path.parent().map(Path::to_path_buf);
+        let index = {
+            let mut pages = self.pages.borrow_mut();
+            pages.push(Page {
+                path,
+                item: item.clone(),
+                label: String::new(),
+                state: Some(PageState::new(document, base_dir)),
+            });
+            pages.len() - 1
+        };
+        self.tabs_busy.set(true);
+        if let Ok(items) = self.tab_view.TabItems()
+            && let Ok(item) = item.cast::<IInspectable>()
+        {
+            _ = items.Append(&item);
+        }
+        self.tabs_busy.set(false);
+        self.relabel();
+        self.update_strip();
+        index
+    }
+
+    /// Restores a saved tab. A file that is gone still gets its tab, saying so.
+    fn restore_page(&self, path: &Path) {
+        let path = canonical_or_absolute(path);
+        if self
+            .pages
+            .borrow()
+            .iter()
+            .any(|page| same_file(&page.path, &path))
+        {
+            return;
+        }
+        let document = read_document(&path).unwrap_or_else(|_| {
+            let name = file_name(&path);
+            parse_bytes(format!("# {name}\n\n{}\n", strings::FILE_NOT_FOUND).as_bytes())
+        });
+        self.add_page(path, document);
+    }
+
+    /// Selects tab `index` in the strip and shows it.
+    fn switch_to(&self, index: usize) {
+        self.tabs_busy.set(true);
+        _ = tabs::set_selected_index(&self.tab_view, index as i32);
+        self.tabs_busy.set(false);
+        self.activate(index);
+    }
+
+    /// Shows tab `index`, keeping the state of the tab it replaces.
+    fn activate(&self, index: usize) {
+        if self.current.get() == Some(index) || index >= self.pages.borrow().len() {
+            return;
+        }
+        self.stash();
+        self.current.set(Some(index));
+        let (path, state) = {
+            let mut pages = self.pages.borrow_mut();
+            let page = &mut pages[index];
+            (page.path.clone(), page.state.take())
+        };
+        if let Some(state) = state {
+            self.renderer.borrow_mut().put_page(state);
+        }
+        *self.path.borrow_mut() = Some(path.clone());
+        self.show_page(&file_name(&path));
+    }
+
+    /// Moves the showing tab's state back into its `Page`.
+    fn stash(&self) {
+        let Some(index) = self.current.get() else {
+            return;
+        };
+        let state = self.renderer.borrow_mut().take_page();
+        if let Some(page) = self.pages.borrow_mut().get_mut(index) {
+            page.state = Some(state);
+        }
+    }
+
+    /// Resets what belongs to the page on screen: find, the title and the outline.
+    fn show_page(&self, name: &str) {
+        self.find_active.set(false);
+        self.renderer.borrow_mut().find_update("");
+        _ = self.window.SetTitle(&format!("mdview - {name}"));
+        refresh_outline(self);
+        self.show();
+    }
+
+    /// Closes tab `index`. The last one closing shows the empty page; the app stays open.
+    fn close_tab(&self, index: usize) {
+        self.sync_order();
+        if index >= self.pages.borrow().len() {
+            return;
+        }
+        match self.current.get() {
+            // The showing tab's state is in the renderer and is simply replaced.
+            Some(current) if current == index => self.current.set(None),
+            Some(current) if current > index => self.current.set(Some(current - 1)),
+            _ => {}
+        }
+        self.pages.borrow_mut().remove(index);
+        self.tabs_busy.set(true);
+        if let Ok(items) = self.tab_view.TabItems() {
+            _ = items.RemoveAt(index as u32);
+        }
+        if let Some(current) = self.current.get() {
+            _ = tabs::set_selected_index(&self.tab_view, current as i32);
+        }
+        self.tabs_busy.set(false);
+        self.relabel();
+        self.update_strip();
+        let count = self.pages.borrow().len();
+        if count == 0 {
+            self.show_empty(strings::STATUS_ALL_CLOSED);
+        } else if self.current.get().is_none() {
+            self.switch_to(index.min(count - 1));
+        }
+        self.save_session();
+        self.focus_page();
+    }
+
+    fn close_all(&self) {
+        while !self.pages.borrow().is_empty() {
+            let last = self.pages.borrow().len() - 1;
+            self.close_tab(last);
+        }
+    }
+
+    /// Ctrl+Tab and Ctrl+Shift+Tab: the next or previous tab, wrapping. Nothing with one tab.
+    fn cycle(&self, delta: isize) {
+        self.sync_order();
+        let count = self.pages.borrow().len();
+        let Some(current) = self.current.get() else {
+            return;
+        };
+        if count > 1 {
+            let next = (current as isize + delta).rem_euclid(count as isize) as usize;
+            self.switch_to(next);
+        }
+    }
+
+    /// Puts `pages` in the TabView's order, which a drag may have changed, keeping `current` on
+    /// the same page. True when anything moved.
+    fn sync_order(&self) -> bool {
+        let Ok(items) = self.tab_view.TabItems() else {
+            return false;
+        };
+        let Ok(size) = items.Size() else {
+            return false;
+        };
+        let order: Vec<IInspectable> = (0..size).filter_map(|i| items.GetAt(i).ok()).collect();
+        let mut pages = self.pages.borrow_mut();
+        if order.len() != pages.len() {
+            return false;
+        }
+        let in_order = order
+            .iter()
+            .zip(pages.iter())
+            .all(|(item, page)| tabs::same_object(item, &page.item));
+        if in_order {
+            return false;
+        }
+        let current_item = self.current.get().map(|i| pages[i].item.clone());
+        let mut old: Vec<Option<Page>> = pages.drain(..).map(Some).collect();
+        for item in &order {
+            if let Some(slot) = old
+                .iter_mut()
+                .find(|slot| slot.as_ref().is_some_and(|p| tabs::same_object(item, &p.item)))
+            {
+                pages.push(slot.take().expect("found"));
+            }
+        }
+        // Anything not matched (it should not happen) goes at the end rather than being lost.
+        pages.extend(old.into_iter().flatten());
+        if let Some(current_item) = current_item {
+            self.current.set(
+                pages
+                    .iter()
+                    .position(|p| tabs::same_object(&p.item, &current_item)),
+            );
+        }
+        true
+    }
+
+    /// A tab was dragged to a new place in the strip.
+    fn tabs_reordered(&self) {
+        if self.sync_order() {
+            self.relabel();
+            self.save_session();
+        }
+    }
+
+    /// The user picked a tab in the strip.
+    fn tab_selected(&self) {
+        if self.tabs_busy.get() {
+            return;
+        }
+        self.sync_order();
+        let Ok(index) = tabs::selected_index(&self.tab_view) else {
+            return;
+        };
+        if index >= 0 {
+            self.activate(index as usize);
+            self.save_session();
+        }
+        self.focus_page();
+    }
+
+    /// The close button on a tab.
+    fn tab_close_requested(&self, item: &TabViewItem) {
+        self.sync_order();
+        let index = self
+            .pages
+            .borrow()
+            .iter()
+            .position(|page| tabs::same_object(&page.item, item));
+        if let Some(index) = index {
+            self.close_tab(index);
+        }
+    }
+
+    /// Tab titles from core: repeated filenames gain parent folders until they differ.
+    fn relabel(&self) {
+        let paths: Vec<PathBuf> = self.pages.borrow().iter().map(|p| p.path.clone()).collect();
+        let labels = tab_labels(&paths);
+        let items: Vec<TabViewItem> = {
+            let mut pages = self.pages.borrow_mut();
+            for (page, label) in pages.iter_mut().zip(&labels) {
+                page.label = label.clone();
+            }
+            pages.iter().map(|p| p.item.clone()).collect()
+        };
+        for ((item, label), path) in items.iter().zip(&labels).zip(&paths) {
+            _ = item.SetHeader(&tabs::boxed(label));
+            _ = tabs::set_tooltip(item, &path.display().to_string());
+        }
+    }
+
+    /// The strip shows only while a tab is open.
+    fn update_strip(&self) {
+        let any = !self.pages.borrow().is_empty();
+        if let Ok(element) = self.tab_view.cast::<UIElement>() {
+            _ = tabs::set_visible(&element, any);
+        }
+    }
+
+    /// The page shown with no tab open.
+    fn show_empty(&self, status: &str) {
+        self.current.set(None);
+        *self.path.borrow_mut() = None;
+        self.renderer
+            .borrow_mut()
+            .put_page(PageState::new(parse_bytes(WELCOME.as_bytes()), None));
+        self.find_active.set(false);
+        _ = self.window.SetTitle("mdview");
+        refresh_outline(self);
+        self.show();
+        self.message(status);
+    }
+
+    /// No status bar here: messages go to the trace and, briefly, the title.
+    fn message(&self, text: &str) {
+        diag::trace(&format!("status: {text}"));
+        let name = self
+            .path
+            .borrow()
+            .as_deref()
+            .map(file_name)
+            .map_or_else(|| "mdview".to_string(), |name| format!("mdview - {name}"));
+        _ = self.window.SetTitle(&format!("{name} — {text}"));
+    }
+
+    /// Writes tabs, the current tab and Recent at once, so a crash loses nothing. Also rebuilds
+    /// the Recent menu, since every change to Recent ends here.
+    fn save_session(&self) {
+        self.sync_order();
+        refresh_recent(self);
+        let mut session = self.session.borrow_mut();
+        let Some((path, session)) = session.as_mut() else {
+            return;
+        };
+        session.tabs = self.pages.borrow().iter().map(|p| p.path.clone()).collect();
+        session.active = self.current.get().unwrap_or(0);
+        session.recent = self.recent.borrow().clone();
+        match session.save(path) {
+            Ok(()) => diag::trace(&format!("session saved: {} tabs", session.tabs.len())),
+            Err(e) => diag::trace(&format!("could not save {}: {e}", path.display())),
+        }
+    }
+
+    fn focus_page(&self) {
+        _ = crate::input::focus(&self.page, crate::input::FOCUS_PROGRAMMATIC);
+    }
+
+    /// `--tabs-test`: with showcase.md open, opens `linked.md` beside it, switches back by opening
+    /// the first again, cycles, moves, closes both, and checks tabs, scroll, labels and Recent.
+    fn run_tabs_check(&self) -> ! {
+        let mut failures: Vec<String> = Vec::new();
+        let mut expect = |ok: bool, what: String| {
+            if !ok {
+                failures.push(what);
+            }
+        };
+        let Some(first) = self.path.borrow().clone() else {
+            diag::trace("tabs test failed: start with a document");
+            std::process::exit(1);
+        };
+        let selected = || tabs::selected_index(&self.tab_view).unwrap_or(-2);
+        let strip = || self.tab_view.TabItems().and_then(|i| i.Size()).unwrap_or(99);
+        let other = first.with_file_name("linked.md");
+        self.renderer.borrow_mut().scroll_to(500.0);
+        self.show();
+        let scrolled = self.renderer.borrow().offset();
+        expect(scrolled > 0.0, format!("first page did not scroll ({scrolled})"));
+        self.open(&other);
+        expect(self.pages.borrow().len() == 2, "second tab not added".into());
+        expect(self.current.get() == Some(1), "second tab not current".into());
+        expect(
+            strip() == 2 && selected() == 1,
+            format!("strip out of step after open: {} {}", strip(), selected()),
+        );
+        expect(
+            self.renderer.borrow().offset() == 0.0,
+            "new tab did not start at the top".into(),
+        );
+        self.open(&first);
+        expect(self.pages.borrow().len() == 2, "reopening added a duplicate".into());
+        expect(self.current.get() == Some(0), "reopening did not switch".into());
+        expect(selected() == 0, "strip did not follow the switch".into());
+        let kept = self.renderer.borrow().offset();
+        expect(
+            kept == scrolled,
+            format!("scroll not kept: {kept} vs {scrolled}"),
+        );
+        let labels: Vec<String> = self.pages.borrow().iter().map(|p| p.label.clone()).collect();
+        expect(
+            labels == ["showcase.md", "linked.md"],
+            format!("labels {labels:?}"),
+        );
+        self.key_with(0x09, true, false);
+        expect(
+            self.current.get() == Some(1) && selected() == 1,
+            "Ctrl+Tab".into(),
+        );
+        self.key_with(0x09, true, false);
+        expect(self.current.get() == Some(0), "Ctrl+Tab did not wrap".into());
+        self.key_with(0x09, true, true);
+        expect(self.current.get() == Some(1), "Ctrl+Shift+Tab".into());
+        // A drag reorders the TabView's own items; move one the same way and let the shell follow.
+        self.move_item(1, 0);
+        self.tabs_reordered();
+        expect(
+            self.current.get() == Some(0)
+                && same_file(&self.pages.borrow()[0].path, &canonical_or_absolute(&other)),
+            "move did not carry the current tab".into(),
+        );
+        self.move_item(0, 1);
+        self.tabs_reordered();
+        expect(self.current.get() == Some(1), "move back".into());
+        self.key_with(0x57, true, false);
+        expect(
+            self.pages.borrow().len() == 1
+                && self
+                    .path
+                    .borrow()
+                    .as_deref()
+                    .is_some_and(|p| same_file(p, &first)),
+            "Ctrl+W closed the wrong tab".into(),
+        );
+        expect(
+            self.current.get() == Some(0) && strip() == 1 && selected() == 0,
+            format!("after close: strip {} selected {}", strip(), selected()),
+        );
+        let reopened = self.renderer.borrow().offset();
+        expect(
+            reopened == scrolled,
+            format!("scroll after close {reopened} vs {scrolled}"),
+        );
+        self.key_with(0x57, true, true);
+        expect(
+            self.pages.borrow().is_empty() && strip() == 0,
+            "Ctrl+Shift+W".into(),
+        );
+        expect(self.path.borrow().is_none(), "empty page still has a path".into());
+        expect(
+            self.renderer.borrow().block_count() > 0,
+            "empty page shows nothing".into(),
+        );
+        let recent: Vec<PathBuf> = self.recent.borrow().paths().to_vec();
+        expect(
+            recent.len() == 2 && same_file(&recent[0], &first),
+            format!("recent {recent:?}"),
+        );
+        let recent_items = self
+            .recent_menu
+            .borrow()
+            .as_ref()
+            .and_then(|m| m.Items().ok())
+            .and_then(|i| i.Size().ok())
+            .unwrap_or(0);
+        expect(recent_items == 3, format!("Recent menu has {recent_items} items"));
+        if failures.is_empty() {
+            diag::trace(&format!(
+                "tabs test ok: 2 tabs, scroll {scrolled:.0} kept, recent {}",
+                recent.len()
+            ));
+            std::process::exit(0);
+        }
+        diag::trace(&format!("tabs test failed: {}", failures.join("; ")));
+        std::process::exit(1);
+    }
+
+    /// Moves a tab in the TabView the way a drag does, keeping the current tab selected.
+    fn move_item(&self, from: u32, to: u32) {
+        let Ok(items) = self.tab_view.TabItems() else {
+            return;
+        };
+        let Ok(item) = items.GetAt(from) else {
+            return;
+        };
+        self.tabs_busy.set(true);
+        _ = items.RemoveAt(from);
+        _ = items.InsertAt(to, &item);
+        let selected = self
+            .current
+            .get()
+            .and_then(|i| self.pages.borrow().get(i).map(|p| p.item.clone()))
+            .and_then(|current| {
+                (0..items.Size().unwrap_or(0))
+                    .find(|&i| items.GetAt(i).is_ok_and(|it| tabs::same_object(&it, &current)))
+            });
+        if let Some(selected) = selected {
+            _ = tabs::set_selected_index(&self.tab_view, selected as i32);
+        }
+        self.tabs_busy.set(false);
     }
 
     /// Where a pointer event landed, in panel device px: XAML reports it in the panel's own logical
@@ -567,6 +1103,10 @@ impl Shell {
                         ));
                         self.show();
                     }
+                    if self.tabs_test.get() {
+                        self.tabs_test.set(false);
+                        self.run_tabs_check();
+                    }
                     if diag::measuring() {
                         // One line and out, so a script can time the first frame from process start.
                         diag::measure_line(&format!(
@@ -592,7 +1132,17 @@ impl Shell {
     }
 }
 
-fn load(shell: &Shell, path: &Path) -> std::result::Result<(), String> {
+fn same_file(a: &Path, b: &Path) -> bool {
+    a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+fn read_document(path: &Path) -> std::result::Result<mdview_core::Document, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let started = std::time::Instant::now();
     let document = parse_bytes(&bytes);
@@ -604,41 +1154,92 @@ fn load(shell: &Shell, path: &Path) -> std::result::Result<(), String> {
         document.warnings.len(),
         started.elapsed().as_secs_f64() * 1000.0
     ));
-    shell
-        .renderer
-        .borrow_mut()
-        .set_document(document, path.parent().map(|parent| parent.to_path_buf()));
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string());
-    shell
-        .window
-        .SetTitle(&format!("mdview - {name}"))
-        .map_err(|e| e.to_string())?;
-    *shell.path.borrow_mut() = Some(path.to_path_buf());
-    refresh_outline(shell);
-    Ok(())
+    Ok(document)
 }
 
-fn open_file(shell: &Rc<Shell>) {
-    let Some(path) = file_dialog() else {
-        return;
-    };
-    match load(shell, &path) {
-        Ok(()) => shell.show(),
-        Err(e) => diag::error_box(&e),
-    }
-}
-
+/// File > Reload: reads the current tab's file again, in place.
 fn reload(shell: &Rc<Shell>) {
     let Some(path) = shell.path.borrow().clone() else {
         return;
     };
-    match load(shell, &path) {
-        Ok(()) => shell.show(),
+    match read_document(&path) {
+        Ok(document) => {
+            shell
+                .renderer
+                .borrow_mut()
+                .set_document(document, path.parent().map(Path::to_path_buf));
+            refresh_outline(shell);
+            shell.show();
+        }
         Err(e) => diag::error_box(&e),
     }
+}
+
+/// Rebuilds the Recent menu: entries (missing ones marked, and removed when clicked), a disabled
+/// line when there are none, and Clear recent files.
+fn refresh_recent(shell: &Shell) {
+    let Some(menu) = shell.recent_menu.borrow().clone() else {
+        return;
+    };
+    let Some(target) = SHELL.with(|cell| cell.borrow().clone()) else {
+        return;
+    };
+    let Ok(items) = menu.Items() else {
+        return;
+    };
+    _ = items.Clear();
+    let add = |text: &str, click: Option<Box<dyn Fn()>>| {
+        let Ok(item) = MenuFlyoutItem::new() else {
+            return None;
+        };
+        _ = item.SetText(text);
+        match click {
+            Some(click) => {
+                if let Ok(revoker) = item.Click(move |_, _| click()) {
+                    revoker.forget();
+                }
+            }
+            None => _ = tabs::set_enabled(&item, false),
+        }
+        if let Ok(base) = item.cast::<MenuFlyoutItemBase>() {
+            _ = items.Append(&base);
+        }
+        Some(item)
+    };
+    let entries = shell.recent.borrow().entries();
+    if entries.is_empty() {
+        add(strings::RECENT_EMPTY, None);
+    }
+    for entry in entries {
+        let s = target.clone();
+        let path = entry.path.clone();
+        let missing = entry.missing;
+        let item = add(
+            &entry.label,
+            Some(Box::new(move || {
+                if missing {
+                    s.recent.borrow_mut().remove(&path);
+                    s.save_session();
+                    s.message(strings::RECENT_REMOVED_MISSING);
+                } else {
+                    s.open(&path);
+                }
+                s.focus_page();
+            })),
+        );
+        if let Some(item) = item {
+            _ = tabs::set_tooltip(&item, &entry.path.display().to_string());
+        }
+    }
+    let s = target.clone();
+    add(
+        "Clear recent files",
+        Some(Box::new(move || {
+            s.recent.borrow_mut().clear();
+            s.save_session();
+            s.message(strings::RECENT_CLEARED);
+        })),
+    );
 }
 
 /// Clipboard formats used by the Win32 fallback; WinRT clipboard needs bindings this shell trims.
@@ -765,10 +1366,30 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
     file.SetTitle("File")?;
 
     let open = MenuFlyoutItem::new()?;
-    open.SetText("Open...")?;
+    open.SetText("Open...\tCtrl+O")?;
     let target = shell.clone();
-    open.Click(move |_, _| open_file(&target))?.forget();
+    open.Click(move |_, _| target.open_dialog())?.forget();
     file.Items()?.Append(&open.cast::<MenuFlyoutItemBase>()?)?;
+
+    let close_tab = MenuFlyoutItem::new()?;
+    close_tab.SetText("Close tab\tCtrl+W")?;
+    let target = shell.clone();
+    close_tab
+        .Click(move |_, _| {
+            if let Some(current) = target.current.get() {
+                target.close_tab(current);
+            }
+        })?
+        .forget();
+    file.Items()?
+        .Append(&close_tab.cast::<MenuFlyoutItemBase>()?)?;
+
+    let close_all = MenuFlyoutItem::new()?;
+    close_all.SetText("Close all tabs\tCtrl+Shift+W")?;
+    let target = shell.clone();
+    close_all.Click(move |_, _| target.close_all())?.forget();
+    file.Items()?
+        .Append(&close_all.cast::<MenuFlyoutItemBase>()?)?;
 
     let refresh = MenuFlyoutItem::new()?;
     refresh.SetText("Reload")?;
@@ -778,7 +1399,7 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
         .Append(&refresh.cast::<MenuFlyoutItemBase>()?)?;
 
     let close = MenuFlyoutItem::new()?;
-    close.SetText("Close")?;
+    close.SetText("Exit")?;
     let window = shell.window.clone();
     close
         .Click(move |_, _| {
@@ -787,6 +1408,11 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
         .forget();
     file.Items()?.Append(&close.cast::<MenuFlyoutItemBase>()?)?;
     menu.Items()?.Append(&file)?;
+
+    let recent = MenuBarItem::new()?;
+    recent.SetTitle("Recent")?;
+    menu.Items()?.Append(&recent)?;
+    *shell.recent_menu.borrow_mut() = Some(recent);
 
     let edit = MenuBarItem::new()?;
     edit.SetTitle("Edit")?;
@@ -838,6 +1464,7 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
     place(&shell.root, &menu, 0, 0)?;
     Grid::SetColumnSpan(&menu.cast::<FrameworkElement>()?, 2)?;
     refresh_outline(shell);
+    refresh_recent(shell);
     Ok(())
 }
 
@@ -876,11 +1503,14 @@ pub struct Startup {
     pub outline: bool,
     /// Run the clipboard check after the first frame, for `--copy-test`.
     pub copy: bool,
+    /// Run the tabs check after the first frame, for `--tabs-test`.
+    pub tabs: bool,
 }
 
 pub fn build(
     gpu: JoinHandle<Result<Gpu>>,
-    file: Option<PathBuf>,
+    files: Vec<PathBuf>,
+    settings: Option<PathBuf>,
     theme: Option<mdview_render::Theme>,
     zoom: f32,
     startup: Startup,
@@ -898,6 +1528,7 @@ pub fn build(
 
     let root = Grid::new()?;
     add_row(&root, GridUnitType::Auto, 1.0)?; // menu
+    add_row(&root, GridUnitType::Auto, 1.0)?; // tabs
     add_row(&root, GridUnitType::Star, 1.0)?; // page
     set_root_background(&root, theme)?;
     set_chrome_theme(&root, theme)?;
@@ -920,7 +1551,14 @@ pub fn build(
         .cast::<IPanel>()?
         .Children()?
         .Append(&hit_target.cast::<UIElement>()?)?;
-    place(&root, &panel, 1, 0)?;
+    place(&root, &panel, 2, 0)?;
+
+    // Headers only: no tab content, so the one panel below draws whichever page is current.
+    let tab_view = TabView::new()?;
+    tabs::set_add_tab_button_visible(&tab_view, false)?;
+    tabs::set_can_reorder_tabs(&tab_view, true)?;
+    tabs::set_visible(&tab_view.cast::<UIElement>()?, false)?;
+    place(&root, &tab_view, 1, 0)?;
 
     let gpu = gpu
         .join()
@@ -930,14 +1568,30 @@ pub fn build(
     renderer.set_zoom(zoom);
     renderer.set_shift(startup.shift);
     renderer.set_pending_scroll(startup.scroll);
-    if file.is_none() {
-        renderer.set_document(parse_bytes(WELCOME.as_bytes()), None);
-    }
+    let session = settings.map(|path| {
+        let saved = Session::load(&path);
+        diag::trace(&format!(
+            "session {}: {} tabs, {} recent",
+            path.display(),
+            saved.tabs.len(),
+            saved.recent.paths().len()
+        ));
+        (path, saved)
+    });
     let shell = Rc::new(Shell {
         window: window.clone(),
         root: root.clone(),
         renderer: RefCell::new(renderer),
-        path: RefCell::new(file.clone()),
+        path: RefCell::new(None),
+        tab_view: tab_view.clone(),
+        page: panel.cast()?,
+        pages: RefCell::new(Vec::new()),
+        current: Cell::new(None),
+        tabs_busy: Cell::new(false),
+        recent: RefCell::new(Recents::default()),
+        session: RefCell::new(session),
+        recent_menu: RefCell::new(None),
+        tabs_test: Cell::new(startup.tabs),
         presented: Cell::new(false),
         dragging: Cell::new(None),
         steps: Cell::new(startup.steps),
@@ -956,12 +1610,6 @@ pub fn build(
         outline_menu: RefCell::new(None),
         outline_entries: Cell::new(0),
     });
-    if let Some(path) = &file
-        && let Err(e) = load(&shell, path)
-    {
-        diag::error_box(&e);
-    }
-
     let framework: FrameworkElement = panel.cast()?;
     {
         let shell = shell.clone();
@@ -1121,6 +1769,40 @@ pub fn build(
 
     SHELL.with(|cell| *cell.borrow_mut() = Some(shell.clone()));
     build_menu(&shell)?;
+    {
+        let target = shell.clone();
+        tabs::selection_changed(&tab_view, move || target.tab_selected())?.forget();
+        let target = shell.clone();
+        tabs::tab_close_requested(&tab_view, move |_, args| {
+            if let Some(tab) = args.as_ref().and_then(|args| args.tab().ok()) {
+                target.tab_close_requested(&tab);
+            }
+        })?
+        .forget();
+        let target = shell.clone();
+        tabs::tab_drag_completed(&tab_view, move |_, _| target.tabs_reordered())?.forget();
+    }
+
+    // Saved tabs come back first, without reordering Recent; files on the command line follow.
+    let saved = shell.session.borrow().as_ref().map(|(_, s)| s.clone());
+    if let Some(saved) = saved {
+        *shell.recent.borrow_mut() = saved.recent.clone();
+        for path in &saved.tabs {
+            shell.restore_page(path);
+        }
+        let count = shell.pages.borrow().len();
+        if count > 0 {
+            shell.switch_to(saved.active.min(count - 1));
+        }
+        refresh_recent(&shell);
+    }
+    for path in &files {
+        shell.open(path);
+    }
+    if shell.pages.borrow().is_empty() {
+        shell.show_empty(strings::STATUS_ALL_CLOSED);
+    }
+
     window.SetContent(&root.cast::<UIElement>()?)?;
     window.Closed(|_, _| diag::trace("window closed"))?.forget();
     window.Activate()?;

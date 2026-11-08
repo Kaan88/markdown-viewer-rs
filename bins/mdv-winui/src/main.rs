@@ -1,7 +1,8 @@
 //! mdview's Windows shell: a WinUI 3 window drawn from raw windows-bindgen output, showing the
 //! page `mdview-render` lays out. No XAML, C# or C++.
 //!
-//! Usage: `mdview-winui [FILE] [--trace] [--measure[=FILE]]`. `--measure` logs first-frame time and
+//! Usage: `mdview-winui [FILE...] [--no-session] [--trace] [--measure[=FILE]]`; `MDVIEW_SETTINGS`
+//! names the session file instead of the per-user default. `--measure` logs first-frame time and
 //! memory, then exits; `--trace` writes startup checkpoints to `mdview.trace.log` beside the exe.
 #![windows_subsystem = "windows"]
 
@@ -19,6 +20,7 @@ mod diag;
 mod input;
 #[allow(non_snake_case)]
 mod render;
+mod tabs;
 mod ui;
 
 use bindings::*;
@@ -79,7 +81,7 @@ impl IXamlMetadataProvider_Impl for App_Impl {
 /// `--zoom 2 file.md` opens `file.md`, not a file named `2`. `--trace` and `--measure[=FILE]` are
 /// read by `diag`, and only skipped here.
 struct Args {
-    document: Option<PathBuf>,
+    documents: Vec<PathBuf>,
     theme: Option<mdview_render::Theme>,
     zoom: f32,
     scroll: f32,
@@ -93,7 +95,7 @@ const VALUE_FLAGS: [&str; 4] = ["--zoom", "--scroll", "--scroll-steps", "--size"
 impl Args {
     fn parse(args: impl IntoIterator<Item = String>) -> Self {
         let mut out = Args {
-            document: None,
+            documents: Vec::new(),
             theme: None,
             zoom: 1.0,
             scroll: 0.0,
@@ -123,8 +125,8 @@ impl Args {
                 out.theme.get_or_insert(mdview_render::LIGHT);
             } else if arg.starts_with("--") {
                 out.flags.push(arg);
-            } else if out.document.is_none() {
-                out.document = Some(PathBuf::from(arg));
+            } else {
+                out.documents.push(PathBuf::from(arg));
             }
         }
         out
@@ -148,7 +150,7 @@ fn run() -> Result<()> {
     diag::trace("STA ready, calling Application::Start");
 
     let args = Args::parse(std::env::args().skip(1));
-    let document = args.document.clone();
+    let documents = args.documents.clone();
     let theme = args.theme;
     let zoom = args.zoom;
     // A shifted frame has to look exactly like a whole one; `--no-shift` sends every frame whole,
@@ -163,14 +165,31 @@ fn run() -> Result<()> {
         find: args.has("--find-test"),
         outline: args.has("--outline-test"),
         copy: args.has("--copy-test"),
+        tabs: args.has("--tabs-test"),
     };
+    // Scripted checks start from a known state, so they never read or write the user's session
+    // unless `MDVIEW_SETTINGS` points them at a scratch one.
+    let scripted = startup.select
+        || startup.details
+        || startup.find
+        || startup.outline
+        || startup.copy
+        || startup.tabs
+        || diag::measuring();
+    let settings = match std::env::var_os("MDVIEW_SETTINGS").map(PathBuf::from) {
+        Some(path) => Some(path),
+        None if scripted => None,
+        None => mdview_core::session::default_settings_path(),
+    }
+    .filter(|_| !args.has("--no-session"));
     let gpu = Rc::new(RefCell::new(Some(gpu)));
     // Application and UI state must outlive Start, which returns at process end.
     let keep_alive: Rc<RefCell<Vec<IInspectable>>> = Rc::default();
     Application::Start(&ApplicationInitializationCallback::new(move |_| {
         diag::trace("Start callback");
         let gpu = gpu.clone();
-        let document = document.clone();
+        let documents = documents.clone();
+        let settings = settings.clone();
         let theme = theme;
         let zoom = zoom;
         let app_slot: Rc<RefCell<Option<Application>>> = Rc::default();
@@ -181,7 +200,7 @@ fn run() -> Result<()> {
             app.Resources()?.MergedDictionaries()?.Append(&controls)?;
             diag::trace("XamlControlsResources merged");
             let gpu = gpu.borrow_mut().take().expect("launched once");
-            ui::build(gpu, document.clone(), theme, zoom, startup)
+            ui::build(gpu, documents.clone(), settings.clone(), theme, zoom, startup)
         });
         let composed = Application::compose(App {
             provider: RefCell::new(None),
@@ -230,7 +249,7 @@ mod tests {
     fn value_flags_do_not_become_the_document() {
         let args = parse("--zoom 2 file.md --scroll 40 --size 800x600 --trace");
         assert_eq!(
-            args.document.as_deref(),
+            args.documents.first().map(|p| p.as_path()),
             Some(std::path::Path::new("file.md"))
         );
         assert_eq!(args.zoom, 2.0);
@@ -242,7 +261,7 @@ mod tests {
     #[test]
     fn dark_wins_over_light_and_defaults_hold() {
         let args = parse("--light --dark");
-        assert!(args.document.is_none());
+        assert!(args.documents.is_empty());
         assert_eq!(args.zoom, 1.0);
         assert_eq!(args.size, (1100, 900));
         assert!(args.theme.is_some());

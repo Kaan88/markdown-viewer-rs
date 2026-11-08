@@ -182,6 +182,39 @@ impl Renderer {
         self.pending_scroll = Some(top.max(0.0));
     }
 
+    /// Takes the showing document's state out (document, its renderer and caches, scroll,
+    /// selection, find), leaving an empty page, so a tab switch can keep it.
+    pub fn take_page(&mut self) -> PageState {
+        PageState {
+            renderer: std::mem::take(&mut self.renderer),
+            document: self.document.take(),
+            base_dir: self.base_dir.take(),
+            page_layout: self.page_layout.take(),
+            selection: self.selection.take(),
+            find: std::mem::take(&mut self.find),
+            scroll: std::mem::replace(&mut self.scroll, 0.0),
+        }
+    }
+
+    /// Shows a page taken earlier. The GPU's copy of the old page is dropped, because the frame
+    /// delta of `state`'s renderer is relative to its own last frame, not to what is on screen.
+    pub fn put_page(&mut self, state: PageState) {
+        self.renderer = state.renderer;
+        self.document = state.document;
+        self.base_dir = state.base_dir;
+        self.page_layout = state.page_layout;
+        self.selection = state.selection;
+        self.find = state.find;
+        self.scroll = state.scroll;
+        self.options = None;
+        self.pages = [None, None];
+        self.page_size = (0, 0);
+    }
+
+    pub fn block_count(&self) -> usize {
+        self.document.as_ref().map_or(0, |doc| doc.blocks.len())
+    }
+
     pub fn set_document(&mut self, document: Document, base_dir: Option<std::path::PathBuf>) {
         self.document = Some(document);
         self.base_dir = base_dir;
@@ -1083,6 +1116,32 @@ impl Renderer {
                 0,
             );
             Ok(())
+        }
+    }
+}
+
+/// One tab's document state while another tab is showing. See [`Renderer::take_page`].
+pub struct PageState {
+    renderer: DocumentRenderer,
+    document: Option<Document>,
+    base_dir: Option<std::path::PathBuf>,
+    page_layout: Option<PageLayout>,
+    selection: Option<(u32, u32)>,
+    find: Find,
+    scroll: f32,
+}
+
+impl PageState {
+    /// A fresh page for `document`, scrolled to the top.
+    pub fn new(document: Document, base_dir: Option<std::path::PathBuf>) -> Self {
+        PageState {
+            renderer: DocumentRenderer::new(),
+            document: Some(document),
+            base_dir,
+            page_layout: None,
+            selection: None,
+            find: Find::default(),
+            scroll: 0.0,
         }
     }
 }
