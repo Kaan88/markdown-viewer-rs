@@ -769,8 +769,9 @@ Qt's event path instead).
    recents, zoom limits, themes, focus mode, session restore. Selection, links, `<details>`, find,
    outline, clipboard copy, math, diagrams and highlighting are done in both shells; a link context
    menu and document tabs are the obvious next shell features.
-3. **Bundled fonts**: the user chose on 2026-11-08 to decide later; system fonts stay for now, which would let the golden
-   comparison in `crates/render/tests/golden.rs` run on Linux too; it runs on Windows today.
+3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.
+   Bundling would let the golden comparison in `crates/render/tests/golden.rs` run on Linux too;
+   today it runs on Windows only.
 4. The 2026-11-08 review fixes were checked on the VM: `cargo test --release -p mdview-core -p
    mdview-render -p mdview-engine -p mdview-engine-proto -- --include-ignored` passes (the golden
    compare skips there), the Qt shell builds against Qt 6.8.2 with no authored C++, and its
