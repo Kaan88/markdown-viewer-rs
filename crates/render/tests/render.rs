@@ -1,5 +1,5 @@
-//! Pixel-level smoke tests for the headless renderer. The golden images are approved by eye; these
-//! catch a crash, a blank page, a lost theme and a lost clamp.
+//! Pixel-level smoke tests for the headless renderer: a crash, a blank page, a lost theme, a lost
+//! clamp, and the subpixel channel order. `golden.rs` compares whole pages against `tests/golden/`.
 
 use mdview_render::{DARK, DocumentRenderer, LIGHT, Options, render, render_slice, render_view};
 use std::path::PathBuf;
@@ -617,4 +617,58 @@ fn a_missing_image_falls_back_to_the_placeholder() {
         .filter(|p| p[0] != LIGHT.bg[2] || p[1] != LIGHT.bg[1] || p[2] != LIGHT.bg[0])
         .count();
     assert!(ink > 100, "placeholder pixels: {ink}");
+}
+
+#[test]
+fn subpixel_text_uses_rgb_stripe_order() {
+    // Phase 0 found zeno's `Format::Subpixel` swapping red and blue, which put coloured fringes on
+    // the wrong side of every stem. On an RGB-stripe panel red is the left third of a pixel and
+    // blue the right, so dark ink starting partway into a pixel covers blue more than red: the left
+    // edge of a dark stem on a light page is red-tinted (R > B) and its right edge blue-tinted. A
+    // swap in the mask format or in the blit flips both.
+    let doc = mdview_core::parse("# llllllll IIIIIIII\n");
+    let rendered = render(
+        &doc,
+        &Options {
+            width: 780.0,
+            scale: 1.0,
+            theme: LIGHT,
+            max_height: None,
+            base_dir: None,
+        },
+    );
+    let bitmap = &rendered.bitmap;
+    let bg = &bitmap.pixels[0..3];
+    let (mut left, mut right) = ((0, 0), (0, 0)); // (red-tinted, blue-tinted)
+    for y in 0..bitmap.height {
+        let row = &bitmap.pixels[(y * bitmap.width * 4) as usize..][..(bitmap.width * 4) as usize];
+        let inked = |x: u32| row[(x * 4) as usize..][..3] != *bg;
+        for x in 1..bitmap.width - 1 {
+            let p = &row[(x * 4) as usize..][..3];
+            let (b, r) = (p[0] as i32, p[2] as i32);
+            if (b - r).abs() < 8 {
+                continue;
+            }
+            let tally = if inked(x) && !inked(x - 1) {
+                &mut left
+            } else if inked(x) && !inked(x + 1) {
+                &mut right
+            } else {
+                continue;
+            };
+            if r > b { tally.0 += 1 } else { tally.1 += 1 }
+        }
+    }
+    assert!(
+        left.0 + left.1 > 20 && right.0 + right.1 > 20,
+        "too few edges: {left:?} {right:?}"
+    );
+    assert!(
+        left.0 > left.1 * 3,
+        "left edges should be red-tinted: {left:?}"
+    );
+    assert!(
+        right.1 > right.0 * 3,
+        "right edges should be blue-tinted: {right:?}"
+    );
 }

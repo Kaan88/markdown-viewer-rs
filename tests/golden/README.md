@@ -52,13 +52,22 @@ inline, a missing file's placeholder, and the SVG badge that the engine now draw
 `shell-winui-images.png` and `shell-qt-images.png` show the same file in both shells, with the badge
 drawn both ways.
 
-They are **not** a pixel test baseline yet:
+**Pixel test.** The four `showcase-*.png` images are a baseline: `crates/render/tests/golden.rs`
+renders the showcase at the same four settings and fails when more than 0.1% of pixels differ by more
+than 24 in any channel, writing the actual image to `target/golden-actual-<name>.png`. A red/blue
+subpixel swap alone changes 0.94% and fails it. Limits:
 
-- They use this host's system fonts (Segoe UI, Consolas), so a render on Linux or another Windows
-  build will differ. The plan calls for bundled fonts and a small tolerance; that is still open.
+- They use this host's system fonts (Segoe UI, Consolas), so the comparison runs on Windows only;
+  elsewhere it passes with a note. Bundled fonts would make it portable; that is still open.
+- Only the four showcase renders are compared. The `shell-*` captures and `images-light.png` are
+  evidence that the shells run, not a baseline.
 - Fenced code is coloured from syntect's bundled syntaxes and two themes; unknown languages, inline
   code and blocks over 256 KiB stay plain.
 - The window captures include the 31 px title bar, which follows Windows; compare the client area.
+
+After an intended visual change, regenerate the baseline with
+`MDV_BLESS=1 cargo test --release -p mdview-render --test golden`, look at the new images, and commit
+them only once they are approved.
 
 To regenerate:
 

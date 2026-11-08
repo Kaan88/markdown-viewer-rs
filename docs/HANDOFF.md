@@ -70,7 +70,9 @@ Toolchain here: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msv
 cd C:\Users\kaank\Desktop\mv
 cargo test --release --offline --workspace     # 7 core, 11 fuzz, 113 regression, 3 spec,
                                                # 12 engine, 7 engine-proto, 10 render unit
-                                               # (10 + 2 ignored deadline waits), 18 render integration
+                                               # (10 + 2 ignored deadline waits), 19 render integration,
+                                               # 1 golden compare (Windows), 1 engine watchdog (ignored),
+                                               # 2 winui args
 cargo fmt --all --check
 cargo build --release --offline --workspace    # includes target/release/mdview-engine.exe
 cargo build --release --offline -p mdview-winui
@@ -769,7 +771,10 @@ Qt's event path instead).
    recents, zoom limits, themes, focus mode, session restore. Selection, links, `<details>`, find,
    outline, clipboard copy, math, diagrams and highlighting are done in both shells; a link context
    menu and document tabs are the obvious next shell features.
-3. **Bundled fonts**, then turn the goldens into a real pixel suite (the plan's Phase 6).
+3. **Bundled fonts** (a size and licence decision for the user), which would let the golden
+   comparison in `crates/render/tests/golden.rs` run on Linux too; it runs on Windows today.
+4. **Linux check of the 2026-11-08 review fixes**: the Qt changes (outline `Tree`, clipboard without
+   C++, core link rules, drop handling) were built and run on Windows only, not on the VM.
 
 Every Qt/Linux change is tested on the VM as well as on Windows, and nothing counts as working on
 Windows until it has run on Windows.
