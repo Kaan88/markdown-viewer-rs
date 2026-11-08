@@ -1,7 +1,9 @@
 //! The only module allowed to contain `unsafe`. `crate::shell` forbids it.
 //!
-//! Handles are raw pointers to Qt objects owned by Qt's parent tree. In this spike
-//! every object lives until process exit, which is what keeps the handles valid.
+//! `H<T>` is a copyable raw pointer to a widget owned by Qt's parent tree. It is only handed out for
+//! widgets that live until the process exits (the window and everything parented to it, which this
+//! shell never deletes), which is what keeps every copy valid. Objects Qt deletes earlier, the
+//! outline's tree items, are never exposed as handles: see `Tree`.
 pub mod ffi;
 
 use cxx::UniquePtr;
@@ -34,6 +36,9 @@ trivial_cxx!(Alignment, "Qt::Alignment");
 trivial_cxx!(Orientation, "Qt::Orientation");
 trivial_cxx!(FocusPolicy, "Qt::FocusPolicy");
 trivial_cxx!(CursorShape, "Qt::CursorShape");
+trivial_cxx!(ClipboardMode, "QClipboard::Mode");
+/// `QClipboard::Clipboard`, the system clipboard (not the X11 selection).
+const CLIPBOARD: ClipboardMode = ClipboardMode(0);
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -106,11 +111,20 @@ fn qs(s: &str) -> QString {
 
 /// Copies text to the system clipboard.
 pub fn set_clipboard(text: &str) {
-    set_clipboard_text(&qs(text));
+    let clipboard = QApplication::clipboard();
+    if clipboard.is_null() {
+        return;
+    }
+    // Owned by the application object, which outlives every caller.
+    unsafe { Pin::new_unchecked(&mut *clipboard) }.clipboard_set_text(&qs(text), CLIPBOARD);
 }
 
 pub fn read_clipboard() -> String {
-    clipboard_text().to_string()
+    let clipboard = QApplication::clipboard();
+    if clipboard.is_null() {
+        return String::new();
+    }
+    unsafe { &*clipboard }.clipboard_get_text(CLIPBOARD).to_string()
 }
 
 /// Events the shell can observe on the canvas. All safe Rust on the other side.
@@ -695,38 +709,66 @@ impl H<QDockWidget> {
         unsafe { pin!(self).setWidget(w.0) }
     }
 }
-impl H<QTreeWidget> {
-    pub fn new() -> Self {
-        let t = H(new_tree());
-        pin!(t).setHeaderHidden(true);
-        t
-    }
-    pub fn clear(&self) {
-        pin!(self).clear_tree()
-    }
-    pub fn expand_all(&self) {
-        pin!(self).expand_tree()
-    }
-    pub fn on_item_clicked(&self, f: impl FnMut(*mut QTreeWidgetItem) + 'static) {
-        let mut f = GuiThreadOnly(f);
-        pin!(self)
-            .on_item_clicked(move |_, item, _| f.get()(item))
-            .release();
-    }
-    pub fn add_top(&self, text: &str) -> H<QTreeWidgetItem> {
-        let i = H(unsafe { new_tree_item(self.0) });
-        i.set_text(text);
-        i
-    }
+/// The outline tree. Its items are deleted by `QTreeWidget::clear`, so no handle to an item ever
+/// leaves this module: the items are rebuilt whole from (level, title) pairs, and a click is
+/// reported as the item's index in that list. The pointers below are only compared, never followed,
+/// after a `clear`, because `set_items` replaces the list in the same call.
+#[derive(Clone)]
+pub struct Tree {
+    handle: H<QTreeWidget>,
+    items: Rc<std::cell::RefCell<Vec<*mut QTreeWidgetItem>>>,
 }
-impl H<QTreeWidgetItem> {
-    pub fn set_text(&self, t: &str) {
-        unsafe { pin!(self).item_set_text(0, &qs(t)) }
+impl Tree {
+    pub fn new() -> Self {
+        let handle = H(new_tree());
+        pin!(handle).setHeaderHidden(true);
+        Tree {
+            handle,
+            items: Rc::default(),
+        }
     }
-    pub fn add_child(&self, text: &str) -> H<QTreeWidgetItem> {
-        let i = H(unsafe { new_child_item(self.0) });
-        i.set_text(text);
-        i
+    pub fn widget(&self) -> H<QWidget> {
+        self.handle.widget()
+    }
+    /// Replaces every item. An entry nests under the closest earlier entry with a lower level,
+    /// the way headings nest; the tree is then fully expanded.
+    pub fn set_items(&self, entries: &[(u8, &str)]) {
+        let mut items = self.items.borrow_mut();
+        pin!(self.handle).clear_tree();
+        items.clear();
+        let mut stack: Vec<(u8, *mut QTreeWidgetItem)> = Vec::new();
+        for &(level, title) in entries {
+            while stack.last().is_some_and(|&(parent, _)| parent >= level) {
+                stack.pop();
+            }
+            // Both constructors parent the new item, so the tree owns it until the next clear.
+            let item = match stack.last() {
+                Some(&(_, parent)) => unsafe { new_child_item(parent) },
+                None => unsafe { new_tree_item(self.handle.0) },
+            };
+            unsafe { Pin::new_unchecked(&mut *item).item_set_text(0, &qs(title)) };
+            stack.push((level, item));
+            items.push(item);
+        }
+        pin!(self.handle).expand_tree();
+    }
+    pub fn len(&self) -> usize {
+        self.items.borrow().len()
+    }
+    /// `f` gets the clicked item's index in the last `set_items` list.
+    pub fn on_item_clicked(&self, f: impl FnMut(usize) + 'static) {
+        let mut state = GuiThreadOnly((Rc::downgrade(&self.items), f));
+        pin!(self.handle)
+            .on_item_clicked(move |_, item, _| {
+                let (items, f) = state.get();
+                let index = items
+                    .upgrade()
+                    .and_then(|items| items.borrow().iter().position(|&known| known == item));
+                if let Some(index) = index {
+                    f(index);
+                }
+            })
+            .release();
     }
 }
 

@@ -1,8 +1,7 @@
 # Handoff
 
 `mdview` is a Rust remake of `Kaan88/markdown-viewer-cpp`: a Markdown viewer with its own renderer,
-**WinUI 3 on Windows** and **Qt Widgets (CXX-Qt) on Linux**, no webview; the only authored C++ is the
-three-line Qt clipboard shim.
+**WinUI 3 on Windows** and **Qt Widgets (CXX-Qt) on Linux**, no webview, and no authored C++.
 
 This document is the current state: what works, how to build and check it, the traps already found,
 and what to do next. `docs/PLAN.md` is the full plan (budgets, phases, gates). Read this file first,
@@ -540,9 +539,17 @@ mouse resize keeps focus, and a click fixes it, so it is a focus matter, not a h
 
 Qt Widgets through CXX-Qt 0.10, ported from `spikes/qt-shell`: `src/qt/mod.rs` is the only module with
 `unsafe`, `src/qt/ffi.rs` holds the C++ declarations, `src/shell.rs` is
-`#![forbid(unsafe_code)]`. `src/qt/clipboard.h` is the only authored C++: cxx cannot express
-`QApplication::clipboard()` as a static factory or pick between `QClipboard`'s `text`/`setText`
-overloads, so it wraps those three calls.
+`#![forbid(unsafe_code)]`. There is no authored C++. The clipboard is bound in `ffi.rs`:
+`QApplication::clipboard()` through cxx's `#[Self = ...]` static members, and `text`/`setText` with an
+explicit `QClipboard::Mode`, which picks the right overload because cxx names a member through a
+pointer of exactly the declared signature.
+
+**Handles.** `H<T>` is a copyable pointer, so it is only handed out for widgets that live until the
+process exits (the window and its children, which this shell never deletes). Outline items are
+deleted by every rebuild, so `qt::Tree` keeps their pointers to itself: `set_items` takes (level,
+title) pairs, and a click arrives as an index into that list, which `shell.rs` maps to a block.
+Checked by clicking: Mathematics scrolls there, then after hiding and re-showing the outline (a
+clear and rebuild), Pie scrolls to Pie.
 
 Menus File > Open... / Quit, View > Light/Dark theme, Help > About, a status bar with the file name and
 block count. A file comes from the command line, File > Open... (`QFileDialog` built through `new_ptr`,

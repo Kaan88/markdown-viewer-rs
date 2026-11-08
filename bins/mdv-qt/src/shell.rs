@@ -85,8 +85,9 @@ struct Shell {
     find: RefCell<Find>,
     /// The outline dock and its heading items, each paired with its block.
     outline_dock: Cell<Option<H<QDockWidget>>>,
-    outline_tree: Cell<Option<H<QTreeWidget>>>,
-    outline_items: RefCell<Vec<(H<QTreeWidgetItem>, u32)>>,
+    outline_tree: RefCell<Option<Tree>>,
+    /// The block of each outline item, by the item's index in the tree.
+    outline_blocks: RefCell<Vec<u32>>,
 }
 
 impl Shell {
@@ -119,8 +120,8 @@ impl Shell {
             find_edit: Cell::new(None),
             find: RefCell::new(Find::default()),
             outline_dock: Cell::new(None),
-            outline_tree: Cell::new(None),
-            outline_items: RefCell::new(Vec::new()),
+            outline_tree: RefCell::new(None),
+            outline_blocks: RefCell::new(Vec::new()),
         }
     }
 
@@ -270,7 +271,7 @@ impl Shell {
     /// Rebuilds the heading tree from the current document. Levels nest, so an `<h3>` under an
     /// `<h2>` becomes its child; a skipped level starts a new top-level branch.
     fn build_outline(&self) {
-        let Some(tree) = self.outline_tree.get() else {
+        let Some(tree) = self.outline_tree.borrow().clone() else {
             return;
         };
         let headings = {
@@ -290,22 +291,12 @@ impl Shell {
                 })
                 .collect::<Vec<_>>()
         };
-        tree.clear();
-        let mut items = self.outline_items.borrow_mut();
-        items.clear();
-        let mut stack: Vec<(u8, H<QTreeWidgetItem>)> = Vec::new();
-        for (level, title, block) in headings {
-            while stack.last().is_some_and(|(parent, _)| *parent >= level) {
-                stack.pop();
-            }
-            let item = match stack.last() {
-                Some((_, parent)) => parent.add_child(&title),
-                None => tree.add_top(&title),
-            };
-            stack.push((level, item));
-            items.push((item, block));
-        }
-        tree.expand_all();
+        let entries: Vec<(u8, &str)> = headings
+            .iter()
+            .map(|(level, title, _)| (*level, title.as_str()))
+            .collect();
+        tree.set_items(&entries);
+        *self.outline_blocks.borrow_mut() = headings.iter().map(|(_, _, block)| *block).collect();
     }
 
     fn show_outline(&self, visible: bool) {
@@ -317,13 +308,8 @@ impl Shell {
         }
     }
 
-    fn outline_click(&self, item: *mut QTreeWidgetItem) {
-        let block = self
-            .outline_items
-            .borrow()
-            .iter()
-            .find(|(handle, _)| handle.raw() == item)
-            .map(|(_, block)| *block);
+    fn outline_click(&self, index: usize) {
+        let block = self.outline_blocks.borrow().get(index).copied();
         if let Some(block) = block {
             self.scroll_to_outline(block);
         }
@@ -1019,7 +1005,7 @@ fn run_check(shell: &Rc<Shell>, check: Check) {
             .outline_dock
             .get()
             .is_some_and(|dock| dock.widget().is_visible());
-        let entries = shell.outline_items.borrow().len();
+        let entries = shell.outline_blocks.borrow().len();
         let target = {
             let document = shell.document.borrow();
             document.as_ref().and_then(|document| {
@@ -1237,15 +1223,15 @@ fn build(
     shell.find_edit.set(Some(find_edit));
 
     let outline_dock = H::<QDockWidget>::new("Outline", window.clone());
-    let outline_tree = H::<QTreeWidget>::new();
+    let outline_tree = Tree::new();
     outline_dock.set_widget(outline_tree.widget());
     window.add_dock(true, outline_dock);
     outline_dock.widget().set_visible(false);
     outline_dock.widget().resize(240, 700);
     let s = shell.clone();
-    outline_tree.on_item_clicked(move |item| s.outline_click(item));
+    outline_tree.on_item_clicked(move |index| s.outline_click(index));
     shell.outline_dock.set(Some(outline_dock));
-    shell.outline_tree.set(Some(outline_tree));
+    shell.outline_tree.replace(Some(outline_tree));
 
     let view_menu = menus.add_menu("&View");
     let outline = view_menu.add_action("&Outline");
