@@ -16,6 +16,7 @@
 mod bindings;
 mod bootstrap;
 mod diag;
+mod input;
 #[allow(non_snake_case)]
 mod render;
 mod ui;

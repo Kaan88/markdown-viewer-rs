@@ -463,12 +463,16 @@ the bar to 6 px.
 
 **Input** arrives two ways, because WinUI moves it around:
 
-- **Keys** come from a thread-level `WH_GETMESSAGE` hook installed on the UI thread. WinUI's content
-  lives in child windows (`InputSiteWindowClass`, `Microsoft.UI.Content.DesktopChildSiteBridge`) that
-  take the keyboard, and subclassing those window procedures with `SetWindowLongPtrW` is not durable:
-  WinUI reinstalls its own and the subclass stops being called after a resize. The hook filters by
-  window (`GetAncestor(.., GA_ROOT)` must be our top-level window), so the file dialog's own message
-  loop is untouched, and it swallows the keys it uses by setting the message to `WM_NULL`.
+- **Keys** come from XAML's routed events, bound by hand in `src/input.rs` (slot indices and IIDs
+  read from `Microsoft.UI.Xaml.winmd` 2.6.4 with `ildasm`; see the module comment). The page panel
+  is a tab stop and takes focus on `Loaded` and on every press. Its `KeyDown` handles scrolling and
+  the other page keys; the root's `KeyDown` handles only Ctrl shortcuts, F3, and Escape while find is
+  open, and Ctrl+F moves focus back to the page. `CharacterReceived` on the root feeds the find
+  query. A control that uses a key marks it handled, and an open menu's keys never reach the page,
+  so keyboard navigation of the menu bar works. This replaced a `WH_GETMESSAGE` thread hook that
+  swallowed arrows, Space and Escape before XAML saw them. Checked with real keystrokes (SendKeys):
+  Page Down scrolls; Tab, Right and Down open the Edit menu without scrolling; Ctrl+F, typing,
+  Enter and Escape drive find from the menu bar.
 - **The scrollbar** is driven by XAML pointer events (`PointerPressed`/`PointerMoved`/
   `PointerReleased`). The generator left those, and `IPointerPoint::Position`, as unbound vtable slots,
   so `bindings.rs` has hand-written `pointer_pressed/moved/released` and `IPointerPoint::position`.
@@ -487,13 +491,13 @@ buffer** just before the gutter strip, so the page texture - and with it `band`/
 contains selection pixels. A details toggle drops the page layout, so the next frame measures it
 again.
 
-**Find.** Ctrl+F (or Edit > Find) starts find mode; `WM_CHAR` from the same thread hook appends the
+**Find.** Ctrl+F (or Edit > Find) starts find mode; `CharacterReceived` appends the
 typed characters, Backspace deletes, Enter and F3 step forward and Shift+F3 steps back, and Escape
 closes. The renderer runs core `find_visible` with its own `<details>` state, scrolls the active match
 into view, and paints all marks (yellow) plus the current one (orange) through the same CPU overlay
 as the selection. This shell has no text-field binding in its trimmed `bindings.rs`, so the query and
 its `2 of 4` counter are shown in the **window title** (`mdview - file — Find: query [2 of 4]`)
-rather than in a find box. `--find-test` feeds WM_CHAR/WM_KEYDOWN messages through the hook and logs
+rather than in a find box. `--find-test` feeds characters and F3 through the same key handlers and logs
 `find test ok: 4 matches, 4 mark rects, 1 current rects, index 1`.
 
 **Outline.** The trimmed WinUI bindings have no usable `ItemInvoked`/`TextBlock` support for a
@@ -689,7 +693,7 @@ selection rows) and a click on the `#diagrams` link, both captured; `<details>` 
 `--details-test` in both shells (4071 -> 4125 px, the body appearing) and a WinUI capture of the
 open body. Find in both shells: Qt `--find-test` sets the line edit's text and reports
 `4 matches, 4 mark rects, 1 current rects, bar true, index 1`; WinUI `--find-test` feeds WM_CHAR and
-F3 through the message hook and logs `4 matches, 4 mark rects, 1 current rects, index 1`; both
+F3 through the key handlers and logs `4 matches, 4 mark rects, 1 current rects, index 1`; both
 captured with the marks visible. Outline in both shells: Qt `--outline-test` reports
 `15 headings, dock true, scrolled to 1242`, WinUI `15 headings, scrolled to 1242`, and both
 captured. Clipboard: Qt copies 7..15 ("Markdown") and reads back 8 characters; WinUI logs

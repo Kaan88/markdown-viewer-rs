@@ -40,9 +40,6 @@ windows_core::link!("user32.dll" "system" fn GetDpiForWindow(window: *mut c_void
 windows_core::link!("user32.dll" "system" fn SetWindowPos(window: *mut c_void, after: *mut c_void, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32);
 windows_core::link!("comdlg32.dll" "system" fn GetOpenFileNameW(ofn: *mut OpenFileNameW) -> i32);
 windows_core::link!("advapi32.dll" "system" fn RegGetValueW(hkey: *mut c_void, subkey: PCWSTR, value: PCWSTR, flags: u32, ty: *mut u32, data: *mut c_void, size: *mut u32) -> i32);
-windows_core::link!("user32.dll" "system" fn SetWindowsHookExW(id: i32, proc: unsafe extern "system" fn(i32, usize, isize) -> isize, module: *mut c_void, thread: u32) -> *mut c_void);
-windows_core::link!("user32.dll" "system" fn CallNextHookEx(hook: *mut c_void, code: i32, wparam: usize, lparam: isize) -> isize);
-windows_core::link!("user32.dll" "system" fn GetAncestor(window: *mut c_void, flags: u32) -> *mut c_void);
 windows_core::link!("user32.dll" "system" fn GetKeyState(key: i32) -> i16);
 windows_core::link!("user32.dll" "system" fn OpenClipboard(owner: *mut c_void) -> i32);
 windows_core::link!("user32.dll" "system" fn CloseClipboard() -> i32);
@@ -55,82 +52,8 @@ windows_core::link!("kernel32.dll" "system" fn GlobalUnlock(mem: *mut c_void) ->
 windows_core::link!("kernel32.dll" "system" fn GlobalFree(mem: *mut c_void) -> *mut c_void);
 windows_core::link!("shell32.dll" "system" fn ShellExecuteW(window: *mut c_void, operation: PCWSTR, file: PCWSTR, parameters: PCWSTR, directory: PCWSTR, show: i32) -> isize);
 
-/// `GETMESSAGE` hook id, `PM_REMOVE`, `WM_NULL` and `GA_ROOT`, from winuser.h.
-const WH_GETMESSAGE: i32 = 3;
-const PM_REMOVE: usize = 1;
-const WM_NULL: u32 = 0;
-const GA_ROOT: u32 = 2;
-
-#[repr(C)]
-#[derive(Default)]
-struct Point {
-    x: i32,
-    y: i32,
-}
-
-/// `MSG`, for the `WH_GETMESSAGE` hook: the message about to be dispatched.
-#[repr(C)]
-#[derive(Default)]
-struct Msg {
-    window: *mut c_void,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-    time: u32,
-    point: Point,
-    private: u32,
-}
-
 thread_local! {
     static SHELL: RefCell<Option<Rc<Shell>>> = const { RefCell::new(None) };
-    /// The WinUI top-level window, so the message hook can ignore everything that is not ours.
-    static TOP_LEVEL: Cell<isize> = const { Cell::new(0) };
-}
-
-/// True for the WinUI window and every child of it (the content site and the input site).
-fn ours(window: *mut c_void) -> bool {
-    let top = TOP_LEVEL.with(|top| top.get());
-    if top == 0 || window.is_null() {
-        return false;
-    }
-    window as isize == top || unsafe { GetAncestor(window, GA_ROOT) } as isize == top
-}
-
-/// A thread-level message hook, because WinUI's content windows take the keyboard and their window
-/// procedures are not stable across a resize: subclasses installed with `SetWindowLongPtrW` stop
-/// being called once WinUI reinstalls its own. `WH_GETMESSAGE` runs for every message this thread
-/// retrieves, including nested loops such as the file dialog, which is why `ours` filters by window.
-unsafe extern "system" fn get_message(code: i32, wparam: usize, lparam: isize) -> isize {
-    if code >= 0 && wparam == PM_REMOVE && lparam != 0 {
-        let msg = unsafe { &mut *(lparam as *mut Msg) };
-        if ours(msg.window) {
-            let handled = SHELL.with(|cell| match cell.borrow().as_ref() {
-                Some(shell) => {
-                    shell.handle_message(msg.window, msg.message, msg.wparam, msg.lparam)
-                }
-                None => false,
-            });
-            if handled {
-                // Nothing is dispatched; the shell already scrolled or started a drag.
-                msg.message = WM_NULL;
-            }
-        }
-    }
-    unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
-}
-
-/// Installs the message hook on this thread and records the window it is for.
-fn hook_messages(window: *mut c_void) -> bool {
-    TOP_LEVEL.with(|top| top.set(window as isize));
-    let hook = unsafe {
-        SetWindowsHookExW(
-            WH_GETMESSAGE,
-            get_message,
-            std::ptr::null_mut(),
-            GetCurrentThreadId(),
-        )
-    };
-    !hook.is_null()
 }
 
 /// Follows the Windows app theme, the way the shell's own chrome does.
@@ -343,14 +266,10 @@ struct Shell {
 }
 
 impl Shell {
-    /// Keys, before WinUI dispatches them. The scrollbar is driven by XAML pointer events instead,
-    /// because WinUI sends those to its child windows outside the message queue.
-    fn handle_message(&self, window: *mut c_void, msg: u32, wparam: usize, _lparam: isize) -> bool {
-        const WM_KEYDOWN: u32 = 0x0100;
-        const WM_SYSKEYDOWN: u32 = 0x0104;
-        const WM_CHAR: u32 = 0x0102;
-        match msg {
-            WM_KEYDOWN | WM_SYSKEYDOWN => {
+    /// A key no control handled, from the root's `KeyDown`. Returns true when the shell used it.
+    fn key(&self, wparam: usize) -> bool {
+        {
+            {
                 const VK_ESCAPE: usize = 0x1b;
                 let ctrl = unsafe { GetKeyState(0x11) } < 0;
                 let shift = unsafe { GetKeyState(0x10) } < 0;
@@ -378,7 +297,7 @@ impl Shell {
                 let scrolled = self.renderer.borrow_mut().key(wparam as u32);
                 if scrolled {
                     diag::trace(&format!(
-                        "key {:#04x} on window {window:p}, offset {:.0}",
+                        "key {:#04x}, offset {:.0}",
                         wparam,
                         self.renderer.borrow().offset()
                     ));
@@ -388,7 +307,13 @@ impl Shell {
                     false
                 }
             }
-            WM_CHAR => {
+        }
+    }
+
+    /// Typed text from `CharacterReceived`, which only find mode uses. Escape is left to `key`.
+    fn character(&self, wparam: usize) -> bool {
+        {
+            {
                 if !self.find_active.get() {
                     return false;
                 }
@@ -399,7 +324,7 @@ impl Shell {
                         self.find_set_query(query);
                     }
                     0x0d | 0x0a => self.find_step(1),
-                    0x1b => self.find_close(),
+                    0x1b => {}
                     code => {
                         if let Some(c) = char::from_u32(code as u32)
                             && !c.is_control()
@@ -412,7 +337,6 @@ impl Shell {
                 }
                 true
             }
-            _ => false,
         }
     }
 
@@ -593,14 +517,14 @@ impl Shell {
                         self.find_test.set(false);
                         self.find_active.set(true);
                         self.renderer.borrow_mut().find_update("");
-                        // Feed the same messages the keyboard hook sees, so this covers the input
+                        // Feed the same handlers the XAML key events call, so this covers the input
                         // path rather than calling the find API directly.
                         for byte in b"Markdown" {
-                            self.handle_message(std::ptr::null_mut(), 0x0102, *byte as usize, 0);
+                            self.character(*byte as usize);
                         }
                         let (hits, _, capped) = self.renderer.borrow().find_summary();
                         let marks = self.renderer.borrow_mut().find_rect_count(false);
-                        self.handle_message(std::ptr::null_mut(), 0x0100, 0x72, 0);
+                        self.key(0x72);
                         let (_, current, _) = self.renderer.borrow().find_summary();
                         let current_rects = self.renderer.borrow_mut().find_rect_count(true);
                         let ok = hits >= 2 && marks > 0 && current_rects > 0 && current == 1;
@@ -890,7 +814,7 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
     menu.Items()?.Append(&edit)?;
 
     let outline = MenuBarItem::new()?;
-    outline.SetTitle("&Outline")?;
+    outline.SetTitle("Outline")?;
     menu.Items()?.Append(&outline)?;
     *shell.outline_menu.borrow_mut() = Some(outline);
 
@@ -1081,6 +1005,8 @@ pub fn build(
         element
             .pointer_pressed(move |_, args| {
                 let Some(args) = args.as_ref() else { return };
+                // A press on the page gives it the keyboard back, from the menu bar for instance.
+                _ = crate::input::focus(&source, crate::input::FOCUS_PROGRAMMATIC);
                 let Some((x, y)) = shell.pointer_at(args, &source) else {
                     return;
                 };
@@ -1200,18 +1126,68 @@ pub fn build(
     window.Activate()?;
     diag::trace("Window activated");
 
-    let hwnd = winui_window();
-    if hwnd != 0 {
-        // Keys and scrollbar clicks arrive through a thread message hook: WinUI's content lives in
-        // child windows that take the keyboard, and subclassing those is not durable across a
-        // resize. The hook ignores anything that is not this window or a child of it, so the file
-        // dialog's nested message loop is untouched.
-        if hook_messages(hwnd as *mut c_void) {
-            SHELL.with(|cell| *cell.borrow_mut() = Some(shell.clone()));
-            diag::trace("thread message hook installed for keys and the scrollbar");
-        } else {
-            diag::trace("SetWindowsHookExW failed; keys and the scrollbar stay inert");
-        }
+    // Keys come from XAML's routed events on the root. KeyDown bubbles from whatever has focus, and
+    // a control that used a key marks it handled, so the menu bar keeps arrows, Space and Escape.
+    // The page panel is a tab stop and takes focus at start and on every press, so the keys reach
+    // the root from it when the user is reading.
+    let root_element: UIElement = root.cast()?;
+    {
+        let shell = shell.clone();
+        // Shortcuts work from anywhere, including the menu bar. Ctrl+F moves focus to the page, so
+        // the query, Enter and Escape that follow go to find rather than to a menu item.
+        let page: UIElement = panel.cast()?;
+        crate::input::key_down(&root_element, move |_, args| {
+            let Some(args) = args.as_ref() else { return };
+            let ctrl = unsafe { GetKeyState(0x11) } < 0;
+            let Ok(key) = args.key() else { return };
+            let find_escape = key == 0x1b && shell.find_active.get();
+            if (ctrl || key == 0x72 || find_escape) && shell.key(key as usize) {
+                _ = args.set_handled(true);
+                if ctrl && key == 0x46 {
+                    _ = crate::input::focus(&page, crate::input::FOCUS_PROGRAMMATIC);
+                }
+            }
+        })?
+        .forget();
+    }
+    {
+        // Everything else only while the page has focus: an open menu does not mark every key it
+        // uses as handled, and its Down must not also scroll the page.
+        let shell = shell.clone();
+        crate::input::key_down(&panel.cast::<UIElement>()?, move |_, args| {
+            let Some(args) = args.as_ref() else { return };
+            if let Ok(key) = args.key()
+                && shell.key(key as usize)
+            {
+                _ = args.set_handled(true);
+            }
+        })?
+        .forget();
+    }
+    {
+        let shell = shell.clone();
+        crate::input::character_received(&root_element, move |_, args| {
+            let Some(args) = args.as_ref() else { return };
+            if let Ok(unit) = args.character()
+                && shell.character(unit as usize)
+            {
+                _ = args.set_handled(true);
+            }
+        })?
+        .forget();
+    }
+    let panel_element: UIElement = panel.cast()?;
+    crate::input::set_is_tab_stop(&panel_element, true)?;
+    // Focus only works once the panel is in the live tree.
+    {
+        let target = panel_element.clone();
+        panel
+            .cast::<FrameworkElement>()?
+            .Loaded(move |_, _| {
+                let focused = crate::input::focus(&target, crate::input::FOCUS_PROGRAMMATIC);
+                diag::trace(&format!("page focus on load: {focused:?}"));
+            })?
+            .forget();
     }
     Ok(())
 }

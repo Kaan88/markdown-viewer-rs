@@ -5351,7 +5351,7 @@ where
     TSender: core::marker::PhantomData<TSender>,
     TResult: core::marker::PhantomData<TResult>,
 }
-struct TypedEventHandlerBox<
+pub(crate) struct TypedEventHandlerBox<
     TSender,
     TResult,
     F: Fn(windows_core::Ref<TSender>, windows_core::Ref<TResult>) + 'static,
@@ -5365,7 +5365,7 @@ impl<
     F: Fn(windows_core::Ref<TSender>, windows_core::Ref<TResult>) + 'static,
 > TypedEventHandlerBox<TSender, TResult, F>
 {
-    const VTABLE : TypedEventHandler_Vtbl < TSender , TResult , > = TypedEventHandler_Vtbl::< TSender , TResult , > { base__ : windows_core::IUnknown_Vtbl { QueryInterface : windows_core::imp::DelegateBox::< TypedEventHandler < TSender , TResult > , F >::QueryInterface , AddRef : windows_core::imp::DelegateBox::< TypedEventHandler < TSender , TResult > , F >::AddRef , Release : windows_core::imp::DelegateBox::< TypedEventHandler < TSender , TResult > , F >::Release , } , Invoke : Self::Invoke , TSender : core::marker::PhantomData::< TSender > , TResult : core::marker::PhantomData::< TResult > } ;
+    pub(crate) const VTABLE : TypedEventHandler_Vtbl < TSender , TResult , > = TypedEventHandler_Vtbl::< TSender , TResult , > { base__ : windows_core::IUnknown_Vtbl { QueryInterface : windows_core::imp::DelegateBox::< TypedEventHandler < TSender , TResult > , F >::QueryInterface , AddRef : windows_core::imp::DelegateBox::< TypedEventHandler < TSender , TResult > , F >::AddRef , Release : windows_core::imp::DelegateBox::< TypedEventHandler < TSender , TResult > , F >::Release , } , Invoke : Self::Invoke , TSender : core::marker::PhantomData::< TSender > , TResult : core::marker::PhantomData::< TResult > } ;
     unsafe extern "system" fn Invoke(
         this: *mut core::ffi::c_void,
         sender: windows_core::imp::AbiType<TSender>,
