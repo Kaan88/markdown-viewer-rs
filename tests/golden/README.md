@@ -53,9 +53,11 @@ inline, a missing file's placeholder, and the SVG badge that the engine now draw
 drawn both ways.
 
 **Pixel test.** The four `showcase-*.png` images are a baseline: `crates/render/tests/golden.rs`
-renders the showcase at the same four settings and fails when more than 0.1% of pixels differ by more
-than 24 in any channel, writing the actual image to `target/golden-actual-<name>.png`. A red/blue
-subpixel swap alone changes 0.94% and fails it. Limits:
+renders the showcase at the same four settings and fails when more than 64 pixels differ by more than
+24 in any channel, writing the actual image to `target/golden-actual-<name>.png`. Rendering is
+deterministic, so with nothing changed no pixel differs. A red/blue subpixel swap changes 29,677
+pixels; the gantt axis fix of 2026-11-08 changed 646 (one band of rows at the chart) and was blessed.
+Limits:
 
 - They use this host's system fonts (Segoe UI, Consolas), so the comparison runs on Windows only;
   elsewhere it passes with a note. Bundled fonts would make it portable; that is still open.

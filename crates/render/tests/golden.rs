@@ -1,9 +1,10 @@
 //! Pixel comparison against the approved showcase images in `tests/golden/`.
 //!
 //! The goldens use this host's system fonts (Segoe UI, Consolas), so they are compared only on
-//! Windows; elsewhere the test passes with a note until the renderer bundles its fonts. The
-//! tolerance absorbs anti-aliasing noise between driver and font-cache states, not layout changes:
-//! a moved line or a lost image changes far more pixels than it allows.
+//! Windows; elsewhere the test passes with a note until the renderer bundles its fonts. Rendering
+//! is on the CPU and deterministic: with nothing changed, no pixel differs. The small allowance is
+//! for a font or library update nudging an edge, not for real changes. A share of the page would
+//! be too loose: a gantt axis that lost half its labels changed 646 pixels, 0.02% of a 4071 px page.
 //!
 //! After an intended visual change, regenerate with `MDV_BLESS=1 cargo test --release -p
 //! mdview-render --test golden` and review the new images before committing them.
@@ -13,8 +14,8 @@ use std::path::{Path, PathBuf};
 
 /// A pixel counts as different when any channel differs by more than this.
 const CHANNEL_TOLERANCE: u8 = 24;
-/// At most this share of pixels may differ.
-const MAX_DIFFERENT: f64 = 0.001;
+/// At most this many pixels may differ.
+const MAX_DIFFERENT: usize = 64;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -79,7 +80,7 @@ fn check(name: &str, theme: Theme, scale: f32) {
         }
     }
     let share = different as f64 / (width as f64 * height as f64);
-    if share > MAX_DIFFERENT {
+    if different > MAX_DIFFERENT {
         let out = root().join(format!("target/golden-actual-{name}.png"));
         _ = bitmap.write_png(&out);
         panic!(

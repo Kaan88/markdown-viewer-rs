@@ -114,8 +114,6 @@ pub fn render_mermaid(
     max_pixels: u64,
     options: &resvg::usvg::Options,
 ) -> Result<Image, String> {
-    use merman::{OperationControl, RenderOutput, RenderRequest, Renderer, SvgRequest};
-
     // Mermaid defaults to HTML labels in `foreignObject`, which resvg cannot draw; its SVG text
     // fallback positions some families inside the node but shifts class, ER and mindmap labels off
     // the left edge. Asking for native text labels avoids both problems. The directive comes
@@ -128,14 +126,22 @@ pub fn render_mermaid(
         r##"{"theme":"default","themeVariables":{"fontSize":"11px"},"htmlLabels":false,"flowchart":{"htmlLabels":false},"gantt":{"leftPadding":150,"gridLineStartPadding":35,"useWidth":900}}"##
     };
     let source = format!("%%{{init: {init}}}%%\n{source}");
+    let svg = settle_gantt_ticks(&source, mermaid_svg(&source)?)?;
+    let svg = inline_label_uses(&svg);
+    render_svg_at(svg.as_bytes(), scale, max_pixels, options)
+}
+
+/// Mermaid source to SVG text.
+fn mermaid_svg(source: &str) -> Result<String, String> {
+    use merman::{OperationControl, RenderOutput, RenderRequest, Renderer, SvgRequest};
     let output = Renderer::new()
         .render(RenderRequest::svg(
-            &source,
+            source,
             OperationControl::new(),
             SvgRequest {
                 // Families that still emit HTML labels get a `<text>` overlay from this pipeline.
-                // `inline_label_uses` below then moves that text out of the nested `<defs>` SVG,
-                // which resvg does not draw.
+                // `inline_label_uses` then moves that text out of the nested `<defs>` SVG, which
+                // resvg does not draw.
                 pipeline: Some(merman::svg::SvgPipeline::readable()),
                 ..Default::default()
             },
@@ -144,8 +150,51 @@ pub fn render_mermaid(
     let RenderOutput::Svg(Some(svg)) = output else {
         return Err("mermaid found no diagram".to_string());
     };
-    let svg = inline_label_uses(svg.svg());
-    render_svg_at(svg.as_bytes(), scale, max_pixels, options)
+    Ok(svg.svg().to_string())
+}
+
+/// Mermaid picks gantt ticks for about ten per axis, so a plan of a few days gets 12-hour ticks
+/// under a date-only label: every date shows twice and the labels crowd together. While
+/// neighbouring labels repeat, this steps up to the next calendar interval. A document's own
+/// `tickInterval` is left alone, and other diagrams pass through.
+fn settle_gantt_ticks(source: &str, mut svg: String) -> Result<String, String> {
+    if is_gantt(source) && !source.contains("tickInterval") {
+        for interval in ["1day", "1week", "1month"] {
+            if !has_repeated_ticks(&svg) {
+                break;
+            }
+            svg = mermaid_svg(&format!("{source}\ntickInterval {interval}"))?;
+        }
+    }
+    Ok(svg)
+}
+
+/// True when the first diagram line, after `%%` directives and comments, is `gantt`.
+fn is_gantt(source: &str) -> bool {
+    source
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("%%"))
+        .is_some_and(|line| line == "gantt" || line.starts_with("gantt "))
+}
+
+/// True when two neighbouring gantt axis tick labels read the same.
+fn has_repeated_ticks(svg: &str) -> bool {
+    let mut previous: Option<&str> = None;
+    for group in svg.split(r#"<g class="tick""#).skip(1) {
+        let label = group
+            .split_once("<text")
+            .and_then(|(_, rest)| rest.split_once('>'))
+            .and_then(|(_, rest)| rest.split_once("</text>"))
+            .map(|(label, _)| label);
+        if let Some(label) = label {
+            if previous == Some(label) {
+                return true;
+            }
+            previous = Some(label);
+        }
+    }
+    false
 }
 
 /// `name="number"` in an SVG tag fragment.
@@ -353,6 +402,38 @@ mod tests {
         .expect("it renders smaller");
         assert!(image.width as u64 * image.height as u64 <= 1_000_000);
         assert!(image.width >= 900 && image.width <= 1001, "{}", image.width);
+    }
+
+    const READING_PLAN: &str = "gantt\n    title Reading plan\n    dateFormat YYYY-MM-DD\n    \
+        section Documentation\n    Read README :read, 2026-11-02, 2d\n    Explore docs :after read, 3d";
+
+    #[test]
+    fn a_short_gantt_gets_one_tick_label_per_date() {
+        // Stock Mermaid labels this five-day plan every 12 hours with dates only, so each date
+        // appears twice. The settled chart must not repeat a label.
+        let raw = super::mermaid_svg(READING_PLAN).unwrap();
+        assert!(super::has_repeated_ticks(&raw), "the stock ticks repeat");
+        let settled = super::settle_gantt_ticks(READING_PLAN, raw).unwrap();
+        assert!(
+            !super::has_repeated_ticks(&settled),
+            "settled ticks still repeat"
+        );
+        assert!(settled.contains(">2026-11-03<") && settled.contains(">2026-11-06<"));
+    }
+
+    #[test]
+    fn gantt_ticks_are_left_alone_when_they_do_not_repeat_or_are_set() {
+        let year = "gantt\n dateFormat YYYY-MM-DD\n section A\n Long :a, 2026-01-01, 300d";
+        let raw = super::mermaid_svg(year).unwrap();
+        assert!(!super::has_repeated_ticks(&raw));
+        assert_eq!(super::settle_gantt_ticks(year, raw.clone()).unwrap(), raw);
+        // A document that chose its interval keeps it, repeats and all.
+        let chosen = format!("{READING_PLAN}\n    tickInterval 12hour");
+        let raw = super::mermaid_svg(&chosen).unwrap();
+        assert_eq!(
+            super::settle_gantt_ticks(&chosen, raw.clone()).unwrap(),
+            raw
+        );
     }
 
     #[test]
