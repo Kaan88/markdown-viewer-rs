@@ -37,7 +37,7 @@ Phase 2, the headless renderer, and it is nearly done.**
 | virtualized viewport, scroll budget | done: 0.2-2.6 ms per scroll frame (budget 4 ms at 150%, 8 ms at 4K) |
 | selection, link/anchor hit-testing | done in the renderer and both shells; Ctrl+C copies the selection |
 | `<details>` toggling | done: a summary click flips it in both shells; view state lives in the renderer |
-| exit gate: goldens approved by the user | **open**: the images in `tests/golden/` have not been approved yet |
+| exit gate: goldens approved by the user | **passed** 2026-11-08: the user approved the four `showcase-*` renders, which `crates/render/tests/golden.rs` now compares on Windows |
 
 Phase 4 is complete. Three slices run through `mdview-engine`: SVG through resvg, TeX math through
 RaTeX and Mermaid through merman (flowchart, sequence, class, state, ER, gantt, pie, mindmap). The
@@ -45,7 +45,7 @@ fourth, syntax highlighting, is in-process: syntect colours fenced code in the r
 showcase's badge, formulas, diagrams and coloured Rust block all draw, as do `fixtures/math.md` and
 `fixtures/diagrams.md`.
 
-So the immediate queue is the golden approval, which is the Phase 2 exit gate; then Phase 3 (Qt shell
+Phase 2 is closed (goldens approved 2026-11-08). Next come Phase 3 (Qt shell
 parity), Phase 5 (WinUI parity, W1-W3), Phase 6 (polish, installer). The shells already exist and run,
 which is ahead of the plan's order - the user asked for the UIs early - so Phase 3 and 5 become "make
 the existing shells match the checklist" rather than "build them".
@@ -764,14 +764,12 @@ Qt's event path instead).
 
 ## 12. What to do next
 
-1. **Get the `tests/golden/` images approved by the user** - it is the Phase 2 exit gate. Show
-   `showcase-{light,dark}@{1.0,1.5}.png` plus the shell captures (including the selection,
-   anchor, details, math, Mermaid and highlighting shots) and ask for a yes or a list of changes.
+1. Phase 2 is closed: the user approved the goldens on 2026-11-08.
 2. **Phase 3/5 parity**: the Qt and WinUI items from `docs/PORT_CHECKLIST.md` - tabs, folder tree,
    recents, zoom limits, themes, focus mode, session restore. Selection, links, `<details>`, find,
    outline, clipboard copy, math, diagrams and highlighting are done in both shells; a link context
    menu and document tabs are the obvious next shell features.
-3. **Bundled fonts** (a size and licence decision for the user), which would let the golden
+3. **Bundled fonts**: the user chose on 2026-11-08 to decide later; system fonts stay for now, which would let the golden
    comparison in `crates/render/tests/golden.rs` run on Linux too; it runs on Windows today.
 4. The 2026-11-08 review fixes were checked on the VM: `cargo test --release -p mdview-core -p
    mdview-render -p mdview-engine -p mdview-engine-proto -- --include-ignored` passes (the golden
