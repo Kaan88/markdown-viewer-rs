@@ -42,6 +42,15 @@ pub fn forward(settings: &Path, paths: &[PathBuf]) -> bool {
 
 /// Starts listening and records the port. `None` when the port cannot be bound or written.
 pub fn listen(settings: &Path) -> Option<Receiver<PathBuf>> {
+    listen_waking(settings, || {})
+}
+
+/// `listen`, calling `wake` from the listener thread after each launch's paths are queued, so the
+/// shell can drain them at once instead of on a timer.
+pub fn listen_waking(
+    settings: &Path,
+    wake: impl Fn() + Send + 'static,
+) -> Option<Receiver<PathBuf>> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).ok()?;
     let port = listener.local_addr().ok()?.port();
     if let Some(dir) = settings.parent() {
@@ -63,6 +72,7 @@ pub fn listen(settings: &Path) -> Option<Receiver<PathBuf>> {
                 }
             }
             _ = (&stream).write_all(b"ok\n");
+            wake();
         }
     });
     Some(receiver)

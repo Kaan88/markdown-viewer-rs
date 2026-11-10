@@ -16,6 +16,7 @@ pub mod single;
 pub mod slug;
 pub mod status;
 pub mod update;
+pub mod watch;
 
 pub use model::{Document, parse_bytes};
 pub use parse::parse;

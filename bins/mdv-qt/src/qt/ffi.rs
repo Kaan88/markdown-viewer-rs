@@ -357,6 +357,8 @@ pub mod ffi {
         unsafe fn base_wheel_event(self: Pin<&mut Self>, e: *mut QWheelEvent);
     }
     impl cxx_qt::Constructor<()> for Canvas {}
+    // Lets worker threads queue a call onto the GUI thread (the file watcher's wake).
+    impl cxx_qt::Threading for Canvas {}
 
     // Constructors: the bridge binds cxx-qt-lib's templates, deduced per signature.
     #[namespace = "rust::cxxqtlib1"]

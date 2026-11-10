@@ -126,7 +126,10 @@ pub fn set_clipboard(text: &str) {
 
 #[cfg(unix)]
 unsafe extern "C" {
-    fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+    fn dlsym(
+        handle: *mut std::ffi::c_void,
+        symbol: *const std::ffi::c_char,
+    ) -> *mut std::ffi::c_void;
 }
 
 /// True when the desktop reports a dark colour scheme; false when light, unknown, or Qt older than 6.5.
@@ -147,11 +150,17 @@ pub fn system_is_dark() -> bool {
         return false;
     }
     // RTLD_DEFAULT is a null handle on glibc.
-    let symbol = unsafe { dlsym(std::ptr::null_mut(), c"_ZNK11QStyleHints11colorSchemeEv".as_ptr()) };
+    let symbol = unsafe {
+        dlsym(
+            std::ptr::null_mut(),
+            c"_ZNK11QStyleHints11colorSchemeEv".as_ptr(),
+        )
+    };
     if symbol.is_null() {
         return false;
     }
-    let color_scheme: unsafe extern "C" fn(*const QStyleHints) -> i32 = unsafe { std::mem::transmute(symbol) };
+    let color_scheme: unsafe extern "C" fn(*const QStyleHints) -> i32 =
+        unsafe { std::mem::transmute(symbol) };
     unsafe { color_scheme(hints) == 2 }
 }
 
@@ -160,7 +169,9 @@ pub fn read_clipboard() -> String {
     if clipboard.is_null() {
         return String::new();
     }
-    unsafe { &*clipboard }.clipboard_get_text(CLIPBOARD).to_string()
+    unsafe { &*clipboard }
+        .clipboard_get_text(CLIPBOARD)
+        .to_string()
 }
 
 /// Events the shell can observe on the canvas. All safe Rust on the other side.
@@ -185,6 +196,8 @@ pub trait CanvasHandler {
     fn dropped(&self, text: String);
     fn timer(&self, id: i32);
     fn update_request(&self);
+    /// A worker thread called the canvas's waker; runs on the GUI thread.
+    fn woken(&self) {}
 }
 
 #[derive(Default)]
@@ -243,10 +256,9 @@ impl Canvas {
             return;
         }
         if modifiers.test_flag(KeyboardModifier::ControlModifier)
-            && self.handler().control_key(
-                code,
-                modifiers.test_flag(KeyboardModifier::ShiftModifier),
-            )
+            && self
+                .handler()
+                .control_key(code, modifiers.test_flag(KeyboardModifier::ShiftModifier))
         {
             return;
         }
@@ -431,6 +443,15 @@ impl H<Canvas> {
         let receiver =
             unsafe { <QWidget as Upcast<QObject>>::upcast_ptr(self.widget().0) }.cast_mut();
         unsafe { QApplication::send_event(receiver, raw) }
+    }
+    /// A thread-safe function that queues `CanvasHandler::woken` onto the GUI thread. Calls made
+    /// after the canvas is gone are dropped by Qt.
+    pub fn waker(&self) -> impl Fn() + Send + Sync + Clone + 'static {
+        use cxx_qt::Threading;
+        let thread = pin!(self).qt_thread();
+        move || {
+            _ = thread.queue(|canvas: Pin<&mut Canvas>| canvas.handler().woken());
+        }
     }
     pub fn start_timer(&self, ms: i32) -> i32 {
         pin!(self).startTimer(ms, TimerType(0)) // Qt::PreciseTimer
@@ -860,7 +881,9 @@ impl H<QTabBar> {
     }
     pub fn on_current_changed(&self, f: impl FnMut(i32) + 'static) {
         let mut f = GuiThreadOnly(f);
-        pin!(self).on_current_changed(move |_, i| f.get()(i)).release();
+        pin!(self)
+            .on_current_changed(move |_, i| f.get()(i))
+            .release();
     }
     pub fn on_close_requested(&self, f: impl FnMut(i32) + 'static) {
         let mut f = GuiThreadOnly(f);
@@ -885,7 +908,9 @@ impl H<QTabBar> {
     }
     pub fn on_moved(&self, f: impl FnMut(i32, i32) + 'static) {
         let mut f = GuiThreadOnly(f);
-        pin!(self).on_tab_moved(move |_, a, b| f.get()(a, b)).release();
+        pin!(self)
+            .on_tab_moved(move |_, a, b| f.get()(a, b))
+            .release();
     }
 }
 impl H<QDockWidget> {

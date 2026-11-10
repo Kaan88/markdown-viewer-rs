@@ -8,8 +8,8 @@ use crate::qt::*;
 use mdview_core::commands::strings;
 use mdview_core::files::{canonical_or_absolute, read_stable, stamp, tab_labels, FileStamp};
 use mdview_core::links::{classify_link, LinkAction};
-use mdview_core::session::{Recents, Session, Theme as ThemeChoice};
 use mdview_core::parse_bytes;
+use mdview_core::session::{Recents, Session, Theme as ThemeChoice};
 use mdview_render::{DocumentRenderer, Hit, Options, PageLayout, Rect, Theme, DARK, LIGHT};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -138,7 +138,13 @@ struct Shell {
     files_tree: RefCell<Option<Tree>>,
     folder: RefCell<Option<PathBuf>>,
     folder_rows: RefCell<Vec<Option<PathBuf>>>,
-    /// Paths sent by later launches, drained on the poll tick.
+    /// Watches the open files' folders; `None` before the window is built or when the OS watcher
+    /// failed, in which case a 2 s poll timer runs instead.
+    watcher: RefCell<Option<mdview_core::watch::FileWatcher>>,
+    /// The canvas's waker, set once the canvas exists. Worker threads started before that (the
+    /// single-instance listener, the update check) call through this slot.
+    wake: std::sync::Arc<std::sync::OnceLock<Box<dyn Fn() + Send + Sync>>>,
+    /// Paths sent by later launches, drained when the listener wakes the GUI thread.
     incoming: RefCell<Option<std::sync::mpsc::Receiver<PathBuf>>>,
     /// The AppImage update check or apply in flight, if any.
     updating: RefCell<Option<std::sync::mpsc::Receiver<crate::appimage_update::Status>>>,
@@ -177,7 +183,11 @@ impl Shell {
             viewport: Cell::new(0),
             theme: Cell::new(theme),
             zoom: Cell::new(zoom),
-            choice: Cell::new(if theme.name == DARK.name { ThemeChoice::Dark } else { ThemeChoice::Light }),
+            choice: Cell::new(if theme.name == DARK.name {
+                ThemeChoice::Dark
+            } else {
+                ThemeChoice::Light
+            }),
             scale: Cell::new(1.0),
             options: RefCell::new(None),
             selection: Cell::new(None),
@@ -197,6 +207,8 @@ impl Shell {
             files_tree: RefCell::new(None),
             folder: RefCell::new(None),
             folder_rows: RefCell::new(Vec::new()),
+            watcher: RefCell::new(None),
+            wake: Default::default(),
             incoming: RefCell::new(None),
             updating: RefCell::new(None),
             manage_dock: Cell::new(None),
@@ -538,11 +550,17 @@ impl Shell {
                 self.recent.borrow_mut().add(path.clone());
                 let index = self.add_page(path, document);
                 if trace {
-                    eprintln!("mdview-qt: open: add_page {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+                    eprintln!(
+                        "mdview-qt: open: add_page {:.1} ms",
+                        t.elapsed().as_secs_f64() * 1000.0
+                    );
                 }
                 self.switch_to(index);
                 if trace {
-                    eprintln!("mdview-qt: open: switch_to {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+                    eprintln!(
+                        "mdview-qt: open: switch_to {:.1} ms",
+                        t.elapsed().as_secs_f64() * 1000.0
+                    );
                 }
                 self.save_session();
                 true
@@ -577,11 +595,17 @@ impl Shell {
             self.tabs_busy.set(false);
         }
         if trace {
-            eprintln!("mdview-qt: add_page: bar.add {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "mdview-qt: add_page: bar.add {:.1} ms",
+                t.elapsed().as_secs_f64() * 1000.0
+            );
         }
         self.relabel();
         if trace {
-            eprintln!("mdview-qt: add_page: relabel {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "mdview-qt: add_page: relabel {:.1} ms",
+                t.elapsed().as_secs_f64() * 1000.0
+            );
         }
         index
     }
@@ -725,22 +749,20 @@ impl Shell {
         let link = self
             .hit(local.0 as f64, local.1 as f64)
             .and_then(|hit| hit.link);
-        let has_selection = self
-            .selection
-            .get()
-            .is_some_and(|(a, b)| a != b);
+        let has_selection = self.selection.get().is_some_and(|(a, b)| a != b);
         if link.is_none() && !has_selection {
             return;
         }
         let menu = H::<QMenu>::new_popup();
         if let Some(index) = link {
-            let destination = self
-                .document
-                .borrow()
-                .as_ref()
-                .and_then(|d| d.links.get(index as usize).map(|l| d.str(l.dest).to_string()));
+            let destination = self.document.borrow().as_ref().and_then(|d| {
+                d.links
+                    .get(index as usize)
+                    .map(|l| d.str(l.dest).to_string())
+            });
             let s = self.clone();
-            menu.add_action("&Open link").on_triggered(move |_| s.follow_link(index));
+            menu.add_action("&Open link")
+                .on_triggered(move |_| s.follow_link(index));
             if let Some(destination) = destination {
                 menu.add_action("Copy link &address")
                     .on_triggered(move |_| set_clipboard(&destination));
@@ -748,7 +770,8 @@ impl Shell {
         }
         if has_selection {
             let s = self.clone();
-            menu.add_action("&Copy").on_triggered(move |_| s.copy_selection());
+            menu.add_action("&Copy")
+                .on_triggered(move |_| s.copy_selection());
         }
         // Leaks one small popup per use at most; the popup deletes itself when it closes.
         menu.popup(at);
@@ -770,7 +793,8 @@ impl Shell {
         menu.clear();
         let path = self.pages.borrow()[index].path.clone();
         let s = self.clone();
-        menu.add_action("&Close tab").on_triggered(move |_| s.close_tab(index));
+        menu.add_action("&Close tab")
+            .on_triggered(move |_| s.close_tab(index));
         let others = menu.add_action("Close &other tabs");
         others.set_enabled(self.pages.borrow().len() > 1);
         let s = self.clone();
@@ -854,8 +878,28 @@ impl Shell {
         self.message(status);
     }
 
-    /// Writes tabs, the current tab and Recent at once, so a crash loses nothing.
+    /// A thread-safe wake for workers; does nothing until the canvas exists.
+    fn waker(&self) -> impl Fn() + Send + Sync + 'static {
+        let slot = self.wake.clone();
+        move || {
+            if let Some(wake) = slot.get() {
+                wake();
+            }
+        }
+    }
+
+    /// Points the file watcher at the open tabs' files.
+    fn rewatch(&self) {
+        if let Some(watcher) = self.watcher.borrow_mut().as_mut() {
+            let pages = self.pages.borrow();
+            watcher.set_files(pages.iter().map(|page| page.path.as_path()));
+        }
+    }
+
+    /// Writes tabs, the current tab and Recent at once, so a crash loses nothing. Called after
+    /// every open, close and move, so it also re-aims the file watcher.
     fn save_session(&self) {
+        self.rewatch();
         let mut session = self.session.borrow_mut();
         let Some((path, session)) = session.as_mut() else {
             return;
@@ -1027,10 +1071,18 @@ impl Shell {
         }
     }
 
-    /// The 800 ms poll: reloads any open file whose stamp changed, background tabs included. A
-    /// file that disappears keeps its last content and says so.
+    /// Runs when the file watcher, the single-instance listener or the update check wakes the GUI
+    /// thread (or on the 2 s fallback timer): reloads any open file whose stamp changed,
+    /// background tabs included. A file that disappears keeps its last content and says so.
     fn poll_files(&self) {
-        let update = self.updating.borrow().as_ref().and_then(|r| r.try_recv().ok());
+        if let Some(watcher) = self.watcher.borrow().as_ref() {
+            watcher.woken();
+        }
+        let update = self
+            .updating
+            .borrow()
+            .as_ref()
+            .and_then(|r| r.try_recv().ok());
         if let Some(status) = update {
             use crate::appimage_update::Status;
             self.updating.borrow_mut().take();
@@ -1071,10 +1123,15 @@ impl Shell {
                 if let Some(page) = self.pages.borrow_mut().get_mut(index) {
                     page.stamp = now;
                 }
+                eprintln!(
+                    "mdview-qt: {} was deleted, keeping its text",
+                    path.display()
+                );
                 if self.current.get() == Some(index) {
                     self.message(strings::FILE_DELETED);
                 }
             } else {
+                eprintln!("mdview-qt: {} changed on disk, reloading", path.display());
                 self.reload_page(index, false);
             }
         }
@@ -1655,6 +1712,10 @@ impl CanvasHandler for Shell {
         self.poll_files();
     }
 
+    fn woken(&self) {
+        self.poll_files();
+    }
+
     fn update_request(&self) {}
 }
 
@@ -1751,15 +1812,36 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
     let other = first.with_file_name("linked.md");
     shell.scroll_to(500.0);
     let scrolled = shell.scroll.get();
-    expect(scrolled > 0.0, format!("first page did not scroll ({scrolled})"));
+    expect(
+        scrolled > 0.0,
+        format!("first page did not scroll ({scrolled})"),
+    );
     shell.open(&other);
-    expect(shell.pages.borrow().len() == 2, "second tab not added".into());
-    expect(shell.current.get() == Some(1), "second tab not current".into());
-    expect(bar.count() == 2 && bar.current() == Some(1), "bar out of step after open".into());
-    expect(shell.scroll.get() == 0.0, "new tab did not start at the top".into());
+    expect(
+        shell.pages.borrow().len() == 2,
+        "second tab not added".into(),
+    );
+    expect(
+        shell.current.get() == Some(1),
+        "second tab not current".into(),
+    );
+    expect(
+        bar.count() == 2 && bar.current() == Some(1),
+        "bar out of step after open".into(),
+    );
+    expect(
+        shell.scroll.get() == 0.0,
+        "new tab did not start at the top".into(),
+    );
     shell.open(&first);
-    expect(shell.pages.borrow().len() == 2, "reopening added a duplicate".into());
-    expect(shell.current.get() == Some(0), "reopening did not switch".into());
+    expect(
+        shell.pages.borrow().len() == 2,
+        "reopening added a duplicate".into(),
+    );
+    expect(
+        shell.current.get() == Some(0),
+        "reopening did not switch".into(),
+    );
     expect(
         shell.scroll.get() == scrolled,
         format!("scroll not kept: {} vs {scrolled}", shell.scroll.get()),
@@ -1769,14 +1851,21 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
         format!("labels {:?} {:?}", bar.text(0), bar.text(1)),
     );
     shell.control_key(KEY_TAB, false);
-    expect(shell.current.get() == Some(1) && bar.current() == Some(1), "Ctrl+Tab".into());
+    expect(
+        shell.current.get() == Some(1) && bar.current() == Some(1),
+        "Ctrl+Tab".into(),
+    );
     shell.control_key(KEY_TAB, false);
-    expect(shell.current.get() == Some(0), "Ctrl+Tab did not wrap".into());
+    expect(
+        shell.current.get() == Some(0),
+        "Ctrl+Tab did not wrap".into(),
+    );
     shell.control_key(KEY_BACKTAB, true);
     expect(shell.current.get() == Some(1), "Ctrl+Shift+Tab".into());
     shell.tab_moved(1, 0);
     expect(
-        shell.current.get() == Some(0) && shell.pages.borrow()[0].path == canonical_or_absolute(&other),
+        shell.current.get() == Some(0)
+            && shell.pages.borrow()[0].path == canonical_or_absolute(&other),
         "move did not carry the current tab".into(),
     );
     shell.tab_moved(0, 1);
@@ -1788,22 +1877,33 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
     for _ in 0..40 {
         shell.control_key(KEY_MINUS, false);
     }
-    expect((shell.zoom.get() - ZOOM_MIN).abs() < 1e-9, "zoom floor".into());
+    expect(
+        (shell.zoom.get() - ZOOM_MIN).abs() < 1e-9,
+        "zoom floor".into(),
+    );
     for _ in 0..40 {
         shell.control_key(KEY_PLUS, false);
     }
-    expect((shell.zoom.get() - ZOOM_MAX).abs() < 1e-9, "zoom ceiling".into());
+    expect(
+        (shell.zoom.get() - ZOOM_MAX).abs() < 1e-9,
+        "zoom ceiling".into(),
+    );
     shell.set_zoom(1.0);
     // Theme and zoom reach the saved session file.
     let scratch = std::env::temp_dir().join(format!("mdview-theme-{}.ini", std::process::id()));
-    let kept = shell.session.borrow_mut().replace((scratch.clone(), Session::default()));
+    let kept = shell
+        .session
+        .borrow_mut()
+        .replace((scratch.clone(), Session::default()));
     shell.set_theme_choice(ThemeChoice::Dark);
     shell.set_zoom(1.3);
     let saved = Session::load(&scratch);
     _ = std::fs::remove_file(&scratch);
     *shell.session.borrow_mut() = kept;
     expect(
-        saved.theme == ThemeChoice::Dark && saved.zoom == 130 && shell.theme.get().name == DARK.name,
+        saved.theme == ThemeChoice::Dark
+            && saved.zoom == 130
+            && shell.theme.get().name == DARK.name,
         format!("theme/zoom not saved: {:?} {}", saved.theme, saved.zoom),
     );
     shell.set_theme_choice(ThemeChoice::System);
@@ -1814,10 +1914,16 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
     shell.recent.borrow_mut().add(gone.clone());
     shell.manage_show(true);
     let listed = shell.manage_rows.borrow().len();
-    expect(listed == shell.recent.borrow().paths().len() && listed >= 3, "manage list".into());
+    expect(
+        listed == shell.recent.borrow().paths().len() && listed >= 3,
+        "manage list".into(),
+    );
     shell.manage_sel.set(Some(0));
     shell.manage_remove();
-    expect(!shell.recent.borrow().paths().contains(&gone), "manage remove".into());
+    expect(
+        !shell.recent.borrow().paths().contains(&gone),
+        "manage remove".into(),
+    );
     shell.manage_show(false);
     let backup = shell.recent.borrow().clone();
     shell.manage_clear();
@@ -1839,15 +1945,26 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
         .map(|p| p.as_ref().map(|p| file_name(p)))
         .collect();
     expect(
-        names == vec![None, Some("c.markdown".to_string()), Some("b.md".to_string())],
+        names
+            == vec![
+                None,
+                Some("c.markdown".to_string()),
+                Some("b.md".to_string()),
+            ],
         format!("folder rows {names:?}"),
     );
     let tabs_before = shell.pages.borrow().len();
     shell.files_click(2);
-    expect(shell.pages.borrow().len() == tabs_before + 1, "folder click opens".into());
+    expect(
+        shell.pages.borrow().len() == tabs_before + 1,
+        "folder click opens".into(),
+    );
     let opened = shell.current.get().unwrap();
     shell.close_tab(opened);
-    shell.recent.borrow_mut().remove(&canonical_or_absolute(&root.join("b.md")));
+    shell
+        .recent
+        .borrow_mut()
+        .remove(&canonical_or_absolute(&root.join("b.md")));
     _ = std::fs::remove_dir_all(&root);
     // Auto-refresh: an edited file reloads (even in the background), a deleted one keeps its text.
     let watched = std::env::temp_dir().join(format!("mdview-watch-{}.md", std::process::id()));
@@ -1859,27 +1976,45 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
     shell.activate(0);
     shell.poll_files();
     shell.activate(index);
-    expect(shell.blocks() > before, format!("auto-refresh: {} blocks, was {before}", shell.blocks()));
+    expect(
+        shell.blocks() > before,
+        format!("auto-refresh: {} blocks, was {before}", shell.blocks()),
+    );
     let kept = shell.blocks();
     std::fs::remove_file(&watched).unwrap();
     shell.poll_files();
-    expect(shell.blocks() == kept, "a deleted file kept its content".into());
+    expect(
+        shell.blocks() == kept,
+        "a deleted file kept its content".into(),
+    );
     std::fs::write(&watched, "# Back\n").unwrap();
     shell.poll_files();
     expect(shell.blocks() < kept, "a recreated file reloaded".into());
     shell.close_tab(index);
-    shell.recent.borrow_mut().remove(&canonical_or_absolute(&watched));
+    shell
+        .recent
+        .borrow_mut()
+        .remove(&canonical_or_absolute(&watched));
     _ = std::fs::remove_file(&watched);
     shell.control_key(KEY_F, true);
     expect(shell.focus.get().is_some(), "focus mode on".into());
     shell.key(KEY_ESCAPE);
-    expect(shell.focus.get().is_none(), "Escape leaves focus mode".into());
+    expect(
+        shell.focus.get().is_none(),
+        "Escape leaves focus mode".into(),
+    );
     let blocks = shell.blocks();
     shell.key(KEY_F5);
-    expect(shell.blocks() == blocks && shell.document.borrow().is_some(), "refresh".into());
+    expect(
+        shell.blocks() == blocks && shell.document.borrow().is_some(),
+        "refresh".into(),
+    );
     shell.tab_menu(Some(0), (20, 20)); // builds and pops the menu; must not crash or change tabs
     shell.tab_menu(None, (20, 20));
-    expect(shell.pages.borrow().len() == 2, "tab menu changed the tabs".into());
+    expect(
+        shell.pages.borrow().len() == 2,
+        "tab menu changed the tabs".into(),
+    );
     // "Close other tabs" from the first tab's menu leaves just that tab; reopen the second.
     shell.close_others(0);
     expect(
@@ -1887,19 +2022,35 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
         "Close other tabs".into(),
     );
     shell.open(&other);
-    expect(shell.pages.borrow().len() == 2 && shell.current.get() == Some(1), "reopen".into());
+    expect(
+        shell.pages.borrow().len() == 2 && shell.current.get() == Some(1),
+        "reopen".into(),
+    );
     shell.open(&first); // keeps `first` the most recent, as the Recent check below expects
     shell.activate(1);
     shell.control_key(KEY_W, false);
     expect(
         shell.pages.borrow().len() == 1
-            && shell.path.borrow().as_deref().is_some_and(|p| same_file(p, &first)),
+            && shell
+                .path
+                .borrow()
+                .as_deref()
+                .is_some_and(|p| same_file(p, &first)),
         "Ctrl+W closed the wrong tab".into(),
     );
-    expect(shell.current.get() == Some(0) && bar.count() == 1, "after close".into());
+    expect(
+        shell.current.get() == Some(0) && bar.count() == 1,
+        "after close".into(),
+    );
     shell.control_key(KEY_W, true);
-    expect(shell.pages.borrow().is_empty() && bar.count() == 0, "Ctrl+Shift+W".into());
-    expect(shell.path.borrow().is_none(), "empty page still has a path".into());
+    expect(
+        shell.pages.borrow().is_empty() && bar.count() == 0,
+        "Ctrl+Shift+W".into(),
+    );
+    expect(
+        shell.path.borrow().is_none(),
+        "empty page still has a path".into(),
+    );
     expect(shell.blocks() > 0, "empty page shows nothing".into());
     let recent: Vec<PathBuf> = shell.recent.borrow().paths().to_vec();
     expect(
@@ -1907,7 +2058,10 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
         format!("recent {recent:?}"),
     );
     if failures.is_empty() {
-        println!("tabs test ok: 2 tabs, scroll {scrolled} kept, recent {}", recent.len());
+        println!(
+            "tabs test ok: 2 tabs, scroll {scrolled} kept, recent {}",
+            recent.len()
+        );
         std::process::exit(0);
     }
     println!("tabs test failed: {}", failures.join("; "));
@@ -2164,7 +2318,10 @@ fn build(
     let trace = std::env::var_os("MDVIEW_STARTUP_TRACE").is_some();
     let mark = |what: &str| {
         if trace {
-            eprintln!("mdview-qt: build {what} at {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "mdview-qt: build {what} at {:.1} ms",
+                t0.elapsed().as_secs_f64() * 1000.0
+            );
         }
     };
     let window = H::<QMainWindow>::new();
@@ -2348,7 +2505,7 @@ fn build(
             if s.updating.borrow().is_some() {
                 return;
             }
-            match crate::appimage_update::spawn_apply() {
+            match crate::appimage_update::spawn_apply(s.waker()) {
                 Some(receiver) => {
                     s.message("Updating mdview...");
                     *s.updating.borrow_mut() = Some(receiver);
@@ -2373,7 +2530,17 @@ fn build(
     let canvas = H::<Canvas>::new(shell.clone() as Rc<dyn CanvasHandler>);
     canvas.widget().accept_drops();
     canvas.widget().track_mouse();
-    canvas.start_timer(800); // the file poll, as in the original
+    // OS file watching instead of the original's 800 ms poll; a 2 s poll only if it cannot start.
+    let wake = canvas.waker();
+    *shell.watcher.borrow_mut() = mdview_core::watch::FileWatcher::new(wake.clone());
+    if shell.watcher.borrow().is_none() {
+        eprintln!("mdview-qt: file watching unavailable, polling every 2 s");
+        canvas.start_timer(2000);
+    }
+    _ = shell.wake.set(Box::new(wake.clone()));
+    shell.rewatch();
+    // Anything a worker sent before the slot was set is picked up by one check after start-up.
+    wake();
     canvas.widget().set_focus_policy(11); // Qt::StrongFocus, so the keys arrive
     let page = new_plain_widget();
     let bar = H::<QScrollBar>::vertical(page);
@@ -2569,12 +2736,15 @@ pub fn run() -> i32 {
     if let Some(path) = settings.filter(|_| use_session) {
         // A window is already open: hand it the files and quit. Scripted checks skip this.
         if !scripted && mdview_core::single::forward(&path, &files) {
-            eprintln!("mdview-qt: sent {} file(s) to the running window", files.len());
+            eprintln!(
+                "mdview-qt: sent {} file(s) to the running window",
+                files.len()
+            );
             std::process::exit(0);
         }
         if !scripted {
-            *shell.incoming.borrow_mut() = mdview_core::single::listen(&path);
-            *shell.updating.borrow_mut() = crate::appimage_update::spawn_check();
+            *shell.incoming.borrow_mut() = mdview_core::single::listen_waking(&path, shell.waker());
+            *shell.updating.borrow_mut() = crate::appimage_update::spawn_check(shell.waker());
         }
         let saved = Session::load(&path);
         if !theme_flag {

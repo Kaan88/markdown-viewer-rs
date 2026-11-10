@@ -94,7 +94,7 @@ fn tool() -> Option<PathBuf> {
 
 /// Starts the once-a-day check on a worker thread. `None` when this is not an AppImage, the user
 /// opted out, a check ran in the last 24 hours, or the tool is not installed.
-pub fn spawn_check() -> Option<Receiver<Status>> {
+pub fn spawn_check(wake: impl Fn() + Send + 'static) -> Option<Receiver<Status>> {
     let image = appimage()?;
     if opted_out() {
         return None;
@@ -122,13 +122,14 @@ pub fn spawn_check() -> Option<Receiver<Status>> {
             Ok(code) => check_status(code),
             Err(e) => Status::Failed(e.to_string()),
         });
+        wake();
     });
     Some(receive)
 }
 
 /// Applies the update now (a zsync delta), on a worker thread. The running file is replaced on
 /// disk; the user restarts to use it.
-pub fn spawn_apply() -> Option<Receiver<Status>> {
+pub fn spawn_apply(wake: impl Fn() + Send + 'static) -> Option<Receiver<Status>> {
     let image = appimage()?;
     let tool = tool()?;
     let (send, receive) = channel();
@@ -144,6 +145,7 @@ pub fn spawn_apply() -> Option<Receiver<Status>> {
             Ok(s) => Status::Failed(format!("exit code {}", s.code().unwrap_or(-1))),
             Err(e) => Status::Failed(e.to_string()),
         });
+        wake();
     });
     Some(receive)
 }
@@ -169,7 +171,10 @@ mod tests {
         std::fs::write(&stamp, "").unwrap();
         let now = SystemTime::now();
         assert!(!due(&stamp, now), "just checked");
-        assert!(due(&stamp, now + CHECK_EVERY + Duration::from_secs(5)), "a day later");
+        assert!(
+            due(&stamp, now + CHECK_EVERY + Duration::from_secs(5)),
+            "a day later"
+        );
         _ = std::fs::remove_dir_all(&dir);
     }
 }

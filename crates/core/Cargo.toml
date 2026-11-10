@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 memchr = "2.8"
+notify = { version = "=8.2.1", default-features = false }
 pulldown-cmark = { version = "=0.13.6", default-features = false }
 regex-syntax = { version = "0.8", default-features = false, features = ["unicode-perl"] }
 unicase = "2.8"

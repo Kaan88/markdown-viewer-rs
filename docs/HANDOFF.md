@@ -7,29 +7,42 @@ This document is the current state: what works, how to build and check it, the t
 and what to do next. `docs/PLAN.md` is the full plan (budgets, phases, gates). Read this file first,
 then the plan.
 
-**Branch:** `phase2-renderer`, tracking `origin/phase2-renderer`; the branch tip is pushed. Check
-`git log --oneline -5` for where it actually is - this file is updated at each milestone, so the
-commit that last changed it is the state it describes. There is no CI: tests are run by hand before a
+**Branch:** `main`, tracking `origin/main`; `phase2-renderer` and `winui-tabs-wip` are merged into it
+and are history only. Check `git log --oneline -5` for where it actually is - this file is updated at
+each milestone, so the commit that last changed it is the state it describes. There is no CI: tests are run by hand before a
 push. Commit and push at milestones.
 
 Working agreements (from `CLAUDE.md`): read this file before touching anything; commit and push as
 phases or milestones complete, not continuously, but do push, because the user checks GitHub; there is
 no CI, so run the tests yourself; `spikes/` is throwaway; report results plainly, including what was
-**not** run; nothing counts as working on Windows until it has run on Windows. The user is on Windows
-and the Linux Qt work happens on their VM (section 5).
+**not** run; nothing counts as working on Windows until it has run on Windows.
 
-Windows handoff checklist: `docs/WINDOWS_HANDOFF.md`.
+**Where the work happens.** Up to 2026-11-08 the user worked on a Windows PC and tested Qt on a Linux
+VM (section 5). From 2026-11-10 the work moved to the user's Linux desktop (CachyOS, KDE Plasma), with
+Windows checks in a WinApps Windows 11 VM that has no real GPU. **Next step: a session on the physical
+Windows PC**, starting from `docs/WINDOWS_HANDOFF.md`.
 
-Everything below was measured on this PC (Windows 11, RTX 4070 Ti SUPER, 3440x1440 at 96 DPI) unless
-it says Linux; Linux numbers come from the test VM in section 5.
+Sections 3, 4 and 6-10 were written on that Windows PC (Windows 11, RTX 4070 Ti SUPER, 3440x1440 at
+96 DPI), and their numbers come from it unless they say Linux. Sections 13-25 are dated notes from
+the Linux desktop; section 12 is the current to-do list.
 
 ---
 
 ## 1. Where the project is on the plan
 
-`docs/PLAN.md` has six phases (its "Phases" section). Phase 0 (spikes) and Phase 1 (core: parser,
-HTML mapping, autolink, slugs, doc model, find) are closed on earlier branches. **This branch is
-Phase 2, the headless renderer, and it is nearly done.**
+`docs/PLAN.md` has six phases (its "Phases" section).
+
+| Phase | State |
+|---|---|
+| 0 spikes | closed |
+| 1 core | closed |
+| 2 headless renderer | closed 2026-11-08 (goldens approved) |
+| 3 Qt shell parity | in progress; most checklist features exist (section 12), but `docs/PORT_CHECKLIST.md` has not been ticked row by row, so the exit gate is not met |
+| 4 engine | complete |
+| 5 WinUI parity (W1-W3) | in progress; features built and run only in the WinApps VM; W1-W3 need the physical PC |
+| 6 polish and packaging | started early: PKGBUILD, AppImage (with self-update, which the user chose to keep), Inno installer compiled in the VM, PGO trial (not adopted) |
+
+Phase 2 detail, kept for reference:
 
 | Phase 2 item | State |
 |---|---|
@@ -47,15 +60,13 @@ fourth, syntax highlighting, is in-process: syntect colours fenced code in the r
 showcase's badge, formulas, diagrams and coloured Rust block all draw, as do `fixtures/math.md` and
 `fixtures/diagrams.md`.
 
-Phase 2 is closed (goldens approved 2026-11-08). Next come Phase 3 (Qt shell
-parity), Phase 5 (WinUI parity, W1-W3), Phase 6 (polish, installer). The shells already exist and run,
-which is ahead of the plan's order - the user asked for the UIs early - so Phase 3 and 5 become "make
-the existing shells match the checklist" rather than "build them".
+The shells were built ahead of the plan's order (the user asked for the UIs early), so Phase 3 and 5
+are "make the existing shells match the checklist" rather than "build them".
 
 ## 2. Repository
 
-- `Kaan88/markdown-viewer-rs`, private, branch `phase2-renderer`.
-- Recent commits: `git log --oneline -5`; the tip is the shared lazy engine client and its docs.
+- `Kaan88/markdown-viewer-rs`, private, branch `main`.
+- Recent commits: `git log --oneline -5`.
 - Workspace members: `crates/core`, `crates/render`, `crates/engine`, `crates/engine-proto`,
   `bins/mdv-bench`, `bins/mdv-winui`. `crates/engine` is both a library and the `mdview-engine`
   binary. `bins/mdv-qt` is **excluded** from the workspace because it needs Qt to build; it has its
@@ -746,112 +757,86 @@ Qt's event path instead).
 
 ## 11. Known gaps
 
-- Links have no context menu (copy works in both shells).
 - **Images:** PNG and JPEG decode in-process, SVG and math through `mdview-engine`; `<picture>`
-  light/dark sources pick the source for the current theme; `width`/`height` on `<img>` are honoured (pixels or percent of the
-  content width, aspect kept when only one is given, clamped to the content width; Markdown images
-  carry none). Any other format keeps its
-  placeholder. A blocked image is retried on every render.
-- WinUI has no tabs, folder tree, recent files or session yet (Qt has them all); no bundled fonts.
-- Table `colspan`/`rowspan` are laid out (grid placement, spanned widths and heights, separators that stop at a spanning cell, at most 200 columns); no vertical rules exist in the table style, so nothing else changes. Highlighting covers fenced blocks only: inline code keeps the
-  theme text colour, and unknown languages or blocks over 256 KiB stay plain.
-- Math blocks are images: dragging across a display equation selects nothing, and there is no
-  equation numbering or copy-as-TeX.
-- Diagram blocks are images, so they have no selection geometry.
-- The WinUI find has no text box: its query and counter live in the window title, because the trimmed
-  `bindings.rs` has no `TextBox` event or text accessor. Qt has a real find bar, and the WinUI
-  outline is a menu rather than a dock.
-- The WinUI title bar follows Windows, not the in-app theme override.
-- The WinUI scrollbar is drawn by the shell, not a WinUI control (no `ScrollBar` in the bindings).
-- Scroll frames meet the budgets, but a frame still waits for vsync (3-6 ms in the trace): the
-  compositor's clock, not the renderer's.
+  light/dark sources pick the source for the current theme; `width`/`height` on `<img>` are honoured
+  (pixels or percent of the content width, aspect kept when only one is given, clamped to the content
+  width). Any other format keeps its placeholder. A blocked image is retried on every render.
+- No bundled fonts (the user's decision, 2026-11-08), so the golden compare runs on Windows only.
+- Table `colspan`/`rowspan` are laid out (at most 200 columns). Highlighting covers fenced blocks
+  only; unknown languages and blocks over 256 KiB stay plain.
+- Math and diagram blocks are images: no selection geometry, no copy-as-TeX, no equation numbering.
+- 1 MB documents: the first height pass runs on the UI thread (615 ms cold on Linux, section 15).
+  PLAN gate G7's fallback (estimated heights off screen) is not done.
+- Restored tabs are read and parsed at startup; PLAN wants restored tabs to hold only a path, and
+  background tabs to drop layout after 60 s idle. Neither is done in either shell.
+- Menus and shortcuts are written out in each shell; only the strings come from core's `commands`
+  table, so the two shells can drift.
+- **Qt:** Manage recent is a dock with a toolbar, not a dialog (no `QDialog` binding); Help >
+  Keyboard shortcuts writes to the status bar; no empty-state widget with its Open button; the Files
+  dock is a one-time scan (at most 4000 rows, 8 deep) that does not follow folder changes; the page
+  context menu has never been opened by a test.
+- **WinUI:** see `docs/WINDOWS_HANDOFF.md` section 4. In short: find has no text box (query and
+  count live in the title), the outline is a menu, no link context menu, the title bar follows
+  Windows rather than the in-app theme, the scrollbar is drawn by the shell, and the MenuBar bug
+  (section 24) is open.
+- Scroll frames meet the budgets, but a frame still waits for vsync (3-6 ms in the trace on Windows).
 
 ## 12. What to do next
 
-1. Phase 2 is closed: the user approved the goldens on 2026-11-08.
-2. **Phase 3/5 parity**: the Qt and WinUI items from `docs/PORT_CHECKLIST.md` - tabs, folder tree,
-   recents, zoom limits, themes, focus mode, session restore. Selection, links, `<details>`, find,
-   outline, clipboard copy, math, diagrams and highlighting are done in both shells; a link context
-   menu and document tabs are the obvious next shell features.
-   - **Qt tabs, Recent and session: done 2026-11-08.** `bins/mdv-qt/src/shell.rs`: a `QTabBar`
-     (document mode, closable, movable, auto-hidden with one tab) above one canvas. The showing tab's
-     state lives in `Shell`'s fields; other tabs sit in `Page`s and `activate` swaps them, so
-     scroll, selection and opened `<details>` survive a switch. Opening an open file switches to
-     it; labels come from core's `tab_labels`; closing the last tab shows the empty page. Ctrl+O,
-     Ctrl+W/Ctrl+F4, Ctrl+Shift+W, Ctrl+Tab and Ctrl+Shift+Tab work. File > Open recent is rebuilt
-     as it opens (missing entries are marked, and clicking one removes it), plus Clear recent files.
-     The session (`tabs`, `active`, `recent`) is saved after every open, close and move, not only on
-     exit, and saved tabs reopen at startup, missing ones with the not-found text. `MDVIEW_SETTINGS`
-     names the file; `--no-session` turns it off; scripted checks never touch the user's file.
-     `--tabs-test` checks it and passes on Windows and on the VM (xvfb). A right-click tab
-     menu (Close tab, Close other tabs, Copy file path, Show in file manager: `explorer /select,` on
-     Windows, the folder through `openUrl` elsewhere) was added 2026-11-10; `--tabs-test` covers it and passes on Linux (offscreen) and on
-     the WinApps Windows 11 VM (the menu is built and popped, not clicked). Also done 2026-11-10 (Qt, `--tabs-test` covers them, Linux only so far):
-     zoom Ctrl+= / Ctrl+- / Ctrl+0 (60-250%, step 10, View menu), Refresh (F5, File menu),
-     focus reading mode (Ctrl+Shift+F, Escape leaves; hides menu bar, status bar, outline, find
-     bar) and Help > Keyboard shortcuts (status bar text, no dialog binding yet). Theme (System/Light/Dark,
-     System follows `QStyleHints::colorScheme`) and zoom are saved in the session and restored unless
-     `--light`/`--dark`/`--zoom` is given. Auto-refresh: an 800 ms canvas timer
-     compares each open file's stamp (background tabs too); a change reloads it keeping the scroll
-     offset, a deleted file keeps its text and says so, a recreated one reloads (`--tabs-test`).
-     Folder tree: File > Open folder (Ctrl+Shift+O, a `QFileDialog` in directory mode) fills a left Files dock (View > Files) with folders first then
-     `.md/.markdown/.mdown/.mkd`, hidden names skipped, at most 4000 rows and 8 deep; a click opens
-     the file; the folder is saved in the session and restored (`--tabs-test`). It is a scanned
-     `QTreeWidget`, not a live `QFileSystemModel`, so it does not update when the folder changes.
-     Single instance: `bins/mdv-qt/src/single.rs`, std only. The first
-     window listens on a loopback port recorded in `instance.port` beside the settings file; a
-     later launch sends its files there and exits, and the first window opens them on its next
-     800 ms tick. A unit test and a two-process offscreen run pass on Linux; scripted checks and
-     `--no-session` skip it. It does not raise the window. Manage recent files: File > Manage recent files... shows a left dock with the list (missing
-     marked) and a toolbar with Open, Remove selected, Clear list and Done; it is a dock and toolbar
-     rather than a modal dialog, because no `QDialog` is bound (`--tabs-test`). Not done yet on Qt:
-     the empty-state widget with its Open button, raising the window on a second launch.
-   - **WinUI zoom and F5: done 2026-11-10.** Ctrl+= / Ctrl+- / Ctrl+0 (also the numpad) zoom 60-250% in
-     steps of 10 through `Shell::zoom_step`, and F5 reloads. `--zoom-test` (up 1.1, reset 1.0, floor
-     0.6, ceiling 2.5) passes on the WinApps Windows 11 VM, a build without a GPU, so its 3.9 s is
-     not a timing. The real Ctrl and F5 key presses were NOT exercised on Windows, and the window
-     stays open after the test (kill it). Not saved in a session yet: the WinUI shell has none.
-   - **WinUI auto-refresh: done 2026-11-10.** A Win32 `SetTimer` with no window (callback on the
-     message loop) fires every 800 ms and compares the file stamp; a change reloads the document
-     keeping the scroll offset (`Renderer::reload_document`), a deleted file keeps its content and
-     says so in the title. Checked on the WinApps VM by appending to the open file: the trace shows
-     `auto-refresh: file changed on disk, reloaded` 600 ms after the write. The deleted-file title was
-     not looked at.
-   - **WinUI session and Recent: done 2026-11-10.** The same `settings.ini` as Qt (`MDVIEW_SETTINGS`
-     overrides; `--no-session` and every `--*-test`/`--measure` run skip it). It keeps the last
-     document (`tab=`/`active=`), Recent, theme and zoom; with no file argument the last document
-     reopens, and View > Light/Dark theme and the zoom keys save. `--light`/`--dark`/`--zoom` are
-     overrides and are not saved. A top-level **Recent** menu is rebuilt after every load (missing files
-     marked, clicking one removes it, Clear recent files). Checked on the VM: a first run wrote the
-     file with the tab and the recent entry, and a second run with no arguments reopened it. Not
-     checked: the Recent menu opening (the VM's menu popups are unreliable), the theme saving from the
-     menu, and no System theme choice (WinUI follows Windows when nothing is saved).
-   - **Single instance, both shells (2026-11-10):** the logic moved to `crates/core/src/single.rs`
-     (std only). WinUI: a later launch forwards its file and exits, the first window loads it on
-     its next 800 ms tick and restores/raises itself (`ShowWindow`/`SetForegroundWindow`). Checked
-     on the VM: the second process exited 0 and the first window parsed the second file 6.5 s in.
-     Whether Windows brings the window to the front (versus flashing the taskbar) was not looked at.
-   - **WinUI tabs merged 2026-11-10** (`winui-tabs-wip` merged with the zoom, auto-refresh, single-instance and
-     theme/zoom persistence work). On the VM: `--tabs-test` ok, `--zoom-test` ok, a second launch forwards its file
-     into a new tab and exits, and a no-argument relaunch restores both tabs. Real key presses, tab
-     clicks and the menus were not exercised by hand.
-   - (superseded) WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
-     swap should carry over.
-3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.
-   Bundling would let the golden comparison in `crates/render/tests/golden.rs` run on Linux too;
-   today it runs on Windows only.
-4. The 2026-11-08 review fixes were checked on the VM: `cargo test --release -p mdview-core -p
-   mdview-render -p mdview-engine -p mdview-engine-proto -- --include-ignored` passes (the golden
-   compare skips there), the Qt shell builds against Qt 6.8.2 with no authored C++, and its
-   `--copy-test`, `--outline-test`, `--find-test`, `--link-test`, `--select-test` and
-   `--details-test` all report ok under `xvfb-run`. Not exercised on Linux: a real outline click
-   after a rebuild, and a file drop (both covered on Windows or by code review only). On the VM,
-   `CARGO_TARGET_DIR` is `/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target`, so binaries land there,
-   not under `bins/mdv-qt/target`; and from PowerShell, upload a script instead of passing
-   double-quoted commands to `vm.py run` (PowerShell 5.1 mangles them).
+**State of the parity work** (Phase 3 Qt, Phase 5 WinUI). "VM" means the WinApps Windows 11 VM;
+nothing in the WinUI column has been run on a physical PC.
 
-Every Qt/Linux change is tested on the VM as well as on Windows, and nothing counts as working on
-Windows until it has run on Windows.
+| Feature | Qt (Linux) | WinUI (VM only) |
+|---|---|---|
+| tabs: close, close others, cycle, move, labels from core | done, `--tabs-test` | done, `--tabs-test` |
+| tab context menu | done (built and popped, not clicked) | not done |
+| Recent menu, clear, missing entries | done | done (top-level Recent menu) |
+| Manage recent | dock + toolbar | not done |
+| session: tabs, active tab, theme, zoom, folder | done | done |
+| theme System/Light/Dark | done | done (View > System theme saves `theme=0`) |
+| zoom 60-250 step 10, Ctrl+0 | done | done, `--zoom-test`; real key presses not tested |
+| refresh F5 | done | done |
+| auto-refresh, deleted-file handling | OS file watching (section 25) | 800 ms poll (`SetTimer`); to be moved to `mdview_core::watch` |
+| single instance | loopback port, wakes the GUI thread at once | loopback port, drained on the 800 ms tick; checked after the WinUI bootstrap, see below |
+| focus reading mode | done | not done |
+| Files tree, Open folder | one-time scan | lazy `TreeView` |
+| outline, find, selection, copy, links, `<details>` | done | done (find in the title, outline as a menu) |
+| page context menu (links, copy) | done, never opened by a test | not done |
+| shortcuts help | status bar text | not done |
+| installer / package | PKGBUILD, AppImage | Inno Setup, compiled and silently installed in the VM |
+
+**Next, on the physical Windows PC** (the user's next session):
+
+1. Follow `docs/WINDOWS_HANDOFF.md`: build, the hands-on checks, and the MenuBar bug (section 24).
+   That bug decides whether more WinUI menu work makes sense.
+2. Move the WinUI single-instance check ahead of `bootstrap::bootstrap()` and the D3D device thread
+   in `bins/mdv-winui/src/main.rs`. PLAN wants it before any WinUI load (it names a named mutex +
+   `WM_COPYDATA`; the shared loopback port in `mdview_core::single` is what exists). Today a second
+   launch loads the Windows App SDK first, and forwarded files wait for the 800 ms tick. Measure the
+   handoff against the 20 ms budget.
+3. Replace the WinUI 800 ms poll with `mdview_core::watch::FileWatcher` (section 25). Its waker needs
+   a `DispatcherQueue::TryEnqueue` or a posted window message; the bindings have neither yet.
+4. W1 text quality at 100/125/150/200%, then real launch and memory numbers with `measure.ps1`.
+5. Tick the WinUI column of `docs/PORT_CHECKLIST.md` row by row.
+
+**Update checks must be manual (the user's decision, 2026-11-10).** No check runs on its own: drop
+the once-a-day check at launch in `bins/mdv-qt/src/appimage_update.rs` (`spawn_check` from `run` in
+`shell.rs`) and keep only a Help menu item that checks and then offers to apply. The Windows shell's
+manifest check (`crates/core/src/update.rs`, `docs/UPDATE.md`), when it is wired, follows the same
+rule. Not done yet; the Qt shell still checks once a day inside an AppImage.
+
+**Linux file association.** The PKGBUILD's desktop entry registers `text/markdown` and
+`text/x-markdown` and never sets a default. Checked 2026-11-10 with the entry and binaries in a temp
+`XDG_DATA_DIRS` folder: `gio mime text/markdown` lists `mdview.desktop`, and `gio launch` with two files
+opened both in one window. The package itself has never been installed with `pacman -U`, and Dolphin's
+"Open with" was not looked at. `.mdown` files are `text/plain` in shared-mime-info, so they are not
+offered (`.md`, `.markdown` and `.mkd` are); a small `mime/packages` XML would fix it. The AppImage
+carries the same entry but registers nothing by itself: that needs Gear Lever, AppImageLauncher or a
+hand-written `~/.local/share/applications` entry pointing at the image.
+
+**Afterwards, on Linux:** tick the Qt column of `docs/PORT_CHECKLIST.md` (the Phase 3 exit gate), the
+Qt empty state, a Files tree that follows folder changes, and the end-to-end Plasma run that PLAN's
+"Verification" section lists. Bundled fonts stay deferred until the user decides.
 
 ## 13. Packaging (Linux)
 
@@ -878,7 +863,9 @@ Written 2026-11-10 by two delegated agents and reviewed here; **none of it has b
 - `packaging/appimage/`: `build-appimage.sh` (`--appdir-only` works and its `usr/bin/mdview
   --tabs-test` passes offscreen), `update-check.sh`, desktop file, placeholder icon. linuxdeploy and
   the Qt plugin are not installed, so no AppImage has been built; `tools.sha256` is all `TODO`.
-- Qt AppImage self-update is wired (`bins/mdv-qt/src/appimage_update.rs`): when `APPIMAGE` is set
+- Qt AppImage self-update is wired (`bins/mdv-qt/src/appimage_update.rs`). **To change:** the user
+  wants update checks manual only (section 12); the automatic daily check below is to be removed.
+  Today: when `APPIMAGE` is set
   and `appimageupdatetool` is on PATH, a launch runs `--check-for-update` on a worker thread at most
   once per 24 h (stamp in `$XDG_STATE_HOME/mdview`), exit code 1 puts "A new mdview is available" in
   the status bar, and Help > Update mdview now applies the delta. Opt out with `MDVIEW_NO_UPDATE_CHECK`
@@ -905,7 +892,7 @@ first `painted` line.
 | Scroll frame, 780x900 @100% | 0.2 mean / 1.6 worst ms | 4 ms p99 |
 | Scroll frame, 1170x1350 @150% | 0.3 / 1.8 ms | 4 ms p99 |
 | Scroll frame, 3840x2200 @150% | 2.0 / 3.7 ms | 8 ms p99 |
-| Idle CPU over 10 s | 0.00 ticks | about 0 (note: an 800 ms poll timer now runs) |
+| Idle CPU over 10 s | 0.00 ticks | about 0 (the 800 ms poll was replaced by OS file watching on 2026-11-10, section 25; 0 ticks over 10 s again) |
 
 **What was wrong with launch.** `DocumentRenderer::new()` built a parley `FontContext`, which
 enumerates system fonts (about 35 ms), and the Qt shell made three of them before the first paint:
@@ -1027,3 +1014,36 @@ update from a published release.
 later item clicks and keys do nothing; theme work, session save, redraw and deferral were each ruled out. It
 may be a VM artifact; see section 3 of the Windows handoff. `system_is_dark()` in the Qt shell is Unix-only (dlsym);
 Windows returns light.
+
+## 25. Review of the 2026-11-10 work, and file watching in the Qt shell (2026-11-10)
+
+A review against PLAN found the 38 commits from `0d4d160` to `d25e217` sound but off the plan in a few
+places; sections 1, 2, 11 and 12 were rewritten from it. The user kept the AppImage self-updater,
+which PLAN does not list.
+
+**File watching.** `crates/core/src/watch.rs` (notify 8.2.1, as PLAN pins) watches the parent
+folders of the open files, non-recursively, so an editor's save-by-rename is seen; events for other
+files are ignored and a burst costs one wake. The Qt shell's 800 ms timer is gone: the watcher, the
+single-instance listener (`single::listen_waking`) and the AppImage update thread call a waker that
+queues `CanvasHandler::woken` onto the GUI thread through CXX-Qt `Threading` on `Canvas`. If the OS
+watcher cannot start, a 2 s poll runs instead. The file set is re-aimed in `save_session`, which runs
+after every open, close and move.
+
+Checked on this Linux desktop (offscreen): the `watch` unit test (rename wakes, unrelated files do
+not, delete wakes, nothing after unwatching); an end-to-end run with a real window process: a
+save-by-rename of the showing tab reloaded it, a background tab's change reloaded it, a delete kept
+the text, a re-created file reloaded, an unrelated file in the folder did nothing, a second launch
+handed its file over (that process took 41 ms end to end, over the 20 ms budget, because it loads
+Qt's libraries before checking), and CPU over 10 idle seconds was 0 ticks. The workspace tests and
+the Qt `--tabs/find/outline/select/details/copy-test` checks pass. In the WinApps VM,
+`cargo test --release --workspace` passes as well (the `watch` test included, so notify's Windows
+backend sees the rename, the delete and nothing else; golden compare and WinUI build included). Not done: network shares (PLAN's
+2 s poll for them is not separate from the fallback), the WinUI shell (still polling, section 12),
+a real Plasma window.
+
+**Clean-up.** At the user's request the work leftovers were deleted on 2026-11-10: the WinApps VM's
+`C:\mv` build copy and its test files, `~/mdview-winchk` (the VM scripts sections 17, 18 and 22 name:
+`ui.ps1`, `mouse.ps1`, `flaky.ps1`, `inst2.cmd`; those sections describe what they did if they are
+needed again), the makepkg and AppImage outputs, the Ubuntu images used to build the AppImage, and
+ignored build output under `spikes/`.
+
