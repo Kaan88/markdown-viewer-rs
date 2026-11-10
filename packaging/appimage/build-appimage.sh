@@ -100,7 +100,9 @@ cd "$out"
 # xcb comes by default. Wayland sessions need libqwayland (Qt 6.12 ships one plugin; older Qt 6 had
 # libqwayland-generic.so and libqwayland-egl.so, so adjust the names there), and offscreen lets the scripted checks run the
 # finished image without a display.
-export EXTRA_PLATFORM_PLUGINS="libqwayland.so;libqoffscreen.so"
+wayland="libqwayland.so"
+[ -e "$("$QMAKE" -query QT_INSTALL_PLUGINS)/platforms/libqwayland.so" ] || wayland="libqwayland-generic.so;libqwayland-egl.so"
+export EXTRA_PLATFORM_PLUGINS="$wayland;libqoffscreen.so"
 export LDAI_UPDATE_INFORMATION="$UPDATE_INFO"
 export LDAI_OUTPUT="mdview-$version-x86_64.AppImage"
 export LDAI_VERSION="$version"

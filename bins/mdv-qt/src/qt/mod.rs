@@ -37,7 +37,6 @@ trivial_cxx!(Orientation, "Qt::Orientation");
 trivial_cxx!(FocusPolicy, "Qt::FocusPolicy");
 trivial_cxx!(CursorShape, "Qt::CursorShape");
 trivial_cxx!(ContextMenuPolicy, "Qt::ContextMenuPolicy");
-trivial_cxx!(ColorScheme, "Qt::ColorScheme");
 trivial_cxx!(FileMode, "QFileDialog::FileMode");
 trivial_cxx!(ClipboardMode, "QClipboard::Mode");
 /// `QClipboard::Clipboard`, the system clipboard (not the X11 selection).
@@ -125,13 +124,27 @@ pub fn set_clipboard(text: &str) {
     unsafe { Pin::new_unchecked(&mut *clipboard) }.clipboard_set_text(&qs(text), CLIPBOARD);
 }
 
-/// True when the desktop reports a dark colour scheme (Qt 6.5+); false when light or unknown.
+unsafe extern "C" {
+    fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+}
+
+/// True when the desktop reports a dark colour scheme; false when light, unknown, or Qt older than 6.5.
+///
+/// `QStyleHints::colorScheme()` returns `Qt::ColorScheme` (0 unknown, 1 light, 2 dark) and was added in
+/// Qt 6.5. The bridge cannot bind a member that older Qt headers lack, so the Itanium-ABI symbol is looked
+/// up at run time: a `const` member function takes `this` and returns the enum as an `int`.
 pub fn system_is_dark() -> bool {
     let hints = QApplication::styleHints();
     if hints.is_null() {
         return false;
     }
-    unsafe { &*hints }.colorScheme().0 == 2
+    // RTLD_DEFAULT is a null handle on glibc.
+    let symbol = unsafe { dlsym(std::ptr::null_mut(), c"_ZNK11QStyleHints11colorSchemeEv".as_ptr()) };
+    if symbol.is_null() {
+        return false;
+    }
+    let color_scheme: unsafe extern "C" fn(*const QStyleHints) -> i32 = unsafe { std::mem::transmute(symbol) };
+    unsafe { color_scheme(hints) == 2 }
 }
 
 pub fn read_clipboard() -> String {

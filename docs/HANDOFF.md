@@ -1001,3 +1001,18 @@ clicks each: File, Edit, View, Outline and Recent showed their popup items 5/5 (
 run did not find the View popup right after launch, so the first click after a cold start is the one case
 that has failed once; the user's intermittent "menus don't show" report is therefore not reproduced here
 but not ruled out. These runs are in the Windows 11 VM over RDP; nothing was run on a physical PC.
+
+## 23. AppImage built in Ubuntu 24.04 (2026-11-10)
+
+`packaging/appimage/build-in-container.sh TOOLS OUT` builds the AppImage in `ubuntu:24.04` (Qt 6.4, glibc 2.39)
+so it is not tied to Arch's glibc 2.43. Needed: `QStyleHints::colorScheme` (Qt 6.5+) is no longer bound
+through cxx-qt; `system_is_dark()` finds it with `dlsym` and reports light on older Qt. `build-appimage.sh` falls back to
+`libqwayland-generic.so;libqwayland-egl.so` when `libqwayland.so` is missing. `lld` must be installed in the container:
+`qt-build-utils` picks the linker by looking for `lld`, falls back to `gold`, and `gold` drops cxx-qt's
+`cxx_qt_init_crate_*` symbols (link error). `DOCKER_LIMITS` and `JOBS` env vars limit CPU on a busy machine.
+Result: 35 MB image; the highest glibc symbol is 2.39 (`mdview`), 2.35 for the engine, 2.38 in the bundled libs,
+GLIBCXX 3.4.30. Launched 8 s each with offscreen, wayland and xcb on this Arch desktop: each painted its first frame
+(trace lines only; no screenshot). Wayland logs `Failed to load client buffer integration: wayland-egl` and
+`Creating a fake screen` (software painting works; the EGL integration plugin is not bundled). Not done: a real
+Ubuntu 24.04 machine or container run of the image, dark-scheme behaviour on Qt 6.4 (only the fallback is exercised), an
+update from a published release.

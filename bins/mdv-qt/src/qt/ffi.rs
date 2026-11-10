@@ -26,7 +26,6 @@ pub mod ffi {
         type FocusPolicy = crate::qt::FocusPolicy;
         type CursorShape = crate::qt::CursorShape;
         type ContextMenuPolicy = crate::qt::ContextMenuPolicy;
-        type ColorScheme = crate::qt::ColorScheme;
     }
 
     #[namespace = "QFileDialog"]
@@ -294,14 +293,14 @@ pub mod ffi {
         // The clipboard, bound directly: `clipboard` is QGuiApplication's static accessor, and the
         // explicit `Mode` argument picks `text(Mode)` out of its overloads, because cxx names the
         // member through a pointer of exactly this signature.
-        // The OS colour scheme: 0 unknown, 1 light, 2 dark (Qt::ColorScheme).
+        // The OS colour scheme is read through `QStyleHints::colorScheme`, which only exists from Qt 6.5,
+        // so `system_is_dark` finds it at run time instead of binding it here.
         include!(<QtGui/QStyleHints>);
         include!(<QtGui/QGuiApplication>);
         #[qobject]
         type QStyleHints;
         #[Self = "QApplication"]
         fn styleHints() -> *mut QStyleHints;
-        fn colorScheme(self: &QStyleHints) -> ColorScheme;
         #[qobject]
         type QClipboard;
         #[Self = "QApplication"]
