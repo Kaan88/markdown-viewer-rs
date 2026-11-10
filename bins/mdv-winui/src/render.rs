@@ -193,6 +193,10 @@ impl Renderer {
         self.renderer.clear_details();
     }
 
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
     pub fn set_zoom(&mut self, zoom: f32) {
         self.zoom = zoom.clamp(0.5, 3.0);
         self.page_layout = None;

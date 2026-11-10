@@ -802,6 +802,11 @@ Qt's event path instead).
      marked) and a toolbar with Open, Remove selected, Clear list and Done; it is a dock and toolbar
      rather than a modal dialog, because no `QDialog` is bound (`--tabs-test`). Not done yet on Qt:
      the empty-state widget with its Open button, raising the window on a second launch.
+   - **WinUI zoom and F5: done 2026-11-10.** Ctrl+= / Ctrl+- / Ctrl+0 (also the numpad) zoom 60-250% in
+     steps of 10 through `Shell::zoom_step`, and F5 reloads. `--zoom-test` (up 1.1, reset 1.0, floor
+     0.6, ceiling 2.5) passes on the WinApps Windows 11 VM, a build without a GPU, so its 3.9 s is
+     not a timing. The real Ctrl and F5 key presses were NOT exercised on Windows, and the window
+     stays open after the test (kill it). Not saved in a session yet: the WinUI shell has none.
    - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.

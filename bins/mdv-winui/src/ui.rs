@@ -260,6 +260,8 @@ struct Shell {
     outline_test: Cell<bool>,
     /// Run the clipboard check after the first frame, for `--copy-test`.
     copy_test: Cell<bool>,
+    /// Run the zoom check after the first frame, for `--zoom-test`.
+    zoom_test: Cell<bool>,
     /// The Outline menu, rebuilt when a document loads.
     outline_menu: RefCell<Option<MenuBarItem>>,
     outline_entries: Cell<usize>,
@@ -279,6 +281,21 @@ impl Shell {
                 }
                 if ctrl && matches!(wparam, 0x43 | 0x63) {
                     self.copy_selection();
+                    return true;
+                }
+                // Zoom, 60-250% in steps of 10: Ctrl+plus (also numpad), Ctrl+minus, Ctrl+0.
+                if ctrl && matches!(wparam, 0xbb | 0x6b | 0xbd | 0x6d | 0x30 | 0x60) {
+                    self.zoom_step(match wparam {
+                        0xbb | 0x6b => 1,
+                        0xbd | 0x6d => -1,
+                        _ => 0,
+                    });
+                    return true;
+                }
+                if wparam == 0x74 {
+                    if let Some(shell) = SHELL.with(|cell| cell.borrow().clone()) {
+                        reload(&shell);
+                    }
                     return true;
                 }
                 if wparam == 0x72 && self.find_active.get() {
@@ -308,6 +325,21 @@ impl Shell {
                 }
             }
         }
+    }
+
+    /// Zooms one step (+1 / -1) or back to 100% (0), within 60-250%, and redraws.
+    fn zoom_step(&self, dir: i32) -> f32 {
+        let now = self.renderer.borrow().zoom();
+        let next = match dir {
+            0 => 1.0,
+            d => now + 0.1 * d as f32,
+        };
+        let next = ((next * 10.0).round() / 10.0).clamp(0.6, 2.5);
+        if (next - now).abs() > 1e-4 {
+            self.renderer.borrow_mut().set_zoom(next);
+            self.show();
+        }
+        next
     }
 
     /// Typed text from `CharacterReceived`, which only find mode uses. Escape is left to `key`.
@@ -566,6 +598,27 @@ impl Shell {
                             if ok { "ok" } else { "failed" }
                         ));
                         self.show();
+                    }
+                    if self.zoom_test.get() {
+                        self.zoom_test.set(false);
+                        let up = self.zoom_step(1);
+                        let reset = self.zoom_step(0);
+                        let mut low = reset;
+                        for _ in 0..30 {
+                            low = self.zoom_step(-1);
+                        }
+                        let mut high = low;
+                        for _ in 0..40 {
+                            high = self.zoom_step(1);
+                        }
+                        let ok = (up - 1.1).abs() < 1e-4
+                            && (reset - 1.0).abs() < 1e-4
+                            && (low - 0.6).abs() < 1e-4
+                            && (high - 2.5).abs() < 1e-4;
+                        diag::trace(&format!(
+                            "zoom test {}: up {up:.1}, reset {reset:.1}, floor {low:.1}, ceiling {high:.1}",
+                            if ok { "ok" } else { "failed" }
+                        ));
                     }
                     if diag::measuring() {
                         // One line and out, so a script can time the first frame from process start.
@@ -876,6 +929,8 @@ pub struct Startup {
     pub outline: bool,
     /// Run the clipboard check after the first frame, for `--copy-test`.
     pub copy: bool,
+    /// Run the zoom check after the first frame, for `--zoom-test`.
+    pub zoom: bool,
 }
 
 pub fn build(
@@ -953,6 +1008,7 @@ pub fn build(
         find_test: Cell::new(startup.find),
         outline_test: Cell::new(startup.outline),
         copy_test: Cell::new(startup.copy),
+        zoom_test: Cell::new(startup.zoom),
         outline_menu: RefCell::new(None),
         outline_entries: Cell::new(0),
     });
@@ -1141,7 +1197,7 @@ pub fn build(
             let ctrl = unsafe { GetKeyState(0x11) } < 0;
             let Ok(key) = args.key() else { return };
             let find_escape = key == 0x1b && shell.find_active.get();
-            if (ctrl || key == 0x72 || find_escape) && shell.key(key as usize) {
+            if (ctrl || key == 0x72 || key == 0x74 || find_escape) && shell.key(key as usize) {
                 _ = args.set_handled(true);
                 if ctrl && key == 0x46 {
                     _ = crate::input::focus(&page, crate::input::FOCUS_PROGRAMMATIC);

@@ -163,6 +163,7 @@ fn run() -> Result<()> {
         find: args.has("--find-test"),
         outline: args.has("--outline-test"),
         copy: args.has("--copy-test"),
+        zoom: args.has("--zoom-test"),
     };
     let gpu = Rc::new(RefCell::new(Some(gpu)));
     // Application and UI state must outlive Start, which returns at process end.
