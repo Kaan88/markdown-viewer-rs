@@ -991,3 +991,13 @@ Pdf/Quick/Qml: 58 MB -> 45 MB; select, tabs, link, copy, find, outline and detai
 image. The image was also launched for 8 seconds each with `QT_QPA_PLATFORM=wayland` and `=xcb` on this
 Wayland (XWayland :0) desktop and painted its first frame both ways (trace lines only; no screenshot was
 taken). Still not done: a clean machine without this Arch Qt, and an update from a published release.
+
+## 22. Real mouse clicks on WinUI (2026-11-10)
+
+`~/mdview-winchk/mouse.ps1` and `flaky.ps1` move the VM's cursor and send real button events (`SetCursorPos` +
+`mouse_event`) at the UI Automation rectangles. Results: View > Dark theme saved `theme=2`; a click on a
+Files-pane row opened the file in a tab; Edit > Find put Find in the title. Popup reliability over five
+clicks each: File, Edit, View, Outline and Recent showed their popup items 5/5 (25/25). One earlier single
+run did not find the View popup right after launch, so the first click after a cold start is the one case
+that has failed once; the user's intermittent "menus don't show" report is therefore not reproduced here
+but not ruled out. These runs are in the Windows 11 VM over RDP; nothing was run on a physical PC.
