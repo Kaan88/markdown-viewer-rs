@@ -798,7 +798,10 @@ Qt's event path instead).
      window listens on a loopback port recorded in `instance.port` beside the settings file; a
      later launch sends its files there and exits, and the first window opens them on its next
      800 ms tick. A unit test and a two-process offscreen run pass on Linux; scripted checks and
-     `--no-session` skip it. It does not raise the window. Not done yet: the Manage recent dialog.
+     `--no-session` skip it. It does not raise the window. Manage recent files: File > Manage recent files... shows a left dock with the list (missing
+     marked) and a toolbar with Open, Remove selected, Clear list and Done; it is a dock and toolbar
+     rather than a modal dialog, because no `QDialog` is bound (`--tabs-test`). Not done yet on Qt:
+     the empty-state widget with its Open button, raising the window on a second launch.
    - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.

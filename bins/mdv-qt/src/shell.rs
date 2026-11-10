@@ -140,6 +140,12 @@ struct Shell {
     folder_rows: RefCell<Vec<Option<PathBuf>>>,
     /// Paths sent by later launches, drained on the poll tick.
     incoming: RefCell<Option<std::sync::mpsc::Receiver<PathBuf>>>,
+    /// Manage recent files: a dock with the list, a toolbar with its buttons, the chosen row.
+    manage_dock: Cell<Option<H<QDockWidget>>>,
+    manage_bar: Cell<Option<H<QToolBar>>>,
+    manage_tree: RefCell<Option<Tree>>,
+    manage_rows: RefCell<Vec<PathBuf>>,
+    manage_sel: Cell<Option<usize>>,
     /// The block of each outline item, by the item's index in the tree.
     outline_blocks: RefCell<Vec<u32>>,
 }
@@ -190,6 +196,11 @@ impl Shell {
             folder: RefCell::new(None),
             folder_rows: RefCell::new(Vec::new()),
             incoming: RefCell::new(None),
+            manage_dock: Cell::new(None),
+            manage_bar: Cell::new(None),
+            manage_tree: RefCell::new(None),
+            manage_rows: RefCell::new(Vec::new()),
+            manage_sel: Cell::new(None),
             outline_blocks: RefCell::new(Vec::new()),
         }
     }
@@ -395,6 +406,59 @@ impl Shell {
             session.folder = Some(dir.to_path_buf());
         }
         self.save_session();
+    }
+
+    /// Fills the Manage recent list from Recent, missing files marked.
+    fn manage_fill(&self) {
+        let entries = self.recent.borrow().entries();
+        let titles: Vec<(u8, &str)> = entries.iter().map(|e| (1u8, e.label.as_str())).collect();
+        if let Some(tree) = self.manage_tree.borrow().as_ref() {
+            tree.set_items(&titles);
+        }
+        *self.manage_rows.borrow_mut() = entries.into_iter().map(|e| e.path).collect();
+        self.manage_sel.set(None);
+    }
+
+    fn manage_show(&self, visible: bool) {
+        if visible {
+            self.manage_fill();
+        }
+        if let Some(dock) = self.manage_dock.get() {
+            dock.widget().set_visible(visible);
+        }
+        if let Some(bar) = self.manage_bar.get() {
+            bar.widget().set_visible(visible);
+        }
+    }
+
+    fn manage_remove(&self) {
+        let path = self
+            .manage_sel
+            .get()
+            .and_then(|i| self.manage_rows.borrow().get(i).cloned());
+        if let Some(path) = path {
+            self.recent.borrow_mut().remove(&path);
+            self.save_session();
+            self.manage_fill();
+        }
+    }
+
+    fn manage_clear(&self) {
+        self.recent.borrow_mut().clear();
+        self.save_session();
+        self.manage_fill();
+        self.message(strings::RECENT_CLEARED);
+    }
+
+    fn manage_open(&self) {
+        let path = self
+            .manage_sel
+            .get()
+            .and_then(|i| self.manage_rows.borrow().get(i).cloned());
+        if let Some(path) = path.filter(|p| p.exists()) {
+            self.manage_show(false);
+            self.open(&path);
+        }
     }
 
     fn choose_folder(&self) {
@@ -1667,6 +1731,20 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
     shell.set_theme_choice(ThemeChoice::System);
     shell.set_theme_choice(ThemeChoice::Light);
     shell.set_zoom(1.0);
+    // Manage recent: select a row, remove it; clear the rest.
+    let gone = std::env::temp_dir().join(format!("mdview-gone-{}.md", std::process::id()));
+    shell.recent.borrow_mut().add(gone.clone());
+    shell.manage_show(true);
+    let listed = shell.manage_rows.borrow().len();
+    expect(listed == shell.recent.borrow().paths().len() && listed >= 3, "manage list".into());
+    shell.manage_sel.set(Some(0));
+    shell.manage_remove();
+    expect(!shell.recent.borrow().paths().contains(&gone), "manage remove".into());
+    shell.manage_show(false);
+    let backup = shell.recent.borrow().clone();
+    shell.manage_clear();
+    expect(shell.recent.borrow().is_empty(), "manage clear".into());
+    *shell.recent.borrow_mut() = backup;
     // Files dock: folders first, Markdown only, hidden skipped; a click opens the file.
     let root = std::env::temp_dir().join(format!("mdview-folder-{}", std::process::id()));
     std::fs::create_dir_all(root.join("sub")).unwrap();
@@ -2105,6 +2183,37 @@ fn build(
     files_tree.on_item_clicked(move |index| s.files_click(index));
     shell.files_dock.set(Some(files_dock));
     shell.files_tree.replace(Some(files_tree));
+
+    let manage_dock = H::<QDockWidget>::new("Manage recent files", window.clone());
+    let manage_tree = Tree::new();
+    manage_dock.set_widget(manage_tree.widget());
+    window.add_dock(true, manage_dock);
+    manage_dock.widget().set_visible(false);
+    manage_dock.widget().resize(320, 360);
+    let manage_bar = window.add_tool_bar("Manage recent");
+    manage_bar.widget().set_visible(false);
+    let (open_sel, remove_sel, clear_all, done) = (
+        manage_bar.add_action("Open"),
+        manage_bar.add_action("Remove selected"),
+        manage_bar.add_action("Clear list"),
+        manage_bar.add_action("Done"),
+    );
+    let s = shell.clone();
+    manage_tree.on_item_clicked(move |index| s.manage_sel.set(Some(index)));
+    let s = shell.clone();
+    open_sel.on_triggered(move |_| s.manage_open());
+    let s = shell.clone();
+    remove_sel.on_triggered(move |_| s.manage_remove());
+    let s = shell.clone();
+    clear_all.on_triggered(move |_| s.manage_clear());
+    let s = shell.clone();
+    done.on_triggered(move |_| s.manage_show(false));
+    shell.manage_dock.set(Some(manage_dock));
+    shell.manage_bar.set(Some(manage_bar));
+    shell.manage_tree.replace(Some(manage_tree));
+    let manage = file_menu.add_action("&Manage recent files...");
+    let s = shell.clone();
+    manage.on_triggered(move |_| s.manage_show(true));
 
     let open_folder = file_menu.add_action("Open &folder...\tCtrl+Shift+O");
     let s = shell.clone();
