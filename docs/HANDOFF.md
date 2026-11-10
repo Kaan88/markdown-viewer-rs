@@ -809,6 +809,12 @@ Qt's event path instead).
      0.6, ceiling 2.5) passes on the WinApps Windows 11 VM, a build without a GPU, so its 3.9 s is
      not a timing. The real Ctrl and F5 key presses were NOT exercised on Windows, and the window
      stays open after the test (kill it). Not saved in a session yet: the WinUI shell has none.
+   - **WinUI auto-refresh: done 2026-11-10.** A Win32 `SetTimer` with no window (callback on the
+     message loop) fires every 800 ms and compares the file stamp; a change reloads the document
+     keeping the scroll offset (`Renderer::reload_document`), a deleted file keeps its content and
+     says so in the title. Checked on the WinApps VM by appending to the open file: the trace shows
+     `auto-refresh: file changed on disk, reloaded` 600 ms after the write. The deleted-file title was
+     not looked at.
    - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.

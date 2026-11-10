@@ -193,6 +193,13 @@ impl Renderer {
         self.renderer.clear_details();
     }
 
+    /// Replaces the document after a reload from disk, keeping the scroll offset (draw clamps it).
+    pub fn reload_document(&mut self, document: Document, base_dir: Option<std::path::PathBuf>) {
+        let keep = self.scroll;
+        self.set_document(document, base_dir);
+        self.scroll = keep;
+    }
+
     pub fn zoom(&self) -> f32 {
         self.zoom
     }

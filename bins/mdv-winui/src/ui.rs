@@ -41,6 +41,7 @@ windows_core::link!("user32.dll" "system" fn SetWindowPos(window: *mut c_void, a
 windows_core::link!("comdlg32.dll" "system" fn GetOpenFileNameW(ofn: *mut OpenFileNameW) -> i32);
 windows_core::link!("advapi32.dll" "system" fn RegGetValueW(hkey: *mut c_void, subkey: PCWSTR, value: PCWSTR, flags: u32, ty: *mut u32, data: *mut c_void, size: *mut u32) -> i32);
 windows_core::link!("user32.dll" "system" fn GetKeyState(key: i32) -> i16);
+windows_core::link!("user32.dll" "system" fn SetTimer(hwnd: *mut c_void, id: usize, ms: u32, callback: unsafe extern "system" fn(*mut c_void, u32, usize, u32)) -> usize);
 windows_core::link!("user32.dll" "system" fn OpenClipboard(owner: *mut c_void) -> i32);
 windows_core::link!("user32.dll" "system" fn CloseClipboard() -> i32);
 windows_core::link!("user32.dll" "system" fn EmptyClipboard() -> i32);
@@ -234,6 +235,8 @@ struct Shell {
     root: Grid,
     renderer: RefCell<Renderer>,
     path: RefCell<Option<PathBuf>>,
+    /// What the open file looked like when last read; the 800 ms poll compares against it.
+    stamp: Cell<mdview_core::files::FileStamp>,
     presented: Cell<bool>,
     /// How far into the scrollbar thumb the drag started, in panel device px.
     dragging: Cell<Option<f32>>,
@@ -325,6 +328,38 @@ impl Shell {
                 }
             }
         }
+    }
+
+    fn poll_file(&self) {
+        use mdview_core::files::{FileStamp, read_stable, stamp};
+        let Some(path) = self.path.borrow().clone() else {
+            return;
+        };
+        let now = stamp(&path);
+        let old = self.stamp.get();
+        if now == old {
+            return;
+        }
+        let name = path
+            .file_name()
+            .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+        if now == FileStamp::Missing {
+            self.stamp.set(now);
+            _ = self.window.SetTitle(&format!("mdview - {name} (deleted; showing the last content)"));
+            return;
+        }
+        let Ok(loaded) = read_stable(&path) else {
+            return; // still being written; the next tick tries again
+        };
+        self.stamp.set(loaded.stamp);
+        let document = parse_bytes(&loaded.bytes);
+        self.renderer
+            .borrow_mut()
+            .reload_document(document, path.parent().map(|p| p.to_path_buf()));
+        _ = self.window.SetTitle(&format!("mdview - {name}"));
+        refresh_outline(self);
+        diag::trace("auto-refresh: file changed on disk, reloaded");
+        self.show();
     }
 
     /// Zooms one step (+1 / -1) or back to 100% (0), within 60-250%, and redraws.
@@ -670,9 +705,19 @@ fn load(shell: &Shell, path: &Path) -> std::result::Result<(), String> {
         .SetTitle(&format!("mdview - {name}"))
         .map_err(|e| e.to_string())?;
     *shell.path.borrow_mut() = Some(path.to_path_buf());
+    shell.stamp.set(mdview_core::files::stamp(path));
     refresh_outline(shell);
     Ok(())
 }
+
+/// Every 800 ms: reload the open file when it changed on disk (keeping the scroll offset), and
+/// say so in the title when it was deleted, keeping what was loaded.
+unsafe extern "system" fn poll_timer(_: *mut c_void, _: u32, _: usize, _: u32) {
+    if let Some(shell) = SHELL.with(|cell| cell.borrow().clone()) {
+        shell.poll_file();
+    }
+}
+
 
 fn open_file(shell: &Rc<Shell>) {
     let Some(path) = file_dialog() else {
@@ -993,6 +1038,7 @@ pub fn build(
         root: root.clone(),
         renderer: RefCell::new(renderer),
         path: RefCell::new(file.clone()),
+        stamp: Cell::new(file.as_deref().map_or(mdview_core::files::FileStamp::Missing, mdview_core::files::stamp)),
         presented: Cell::new(false),
         dragging: Cell::new(None),
         steps: Cell::new(startup.steps),
@@ -1176,6 +1222,8 @@ pub fn build(
     }
 
     SHELL.with(|cell| *cell.borrow_mut() = Some(shell.clone()));
+    // The file poll runs on this thread's message loop; a null window means no HWND is needed.
+    unsafe { SetTimer(std::ptr::null_mut(), 0, 800, poll_timer) };
     build_menu(&shell)?;
     window.SetContent(&root.cast::<UIElement>()?)?;
     window.Closed(|_, _| diag::trace("window closed"))?.forget();
