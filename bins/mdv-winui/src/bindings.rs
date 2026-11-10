@@ -827,6 +827,19 @@ impl Grid {
             .ok()
         })
     }
+    pub fn SetRowSpan<P0>(element: P0, value: i32) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<FrameworkElement>,
+    {
+        Self::IGridStatics(|this| unsafe {
+            (windows_core::Interface::vtable(this).SetRowSpan)(
+                windows_core::Interface::as_raw(this),
+                element.param().abi(),
+                value,
+            )
+            .ok()
+        })
+    }
     pub fn SetColumnSpan<P0>(element: P0, value: i32) -> windows_core::Result<()>
     where
         P0: windows_core::Param<FrameworkElement>,
@@ -2288,7 +2301,11 @@ pub struct IGridStatics_Vtbl {
     ) -> windows_core::HRESULT,
     RowSpanProperty: usize,
     GetRowSpan: usize,
-    SetRowSpan: usize,
+    pub SetRowSpan: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        i32,
+    ) -> windows_core::HRESULT,
     ColumnSpanProperty: usize,
     GetColumnSpan: usize,
     pub SetColumnSpan: unsafe extern "system" fn(

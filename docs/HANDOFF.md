@@ -968,3 +968,18 @@ under FUSE with the offscreen platform: select, tabs, link, copy and find checks
 Not done: running on a clean machine without the Arch Qt, a real Wayland/X11 window from the image,
 and the update itself (it needs a published GitHub release; today's 404 is expected). The bundle also
 carries Qt Quick/Pdf/VirtualKeyboard libraries it does not need, which is size to trim.
+
+## 21. WinUI Files pane (2026-11-10)
+
+A `TreeView` in a new left column (0 px wide until a folder is open, then 280 px). File > Open folder
+(Ctrl+Shift+O, `SHBrowseForFolderW`), View > Files panel (Ctrl+B), `--folder DIR` for scripts. Folders first, then
+`.md/.markdown/.mdown/.mkd`, hidden names skipped; a folder's children are read when it first expands
+(`Expanding`), a click on a file opens it in a tab (`ItemInvoked`). The folder is saved in the session and
+restored (an explicit `--folder` wins and is not saved). `ItemInvoked` is not in the trimmed bindings, so
+`src/tree.rs` calls it by slot index (ITreeView 7/8, args IID `1a05853c-b101-542c-9a1e-775a044c4652`), read from
+`Microsoft.UI.Xaml.winmd` 2.6.4 downloaded from NuGet; `Grid.SetRowSpan` was un-trimmed in `bindings.rs`.
+Checked on the VM through UI Automation: a folder with a subfolder, two Markdown files, a `.txt` and a hidden
+file showed `sub, a.md, b.markdown`; expanding `sub` added `deep.md`; invoking `a.md` opened it in a tab; a
+screenshot shows the pane beside the tabs and page. The earlier tabs/zoom/session/single-instance checks
+still pass. Not done: keyboard navigation in the tree, dragging the pane wider, a click on a folder row
+(the chevron expands it), real mouse clicks (UIA invoked the row).

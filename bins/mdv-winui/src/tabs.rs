@@ -17,7 +17,7 @@
 use crate::bindings::{IControl, TabView, TabViewItem, TypedEventHandler, UIElement};
 use windows_core::{GUID, HRESULT, IInspectable, IUnknown, Interface, Ref, RuntimeType};
 
-const BASE: usize = 6;
+pub(crate) const BASE: usize = 6;
 const TABVIEW_SET_IS_ADD_TAB_BUTTON_VISIBLE: usize = 13;
 const TABVIEW_ADD_TAB_CLOSE_REQUESTED: usize = 18;
 const TABVIEW_REMOVE_TAB_CLOSE_REQUESTED: usize = 19;
@@ -33,18 +33,18 @@ const TOOLTIP_SET_TOOL_TIP: usize = 8;
 const CONTROL_SET_IS_ENABLED: usize = 23;
 const UIELEMENT_SET_VISIBILITY: usize = 18;
 
-type Raw = *mut core::ffi::c_void;
+pub(crate) type Raw = *mut core::ffi::c_void;
 
 /// # Safety
 /// `object` must implement an interface with at least `index + 1` slots.
-unsafe fn slot(object: &impl Interface, index: usize) -> usize {
+pub(crate) unsafe fn slot(object: &impl Interface, index: usize) -> usize {
     unsafe {
         let raw = object.as_raw() as *const *const usize;
         *(*raw).add(index)
     }
 }
 
-fn register<S: Interface + Clone>(
+pub(crate) fn register<S: Interface + Clone>(
     source: &S,
     add: usize,
     remove: usize,
@@ -230,7 +230,7 @@ impl windows_core::RuntimeName for TabViewTabDragCompletedEventArgs {
     const NAME: &'static str = "Microsoft.UI.Xaml.Controls.TabViewTabDragCompletedEventArgs";
 }
 
-fn typed<T, U, F>(handler: F) -> TypedEventHandler<T, U>
+pub(crate) fn typed<T, U, F>(handler: F) -> TypedEventHandler<T, U>
 where
     T: RuntimeType + 'static,
     U: RuntimeType + 'static,

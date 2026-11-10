@@ -45,6 +45,9 @@ windows_core::link!("user32.dll" "system" fn SetWindowPos(window: *mut c_void, a
 windows_core::link!("comdlg32.dll" "system" fn GetOpenFileNameW(ofn: *mut OpenFileNameW) -> i32);
 windows_core::link!("advapi32.dll" "system" fn RegGetValueW(hkey: *mut c_void, subkey: PCWSTR, value: PCWSTR, flags: u32, ty: *mut u32, data: *mut c_void, size: *mut u32) -> i32);
 windows_core::link!("user32.dll" "system" fn GetKeyState(key: i32) -> i16);
+windows_core::link!("shell32.dll" "system" fn SHBrowseForFolderW(info: *mut BrowseInfoW) -> *mut c_void);
+windows_core::link!("shell32.dll" "system" fn SHGetPathFromIDListW(pidl: *mut c_void, path: *mut u16) -> i32);
+windows_core::link!("ole32.dll" "system" fn CoTaskMemFree(memory: *mut c_void));
 windows_core::link!("user32.dll" "system" fn SetForegroundWindow(hwnd: *mut c_void) -> i32);
 windows_core::link!("user32.dll" "system" fn ShowWindow(hwnd: *mut c_void, command: i32) -> i32);
 windows_core::link!("user32.dll" "system" fn SetTimer(hwnd: *mut c_void, id: usize, ms: u32, callback: unsafe extern "system" fn(*mut c_void, u32, usize, u32)) -> usize);
@@ -59,12 +62,19 @@ windows_core::link!("kernel32.dll" "system" fn GlobalUnlock(mem: *mut c_void) ->
 windows_core::link!("kernel32.dll" "system" fn GlobalFree(mem: *mut c_void) -> *mut c_void);
 windows_core::link!("shell32.dll" "system" fn ShellExecuteW(window: *mut c_void, operation: PCWSTR, file: PCWSTR, parameters: PCWSTR, directory: PCWSTR, show: i32) -> isize);
 
+/// `--folder DIR`: the folder the Files pane opens with.
+pub fn set_start_folder(dir: PathBuf) {
+    START_FOLDER.with(|cell| *cell.borrow_mut() = Some(dir));
+}
+
 /// Starts receiving files from later launches (see `mdview_core::single`).
 pub fn set_incoming(receiver: std::sync::mpsc::Receiver<PathBuf>) {
     INCOMING.with(|cell| *cell.borrow_mut() = Some(receiver));
 }
 
 thread_local! {
+    /// A folder to show in the Files pane at start (`--folder`), instead of the saved one.
+    static START_FOLDER: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// Paths later launches sent to this window; drained by the poll timer.
     static INCOMING: RefCell<Option<std::sync::mpsc::Receiver<PathBuf>>> = const { RefCell::new(None) };
     static SHELL: RefCell<Option<Rc<Shell>>> = const { RefCell::new(None) };
@@ -202,6 +212,48 @@ fn open_url(url: &str) {
     diag::trace(&format!("opened {url}: {result}"));
 }
 
+#[repr(C)]
+struct BrowseInfoW {
+    owner: *mut c_void,
+    root: *mut c_void,
+    display_name: *mut u16,
+    title: *const u16,
+    flags: u32,
+    callback: *mut c_void,
+    lparam: isize,
+    image: i32,
+}
+
+/// The system folder picker. `None` when cancelled.
+fn folder_dialog() -> Option<PathBuf> {
+    const RETURN_ONLY_FS_DIRS: u32 = 0x1;
+    const NEW_DIALOG_STYLE: u32 = 0x40;
+    let title: Vec<u16> = "Open folder\0".encode_utf16().collect();
+    let mut name = vec![0u16; 260];
+    let mut info = BrowseInfoW {
+        owner: winui_window() as *mut c_void,
+        root: std::ptr::null_mut(),
+        display_name: name.as_mut_ptr(),
+        title: title.as_ptr(),
+        flags: RETURN_ONLY_FS_DIRS | NEW_DIALOG_STYLE,
+        callback: std::ptr::null_mut(),
+        lparam: 0,
+        image: 0,
+    };
+    let pidl = unsafe { SHBrowseForFolderW(&mut info) };
+    if pidl.is_null() {
+        return None;
+    }
+    let mut path = vec![0u16; 32_768];
+    let ok = unsafe { SHGetPathFromIDListW(pidl, path.as_mut_ptr()) };
+    unsafe { CoTaskMemFree(pidl) };
+    if ok == 0 {
+        return None;
+    }
+    let length = path.iter().position(|&c| c == 0).unwrap_or(0);
+    (length > 0).then(|| PathBuf::from(String::from_utf16_lossy(&path[..length])))
+}
+
 fn file_dialog() -> Option<PathBuf> {
     const FILE_MUST_EXIST: u32 = 0x0000_1000;
     const PATH_MUST_EXIST: u32 = 0x0000_0800;
@@ -252,7 +304,57 @@ struct Page {
     state: Option<PageState>,
 }
 
+/// One row of the Files pane: its node, what it stands for, and whether its children are in yet.
+struct TreeEntry {
+    key: usize,
+    node: TreeViewNode,
+    path: PathBuf,
+    is_dir: bool,
+    loaded: bool,
+}
+
+/// Folders first, then Markdown files, names compared without case; hidden names are skipped.
+fn scan_dir(dir: &Path) -> Vec<(String, PathBuf, bool)> {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<(String, PathBuf, bool)> = read
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                return None;
+            }
+            let path = entry.path();
+            let is_dir = path.is_dir();
+            let markdown = path.extension().is_some_and(|e| {
+                matches!(
+                    e.to_string_lossy().to_lowercase().as_str(),
+                    "md" | "markdown" | "mdown" | "mkd"
+                )
+            });
+            (is_dir || markdown).then_some((name, path, is_dir))
+        })
+        .collect();
+    entries.sort_by(|a, b| {
+        b.2.cmp(&a.2)
+            .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+    });
+    entries.truncate(2000);
+    entries
+}
+
+fn identity(object: &impl Interface) -> Option<usize> {
+    object.cast::<IUnknown>().ok().map(|u| u.as_raw() as usize)
+}
+
 struct Shell {
+    /// The Files pane, its column, and the rows in it.
+    tree: TreeView,
+    tree_column: ColumnDefinition,
+    tree_nodes: RefCell<Vec<TreeEntry>>,
+    folder: RefCell<Option<PathBuf>>,
+    tree_visible: Cell<bool>,
     window: Window,
     root: Grid,
     renderer: RefCell<Renderer>,
@@ -327,7 +429,15 @@ impl Shell {
                 const VK_TAB: usize = 0x09;
                 const VK_F4: usize = 0x73;
                 if ctrl && wparam == 0x4f {
-                    self.open_dialog();
+                    if shift {
+                        self.open_folder_dialog();
+                    } else {
+                        self.open_dialog();
+                    }
+                    return true;
+                }
+                if ctrl && wparam == 0x42 {
+                    self.toggle_files();
                     return true;
                 }
                 if ctrl && (wparam == 0x57 || (wparam == VK_F4 && !shift)) {
@@ -637,6 +747,123 @@ impl Shell {
                 diag::error_box(&e);
                 false
             }
+        }
+    }
+
+    /// Adds one level of `dir` under `children`; folders get a placeholder so they can expand.
+    fn fill_nodes(&self, children: &windows_collections::IVector<TreeViewNode>, dir: &Path) {
+        for (name, path, is_dir) in scan_dir(dir) {
+            let Ok(node) = TreeViewNode::new() else {
+                continue;
+            };
+            _ = node.SetContent(&tabs::boxed(&name));
+            if is_dir {
+                _ = node.SetHasUnrealizedChildren(true);
+            }
+            if children.Append(&node).is_err() {
+                continue;
+            }
+            if let Some(key) = identity(&node) {
+                self.tree_nodes.borrow_mut().push(TreeEntry {
+                    key,
+                    node,
+                    path,
+                    is_dir,
+                    loaded: false,
+                });
+            }
+        }
+    }
+
+    /// Shows `dir` in the Files pane. `persist` saves it as the session's folder.
+    fn open_folder(&self, dir: &Path, persist: bool) {
+        let Ok(roots) = self.tree.RootNodes() else {
+            return;
+        };
+        _ = roots.Clear();
+        self.tree_nodes.borrow_mut().clear();
+        self.fill_nodes(&roots, dir);
+        *self.folder.borrow_mut() = Some(dir.to_path_buf());
+        self.set_tree_visible(true);
+        diag::trace(&format!(
+            "folder {}: {} rows",
+            dir.display(),
+            self.tree_nodes.borrow().len()
+        ));
+        if persist {
+            if let Some((_, session)) = self.session.borrow_mut().as_mut() {
+                session.folder = Some(dir.to_path_buf());
+            }
+            self.save_session();
+        }
+    }
+
+    fn set_tree_visible(&self, visible: bool) {
+        self.tree_visible.set(visible);
+        if let Ok(element) = self.tree.cast::<UIElement>() {
+            _ = tabs::set_visible(&element, visible);
+        }
+        _ = self.tree_column.SetWidth(GridLength {
+            value: if visible { 280.0 } else { 0.0 },
+            grid_unit_type: GridUnitType::Pixel,
+        });
+    }
+
+    /// File > Open folder and Ctrl+Shift+O.
+    fn open_folder_dialog(&self) {
+        if let Some(dir) = folder_dialog() {
+            self.open_folder(&dir, true);
+        }
+        self.focus_page();
+    }
+
+    /// View > Files and Ctrl+B: shows or hides the pane; with no folder yet, asks for one.
+    fn toggle_files(&self) {
+        if self.folder.borrow().is_none() {
+            self.open_folder_dialog();
+        } else {
+            self.set_tree_visible(!self.tree_visible.get());
+            self.focus_page();
+        }
+    }
+
+    /// A row was clicked: a Markdown file opens in a tab; a folder is left to the tree's own expander.
+    fn tree_invoked(&self, item: &windows_core::IInspectable) {
+        let Some(key) = identity(item) else {
+            return;
+        };
+        let target = self
+            .tree_nodes
+            .borrow()
+            .iter()
+            .find(|entry| entry.key == key && !entry.is_dir)
+            .map(|entry| entry.path.clone());
+        if let Some(path) = target {
+            self.open(&path);
+            self.focus_page();
+        }
+    }
+
+    /// A folder row expanded: reads its children the first time.
+    fn tree_expanding(&self, node: &TreeViewNode) {
+        let Some(key) = identity(node) else {
+            return;
+        };
+        let target = {
+            let mut nodes = self.tree_nodes.borrow_mut();
+            nodes
+                .iter_mut()
+                .find(|entry| entry.key == key && entry.is_dir && !entry.loaded)
+                .map(|entry| {
+                    entry.loaded = true;
+                    entry.path.clone()
+                })
+        };
+        if let Some(path) = target {
+            if let Ok(children) = node.Children() {
+                self.fill_nodes(&children, &path);
+            }
+            _ = node.SetHasUnrealizedChildren(false);
         }
     }
 
@@ -1505,6 +1732,15 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
     open.Click(move |_, _| target.open_dialog())?.forget();
     file.Items()?.Append(&open.cast::<MenuFlyoutItemBase>()?)?;
 
+    let open_folder = MenuFlyoutItem::new()?;
+    open_folder.SetText("Open folder...\tCtrl+Shift+O")?;
+    let target = shell.clone();
+    open_folder
+        .Click(move |_, _| target.open_folder_dialog())?
+        .forget();
+    file.Items()?
+        .Append(&open_folder.cast::<MenuFlyoutItemBase>()?)?;
+
     let close_tab = MenuFlyoutItem::new()?;
     close_tab.SetText("Close tab\tCtrl+W")?;
     let target = shell.clone();
@@ -1601,6 +1837,11 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
         .forget();
         view.Items()?.Append(&item.cast::<MenuFlyoutItemBase>()?)?;
     }
+    let files = MenuFlyoutItem::new()?;
+    files.SetText("Files panel\tCtrl+B")?;
+    let target = shell.clone();
+    files.Click(move |_, _| target.toggle_files())?.forget();
+    view.Items()?.Append(&files.cast::<MenuFlyoutItemBase>()?)?;
     menu.Items()?.Append(&view)?;
 
     place(&shell.root, &menu, 0, 0)?;
@@ -1674,6 +1915,19 @@ pub fn build(
     add_row(&root, GridUnitType::Auto, 1.0)?; // menu
     add_row(&root, GridUnitType::Auto, 1.0)?; // tabs
     add_row(&root, GridUnitType::Star, 1.0)?; // page
+    // Column 0 holds the Files pane (0 wide until a folder is open); column 1 the tabs and the page.
+    let tree_column = ColumnDefinition::new()?;
+    tree_column.SetWidth(GridLength {
+        value: 0.0,
+        grid_unit_type: GridUnitType::Pixel,
+    })?;
+    root.ColumnDefinitions()?.Append(&tree_column)?;
+    let page_column = ColumnDefinition::new()?;
+    page_column.SetWidth(GridLength {
+        value: 1.0,
+        grid_unit_type: GridUnitType::Star,
+    })?;
+    root.ColumnDefinitions()?.Append(&page_column)?;
     set_root_background(&root, theme)?;
     set_chrome_theme(&root, theme)?;
 
@@ -1695,14 +1949,19 @@ pub fn build(
         .cast::<IPanel>()?
         .Children()?
         .Append(&hit_target.cast::<UIElement>()?)?;
-    place(&root, &panel, 2, 0)?;
+    place(&root, &panel, 2, 1)?;
 
     // Headers only: no tab content, so the one panel below draws whichever page is current.
     let tab_view = TabView::new()?;
     tabs::set_add_tab_button_visible(&tab_view, false)?;
     tabs::set_can_reorder_tabs(&tab_view, true)?;
     tabs::set_visible(&tab_view.cast::<UIElement>()?, false)?;
-    place(&root, &tab_view, 1, 0)?;
+    place(&root, &tab_view, 1, 1)?;
+
+    let tree = TreeView::new()?;
+    tabs::set_visible(&tree.cast::<UIElement>()?, false)?;
+    place(&root, &tree, 1, 0)?;
+    Grid::SetRowSpan(&tree.cast::<FrameworkElement>()?, 2)?;
 
     let gpu = gpu
         .join()
@@ -1736,6 +1995,11 @@ pub fn build(
         session: RefCell::new(session),
         recent_menu: RefCell::new(None),
         tabs_test: Cell::new(startup.tabs),
+        tree: tree.clone(),
+        tree_column: tree_column.clone(),
+        tree_nodes: RefCell::new(Vec::new()),
+        folder: RefCell::new(None),
+        tree_visible: Cell::new(false),
         stamp: Cell::new(mdview_core::files::FileStamp::Missing),
         zoom_test: Cell::new(startup.zoom),
         presented: Cell::new(false),
@@ -1943,6 +2207,30 @@ pub fn build(
             shell.switch_to(saved.active.min(count - 1));
         }
         refresh_recent(&shell);
+        if let Some(folder) = saved.folder.filter(|f| f.is_dir()) {
+            shell.open_folder(&folder, false);
+        }
+    }
+    if let Some(folder) = START_FOLDER.with(|cell| cell.borrow().clone()) {
+        shell.open_folder(&folder, false);
+    }
+    {
+        let target = shell.clone();
+        crate::tree::item_invoked(&shell.tree, move |_, args| {
+            if let Some(item) = args.as_ref().and_then(|args| args.invoked_item().ok()) {
+                target.tree_invoked(&item);
+            }
+        })?
+        .forget();
+        let target = shell.clone();
+        shell
+            .tree
+            .Expanding(move |_, args| {
+                if let Some(node) = args.as_ref().and_then(|args| args.Node().ok()) {
+                    target.tree_expanding(&node);
+                }
+            })?
+            .forget();
     }
     for path in &files {
         shell.open(path);

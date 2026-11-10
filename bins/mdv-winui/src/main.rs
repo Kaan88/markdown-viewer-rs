@@ -21,6 +21,7 @@ mod input;
 #[allow(non_snake_case)]
 mod render;
 mod tabs;
+mod tree;
 mod ui;
 
 use bindings::*;
@@ -87,10 +88,11 @@ struct Args {
     scroll: f32,
     steps: u32,
     size: (i32, i32),
+    folder: Option<PathBuf>,
     flags: Vec<String>,
 }
 
-const VALUE_FLAGS: [&str; 4] = ["--zoom", "--scroll", "--scroll-steps", "--size"];
+const VALUE_FLAGS: [&str; 5] = ["--zoom", "--scroll", "--scroll-steps", "--size", "--folder"];
 
 impl Args {
     fn parse(args: impl IntoIterator<Item = String>) -> Self {
@@ -101,6 +103,7 @@ impl Args {
             scroll: 0.0,
             steps: 0,
             size: (1100, 900),
+            folder: None,
             flags: Vec::new(),
         };
         let mut args = args.into_iter();
@@ -109,6 +112,7 @@ impl Args {
                 let value = args.next().unwrap_or_default();
                 match arg.as_str() {
                     "--zoom" => out.zoom = value.parse().unwrap_or(out.zoom),
+                    "--folder" => out.folder = Some(PathBuf::from(&value)),
                     "--scroll" => out.scroll = value.parse().unwrap_or(out.scroll),
                     "--scroll-steps" => out.steps = value.parse().unwrap_or(out.steps),
                     _ => {
@@ -205,6 +209,9 @@ fn run() -> Result<()> {
         if let Some(receiver) = mdview_core::single::listen(path) {
             ui::set_incoming(receiver);
         }
+    }
+    if let Some(folder) = args.folder.clone() {
+        ui::set_start_folder(folder);
     }
     let gpu = Rc::new(RefCell::new(Some(gpu)));
     // Application and UI state must outlive Start, which returns at process end.
