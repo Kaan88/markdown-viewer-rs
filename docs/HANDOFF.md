@@ -917,3 +917,10 @@ timings (QApplication, `build`, `open`). What remains of the ~119 ms: Qt start, 
 warm repeat). PLAN gate G7 wanted under 500 ms off-thread; the fallback it names is estimated
 heights for blocks off screen, refined as they are laid out. Not done. Not measured: cold launch,
 10 tabs, second-launch handoff time, a real Wayland or X11 window.
+
+## 16. PGO trial (Qt, Linux, 2026-11-10)
+
+Instrumented build, trained on the 1 MiB doc, showcase, math/diagram/image fixtures and the scripted
+checks, then rebuilt with `-Cprofile-use`. Painted-frame time on the 1 MiB doc: 5.2-8.0 ms normal vs
+5.5-5.9 ms PGO, i.e. no measurable difference in what the offscreen run can see. Cold layout time was
+not compared. Not adopted; the PKGBUILD and normal builds stay as they are.
