@@ -829,7 +829,11 @@ Qt's event path instead).
      its next 800 ms tick and restores/raises itself (`ShowWindow`/`SetForegroundWindow`). Checked
      on the VM: the second process exited 0 and the first window parsed the second file 6.5 s in.
      Whether Windows brings the window to the front (versus flashing the taskbar) was not looked at.
-   - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
+   - **WinUI tabs merged 2026-11-10** (`winui-tabs-wip` merged with the zoom, auto-refresh, single-instance and
+     theme/zoom persistence work). On the VM: `--tabs-test` ok, `--zoom-test` ok, a second launch forwards its file
+     into a new tab and exits, and a no-argument relaunch restores both tabs. Real key presses, tab
+     clicks and the menus were not exercised by hand.
+   - (superseded) WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.
    Bundling would let the golden comparison in `crates/render/tests/golden.rs` run on Linux too;
