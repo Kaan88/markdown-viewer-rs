@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <!-- Placeholder icon: replace with real artwork before a public release. -->
-  <rect x="16" y="48" width="224" height="160" rx="24" fill="#2b5fab"/>
-  <path d="M56 176V80h24l24 32 24-32h24v96h-24v-56l-24 32-24-32v56zM184 144h-20l32 32 32-32h-20V80h-24z" fill="#fff"/>
+  <!-- The mdview mark: the Markdown "M" and down arrow on a blue tile. Replace for a branded release. -->
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#2b5fab"/>
+  <rect x="8" y="8" width="240" height="120" rx="52" fill="#fff" opacity="0.08"/>
+  <path d="M44 176V80h28l28 36 28-36h28v96h-28v-54l-28 36-28-36v54zM178 128h-24l38 44 38-44h-24V80h-28z" fill="#fff" transform="translate(-8 4) scale(0.96)"/>
 </svg>

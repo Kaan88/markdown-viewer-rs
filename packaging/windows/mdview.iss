@@ -36,6 +36,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.22000
+SetupIconFile=..\..\assets\mdview.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 ; Registers the associations and calls SHChangeNotify(SHCNE_ASSOCCHANGED) at the end.
