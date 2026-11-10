@@ -1,8 +1,8 @@
-# !!! HASHES ARE NOT FILLED IN. Every value below is TODO on purpose: no hash was invented.
-# The upstream "continuous" builds are rebuilt over time, so a pinned hash only holds until upstream
-# republishes. To fill in: download the file yourself, inspect it, run `sha256sum`, paste the value.
-# `build-appimage.sh --fetch-tools` refuses to keep a file whose hash here is TODO or mismatched
-# (it prints the computed hash so you can review it and paste it in).
+# sha256 of the tools this build was verified with on 2026-11-10 (downloaded from the "continuous"
+# releases of linuxdeploy, linuxdeploy-plugin-qt and linuxdeploy-plugin-appimage and used to build a
+# working image). Upstream rebuilds "continuous" over time, so a later download can differ: the script
+# then refuses it and prints the new hash. Review the new file, then replace the value here.
 # Format: <sha256>  <name in tools/>
-TODO  linuxdeploy
-TODO  linuxdeploy-plugin-qt
+df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5  linuxdeploy
+cfc1055b2b9dbc08412b579f20990b7b41a17b61beaa5847dc9477c96c9e9617  linuxdeploy-plugin-qt
+49d6a17160675a6bd1781699aae6bdf7692d98552e02a3671d2183d10547842e  linuxdeploy-plugin-appimage

@@ -16,6 +16,7 @@ fetch=0
 
 LD_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
 LDQT_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+LDAI_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage"
 UPDATE_INFO="gh-releases-zsync|Kaan88|markdown-viewer-rs|latest|mdview-*x86_64.AppImage.zsync"
 
 while [ $# -gt 0 ]; do
@@ -32,7 +33,7 @@ done
 fetch_tools() {
   mkdir -p "$here/tools"
   local name url want got
-  for pair in "linuxdeploy|$LD_URL" "linuxdeploy-plugin-qt|$LDQT_URL"; do
+  for pair in "linuxdeploy|$LD_URL" "linuxdeploy-plugin-qt|$LDQT_URL" "linuxdeploy-plugin-appimage|$LDAI_URL"; do
     name="${pair%%|*}"; url="${pair#*|}"
     echo "downloading $url"
     curl -fL --proto '=https' -o "$here/tools/$name.part" "$url"
@@ -54,7 +55,7 @@ fetch_tools() {
 
 if [ "$appdir_only" = 0 ]; then
   missing=0
-  for t in linuxdeploy linuxdeploy-plugin-qt; do
+  for t in linuxdeploy linuxdeploy-plugin-qt linuxdeploy-plugin-appimage; do
     command -v "$t" >/dev/null || missing=1
   done
   if [ "$missing" = 1 ]; then
@@ -96,13 +97,45 @@ if [ "$appdir_only" = 1 ]; then
 fi
 
 cd "$out"
+# xcb comes by default. Wayland sessions need libqwayland (Qt 6.12 ships one plugin; older Qt 6 had
+# libqwayland-generic.so and libqwayland-egl.so, so adjust the names there), and offscreen lets the scripted checks run the
+# finished image without a display.
+export EXTRA_PLATFORM_PLUGINS="libqwayland.so;libqoffscreen.so"
 export LDAI_UPDATE_INFORMATION="$UPDATE_INFO"
 export LDAI_OUTPUT="mdview-$version-x86_64.AppImage"
 export LDAI_VERSION="$version"
 export APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}"   # no FUSE needed for the tools
+# linuxdeploy-plugin-qt deploys every Qt plugin it finds, and distro-added ones (KDE's kimg_* image
+# formats) can need libraries that are not installed, which aborts the build. mdview only needs Qt's
+# own image formats, so the plugin is pointed at a copy of the plugin tree without kimg_*, through a
+# qmake wrapper that reports that tree as QT_INSTALL_PLUGINS.
+plugins_src="$("$QMAKE" -query QT_INSTALL_PLUGINS)"
+plugins="$out/qt-plugins"
+rm -rf "$plugins"; mkdir -p "$plugins"
+for d in "$plugins_src"/*/; do
+  name="$(basename "$d")"
+  if [ "$name" = imageformats ]; then
+    mkdir -p "$plugins/imageformats"
+    for f in "$d"*; do case "$(basename "$f")" in kimg_*) ;; *) ln -s "$f" "$plugins/imageformats/";; esac; done
+  else
+    ln -s "$d" "$plugins/$name"
+  fi
+done
+cat > "$out/qmake-wrapper" <<W
+#!/bin/sh
+# Same answers as the real qmake, except for where the plugins are.
+case "\$*" in
+  *"QT_INSTALL_PLUGINS") echo "$plugins" ;;
+  *-query*) "$QMAKE" "\$@" | sed "s|^QT_INSTALL_PLUGINS:.*|QT_INSTALL_PLUGINS:$plugins|" ;;
+  *) exec "$QMAKE" "\$@" ;;
+esac
+W
+chmod +x "$out/qmake-wrapper"
+export QMAKE="$out/qmake-wrapper"
 linuxdeploy --appdir "$appdir" \
   --desktop-file "$appdir/usr/share/applications/mdview.desktop" \
   --icon-file "$here/mdview.svg" \
+  --custom-apprun "$here/AppRun" \
   --plugin qt --output appimage
 
 image="$out/$LDAI_OUTPUT"

@@ -954,3 +954,17 @@ link and Copy link address; with a selection it adds Copy; elsewhere nothing. Th
 pass (tabs, select, link, details, find, outline, copy, drop). The menu itself was never opened: the offscreen
 platform cannot show a popup and no check synthesises a right click, so only the build is verified. Not done:
 WinUI has no link context menu.
+
+## 20. AppImage built and run (2026-11-10)
+
+With the user's go-ahead the tools (linuxdeploy, its Qt and AppImage plugins, appimageupdatetool) were
+downloaded into the job temp folder and `packaging/appimage/build-appimage.sh` produced a 58 MB
+`mdview-0.1.0-x86_64.AppImage` plus `.zsync` and `SHA256SUMS`. Fixes the build needed: a qmake wrapper
+that hides KDE's `kimg_*` image plugins (one needs a missing `libjpegxr`), `EXTRA_PLATFORM_PLUGINS`
+(Wayland and offscreen), and a real `AppRun` script (the default symlink made Qt look for plugins in
+the wrong directory when mounted). `tools.sha256` now holds the hashes of those downloads. Run mounted
+under FUSE with the offscreen platform: select, tabs, link, copy and find checks pass, and
+`appimageupdatetool` reads the embedded update information (GitHub releases, `Kaan88/markdown-viewer-rs`).
+Not done: running on a clean machine without the Arch Qt, a real Wayland/X11 window from the image,
+and the update itself (it needs a published GitHub release; today's 404 is expected). The bundle also
+carries Qt Quick/Pdf/VirtualKeyboard libraries it does not need, which is size to trim.
