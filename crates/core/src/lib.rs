@@ -12,6 +12,7 @@ mod parse;
 pub mod session;
 pub mod slug;
 pub mod status;
+pub mod update;
 
 pub use model::{Document, parse_bytes};
 pub use parse::parse;
