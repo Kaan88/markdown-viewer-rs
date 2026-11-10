@@ -1014,6 +1014,44 @@ impl<'a, 'b> Pager<'a, 'b> {
         decoded
     }
 
+    /// The drawn size of an image whose HTML gave `width` and/or `height`. One of them keeps the
+    /// aspect ratio; both stretch to that box. Neither is allowed to pass the content width.
+    fn sized_image(
+        &self,
+        natural: (f32, f32),
+        width: Option<mdview_core::model::Length>,
+        height: Option<mdview_core::model::Length>,
+    ) -> (f32, f32) {
+        use mdview_core::model::Length;
+        let content = self.content_width().max(1.0);
+        let wide = |l: Length| match l {
+            Length::Px(p) => p as f32 * self.scale,
+            Length::Percent(p) => content * f32::from(p) / 100.0,
+        };
+        let tall = |l: Length| match l {
+            Length::Px(p) => p as f32 * self.scale,
+            // A percentage of a height has no reference box in running text.
+            Length::Percent(_) => natural.1,
+        };
+        let (mut w, mut h) = match (width, height) {
+            (None, None) => natural,
+            (Some(w), None) => {
+                let w = wide(w);
+                (w, natural.1 * w / natural.0.max(1.0))
+            }
+            (None, Some(h)) => {
+                let h = tall(h);
+                (natural.0 * h / natural.1.max(1.0), h)
+            }
+            (Some(w), Some(h)) => (wide(w), tall(h)),
+        };
+        if w > content && width.is_some() {
+            h *= content / w;
+            w = content;
+        }
+        (w.max(1.0), h.max(1.0))
+    }
+
     fn px(&self, logical: f32) -> f32 {
         (logical * self.scale).round()
     }
@@ -2370,8 +2408,9 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
             SpanKind::Image(index) => {
                 if let Some(image) = self.image(index) {
-                    let width = image.width as f32 * self.scale;
-                    let height = image.height as f32 * self.scale;
+                    let natural = (image.width as f32 * self.scale, image.height as f32 * self.scale);
+                    let info = self.doc.images[index as usize];
+                    let (width, height) = self.sized_image(natural, info.width, info.height);
                     out.boxes.push(ImageBox {
                         at: out.text.len(),
                         index,

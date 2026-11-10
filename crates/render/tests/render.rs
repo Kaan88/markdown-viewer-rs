@@ -151,6 +151,39 @@ fn write_red_png(path: &std::path::Path) {
 }
 
 #[test]
+fn an_html_image_honours_its_width_and_height() {
+    let dir = temp_dir("image-attrs");
+    write_red_png(&dir.join("red.png"));
+    let red_pixels = |markdown: &str| {
+        let doc = mdview_core::parse(markdown);
+        let options = Options {
+            width: 400.0,
+            scale: 1.0,
+            theme: LIGHT,
+            max_height: None,
+            base_dir: Some(dir.clone()),
+        };
+        let mut renderer = DocumentRenderer::new();
+        let page = renderer.layout(&doc, &options);
+        let view = renderer.view(&doc, &options, &page, 0.0, 400.0);
+        view.bitmap
+            .pixels
+            .chunks_exact(4)
+            .filter(|p| p[2] > 180 && p[0] < 80 && p[1] < 80)
+            .count() as f32
+    };
+    let natural = red_pixels("<img src=\"red.png\">\n");
+    let half = red_pixels("<img src=\"red.png\" width=\"32\">\n");
+    let wide = red_pixels("<img src=\"red.png\" width=\"128\" height=\"32\">\n");
+    let huge = red_pixels("<img src=\"red.png\" width=\"5000\">\n");
+    assert!(natural > 3500.0, "natural {natural}");
+    assert!((half / natural - 0.25).abs() < 0.05, "half {half} vs {natural}");
+    assert!((wide / natural - 1.0).abs() < 0.1, "128x32 is as big as 64x64: {wide}");
+    // Clamped to the content width (about 400 minus margins), aspect kept, so far under 5000^2.
+    assert!(huge > natural * 10.0 && huge < 400.0 * 400.0, "huge {huge}");
+}
+
+#[test]
 fn a_png_on_disk_is_drawn_inline() {
     let dir = temp_dir("image-drawn");
     let path = dir.join("red.png");

@@ -744,11 +744,13 @@ Qt's event path instead).
 
 ## 11. Known gaps
 
-- **No copy yet.** Selection is drawn but Ctrl+C does not copy it, and links have no context menu.
+- Links have no context menu (copy works in both shells).
 - **Images:** PNG and JPEG decode in-process, SVG and math through `mdview-engine`; `<picture>`
-  light/dark sources and `width`/`height` attributes are ignored, and any other format keeps its
+  light/dark sources are ignored; `width`/`height` on `<img>` are honoured (pixels or percent of the
+  content width, aspect kept when only one is given, clamped to the content width; Markdown images
+  carry none). Any other format keeps its
   placeholder. A blocked image is retried on every render.
-- No find, tabs, folder tree, outline or recent files in either shell; no bundled fonts.
+- WinUI has no tabs, folder tree, recent files or session yet (Qt has them all); no bundled fonts.
 - Table `colspan`/`rowspan` ignored. Highlighting covers fenced blocks only: inline code keeps the
   theme text colour, and unknown languages or blocks over 256 KiB stay plain.
 - Math blocks are images: dragging across a display equation selects nothing, and there is no
