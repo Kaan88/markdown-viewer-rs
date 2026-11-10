@@ -852,8 +852,16 @@ Written 2026-11-10 by two delegated agents and reviewed here; **none of it has b
 - `packaging/appimage/`: `build-appimage.sh` (`--appdir-only` works and its `usr/bin/mdview
   --tabs-test` passes offscreen), `update-check.sh`, desktop file, placeholder icon. linuxdeploy and
   the Qt plugin are not installed, so no AppImage has been built; `tools.sha256` is all `TODO`.
-- Still to do: the shells' update check (read the manifest, once per 24 h, opt-out), the installer
-  run on Windows, and an actual AppImage build.
+- Qt AppImage self-update is wired (`bins/mdv-qt/src/appimage_update.rs`): when `APPIMAGE` is set
+  and `appimageupdatetool` is on PATH, a launch runs `--check-for-update` on a worker thread at most
+  once per 24 h (stamp in `$XDG_STATE_HOME/mdview`), exit code 1 puts "A new mdview is available" in
+  the status bar, and Help > Update mdview now applies the delta. Opt out with `MDVIEW_NO_UPDATE_CHECK`
+  or `~/.config/mdview/no-update-check` (no settings toggle yet). Checked with a fake tool: it is run
+  once per day, again once the stamp is stale, and never with the opt-out file. Not checked against a
+  real AppImage, release or `appimageupdatetool`.
+- Still to do: the manifest-based update check for the Windows shell (`update.rs` is ready, the
+  shell has no HTTP client and no settings), the installer run on Windows, and an actual AppImage
+  build.
 
 ## 15. Linux budget numbers (measured 2026-11-10)
 
@@ -885,4 +893,3 @@ timings (QApplication, `build`, `open`). What remains of the ~119 ms: Qt start, 
 warm repeat). PLAN gate G7 wanted under 500 ms off-thread; the fallback it names is estimated
 heights for blocks off screen, refined as they are laid out. Not done. Not measured: cold launch,
 10 tabs, second-launch handoff time, a real Wayland or X11 window.
-

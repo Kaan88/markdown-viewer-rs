@@ -140,6 +140,8 @@ struct Shell {
     folder_rows: RefCell<Vec<Option<PathBuf>>>,
     /// Paths sent by later launches, drained on the poll tick.
     incoming: RefCell<Option<std::sync::mpsc::Receiver<PathBuf>>>,
+    /// The AppImage update check or apply in flight, if any.
+    updating: RefCell<Option<std::sync::mpsc::Receiver<crate::appimage_update::Status>>>,
     /// Manage recent files: a dock with the list, a toolbar with its buttons, the chosen row.
     manage_dock: Cell<Option<H<QDockWidget>>>,
     manage_bar: Cell<Option<H<QToolBar>>>,
@@ -196,6 +198,7 @@ impl Shell {
             folder: RefCell::new(None),
             folder_rows: RefCell::new(Vec::new()),
             incoming: RefCell::new(None),
+            updating: RefCell::new(None),
             manage_dock: Cell::new(None),
             manage_bar: Cell::new(None),
             manage_tree: RefCell::new(None),
@@ -993,6 +996,19 @@ impl Shell {
     /// The 800 ms poll: reloads any open file whose stamp changed, background tabs included. A
     /// file that disappears keeps its last content and says so.
     fn poll_files(&self) {
+        let update = self.updating.borrow().as_ref().and_then(|r| r.try_recv().ok());
+        if let Some(status) = update {
+            use crate::appimage_update::Status;
+            self.updating.borrow_mut().take();
+            self.message(&match status {
+                Status::UpToDate => "mdview is up to date".to_string(),
+                Status::Available => {
+                    "A new mdview is available: Help > Update mdview now".to_string()
+                }
+                Status::Updated => "mdview was updated; restart it to use the new version".into(),
+                Status::Failed(why) => format!("Update failed: {why}"),
+            });
+        }
         let sent: Vec<PathBuf> = self
             .incoming
             .borrow()
@@ -2291,6 +2307,22 @@ fn build(
     let shortcuts = help.add_action("&Keyboard shortcuts");
     let s = shell.clone();
     shortcuts.on_triggered(move |_| s.message(SHORTCUTS));
+    if crate::appimage_update::appimage().is_some() {
+        let update_now = help.add_action("&Update mdview now");
+        let s = shell.clone();
+        update_now.on_triggered(move |_| {
+            if s.updating.borrow().is_some() {
+                return;
+            }
+            match crate::appimage_update::spawn_apply() {
+                Some(receiver) => {
+                    s.message("Updating mdview...");
+                    *s.updating.borrow_mut() = Some(receiver);
+                }
+                None => s.message("appimageupdatetool is not installed"),
+            }
+        });
+    }
     let about = help.add_action("&About");
     let s = shell.clone();
     about.on_triggered(move |_| s.message("mdview 0.1 - Qt shell"));
@@ -2502,6 +2534,7 @@ pub fn run() -> i32 {
         }
         if !scripted {
             *shell.incoming.borrow_mut() = crate::single::listen(&path);
+            *shell.updating.borrow_mut() = crate::appimage_update::spawn_check();
         }
         let saved = Session::load(&path);
         if !theme_flag {
