@@ -855,3 +855,26 @@ Written 2026-11-10 by two delegated agents and reviewed here; **none of it has b
 - Still to do: the shells' update check (read the manifest, once per 24 h, opt-out), the installer
   run on Windows, and an actual AppImage build.
 
+## 15. Linux budget numbers (measured 2026-11-10)
+
+CachyOS, Qt 6.10 shell built `--release`, **offscreen** platform (no compositor, so real Wayland
+memory will be higher), AC power, desktop not otherwise idle. The 20 KB document is the first 20,000
+bytes of `generated_1mib.md` (plain prose); the PLAN's "instant" definition is process start to the
+first `painted` line.
+
+| Metric | Measured | Plan (likely / aspiration) |
+|---|---|---|
+| Warm first paint, plain 20 KB | **171 ms** median of 10 after 2 warm-ups (165-177) | 100-160 / 80 ms: **over** |
+| Same, showcase x5 (diagrams, math, syntect) | 462 ms | not a plan row; shows the engine and highlighter cost |
+| Private memory, plain 20 KB, 3 s in | 37.0 MB | 25-40 empty window: inside, with a document |
+| 1 MB document, first paint / private | 747 ms / 40.8 MB | +15-25 MB, +30 ms: **not met** on time |
+| Scroll frame, 780x900 @100% | 0.2 mean / 1.6 worst ms | 4 ms p99 |
+| Scroll frame, 1170x1350 @150% | 0.3 / 1.8 ms | 4 ms p99 |
+| Scroll frame, 3840x2200 @150% | 2.0 / 3.7 ms | 8 ms p99 |
+| Idle CPU over 10 s | 0.00 ticks | about 0 (note: an 800 ms poll timer now runs) |
+
+Launch is the open item: render, parse (0.1 ms) and paint (0.1-0.7 ms) are not where the 171 ms goes;
+it is Qt and font initialisation, not yet profiled (no `perf` or `strace` on this box). The 1 MB first
+paint includes the 4-9 ms height pass plus parse and a full first layout. Not measured: cold launch,
+10 tabs, second-launch handoff time, a real Wayland or X11 window.
+
