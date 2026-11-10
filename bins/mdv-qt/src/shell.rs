@@ -530,9 +530,17 @@ impl Shell {
                     document.warnings.len(),
                     started.elapsed().as_secs_f64() * 1000.0
                 );
+                let trace = std::env::var_os("MDVIEW_STARTUP_TRACE").is_some();
+                let t = std::time::Instant::now();
                 self.recent.borrow_mut().add(path.clone());
                 let index = self.add_page(path, document);
+                if trace {
+                    eprintln!("mdview-qt: open: add_page {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+                }
                 self.switch_to(index);
+                if trace {
+                    eprintln!("mdview-qt: open: switch_to {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+                }
                 self.save_session();
                 true
             }
@@ -558,12 +566,20 @@ impl Shell {
             });
             pages.len() - 1
         };
+        let trace = std::env::var_os("MDVIEW_STARTUP_TRACE").is_some();
+        let t = std::time::Instant::now();
         if let Some(bar) = self.tab_bar.get() {
             self.tabs_busy.set(true);
             bar.add("");
             self.tabs_busy.set(false);
         }
+        if trace {
+            eprintln!("mdview-qt: add_page: bar.add {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+        }
         self.relabel();
+        if trace {
+            eprintln!("mdview-qt: add_page: relabel {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+        }
         index
     }
 
@@ -652,7 +668,14 @@ impl Shell {
             bar.widget().set_visible(false);
         }
         self.pending_anchor.borrow_mut().take();
-        self.build_outline();
+        // The outline tree is only filled while it is showing (View > Outline fills it on open).
+        if self
+            .outline_dock
+            .get()
+            .is_some_and(|dock| dock.widget().is_visible())
+        {
+            self.build_outline();
+        }
         self.redraw();
     }
 
@@ -2087,6 +2110,13 @@ fn build(
     check: Option<Check>,
     scroll: f64,
 ) {
+    let t0 = std::time::Instant::now();
+    let trace = std::env::var_os("MDVIEW_STARTUP_TRACE").is_some();
+    let mark = |what: &str| {
+        if trace {
+            eprintln!("mdview-qt: build {what} at {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0);
+        }
+    };
     let window = H::<QMainWindow>::new();
     window.widget().set_title("mdview");
     window.widget().resize(1100, 900);
@@ -2146,6 +2176,7 @@ fn build(
     let s = shell.clone();
     copy.on_triggered(move |_| s.copy_selection());
 
+    mark("menus (File, Open recent)");
     let find_bar = window.add_tool_bar("Find");
     find_bar.widget().set_visible(false);
     let find_edit = H::<QLineEdit>::new();
@@ -2290,6 +2321,7 @@ fn build(
         s.redraw();
     });
     layout_row(page, canvas.widget(), bar.widget());
+    mark("docks and view menu");
     let tabs = H::<QTabBar>::new();
     let s = shell.clone();
     tabs.on_current_changed(move |index| {
@@ -2316,6 +2348,7 @@ fn build(
     shell.tab_bar.set(Some(tabs));
     let central = new_plain_widget();
     layout_column(central, tabs.widget(), page);
+    mark("canvas and tabs");
     window.set_central(central);
     shell.canvas.set(Some(canvas));
     shell.scrollbar.set(Some(bar));
@@ -2323,6 +2356,7 @@ fn build(
     shell.status.set(Some(window.status_bar()));
     shell.menu_bar.set(Some(window.menu_bar()));
     window.widget().show();
+    mark("window shown");
     if let Some(canvas) = shell.canvas.get() {
         canvas.widget().set_focus();
     }
@@ -2342,6 +2376,7 @@ fn build(
             shell.open_folder(&dir);
         }
     }
+    mark("session restored");
     for path in &files {
         shell.open(path);
     }

@@ -954,7 +954,16 @@ pub fn run_app(setup: impl FnOnce()) -> i32 {
         arg0.as_mut_ptr() as *mut c_char,
         std::ptr::null_mut(),
     ]));
+    let started = std::time::Instant::now();
     let _app = unsafe { new_app(argc, argv.as_mut_ptr()) };
+    let app_ready = started.elapsed();
     setup();
+    if std::env::var_os("MDVIEW_STARTUP_TRACE").is_some() {
+        eprintln!(
+            "mdview-qt: startup: QApplication {:.1} ms, setup {:.1} ms",
+            app_ready.as_secs_f64() * 1000.0,
+            (started.elapsed() - app_ready).as_secs_f64() * 1000.0
+        );
+    }
     QApplication::exec()
 }

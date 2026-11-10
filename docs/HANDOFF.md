@@ -857,24 +857,32 @@ Written 2026-11-10 by two delegated agents and reviewed here; **none of it has b
 
 ## 15. Linux budget numbers (measured 2026-11-10)
 
-CachyOS, Qt 6.10 shell built `--release`, **offscreen** platform (no compositor, so real Wayland
+CachyOS, Qt 6.12.0 shell built `--release`, **offscreen** platform (no compositor, so real Wayland
 memory will be higher), AC power, desktop not otherwise idle. The 20 KB document is the first 20,000
 bytes of `generated_1mib.md` (plain prose); the PLAN's "instant" definition is process start to the
 first `painted` line.
 
 | Metric | Measured | Plan (likely / aspiration) |
 |---|---|---|
-| Warm first paint, plain 20 KB | **171 ms** median of 10 after 2 warm-ups (165-177) | 100-160 / 80 ms: **over** |
-| Same, showcase x5 (diagrams, math, syntect) | 462 ms | not a plan row; shows the engine and highlighter cost |
+| Warm first paint, plain 20 KB | **119 ms** median of 10 after 2 warm-ups (112-179); was 171 ms before the font-sharing fix below | 100-160 / 80 ms: inside the likely band |
+| Same, showcase x5 (diagrams, math, syntect) | 418 ms (was 462) | not a plan row; shows the engine and highlighter cost |
 | Private memory, plain 20 KB, 3 s in | 37.0 MB | 25-40 empty window: inside, with a document |
-| 1 MB document, first paint / private | 747 ms / 40.8 MB | +15-25 MB, +30 ms: **not met** on time |
+| 1 MB document, first paint / private | 661 ms / 40.3 MB (was 747) | +15-25 MB, +30 ms: **not met** on time |
 | Scroll frame, 780x900 @100% | 0.2 mean / 1.6 worst ms | 4 ms p99 |
 | Scroll frame, 1170x1350 @150% | 0.3 / 1.8 ms | 4 ms p99 |
 | Scroll frame, 3840x2200 @150% | 2.0 / 3.7 ms | 8 ms p99 |
 | Idle CPU over 10 s | 0.00 ticks | about 0 (note: an 800 ms poll timer now runs) |
 
-Launch is the open item: render, parse (0.1 ms) and paint (0.1-0.7 ms) are not where the 171 ms goes;
-it is Qt and font initialisation, not yet profiled (no `perf` or `strace` on this box). The 1 MB first
-paint includes the 4-9 ms height pass plus parse and a full first layout. Not measured: cold launch,
+**What was wrong with launch.** `DocumentRenderer::new()` built a parley `FontContext`, which
+enumerates system fonts (about 35 ms), and the Qt shell made three of them before the first paint:
+one in `Shell`, one per `Page`, and one more through `mem::take`'s `Default`. They now clone one
+per-thread context (`shared_fonts` in `crates/render/src/layout.rs`), so only the first pays. The
+outline tree is also filled only while it is showing. `MDVIEW_STARTUP_TRACE=1` prints the phase
+timings (QApplication, `build`, `open`). What remains of the ~119 ms: Qt start, about 25 ms of
+`build` (docks, toolbars, menus), the one font enumeration, and the first paint.
+
+**The 1 MB number is the first height pass**, 615 ms cold on the UI thread (the bench's 4-9 ms is a
+warm repeat). PLAN gate G7 wanted under 500 ms off-thread; the fallback it names is estimated
+heights for blocks off screen, refined as they are laid out. Not done. Not measured: cold launch,
 10 tabs, second-launch handoff time, a real Wayland or X11 window.
 
