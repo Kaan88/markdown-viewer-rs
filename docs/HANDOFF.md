@@ -820,10 +820,13 @@ Qt's event path instead).
 Every Qt/Linux change is tested on the VM as well as on Windows, and nothing counts as working on
 Windows until it has run on Windows.
 
+## 13. Packaging (Linux)
 
-
-
-
-
-
+`packaging/arch/PKGBUILD` builds from the working tree (no download): `cd packaging/arch &&
+makepkg -f` (about 3.5 minutes) gives `mdview-0.1.0-1-x86_64.pkg.tar.zst` holding `/usr/bin/mdview`
+(the Qt shell), `/usr/bin/mdview-engine` (found beside the viewer) and a desktop entry that lists
+Markdown as an openable type and never sets a default. Built here on 2026-11-10 with its
+`single` unit test as `check()`; makepkg warns that the binary mentions `$srcdir` (build paths in
+panic messages). Not installed or launched from the package yet. Still open for Phase 6: PGO, the
+allocator check, the Inno Setup installer and the all-four-extensions Windows registration.
 

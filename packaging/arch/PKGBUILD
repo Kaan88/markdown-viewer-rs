@@ -1,0 +1,35 @@
+# Maintainer: Kaan
+# Builds from the working tree this file sits in (packaging/arch), so it needs no download.
+# `makepkg -f` here produces mdview-<version>-<arch>.pkg.tar.zst. It installs the viewer and its
+# helper `mdview-engine` (SVG, math and Mermaid) side by side, and the desktop entry lists
+# Markdown as a type it can open; it never makes itself the default.
+pkgname=mdview
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Fast read-only Markdown viewer with its own renderer (Qt Widgets)'
+arch=('x86_64')
+license=('custom')
+depends=('qt6-base' 'fontconfig')
+makedepends=('cargo' 'clang' 'lld')
+options=('!lto')
+_root="$startdir/../.."
+
+build() {
+  export QMAKE=/usr/bin/qmake6 CARGO_TARGET_DIR="$srcdir/target"
+  cd "$_root"
+  cargo build --release --locked -p mdview-engine
+  cd "$_root/bins/mdv-qt"
+  cargo build --release --locked
+}
+
+check() {
+  export QMAKE=/usr/bin/qmake6 CARGO_TARGET_DIR="$srcdir/target"
+  cd "$_root/bins/mdv-qt"
+  cargo test --release --locked single
+}
+
+package() {
+  install -Dm755 "$srcdir/target/release/mdview-qt" "$pkgdir/usr/bin/mdview"
+  install -Dm755 "$srcdir/target/release/mdview-engine" "$pkgdir/usr/bin/mdview-engine"
+  install -Dm644 "$_root/packaging/arch/mdview.desktop" "$pkgdir/usr/share/applications/mdview.desktop"
+}
