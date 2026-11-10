@@ -1,6 +1,10 @@
 # mdview AppImage
 
-Status: scripts written; AppDir assembly tested, the `linuxdeploy` step has NOT been run.
+Status: built and run. The supported way is `build-in-container.sh TOOLS_DIR OUT_DIR`, which builds in
+`ubuntu:24.04` so the image needs only glibc 2.39 (building on Arch ties it to Arch's newer glibc).
+`TOOLS_DIR` holds the three linuxdeploy files named in `tools.sha256`; check them with
+`grep -v '^#' tools.sha256 | (cd TOOLS_DIR && sha256sum -c -)`. Keep `OUT_DIR` outside any temp folder.
+Not done yet: a published GitHub release, so the update path has never run against a real release.
 
 ## Producing a release
 
@@ -8,7 +12,8 @@ Status: scripts written; AppDir assembly tested, the `linuxdeploy` step has NOT 
    The script never downloads tools on its own. Without them it prints the official URLs
    (`github.com/linuxdeploy/linuxdeploy`, `.../linuxdeploy-plugin-qt`, `continuous` releases) and
    exits 1. `--fetch-tools` downloads them into `tools/` (git-ignored) and checks `tools.sha256`;
-   the hashes there are `TODO`, so fill them in after inspecting the files yourself.
+   the hashes there are the files the 2026-11-10 builds used; upstream rebuilds `continuous`, so a
+   new download can differ and is refused until its hash is reviewed and recorded.
 2. `./build-appimage.sh` builds `mdview-engine` and the Qt shell as `packaging/arch/PKGBUILD` does,
    assembles `out/AppDir` (`usr/bin/mdview`, `usr/bin/mdview-engine`, desktop file, icon), runs
    `linuxdeploy --plugin qt --output appimage` with
@@ -34,19 +39,12 @@ directory of `current_exe()`), i.e. `usr/bin`, so nothing sets `MDV_ENGINE`. `QT
 
 Or download the new AppImage by hand and compare with `SHA256SUMS`.
 
-## Shell integration (not implemented yet)
+## Shell integration
 
-The shell must read the `APPIMAGE` environment variable (set by the AppImage runtime to the absolute
-path of the running file). Unset means not an AppImage: do nothing. When set, at most once per 24 h and
-unless the user opted out, spawn (off the UI thread):
+`bins/mdv-qt/src/appimage_update.rs` calls `appimageupdatetool` directly when `APPIMAGE` is set and the
+tool is on `PATH`; `update-check.sh` is not used by the shell. Help > Update mdview now applies a
+delta. Opt-out: `MDVIEW_NO_UPDATE_CHECK=1` or `${XDG_CONFIG_HOME:-~/.config}/mdview/no-update-check`.
 
-    packaging/appimage/update-check.sh          # check, 24 h stamp in ${XDG_STATE_HOME:-~/.local/state}/mdview/
-    packaging/appimage/update-check.sh --apply  # on user consent
-
-The helper is not shipped inside the AppImage yet; the Rust side should either bundle it into
-`usr/bin` (add an `install` line to the script) or call `appimageupdatetool --check-for-update
-"$APPIMAGE"` directly (exit 1 = update available, 0 = current) and keep its own stamp.
-The helper prints one line: `update-available`, `up-to-date`, `skipped (checked recently)`,
-`disabled`, `no-tool`, `not-appimage`, `error (<code>)`, `updated`, `update-failed (<code>)`.
-Opt-out: `MDVIEW_NO_UPDATE_CHECK=1` or the file `${XDG_CONFIG_HOME:-~/.config}/mdview/no-update-check`;
-the Rust side should map its settings toggle onto that file.
+**Decided 2026-11-10: update checks are manual only.** The shell still checks once a day at launch;
+that automatic check is to be removed, leaving a Help menu item that checks and then offers to apply
+(see `docs/HANDOFF.md` section 12).

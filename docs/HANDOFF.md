@@ -1051,3 +1051,12 @@ Kept on purpose: the build caches (`target/`, `bins/mdv-qt/target/`, about 2.3 G
 and the VM's toolchains (Rust, VS Build Tools and Windows SDK, Qt 6.9.3 in `C:\Qt`, Inno Setup 7,
 Windows App Runtime 2.6.5).
 
+**AppImage rebuilt (2026-11-10, after the clean-up).** The clean-up had also deleted the only built
+AppImage, which lived in the job's temp folder. Rebuilt with `build-in-container.sh` (tools
+re-downloaded, all three matched `tools.sha256`) into **`~/mdview-appimage/`**:
+`mdview-0.1.0-x86_64.AppImage` (36.7 MB, includes the file watching above), `.zsync` and
+`SHA256SUMS`. That folder is outside the repo and any temp folder; keep built images there. Checked
+offscreen: the tabs, find, select, details, outline and copy checks pass, a save-by-rename reloads,
+and a second launch hands its file over. The tools and the `ubuntu:24.04` image were removed again
+afterwards; a rebuild downloads them (the tools are checked against `tools.sha256`).
+
