@@ -934,3 +934,15 @@ the earlier "menus broken" reports were not reproduced with scripted opens. Ctrl
 restored it exactly, F5 kept the app alive, Ctrl+F put Find in the title. Found and fixed: the Recent
 menu doubled its entries (`Clear` on the collection does not empty it; now removed one by one).
 Mouse clicks on menus were not tried; the windows show on the user's desktop while a script runs.
+
+## 18. Inno Setup 7.1.1 compile and install test (2026-11-10)
+
+The user installed Inno Setup 7.1.1 in the VM (`C:\Program Files\Inno Setup 7`). `ISCC /DAppVersion=0.1.0
+packaging\windows\mdview.iss` compiled cleanly on the first try (no warnings, 9.4 MB
+`target\installer\mdview-setup-0.1.0.exe`). A silent install with `/TASKS=assoc` in the VM
+(`~/mdview-winchk/inst2.cmd`, needs `start /wait` because Setup is a GUI program) put both exes under
+`%LOCALAPPDATA%\Programs\mdview`, created `HKCU\Software\Classes\mdview.Markdown` with the open command,
+added the ProgID under `.md\OpenWithProgids` and left the `.md` default untouched; the silent uninstall removed
+the keys (`unins000.exe` removes itself a moment later). Not run: the interactive wizard, the runtime
+download branch (the runtime is already installed there), upgrade over an older version,
+`build-installer.ps1` end to end, and what Windows' "Open with" list then looks like.
