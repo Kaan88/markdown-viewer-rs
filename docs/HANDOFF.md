@@ -794,7 +794,11 @@ Qt's event path instead).
      `.md/.markdown/.mdown/.mkd`, hidden names skipped, at most 4000 rows and 8 deep; a click opens
      the file; the folder is saved in the session and restored (`--tabs-test`). It is a scanned
      `QTreeWidget`, not a live `QFileSystemModel`, so it does not update when the folder changes.
-     Not done yet: the Manage recent dialog, single instance.
+     Single instance: `bins/mdv-qt/src/single.rs`, std only. The first
+     window listens on a loopback port recorded in `instance.port` beside the settings file; a
+     later launch sends its files there and exits, and the first window opens them on its next
+     800 ms tick. A unit test and a two-process offscreen run pass on Linux; scripted checks and
+     `--no-session` skip it. It does not raise the window. Not done yet: the Manage recent dialog.
    - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.

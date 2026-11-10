@@ -138,6 +138,8 @@ struct Shell {
     files_tree: RefCell<Option<Tree>>,
     folder: RefCell<Option<PathBuf>>,
     folder_rows: RefCell<Vec<Option<PathBuf>>>,
+    /// Paths sent by later launches, drained on the poll tick.
+    incoming: RefCell<Option<std::sync::mpsc::Receiver<PathBuf>>>,
     /// The block of each outline item, by the item's index in the tree.
     outline_blocks: RefCell<Vec<u32>>,
 }
@@ -187,6 +189,7 @@ impl Shell {
             files_tree: RefCell::new(None),
             folder: RefCell::new(None),
             folder_rows: RefCell::new(Vec::new()),
+            incoming: RefCell::new(None),
             outline_blocks: RefCell::new(Vec::new()),
         }
     }
@@ -903,6 +906,15 @@ impl Shell {
     /// The 800 ms poll: reloads any open file whose stamp changed, background tabs included. A
     /// file that disappears keeps its last content and says so.
     fn poll_files(&self) {
+        let sent: Vec<PathBuf> = self
+            .incoming
+            .borrow()
+            .as_ref()
+            .map(|r| r.try_iter().collect())
+            .unwrap_or_default();
+        for path in sent {
+            self.open(&path);
+        }
         let count = self.pages.borrow().len();
         for index in 0..count {
             let (path, old) = {
@@ -2334,6 +2346,14 @@ pub fn run() -> i32 {
         None => mdview_core::session::default_settings_path(),
     };
     if let Some(path) = settings.filter(|_| use_session) {
+        // A window is already open: hand it the files and quit. Scripted checks skip this.
+        if !scripted && crate::single::forward(&path, &files) {
+            eprintln!("mdview-qt: sent {} file(s) to the running window", files.len());
+            std::process::exit(0);
+        }
+        if !scripted {
+            *shell.incoming.borrow_mut() = crate::single::listen(&path);
+        }
         let saved = Session::load(&path);
         if !theme_flag {
             shell.set_theme_choice(saved.theme);
