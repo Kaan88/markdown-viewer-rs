@@ -983,3 +983,11 @@ file showed `sub, a.md, b.markdown`; expanding `sub` added `deep.md`; invoking `
 screenshot shows the pane beside the tabs and page. The earlier tabs/zoom/session/single-instance checks
 still pass. Not done: keyboard navigation in the tree, dragging the pane wider, a click on a folder row
 (the chevron expands it), real mouse clicks (UIA invoked the row).
+
+### 20a. AppImage follow-up (2026-11-10)
+
+The PDF image plugin and the on-screen keyboard plugin are left out of the bundled plugin tree, which removed Qt
+Pdf/Quick/Qml: 58 MB -> 45 MB; select, tabs, link, copy, find, outline and details checks pass on the slimmer
+image. The image was also launched for 8 seconds each with `QT_QPA_PLATFORM=wayland` and `=xcb` on this
+Wayland (XWayland :0) desktop and painted its first frame both ways (trace lines only; no screenshot was
+taken). Still not done: a clean machine without this Arch Qt, and an update from a published release.
