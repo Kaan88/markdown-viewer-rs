@@ -1316,7 +1316,12 @@ fn refresh_recent(shell: &Shell) {
     let Ok(items) = menu.Items() else {
         return;
     };
-    _ = items.Clear();
+    // `Clear` on this collection has been seen to leave the old entries, so remove them one by one.
+    while items.Size().unwrap_or(0) > 0 {
+        if items.RemoveAt(0).is_err() {
+            break;
+        }
+    }
     let add = |text: &str, click: Option<Box<dyn Fn()>>| {
         let Ok(item) = MenuFlyoutItem::new() else {
             return None;

@@ -924,3 +924,13 @@ Instrumented build, trained on the 1 MiB doc, showcase, math/diagram/image fixtu
 checks, then rebuilt with `-Cprofile-use`. Painted-frame time on the 1 MiB doc: 5.2-8.0 ms normal vs
 5.5-5.9 ms PGO, i.e. no measurable difference in what the offscreen run can see. Cold layout time was
 not compared. Not adopted; the PKGBUILD and normal builds stay as they are.
+
+## 17. WinUI driven on the VM desktop (2026-11-10)
+
+`~/mdview-winchk/ui.ps1` (run through `ui.cmd`) launches the app in the VM's interactive session, opens
+each menu through UI Automation `ExpandCollapse`, sends real keystrokes with `SendKeys`, and saves
+screenshots. Results: every menu (File, Recent, Edit, Outline, View) opens and lists its items, so
+the earlier "menus broken" reports were not reproduced with scripted opens. Ctrl+plus changed the page, Ctrl+0
+restored it exactly, F5 kept the app alive, Ctrl+F put Find in the title. Found and fixed: the Recent
+menu doubled its entries (`Clear` on the collection does not empty it; now removed one by one).
+Mouse clicks on menus were not tried; the windows show on the user's desktop while a script runs.
