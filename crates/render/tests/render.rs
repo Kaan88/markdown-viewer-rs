@@ -211,6 +211,34 @@ fn a_picture_uses_the_source_for_the_colour_scheme() {
 }
 
 #[test]
+fn table_spans_lay_out_and_hostile_spans_are_clamped() {
+    let height = |markdown: &str| {
+        let doc = mdview_core::parse(markdown);
+        let options = Options {
+            width: 500.0,
+            scale: 1.0,
+            theme: LIGHT,
+            max_height: None,
+            base_dir: None,
+        };
+        let mut renderer = DocumentRenderer::new();
+        let page = renderer.layout(&doc, &options);
+        let slice = renderer.view(&doc, &options, &page, 0.0, 600.0);
+        slice.total_height
+    };
+    let plain = height("<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>");
+    let colspan = height("<table><tr><td colspan=\"2\">a wide cell</td></tr><tr><td>c</td><td>d</td></tr></table>");
+    assert_eq!(plain, colspan, "a colspan row is as tall as a plain one");
+    // A tall cell spanning two short rows makes them taller than the unspanned table.
+    let tall = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen";
+    let narrow = height(&format!("<table><tr><td rowspan=\"2\" width=\"10%\">{tall}</td><td>b</td></tr><tr><td>d</td></tr></table>"));
+    assert!(narrow > plain, "rowspan grows the rows it covers: {narrow} vs {plain}");
+    // Hostile values neither hang nor panic.
+    let hostile = height("<table><tr><td colspan=\"1000\" rowspan=\"65534\">x</td><td>y</td></tr><tr><td>z</td></tr></table>");
+    assert!(hostile > 0.0);
+}
+
+#[test]
 fn a_png_on_disk_is_drawn_inline() {
     let dir = temp_dir("image-drawn");
     let path = dir.join("red.png");

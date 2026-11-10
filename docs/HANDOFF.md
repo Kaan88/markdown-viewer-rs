@@ -751,7 +751,7 @@ Qt's event path instead).
   carry none). Any other format keeps its
   placeholder. A blocked image is retried on every render.
 - WinUI has no tabs, folder tree, recent files or session yet (Qt has them all); no bundled fonts.
-- Table `colspan`/`rowspan` ignored. Highlighting covers fenced blocks only: inline code keeps the
+- Table `colspan`/`rowspan` are laid out (grid placement, spanned widths and heights, separators that stop at a spanning cell, at most 200 columns); no vertical rules exist in the table style, so nothing else changes. Highlighting covers fenced blocks only: inline code keeps the
   theme text colour, and unknown languages or blocks over 256 KiB stay plain.
 - Math blocks are images: dragging across a display equation selects nothing, and there is no
   equation numbering or copy-as-TeX.
