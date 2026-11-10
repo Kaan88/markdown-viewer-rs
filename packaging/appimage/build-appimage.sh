@@ -112,14 +112,18 @@ export APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}"   # no FUSE nee
 plugins_src="$("$QMAKE" -query QT_INSTALL_PLUGINS)"
 plugins="$out/qt-plugins"
 rm -rf "$plugins"; mkdir -p "$plugins"
+# Also left out: the PDF image plugin and the on-screen keyboard, which drag in Qt Pdf, Qt Quick and
+# Qt Qml (about 60 MB) for features mdview does not have.
 for d in "$plugins_src"/*/; do
   name="$(basename "$d")"
-  if [ "$name" = imageformats ]; then
-    mkdir -p "$plugins/imageformats"
-    for f in "$d"*; do case "$(basename "$f")" in kimg_*) ;; *) ln -s "$f" "$plugins/imageformats/";; esac; done
-  else
-    ln -s "$d" "$plugins/$name"
-  fi
+  case "$name" in
+    imageformats|platforminputcontexts)
+      mkdir -p "$plugins/$name"
+      for f in "$d"*; do
+        case "$(basename "$f")" in kimg_*|libqpdf.so|libqtvirtualkeyboardplugin.so) ;; *) ln -s "$f" "$plugins/$name/";; esac
+      done ;;
+    *) ln -s "$d" "$plugins/$name" ;;
+  esac
 done
 cat > "$out/qmake-wrapper" <<W
 #!/bin/sh
