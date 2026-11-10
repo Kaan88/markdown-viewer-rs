@@ -196,6 +196,7 @@ pub enum SpanKind {
     Sub,
     Sup,
     Mark,
+    Small,
     /// Index into `Document::links`.
     Link(u32),
     /// Atom. Index into `Document::images`; the alt text is not part of `Document::text`.

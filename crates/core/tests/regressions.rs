@@ -3096,3 +3096,9 @@ fn github_backtick_math_is_inline_math() {
     let d = parse("cost $`5 and $`a$b`$ here");
     assert!(math_spans(&d).is_empty(), "{:?}", math_spans(&d));
 }
+
+#[test]
+fn small_is_a_span() {
+    let d = parse("a <small>fine print</small> b");
+    assert!(d.spans.iter().any(|s| s.kind == SpanKind::Small && span_text(&d, s) == "fine print"));
+}

@@ -1990,6 +1990,7 @@ impl<'a> Builder<'a> {
             Tag::Sub => self.open_html_span(tag, SpanKind::Sub),
             Tag::Sup => self.open_html_span(tag, SpanKind::Sup),
             Tag::Mark => self.open_html_span(tag, SpanKind::Mark),
+            Tag::Small => self.open_html_span(tag, SpanKind::Small),
             Tag::A => self.html_link(attrs),
             Tag::Img => self.html_image(attrs),
             Tag::Br => {
@@ -2275,6 +2276,7 @@ impl<'a> Builder<'a> {
                 | Tag::Sub
                 | Tag::Sup
                 | Tag::Mark
+                | Tag::Small
         );
         if is_span {
             self.close_html_span(tag);

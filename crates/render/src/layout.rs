@@ -2463,6 +2463,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 SpanKind::Sub => style.sub = true,
                 SpanKind::Sup => style.sup = true,
                 SpanKind::Mark => {}
+                SpanKind::Small => style.small = true,
                 SpanKind::Link(_) => style.link = true,
                 SpanKind::Math { display: false, .. } => style.math = true,
                 _ => {}

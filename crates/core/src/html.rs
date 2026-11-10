@@ -344,13 +344,14 @@ pub(crate) enum Tag {
     Sub,
     Sup,
     Mark,
+    Small,
     /// GFM tagfilter names that show as literal text.
     Literal,
     Unknown,
 }
 
 impl Tag {
-    pub(crate) const SLOTS: usize = 40;
+    pub(crate) const SLOTS: usize = 41;
 
     /// A distinct small index per element the builder keeps open.
     pub(crate) fn slot(self) -> usize {
@@ -390,6 +391,7 @@ impl Tag {
             Tag::Mark => 37,
             Tag::Literal => 38,
             Tag::Unknown => 39,
+            Tag::Small => 40,
         }
     }
 
@@ -481,6 +483,7 @@ pub(crate) fn classify_tag(name: &str) -> Tag {
         b"sub" => Tag::Sub,
         b"sup" => Tag::Sup,
         b"mark" => Tag::Mark,
+        b"small" => Tag::Small,
         // GitHub's tag filter escapes these tags, so they show as text and their content is ordinary
         // HTML by the time the browser sees it. Nothing here executes either way: the model holds
         // plain text, not markup.
