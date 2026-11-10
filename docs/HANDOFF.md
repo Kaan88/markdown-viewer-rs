@@ -787,8 +787,10 @@ Qt's event path instead).
      focus reading mode (Ctrl+Shift+F, Escape leaves; hides menu bar, status bar, outline, find
      bar) and Help > Keyboard shortcuts (status bar text, no dialog binding yet). Theme (System/Light/Dark,
      System follows `QStyleHints::colorScheme`) and zoom are saved in the session and restored unless
-     `--light`/`--dark`/`--zoom` is given. Not done yet: the Manage recent dialog, folder tree,
-     auto-refresh, single instance.
+     `--light`/`--dark`/`--zoom` is given. Auto-refresh: an 800 ms canvas timer
+     compares each open file's stamp (background tabs too); a change reloads it keeping the scroll
+     offset, a deleted file keeps its text and says so, a recreated one reloads (`--tabs-test`).
+     Not done yet: the Manage recent dialog, folder tree, single instance.
    - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.

@@ -6,7 +6,7 @@
 use crate::qt::ffi::*;
 use crate::qt::*;
 use mdview_core::commands::strings;
-use mdview_core::files::{canonical_or_absolute, tab_labels};
+use mdview_core::files::{canonical_or_absolute, read_stable, stamp, tab_labels, FileStamp};
 use mdview_core::links::{classify_link, LinkAction};
 use mdview_core::session::{Recents, Session, Theme as ThemeChoice};
 use mdview_core::parse_bytes;
@@ -74,6 +74,8 @@ struct Page {
     renderer: DocumentRenderer,
     scroll: f64,
     selection: Option<(u32, u32)>,
+    /// What the file looked like when last read; the poll compares against it.
+    stamp: FileStamp,
 }
 
 struct Shell {
@@ -430,6 +432,7 @@ impl Shell {
         let index = {
             let mut pages = self.pages.borrow_mut();
             pages.push(Page {
+                stamp: stamp(&path),
                 path,
                 document: Some(document),
                 renderer: DocumentRenderer::new(),
@@ -804,19 +807,72 @@ impl Shell {
 
     /// Re-reads the showing file from disk, keeping the scroll offset. F5 and File > Refresh.
     fn refresh(&self) {
-        let Some(path) = self.path.borrow().clone() else {
+        if let Some(index) = self.current.get() {
+            self.reload_page(index, true);
+        }
+    }
+
+    /// Re-reads tab `index` from disk. The showing tab keeps its scroll offset; others get a fresh
+    /// renderer and are laid out when next shown. A file that cannot be read keeps its content.
+    fn reload_page(&self, index: usize, manual: bool) {
+        let Some(path) = self.pages.borrow().get(index).map(|p| p.path.clone()) else {
             return;
         };
-        match std::fs::read(&path) {
-            Ok(bytes) => {
-                let document = parse_bytes(&bytes);
-                let scroll = self.scroll.get();
-                *self.document.borrow_mut() = Some(document);
-                *self.renderer.borrow_mut() = DocumentRenderer::new();
-                self.show_page(scroll, None);
-                self.message(&format!("Refreshed {}: {} blocks", file_name(&path), self.blocks()));
+        let loaded = match read_stable(&path) {
+            Ok(loaded) => loaded,
+            Err(e) => {
+                self.message(&format!("{}: {e}", path.display()));
+                return;
             }
-            Err(e) => self.message(&format!("{}: {e}", path.display())),
+        };
+        let document = parse_bytes(&loaded.bytes);
+        let blocks = document.blocks.len();
+        if let Some(page) = self.pages.borrow_mut().get_mut(index) {
+            page.stamp = loaded.stamp;
+        }
+        if self.current.get() == Some(index) {
+            let scroll = self.scroll.get();
+            *self.document.borrow_mut() = Some(document);
+            *self.renderer.borrow_mut() = DocumentRenderer::new();
+            self.show_page(scroll, None);
+        } else if let Some(page) = self.pages.borrow_mut().get_mut(index) {
+            page.document = Some(document);
+            page.renderer = DocumentRenderer::new();
+            page.selection = None;
+        }
+        if manual || self.current.get() == Some(index) {
+            let text = if manual {
+                format!("Refreshed {}: {blocks} blocks", file_name(&path))
+            } else {
+                strings::REFRESHED.to_string()
+            };
+            self.message(&text);
+        }
+    }
+
+    /// The 800 ms poll: reloads any open file whose stamp changed, background tabs included. A
+    /// file that disappears keeps its last content and says so.
+    fn poll_files(&self) {
+        let count = self.pages.borrow().len();
+        for index in 0..count {
+            let (path, old) = {
+                let pages = self.pages.borrow();
+                (pages[index].path.clone(), pages[index].stamp)
+            };
+            let now = stamp(&path);
+            if now == old {
+                continue;
+            }
+            if now == FileStamp::Missing {
+                if let Some(page) = self.pages.borrow_mut().get_mut(index) {
+                    page.stamp = now;
+                }
+                if self.current.get() == Some(index) {
+                    self.message(strings::FILE_DELETED);
+                }
+            } else {
+                self.reload_page(index, false);
+            }
         }
     }
 
@@ -1390,7 +1446,9 @@ impl CanvasHandler for Shell {
         }
     }
 
-    fn timer(&self, _id: i32) {}
+    fn timer(&self, _id: i32) {
+        self.poll_files();
+    }
 
     fn update_request(&self) {}
 }
@@ -1508,6 +1566,27 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
     shell.set_theme_choice(ThemeChoice::System);
     shell.set_theme_choice(ThemeChoice::Light);
     shell.set_zoom(1.0);
+    // Auto-refresh: an edited file reloads (even in the background), a deleted one keeps its text.
+    let watched = std::env::temp_dir().join(format!("mdview-watch-{}.md", std::process::id()));
+    std::fs::write(&watched, "# One\n\nfirst\n").unwrap();
+    shell.open(&watched);
+    let index = shell.current.get().unwrap();
+    let before = shell.blocks();
+    std::fs::write(&watched, "# One\n\nfirst\n\nsecond\n\nthird\n").unwrap();
+    shell.activate(0);
+    shell.poll_files();
+    shell.activate(index);
+    expect(shell.blocks() > before, format!("auto-refresh: {} blocks, was {before}", shell.blocks()));
+    let kept = shell.blocks();
+    std::fs::remove_file(&watched).unwrap();
+    shell.poll_files();
+    expect(shell.blocks() == kept, "a deleted file kept its content".into());
+    std::fs::write(&watched, "# Back\n").unwrap();
+    shell.poll_files();
+    expect(shell.blocks() < kept, "a recreated file reloaded".into());
+    shell.close_tab(index);
+    shell.recent.borrow_mut().remove(&canonical_or_absolute(&watched));
+    _ = std::fs::remove_file(&watched);
     shell.control_key(KEY_F, true);
     expect(shell.focus.get().is_some(), "focus mode on".into());
     shell.key(KEY_ESCAPE);
@@ -1934,6 +2013,7 @@ fn build(
     let canvas = H::<Canvas>::new(shell.clone() as Rc<dyn CanvasHandler>);
     canvas.widget().accept_drops();
     canvas.widget().track_mouse();
+    canvas.start_timer(800); // the file poll, as in the original
     canvas.widget().set_focus_policy(11); // Qt::StrongFocus, so the keys arrive
     let page = new_plain_widget();
     let bar = H::<QScrollBar>::vertical(page);
