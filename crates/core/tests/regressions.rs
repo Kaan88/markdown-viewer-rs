@@ -3110,3 +3110,12 @@ fn q_is_drawn_between_curly_quotes() {
     assert!(text.contains("\u{201c}stop\u{201d} twice"), "{text:?}");
     assert_eq!(text.matches('\u{201d}').count(), 1, "{text:?}");
 }
+
+#[test]
+fn ruby_annotation_reads_as_base_with_parentheses() {
+    let d = parse("<ruby>漢<rt>kan</rt>字<rt>ji</rt></ruby> and <ruby>東<rp>(</rp><rt>tou</rt><rp>)</rp></ruby>");
+    let text = d.block_text(0);
+    assert!(text.contains("漢(kan)字(ji)"), "{text:?}");
+    assert!(text.contains("東(tou)"), "{text:?}");
+    assert!(!text.contains("(("), "{text:?}");
+}

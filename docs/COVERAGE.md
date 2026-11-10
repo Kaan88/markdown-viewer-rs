@@ -81,7 +81,8 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 | Raw `<input>` outside a task list | Supported | Ignored, as GitHub's sanitizer removes it; a Markdown task box still draws |
 | `<dl>`, `<figure>`, `<section>` and similar | Supported as plain blocks | No term or caption styling yet |
 | `<small>`, `<q>` | Supported | `<small>` draws at the small size; `<q>` between curly quotes (`SpanKind::Small`/`Quote`) |
-| `<ruby>`, `<abbr>`, `<bdo>`, `<time>` and similar | Text only | Text is kept without the styling (no tooltip, ruby annotation or direction override) |
+| `<ruby>` with `<rt>`/`<rp>` | Fallback | The annotation reads in parentheses after its base, `漢(kan)`, as a browser without ruby support shows it; no small text above the base |
+| `<abbr>`, `<bdo>`, `<time>` and similar | Text only | Text is kept without the styling (no tooltip, dotted underline or direction override) |
 | Inline CSS `style=` | Excluded | GitHub strips it too |
 | `hspace` on images; `cellpadding`, `cellspacing` on tables; `nowrap` on cells | Excluded | GitHub keeps these and the model drops them. Spacing only. Worth adding if the Phase 2 corpus shows them |
 | `<li value>` | Excluded | GitHub keeps it; numbering here ignores it |

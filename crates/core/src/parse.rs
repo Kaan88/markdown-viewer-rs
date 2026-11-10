@@ -436,6 +436,10 @@ struct Builder<'a> {
     ambient: Vec<Ambient>,
     ambient_spans_left: usize,
     open_html: [u32; Tag::SLOTS],
+    /// Whether the current `<ruby>` has shown `<rp>` fallback parentheses already.
+    ruby_rp: bool,
+    /// For each open `<rt>`: whether it added a `(` and so owes a `)`.
+    rt_parens: Vec<bool>,
     html_depth: usize,
     image_depth: u32,
     image_alt_start: usize,
@@ -508,6 +512,8 @@ impl<'a> Builder<'a> {
             ambient: Vec::new(),
             ambient_spans_left: src.len() / 4 + 64,
             open_html: [0; Tag::SLOTS],
+            ruby_rp: false,
+            rt_parens: Vec::new(),
             html_depth: 0,
             image_depth: 0,
             image_alt_start: 0,
@@ -1981,6 +1987,16 @@ impl<'a> Builder<'a> {
         let anchor = html::attr(attrs, "id").or_else(|| html::attr(attrs, "name"));
         match tag {
             Tag::Unknown => {}
+            Tag::Ruby => self.ruby_rp = false,
+            Tag::Rp => self.ruby_rp = true,
+            Tag::Rt => {
+                let owes = !self.ruby_rp;
+                self.rt_parens.push(owes);
+                if owes {
+                    self.begin_inline();
+                    self.push_inline_text("(");
+                }
+            }
             Tag::Strong => self.open_strong(Origin::Html(tag)),
             Tag::Em => self.open_html_span(tag, SpanKind::Emphasis),
             Tag::Underline => self.open_html_span(tag, SpanKind::Underline),
@@ -2257,6 +2273,13 @@ impl<'a> Builder<'a> {
                 self.leave_picture();
                 return;
             }
+            Tag::Rt => {
+                if self.rt_parens.pop() == Some(true) {
+                    self.push_inline_text(")");
+                }
+                return;
+            }
+            Tag::Ruby | Tag::Rp => return,
             Tag::Unknown
             | Tag::TableSection
             | Tag::Hr

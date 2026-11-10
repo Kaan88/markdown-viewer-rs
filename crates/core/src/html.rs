@@ -347,13 +347,17 @@ pub(crate) enum Tag {
     Small,
     /// `<q>`: a short quotation, drawn between curly quotes as browsers do.
     Q,
+    /// `<ruby>`, `<rp>` and `<rt>`: no element of their own; an annotation reads as `base(note)`.
+    Ruby,
+    Rp,
+    Rt,
     /// GFM tagfilter names that show as literal text.
     Literal,
     Unknown,
 }
 
 impl Tag {
-    pub(crate) const SLOTS: usize = 42;
+    pub(crate) const SLOTS: usize = 45;
 
     /// A distinct small index per element the builder keeps open.
     pub(crate) fn slot(self) -> usize {
@@ -395,6 +399,9 @@ impl Tag {
             Tag::Unknown => 39,
             Tag::Small => 40,
             Tag::Q => 41,
+            Tag::Ruby => 42,
+            Tag::Rp => 43,
+            Tag::Rt => 44,
         }
     }
 
@@ -410,6 +417,9 @@ impl Tag {
                 | Tag::Source
                 | Tag::TableSection
                 | Tag::Unknown
+                | Tag::Ruby
+                | Tag::Rp
+                | Tag::Rt
         )
     }
 }
@@ -488,6 +498,9 @@ pub(crate) fn classify_tag(name: &str) -> Tag {
         b"mark" => Tag::Mark,
         b"small" => Tag::Small,
         b"q" => Tag::Q,
+        b"ruby" => Tag::Ruby,
+        b"rp" => Tag::Rp,
+        b"rt" => Tag::Rt,
         // GitHub's tag filter escapes these tags, so they show as text and their content is ordinary
         // HTML by the time the browser sees it. Nothing here executes either way: the model holds
         // plain text, not markup.
