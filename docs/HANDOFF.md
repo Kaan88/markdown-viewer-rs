@@ -1045,5 +1045,9 @@ a real Plasma window.
 `C:\mv` build copy and its test files, `~/mdview-winchk` (the VM scripts sections 17, 18 and 22 name:
 `ui.ps1`, `mouse.ps1`, `flaky.ps1`, `inst2.cmd`; those sections describe what they did if they are
 needed again), the makepkg and AppImage outputs, the Ubuntu images used to build the AppImage, and
-ignored build output under `spikes/`.
+ignored build output under `spikes/`; in the VM also the downloaded installers in `%USERPROFILE%\tools`
+and the loose scripts in the profile folder, and on Linux the test session in `~/.local/share/mdview`.
+Kept on purpose: the build caches (`target/`, `bins/mdv-qt/target/`, about 2.3 GB), `~/.local/rust-win`,
+and the VM's toolchains (Rust, VS Build Tools and Windows SDK, Qt 6.9.3 in `C:\Qt`, Inno Setup 7,
+Windows App Runtime 2.6.5).
 
