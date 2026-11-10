@@ -253,7 +253,10 @@ mod tests {
     fn known_names_are_replaced_and_unknown_ones_kept() {
         assert_eq!(replace("ship it :rocket:!"), "ship it 🚀!");
         assert_eq!(replace(":+1: and :-1:"), "👍 and 👎");
-        assert_eq!(replace("12:30:45 and :nope: and a:b"), "12:30:45 and :nope: and a:b");
+        assert_eq!(
+            replace("12:30:45 and :nope: and a:b"),
+            "12:30:45 and :nope: and a:b"
+        );
         assert_eq!(replace(":tada::tada:"), "🎉🎉");
         assert!(matches!(replace("no colons"), Cow::Borrowed(_)));
     }

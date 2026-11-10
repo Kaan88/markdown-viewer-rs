@@ -3087,7 +3087,12 @@ fn find_matches_a_crlf_line_break() {
 #[test]
 fn github_backtick_math_is_inline_math() {
     let d = parse("Euler: $`e^{i\\pi} + 1 = 0`$ and ($`a_b`$) done");
-    assert_eq!(math_spans(&d), vec!["e^{i\\pi} + 1 = 0", "a_b"], "{:?}", math_spans(&d));
+    assert_eq!(
+        math_spans(&d),
+        vec!["e^{i\\pi} + 1 = 0", "a_b"],
+        "{:?}",
+        math_spans(&d)
+    );
     // Inside a fence it is code, untouched.
     let d = parse("```\n$`x`$\n```\n");
     assert!(math_spans(&d).is_empty());
@@ -3100,7 +3105,11 @@ fn github_backtick_math_is_inline_math() {
 #[test]
 fn small_is_a_span() {
     let d = parse("a <small>fine print</small> b");
-    assert!(d.spans.iter().any(|s| s.kind == SpanKind::Small && span_text(&d, s) == "fine print"));
+    assert!(
+        d.spans
+            .iter()
+            .any(|s| s.kind == SpanKind::Small && span_text(&d, s) == "fine print")
+    );
 }
 
 #[test]
@@ -3113,7 +3122,9 @@ fn q_is_drawn_between_curly_quotes() {
 
 #[test]
 fn ruby_annotation_reads_as_base_with_parentheses() {
-    let d = parse("<ruby>漢<rt>kan</rt>字<rt>ji</rt></ruby> and <ruby>東<rp>(</rp><rt>tou</rt><rp>)</rp></ruby>");
+    let d = parse(
+        "<ruby>漢<rt>kan</rt>字<rt>ji</rt></ruby> and <ruby>東<rp>(</rp><rt>tou</rt><rp>)</rp></ruby>",
+    );
     let text = d.block_text(0);
     assert!(text.contains("漢(kan)字(ji)"), "{text:?}");
     assert!(text.contains("東(tou)"), "{text:?}");

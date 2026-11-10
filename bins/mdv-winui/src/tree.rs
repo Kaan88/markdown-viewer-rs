@@ -30,10 +30,8 @@ pub struct ITreeViewItemInvokedEventArgs_Vtbl {
 pub struct TreeViewItemInvokedEventArgs(IUnknown);
 windows_core::imp::interface_hierarchy!(TreeViewItemInvokedEventArgs, IUnknown, IInspectable);
 impl RuntimeType for TreeViewItemInvokedEventArgs {
-    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<
-        Self,
-        ITreeViewItemInvokedEventArgs,
-    >();
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ITreeViewItemInvokedEventArgs>();
 }
 unsafe impl Interface for TreeViewItemInvokedEventArgs {
     type Vtable = ITreeViewItemInvokedEventArgs_Vtbl;
@@ -59,7 +57,10 @@ impl TreeViewItemInvokedEventArgs {
 }
 
 /// `TreeView.ItemInvoked`: a row was clicked or activated with the keyboard.
-pub fn item_invoked<F>(view: &TreeView, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+pub fn item_invoked<F>(
+    view: &TreeView,
+    handler: F,
+) -> windows_core::Result<windows_core::EventRevoker>
 where
     F: Fn(Ref<TreeView>, Ref<TreeViewItemInvokedEventArgs>) + 'static,
 {

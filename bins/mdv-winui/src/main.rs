@@ -231,7 +231,14 @@ fn run() -> Result<()> {
             app.Resources()?.MergedDictionaries()?.Append(&controls)?;
             diag::trace("XamlControlsResources merged");
             let gpu = gpu.borrow_mut().take().expect("launched once");
-            ui::build(gpu, documents.clone(), settings.clone(), theme, zoom, startup)
+            ui::build(
+                gpu,
+                documents.clone(),
+                settings.clone(),
+                theme,
+                zoom,
+                startup,
+            )
         });
         let composed = Application::compose(App {
             provider: RefCell::new(None),

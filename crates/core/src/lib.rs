@@ -2,19 +2,19 @@
 
 pub mod autolink;
 pub mod commands;
+pub mod emoji;
 pub mod files;
 pub mod find;
+pub mod frontmatter;
 pub mod html;
 pub mod limits;
 pub mod links;
 pub mod model;
 mod parse;
 pub mod session;
+pub mod single;
 pub mod slug;
 pub mod status;
-pub mod emoji;
-pub mod frontmatter;
-pub mod single;
 pub mod update;
 
 pub use model::{Document, parse_bytes};

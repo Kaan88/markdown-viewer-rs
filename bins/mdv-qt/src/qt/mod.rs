@@ -124,6 +124,7 @@ pub fn set_clipboard(text: &str) {
     unsafe { Pin::new_unchecked(&mut *clipboard) }.clipboard_set_text(&qs(text), CLIPBOARD);
 }
 
+#[cfg(unix)]
 unsafe extern "C" {
     fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::ffi::c_char) -> *mut std::ffi::c_void;
 }
@@ -133,6 +134,13 @@ unsafe extern "C" {
 /// `QStyleHints::colorScheme()` returns `Qt::ColorScheme` (0 unknown, 1 light, 2 dark) and was added in
 /// Qt 6.5. The bridge cannot bind a member that older Qt headers lack, so the Itanium-ABI symbol is looked
 /// up at run time: a `const` member function takes `this` and returns the enum as an `int`.
+#[cfg(not(unix))]
+pub fn system_is_dark() -> bool {
+    // dlsym is POSIX. The WinUI shell is the Windows shell and follows Windows itself; this one reports light.
+    false
+}
+
+#[cfg(unix)]
 pub fn system_is_dark() -> bool {
     let hints = QApplication::styleHints();
     if hints.is_null() {

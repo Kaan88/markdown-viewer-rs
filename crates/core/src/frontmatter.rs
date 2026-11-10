@@ -12,7 +12,9 @@ const MAX_BYTES: usize = 16 * 1024;
 /// source bytes it used. The block is `---` on the first line, any lines, then `---` or `...`.
 pub fn take(src: &str) -> Option<(String, usize)> {
     let rest = src.strip_prefix("---")?;
-    let rest = rest.strip_prefix("\r\n").or_else(|| rest.strip_prefix('\n'))?;
+    let rest = rest
+        .strip_prefix("\r\n")
+        .or_else(|| rest.strip_prefix('\n'))?;
     let head = &rest[..rest.len().min(MAX_BYTES)];
     let mut body_end = None;
     let mut consumed = src.len() - rest.len();
@@ -38,7 +40,9 @@ pub fn take(src: &str) -> Option<(String, usize)> {
         .find(|l| !l.is_empty() && !l.starts_with('#'))?;
     let key_ok = first.split_once(':').is_some_and(|(key, value)| {
         !key.is_empty()
-            && key.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
+            && key
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
             && (value.is_empty() || value.starts_with(' '))
     });
     if !key_ok {
@@ -63,7 +67,11 @@ fn table(body: &str) -> Option<String> {
             return None; // nested, a list or a continuation
         }
         let (key, value) = trimmed.split_once(':')?;
-        if key.is_empty() || !key.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.')) {
+        if key.is_empty()
+            || !key
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        {
             return None;
         }
         let value = value.trim();
@@ -100,10 +108,14 @@ mod tests {
 
     #[test]
     fn a_plain_mapping_becomes_a_table() {
-        let (md, used) = take("---\ntitle: \"Hello | world\"\ntags: [a, b]\n---\n# Body\n").unwrap();
+        let (md, used) =
+            take("---\ntitle: \"Hello | world\"\ntags: [a, b]\n---\n# Body\n").unwrap();
         assert!(md.contains("| title | Hello \\| world |"));
         assert!(md.contains("| tags | [a, b] |"));
-        assert_eq!(&"---\ntitle: \"Hello | world\"\ntags: [a, b]\n---\n# Body\n"[used..], "# Body\n");
+        assert_eq!(
+            &"---\ntitle: \"Hello | world\"\ntags: [a, b]\n---\n# Body\n"[used..],
+            "# Body\n"
+        );
     }
 
     #[test]

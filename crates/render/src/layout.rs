@@ -258,7 +258,11 @@ thread_local! {
 }
 
 fn shared_fonts() -> FontContext {
-    FONTS.with(|cell| cell.borrow_mut().get_or_insert_with(FontContext::new).clone())
+    FONTS.with(|cell| {
+        cell.borrow_mut()
+            .get_or_insert_with(FontContext::new)
+            .clone()
+    })
 }
 
 impl DocumentRenderer {
@@ -2022,12 +2026,21 @@ impl<'a, 'b> Pager<'a, 'b> {
             header_row.push(header);
             let mut col = 0usize;
             for cell in self.doc.children(*row) {
-                let (align, header_cell, colspan, rowspan) = match self.doc.blocks[cell as usize].kind {
-                    BlockKind::TableCell { align, header, colspan, rowspan } => {
-                        (align, header, usize::from(colspan.max(1)), usize::from(rowspan.max(1)))
-                    }
-                    _ => (Align::None, header, 1, 1),
-                };
+                let (align, header_cell, colspan, rowspan) =
+                    match self.doc.blocks[cell as usize].kind {
+                        BlockKind::TableCell {
+                            align,
+                            header,
+                            colspan,
+                            rowspan,
+                        } => (
+                            align,
+                            header,
+                            usize::from(colspan.max(1)),
+                            usize::from(rowspan.max(1)),
+                        ),
+                        _ => (Align::None, header, 1, 1),
+                    };
                 while taken[r].get(col).copied().unwrap_or(false) {
                     col += 1;
                 }
@@ -2092,8 +2105,8 @@ impl<'a, 'b> Pager<'a, 'b> {
         for (cell, w) in cells.iter().zip(&naturals) {
             if cell.colspan > 1 {
                 let span = cell.col..cell.col + cell.colspan;
-                let have: f32 =
-                    natural[span.clone()].iter().sum::<f32>() + 2.0 * pad_x * (cell.colspan - 1) as f32;
+                let have: f32 = natural[span.clone()].iter().sum::<f32>()
+                    + 2.0 * pad_x * (cell.colspan - 1) as f32;
                 if *w > have {
                     let extra = (*w - have) / cell.colspan as f32;
                     for n in &mut natural[span] {
@@ -2116,7 +2129,8 @@ impl<'a, 'b> Pager<'a, 'b> {
                 columns_w[ci] = ((w + 2.0 * pad_x) * scale).max(2.0 * pad_x + self.px(8.0));
             }
         }
-        let span_width = |cell: &Cell| -> f32 { columns_w[cell.col..cell.col + cell.colspan].iter().sum() };
+        let span_width =
+            |cell: &Cell| -> f32 { columns_w[cell.col..cell.col + cell.colspan].iter().sum() };
         let mut laid: Vec<Laid> = Vec::with_capacity(cells.len());
         for (i, cell) in cells.iter().enumerate() {
             let max = (span_width(cell) - 2.0 * pad_x).max(1.0);
@@ -2140,7 +2154,8 @@ impl<'a, 'b> Pager<'a, 'b> {
         for l in spanning {
             let cell = &cells[l.cell];
             let end = cell.row + cell.rowspan;
-            let have: f32 = heights[cell.row..end].iter().sum::<f32>() + (cell.rowspan - 1) as f32 * hr;
+            let have: f32 =
+                heights[cell.row..end].iter().sum::<f32>() + (cell.rowspan - 1) as f32 * hr;
             let need = l.layout.height().round() + 2.0 * pad_y;
             if need > have {
                 heights[end - 1] += need - have;
@@ -2517,7 +2532,10 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
             SpanKind::Image(index) => {
                 if let Some(image) = self.image(index) {
-                    let natural = (image.width as f32 * self.scale, image.height as f32 * self.scale);
+                    let natural = (
+                        image.width as f32 * self.scale,
+                        image.height as f32 * self.scale,
+                    );
                     let info = self.doc.images[index as usize];
                     let (width, height) = self.sized_image(natural, info.width, info.height);
                     out.boxes.push(ImageBox {

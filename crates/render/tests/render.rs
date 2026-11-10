@@ -177,8 +177,14 @@ fn an_html_image_honours_its_width_and_height() {
     let wide = red_pixels("<img src=\"red.png\" width=\"128\" height=\"32\">\n");
     let huge = red_pixels("<img src=\"red.png\" width=\"5000\">\n");
     assert!(natural > 3500.0, "natural {natural}");
-    assert!((half / natural - 0.25).abs() < 0.05, "half {half} vs {natural}");
-    assert!((wide / natural - 1.0).abs() < 0.1, "128x32 is as big as 64x64: {wide}");
+    assert!(
+        (half / natural - 0.25).abs() < 0.05,
+        "half {half} vs {natural}"
+    );
+    assert!(
+        (wide / natural - 1.0).abs() < 0.1,
+        "128x32 is as big as 64x64: {wide}"
+    );
     // Clamped to the content width (about 400 minus margins), aspect kept, so far under 5000^2.
     assert!(huge > natural * 10.0 && huge < 400.0 * 400.0, "huge {huge}");
 }
@@ -206,8 +212,15 @@ fn a_picture_uses_the_source_for_the_colour_scheme() {
             .filter(|p| p[2] > 180 && p[0] < 80 && p[1] < 80)
             .count()
     };
-    assert!(red(mdview_render::DARK) > 1000, "dark theme should draw the dark source");
-    assert_eq!(red(LIGHT), 0, "light theme falls back to the missing default");
+    assert!(
+        red(mdview_render::DARK) > 1000,
+        "dark theme should draw the dark source"
+    );
+    assert_eq!(
+        red(LIGHT),
+        0,
+        "light theme falls back to the missing default"
+    );
 }
 
 #[test]
@@ -227,14 +240,23 @@ fn table_spans_lay_out_and_hostile_spans_are_clamped() {
         slice.total_height
     };
     let plain = height("<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>");
-    let colspan = height("<table><tr><td colspan=\"2\">a wide cell</td></tr><tr><td>c</td><td>d</td></tr></table>");
+    let colspan = height(
+        "<table><tr><td colspan=\"2\">a wide cell</td></tr><tr><td>c</td><td>d</td></tr></table>",
+    );
     assert_eq!(plain, colspan, "a colspan row is as tall as a plain one");
     // A tall cell spanning two short rows makes them taller than the unspanned table.
     let tall = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen";
-    let narrow = height(&format!("<table><tr><td rowspan=\"2\" width=\"10%\">{tall}</td><td>b</td></tr><tr><td>d</td></tr></table>"));
-    assert!(narrow > plain, "rowspan grows the rows it covers: {narrow} vs {plain}");
+    let narrow = height(&format!(
+        "<table><tr><td rowspan=\"2\" width=\"10%\">{tall}</td><td>b</td></tr><tr><td>d</td></tr></table>"
+    ));
+    assert!(
+        narrow > plain,
+        "rowspan grows the rows it covers: {narrow} vs {plain}"
+    );
     // Hostile values neither hang nor panic.
-    let hostile = height("<table><tr><td colspan=\"1000\" rowspan=\"65534\">x</td><td>y</td></tr><tr><td>z</td></tr></table>");
+    let hostile = height(
+        "<table><tr><td colspan=\"1000\" rowspan=\"65534\">x</td><td>y</td></tr><tr><td>z</td></tr></table>",
+    );
     assert!(hostile > 0.0);
 }
 

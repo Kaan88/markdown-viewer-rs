@@ -516,9 +516,9 @@ impl Shell {
         let name = file_name(&path);
         if now == FileStamp::Missing {
             self.stamp.set(now);
-            _ = self
-                .window
-                .SetTitle(&format!("mdview - {name} (deleted; showing the last content)"));
+            _ = self.window.SetTitle(&format!(
+                "mdview - {name} (deleted; showing the last content)"
+            ));
             return;
         }
         let Ok(loaded) = read_stable(&path) else {
@@ -1047,10 +1047,10 @@ impl Shell {
         let current_item = self.current.get().map(|i| pages[i].item.clone());
         let mut old: Vec<Option<Page>> = pages.drain(..).map(Some).collect();
         for item in &order {
-            if let Some(slot) = old
-                .iter_mut()
-                .find(|slot| slot.as_ref().is_some_and(|p| tabs::same_object(item, &p.item)))
-            {
+            if let Some(slot) = old.iter_mut().find(|slot| {
+                slot.as_ref()
+                    .is_some_and(|p| tabs::same_object(item, &p.item))
+            }) {
                 pages.push(slot.take().expect("found"));
             }
         }
@@ -1190,15 +1190,29 @@ impl Shell {
             std::process::exit(1);
         };
         let selected = || tabs::selected_index(&self.tab_view).unwrap_or(-2);
-        let strip = || self.tab_view.TabItems().and_then(|i| i.Size()).unwrap_or(99);
+        let strip = || {
+            self.tab_view
+                .TabItems()
+                .and_then(|i| i.Size())
+                .unwrap_or(99)
+        };
         let other = first.with_file_name("linked.md");
         self.renderer.borrow_mut().scroll_to(500.0);
         self.show();
         let scrolled = self.renderer.borrow().offset();
-        expect(scrolled > 0.0, format!("first page did not scroll ({scrolled})"));
+        expect(
+            scrolled > 0.0,
+            format!("first page did not scroll ({scrolled})"),
+        );
         self.open(&other);
-        expect(self.pages.borrow().len() == 2, "second tab not added".into());
-        expect(self.current.get() == Some(1), "second tab not current".into());
+        expect(
+            self.pages.borrow().len() == 2,
+            "second tab not added".into(),
+        );
+        expect(
+            self.current.get() == Some(1),
+            "second tab not current".into(),
+        );
         expect(
             strip() == 2 && selected() == 1,
             format!("strip out of step after open: {} {}", strip(), selected()),
@@ -1208,15 +1222,26 @@ impl Shell {
             "new tab did not start at the top".into(),
         );
         self.open(&first);
-        expect(self.pages.borrow().len() == 2, "reopening added a duplicate".into());
-        expect(self.current.get() == Some(0), "reopening did not switch".into());
+        expect(
+            self.pages.borrow().len() == 2,
+            "reopening added a duplicate".into(),
+        );
+        expect(
+            self.current.get() == Some(0),
+            "reopening did not switch".into(),
+        );
         expect(selected() == 0, "strip did not follow the switch".into());
         let kept = self.renderer.borrow().offset();
         expect(
             kept == scrolled,
             format!("scroll not kept: {kept} vs {scrolled}"),
         );
-        let labels: Vec<String> = self.pages.borrow().iter().map(|p| p.label.clone()).collect();
+        let labels: Vec<String> = self
+            .pages
+            .borrow()
+            .iter()
+            .map(|p| p.label.clone())
+            .collect();
         expect(
             labels == ["showcase.md", "linked.md"],
             format!("labels {labels:?}"),
@@ -1227,7 +1252,10 @@ impl Shell {
             "Ctrl+Tab".into(),
         );
         self.key_with(0x09, true, false);
-        expect(self.current.get() == Some(0), "Ctrl+Tab did not wrap".into());
+        expect(
+            self.current.get() == Some(0),
+            "Ctrl+Tab did not wrap".into(),
+        );
         self.key_with(0x09, true, true);
         expect(self.current.get() == Some(1), "Ctrl+Shift+Tab".into());
         // A drag reorders the TabView's own items; move one the same way and let the shell follow.
@@ -1265,7 +1293,10 @@ impl Shell {
             self.pages.borrow().is_empty() && strip() == 0,
             "Ctrl+Shift+W".into(),
         );
-        expect(self.path.borrow().is_none(), "empty page still has a path".into());
+        expect(
+            self.path.borrow().is_none(),
+            "empty page still has a path".into(),
+        );
         expect(
             self.renderer.borrow().block_count() > 0,
             "empty page shows nothing".into(),
@@ -1282,7 +1313,10 @@ impl Shell {
             .and_then(|m| m.Items().ok())
             .and_then(|i| i.Size().ok())
             .unwrap_or(0);
-        expect(recent_items == 3, format!("Recent menu has {recent_items} items"));
+        expect(
+            recent_items == 3,
+            format!("Recent menu has {recent_items} items"),
+        );
         if failures.is_empty() {
             diag::trace(&format!(
                 "tabs test ok: 2 tabs, scroll {scrolled:.0} kept, recent {}",
@@ -1310,8 +1344,11 @@ impl Shell {
             .get()
             .and_then(|i| self.pages.borrow().get(i).map(|p| p.item.clone()))
             .and_then(|current| {
-                (0..items.Size().unwrap_or(0))
-                    .find(|&i| items.GetAt(i).is_ok_and(|it| tabs::same_object(&it, &current)))
+                (0..items.Size().unwrap_or(0)).find(|&i| {
+                    items
+                        .GetAt(i)
+                        .is_ok_and(|it| tabs::same_object(&it, &current))
+                })
             });
         if let Some(selected) = selected {
             _ = tabs::set_selected_index(&self.tab_view, selected as i32);
@@ -1816,19 +1853,26 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
 
     let view = MenuBarItem::new()?;
     view.SetTitle("View")?;
-    for (title, theme) in [("Light theme", LIGHT), ("Dark theme", DARK)] {
+    // `None` is the System choice: the page and chrome take the Windows app theme as read now, and the
+    // session records System so the next launch follows Windows again.
+    for (title, choice) in [
+        ("System theme", None),
+        ("Light theme", Some(LIGHT)),
+        ("Dark theme", Some(DARK)),
+    ] {
         let item = MenuFlyoutItem::new()?;
         item.SetText(title)?;
         let target = shell.clone();
         item.Click(move |_, _| {
+            let theme = choice.unwrap_or_else(system_theme);
             target.renderer.borrow_mut().set_theme(theme);
             _ = set_root_background(&target.root, theme);
             _ = set_chrome_theme(&target.root, theme);
             if let Some((_, session)) = target.session.borrow_mut().as_mut() {
-                session.theme = if theme.name == DARK.name {
-                    mdview_core::session::Theme::Dark
-                } else {
-                    mdview_core::session::Theme::Light
+                session.theme = match choice {
+                    None => mdview_core::session::Theme::System,
+                    Some(t) if t.name == DARK.name => mdview_core::session::Theme::Dark,
+                    Some(_) => mdview_core::session::Theme::Light,
                 };
             }
             target.save_session();

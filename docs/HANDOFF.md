@@ -18,6 +18,8 @@ no CI, so run the tests yourself; `spikes/` is throwaway; report results plainly
 **not** run; nothing counts as working on Windows until it has run on Windows. The user is on Windows
 and the Linux Qt work happens on their VM (section 5).
 
+Windows handoff checklist: `docs/WINDOWS_HANDOFF.md`.
+
 Everything below was measured on this PC (Windows 11, RTX 4070 Ti SUPER, 3440x1440 at 96 DPI) unless
 it says Linux; Linux numbers come from the test VM in section 5.
 
@@ -1016,3 +1018,12 @@ GLIBCXX 3.4.30. Launched 8 s each with offscreen, wayland and xcb on this Arch d
 `Creating a fake screen` (software painting works; the EGL integration plugin is not bundled). Not done: a real
 Ubuntu 24.04 machine or container run of the image, dark-scheme behaviour on Qt 6.4 (only the fallback is exercised), an
 update from a published release.
+
+## 24. Windows handoff and the menu bug (2026-11-10)
+
+`docs/WINDOWS_HANDOFF.md` is the checklist for a physical Windows PC. Added View > System theme (WinUI; saved as
+`theme=0`). Full workspace test on the VM passes, including the golden compare; the Qt shell builds and
+`--tabs-test` passes there. Found and bisected (not fixed) a MenuBar problem: after one menu item is used,
+later item clicks and keys do nothing; theme work, session save, redraw and deferral were each ruled out. It
+may be a VM artifact; see section 3 of the Windows handoff. `system_is_dark()` in the Qt shell is Unix-only (dlsym);
+Windows returns light.

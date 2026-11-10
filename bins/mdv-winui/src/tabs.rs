@@ -111,7 +111,13 @@ pub fn set_enabled(control: &impl Interface, value: bool) -> windows_core::Resul
 
 /// `UIElement.Visibility`: 0 visible, 1 collapsed.
 pub fn set_visible(element: &UIElement, visible: bool) -> windows_core::Result<()> {
-    unsafe { set_i32(element, UIELEMENT_SET_VISIBILITY, if visible { 0 } else { 1 }) }
+    unsafe {
+        set_i32(
+            element,
+            UIELEMENT_SET_VISIBILITY,
+            if visible { 0 } else { 1 },
+        )
+    }
 }
 
 /// A string boxed the way XAML content wants it, for a tab header or tooltip.
@@ -172,10 +178,8 @@ pub struct ITabViewTabCloseRequestedEventArgs_Vtbl {
 pub struct TabViewTabCloseRequestedEventArgs(IUnknown);
 windows_core::imp::interface_hierarchy!(TabViewTabCloseRequestedEventArgs, IUnknown, IInspectable);
 impl RuntimeType for TabViewTabCloseRequestedEventArgs {
-    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<
-        Self,
-        ITabViewTabCloseRequestedEventArgs,
-    >();
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ITabViewTabCloseRequestedEventArgs>();
 }
 unsafe impl Interface for TabViewTabCloseRequestedEventArgs {
     type Vtable = ITabViewTabCloseRequestedEventArgs_Vtbl;
@@ -217,10 +221,8 @@ pub struct ITabViewTabDragCompletedEventArgs_Vtbl {
 pub struct TabViewTabDragCompletedEventArgs(IUnknown);
 windows_core::imp::interface_hierarchy!(TabViewTabDragCompletedEventArgs, IUnknown, IInspectable);
 impl RuntimeType for TabViewTabDragCompletedEventArgs {
-    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<
-        Self,
-        ITabViewTabDragCompletedEventArgs,
-    >();
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ITabViewTabDragCompletedEventArgs>();
 }
 unsafe impl Interface for TabViewTabDragCompletedEventArgs {
     type Vtable = ITabViewTabDragCompletedEventArgs_Vtbl;
@@ -244,7 +246,10 @@ where
 }
 
 /// `TabView.TabCloseRequested`: the close button on a tab (or the TabView's own Ctrl+F4).
-pub fn tab_close_requested<F>(view: &TabView, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+pub fn tab_close_requested<F>(
+    view: &TabView,
+    handler: F,
+) -> windows_core::Result<windows_core::EventRevoker>
 where
     F: Fn(Ref<TabView>, Ref<TabViewTabCloseRequestedEventArgs>) + 'static,
 {
@@ -258,7 +263,10 @@ where
 }
 
 /// `TabView.TabDragCompleted`: a drag (a reorder, here) ended.
-pub fn tab_drag_completed<F>(view: &TabView, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+pub fn tab_drag_completed<F>(
+    view: &TabView,
+    handler: F,
+) -> windows_core::Result<windows_core::EventRevoker>
 where
     F: Fn(Ref<TabView>, Ref<TabViewTabDragCompletedEventArgs>) + 'static,
 {
@@ -308,7 +316,10 @@ impl<F: Fn() + 'static> SelectionChangedBox<F> {
 }
 
 /// `TabView.SelectionChanged`. The handler reads the selection itself.
-pub fn selection_changed<F>(view: &TabView, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+pub fn selection_changed<F>(
+    view: &TabView,
+    handler: F,
+) -> windows_core::Result<windows_core::EventRevoker>
 where
     F: Fn() + 'static,
 {

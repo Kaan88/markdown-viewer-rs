@@ -5,7 +5,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
 /// Where the running instance records its port.
@@ -82,7 +82,10 @@ mod tests {
         std::fs::write(&file, "# a\n").unwrap();
         assert!(forward(&settings, &[file.clone(), dir.join("missing.md")]));
         assert_eq!(receiver.recv_timeout(Duration::from_secs(2)).unwrap(), file);
-        assert!(receiver.try_recv().is_err(), "a missing file is not forwarded");
+        assert!(
+            receiver.try_recv().is_err(),
+            "a missing file is not forwarded"
+        );
         _ = std::fs::remove_dir_all(&dir);
     }
 }

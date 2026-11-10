@@ -95,10 +95,14 @@ fn github_math(src: &str) -> Cow<'_, str> {
         let marker = rest.chars().next().filter(|c| matches!(c, '`' | '~'));
         let run = marker.map_or(0, |m| rest.chars().take_while(|&c| c == m).count());
         match (fence, marker) {
-            (Some((m, n)), Some(c)) if indent < 4 && c == m && run >= n && rest[run..].trim().is_empty() => {
+            (Some((m, n)), Some(c))
+                if indent < 4 && c == m && run >= n && rest[run..].trim().is_empty() =>
+            {
                 fence = None;
             }
-            (None, Some(c)) if indent < 4 && run >= 3 && !(c == '`' && rest[run..].contains('`')) => {
+            (None, Some(c))
+                if indent < 4 && run >= 3 && !(c == '`' && rest[run..].contains('`')) =>
+            {
                 fence = Some((c, run));
             }
             _ => {}
@@ -112,9 +116,7 @@ fn github_math(src: &str) -> Cow<'_, str> {
             let body = open + 2;
             let close = line[body..].find("`$").map(|i| body + i);
             match close {
-                Some(close)
-                    if close > body && !line[body..close].contains(['`', '$']) =>
-                {
+                Some(close) if close > body && !line[body..close].contains(['`', '$']) => {
                     out.push_str(&line[at..open]);
                     out.push('$');
                     out.push_str(&line[body..close]);
@@ -130,7 +132,11 @@ fn github_math(src: &str) -> Cow<'_, str> {
         }
         out.push_str(&line[at..]);
     }
-    if changed { Cow::Owned(out) } else { Cow::Borrowed(src) }
+    if changed {
+        Cow::Owned(out)
+    } else {
+        Cow::Borrowed(src)
+    }
 }
 
 /// Passes that may hide rejected delimiters before the rest are shown as literal text. The first
