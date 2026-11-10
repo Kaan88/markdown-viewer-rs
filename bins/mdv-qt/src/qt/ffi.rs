@@ -29,6 +29,11 @@ pub mod ffi {
         type ColorScheme = crate::qt::ColorScheme;
     }
 
+    #[namespace = "QFileDialog"]
+    unsafe extern "C++" {
+        type FileMode = crate::qt::FileMode;
+    }
+
     #[namespace = "QClipboard"]
     unsafe extern "C++" {
         #[cxx_name = "Mode"]
@@ -513,6 +518,7 @@ pub mod ffi {
         // QFileDialog
         #[rust_name = "exec_dialog"]
         fn exec(self: Pin<&mut QFileDialog>) -> i32;
+        fn setFileMode(self: Pin<&mut QFileDialog>, mode: FileMode);
         #[rust_name = "selected_files"]
         fn selectedFiles(self: &QFileDialog) -> QStringList;
 

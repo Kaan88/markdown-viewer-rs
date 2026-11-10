@@ -790,7 +790,11 @@ Qt's event path instead).
      `--light`/`--dark`/`--zoom` is given. Auto-refresh: an 800 ms canvas timer
      compares each open file's stamp (background tabs too); a change reloads it keeping the scroll
      offset, a deleted file keeps its text and says so, a recreated one reloads (`--tabs-test`).
-     Not done yet: the Manage recent dialog, folder tree, single instance.
+     Folder tree: File > Open folder (Ctrl+Shift+O, a `QFileDialog` in directory mode) fills a left Files dock (View > Files) with folders first then
+     `.md/.markdown/.mdown/.mkd`, hidden names skipped, at most 4000 rows and 8 deep; a click opens
+     the file; the folder is saved in the session and restored (`--tabs-test`). It is a scanned
+     `QTreeWidget`, not a live `QFileSystemModel`, so it does not update when the folder changes.
+     Not done yet: the Manage recent dialog, single instance.
    - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.

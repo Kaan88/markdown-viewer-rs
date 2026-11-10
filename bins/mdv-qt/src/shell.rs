@@ -133,6 +133,11 @@ struct Shell {
     /// The outline dock and its heading items, each paired with its block.
     outline_dock: Cell<Option<H<QDockWidget>>>,
     outline_tree: RefCell<Option<Tree>>,
+    /// The Files dock: the open folder, its tree, and the file behind each tree row (None = folder).
+    files_dock: Cell<Option<H<QDockWidget>>>,
+    files_tree: RefCell<Option<Tree>>,
+    folder: RefCell<Option<PathBuf>>,
+    folder_rows: RefCell<Vec<Option<PathBuf>>>,
     /// The block of each outline item, by the item's index in the tree.
     outline_blocks: RefCell<Vec<u32>>,
 }
@@ -178,6 +183,10 @@ impl Shell {
             find: RefCell::new(Find::default()),
             outline_dock: Cell::new(None),
             outline_tree: RefCell::new(None),
+            files_dock: Cell::new(None),
+            files_tree: RefCell::new(None),
+            folder: RefCell::new(None),
+            folder_rows: RefCell::new(Vec::new()),
             outline_blocks: RefCell::new(Vec::new()),
         }
     }
@@ -362,6 +371,47 @@ impl Shell {
                 self.build_outline();
             }
             dock.widget().set_visible(visible);
+        }
+    }
+
+    /// Shows `dir` in the Files dock: folders and Markdown files, hidden names skipped.
+    fn open_folder(&self, dir: &Path) {
+        let mut rows: Vec<(u8, String, Option<PathBuf>)> = Vec::new();
+        scan_folder(dir, 1, &mut rows);
+        let titles: Vec<(u8, &str)> = rows.iter().map(|(l, t, _)| (*l, t.as_str())).collect();
+        if let Some(tree) = self.files_tree.borrow().as_ref() {
+            tree.set_items(&titles);
+        }
+        *self.folder_rows.borrow_mut() = rows.into_iter().map(|(_, _, p)| p).collect();
+        *self.folder.borrow_mut() = Some(dir.to_path_buf());
+        if let Some(dock) = self.files_dock.get() {
+            dock.widget().set_visible(true);
+        }
+        self.message(&format!("Folder {}", dir.display()));
+        if let Some((_, session)) = self.session.borrow_mut().as_mut() {
+            session.folder = Some(dir.to_path_buf());
+        }
+        self.save_session();
+    }
+
+    fn choose_folder(&self) {
+        let start = self
+            .folder
+            .borrow()
+            .clone()
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_default();
+        if let Some(window) = self.window.get() {
+            if let Some(dir) = choose_folder(window.widget(), &start) {
+                self.open_folder(&dir);
+            }
+        }
+    }
+
+    fn files_click(&self, index: usize) {
+        let path = self.folder_rows.borrow().get(index).cloned().flatten();
+        if let Some(path) = path {
+            self.open(&path);
         }
     }
 
@@ -1403,6 +1453,7 @@ impl CanvasHandler for Shell {
                     self.close_tab(current);
                 }
             }
+            KEY_O if shift => self.choose_folder(),
             KEY_O => {
                 if let Some(window) = self.window.get() {
                     let dir = self
@@ -1479,6 +1530,44 @@ enum Check {
 
 /// Shown by Help > Keyboard shortcuts (the status bar; there is no dialog binding yet).
 const SHORTCUTS: &str = "Ctrl+O open | Ctrl+W close | Ctrl+Tab next tab | Ctrl+F find, F3 next | F5 refresh | Ctrl++ / Ctrl+- / Ctrl+0 zoom | Ctrl+C copy";
+
+/// Markdown extensions the Files dock lists, as in the original.
+fn is_markdown(path: &Path) -> bool {
+    path.extension().is_some_and(|e| {
+        let e = e.to_string_lossy().to_ascii_lowercase();
+        matches!(e.as_str(), "md" | "markdown" | "mdown" | "mkd")
+    })
+}
+
+/// Collects `dir`'s folders (first) and Markdown files, depth first, at most 4000 rows and 8 deep.
+fn scan_folder(dir: &Path, level: u8, rows: &mut Vec<(u8, String, Option<PathBuf>)>) {
+    if rows.len() >= 4000 || level > 8 {
+        return;
+    }
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = read
+        .flatten()
+        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+        .collect();
+    entries.sort_by_key(|e| {
+        (
+            !e.path().is_dir(),
+            e.file_name().to_string_lossy().to_lowercase(),
+        )
+    });
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if path.is_dir() {
+            rows.push((level, name, None));
+            scan_folder(&path, level + 1, rows);
+        } else if is_markdown(&path) {
+            rows.push((level, name, Some(path)));
+        }
+    }
+}
 
 /// Opens the folder holding `path`, with the file selected where the platform supports it.
 fn reveal_in_file_manager(path: &Path) {
@@ -1566,6 +1655,32 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
     shell.set_theme_choice(ThemeChoice::System);
     shell.set_theme_choice(ThemeChoice::Light);
     shell.set_zoom(1.0);
+    // Files dock: folders first, Markdown only, hidden skipped; a click opens the file.
+    let root = std::env::temp_dir().join(format!("mdview-folder-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("sub")).unwrap();
+    std::fs::create_dir_all(root.join(".hidden")).unwrap();
+    std::fs::write(root.join("b.md"), "# B\n").unwrap();
+    std::fs::write(root.join("a.txt"), "no").unwrap();
+    std::fs::write(root.join("sub").join("c.markdown"), "# C\n").unwrap();
+    std::fs::write(root.join(".hidden").join("h.md"), "# H\n").unwrap();
+    shell.open_folder(&root);
+    let names: Vec<Option<String>> = shell
+        .folder_rows
+        .borrow()
+        .iter()
+        .map(|p| p.as_ref().map(|p| file_name(p)))
+        .collect();
+    expect(
+        names == vec![None, Some("c.markdown".to_string()), Some("b.md".to_string())],
+        format!("folder rows {names:?}"),
+    );
+    let tabs_before = shell.pages.borrow().len();
+    shell.files_click(2);
+    expect(shell.pages.borrow().len() == tabs_before + 1, "folder click opens".into());
+    let opened = shell.current.get().unwrap();
+    shell.close_tab(opened);
+    shell.recent.borrow_mut().remove(&canonical_or_absolute(&root.join("b.md")));
+    _ = std::fs::remove_dir_all(&root);
     // Auto-refresh: an edited file reloads (even in the background), a deleted one keeps its text.
     let watched = std::env::temp_dir().join(format!("mdview-watch-{}.md", std::process::id()));
     std::fs::write(&watched, "# One\n\nfirst\n").unwrap();
@@ -1968,7 +2083,29 @@ fn build(
     shell.outline_dock.set(Some(outline_dock));
     shell.outline_tree.replace(Some(outline_tree));
 
+    let files_dock = H::<QDockWidget>::new("Files", window.clone());
+    let files_tree = Tree::new();
+    files_dock.set_widget(files_tree.widget());
+    window.add_dock(true, files_dock);
+    files_dock.widget().set_visible(false);
+    files_dock.widget().resize(240, 700);
+    let s = shell.clone();
+    files_tree.on_item_clicked(move |index| s.files_click(index));
+    shell.files_dock.set(Some(files_dock));
+    shell.files_tree.replace(Some(files_tree));
+
+    let open_folder = file_menu.add_action("Open &folder...\tCtrl+Shift+O");
+    let s = shell.clone();
+    open_folder.on_triggered(move |_| s.choose_folder());
+
     let view_menu = menus.add_menu("&View");
+    let files_toggle = view_menu.add_action("&Files");
+    let s = shell.clone();
+    files_toggle.on_triggered(move |_| {
+        if let Some(dock) = s.files_dock.get() {
+            dock.widget().set_visible(!dock.widget().is_visible());
+        }
+    });
     let outline = view_menu.add_action("&Outline");
     let s = shell.clone();
     outline.on_triggered(move |_| {
@@ -2074,6 +2211,9 @@ fn build(
         if !shell.pages.borrow().is_empty() {
             let last = shell.pages.borrow().len() - 1;
             shell.switch_to(saved.active.min(last));
+        }
+        if let Some(dir) = saved.folder.filter(|d| d.is_dir()) {
+            shell.open_folder(&dir);
         }
     }
     for path in &files {

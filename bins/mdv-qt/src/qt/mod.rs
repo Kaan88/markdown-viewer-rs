@@ -38,6 +38,7 @@ trivial_cxx!(FocusPolicy, "Qt::FocusPolicy");
 trivial_cxx!(CursorShape, "Qt::CursorShape");
 trivial_cxx!(ContextMenuPolicy, "Qt::ContextMenuPolicy");
 trivial_cxx!(ColorScheme, "Qt::ColorScheme");
+trivial_cxx!(FileMode, "QFileDialog::FileMode");
 trivial_cxx!(ClipboardMode, "QClipboard::Mode");
 /// `QClipboard::Clipboard`, the system clipboard (not the X11 selection).
 const CLIPBOARD: ClipboardMode = ClipboardMode(0);
@@ -548,6 +549,24 @@ pub fn choose_file(parent: H<QWidget>, dir: &std::path::Path) -> Option<std::pat
     let files = unsafe { &*dialog.0 }.selected_files();
     let first = files.get(0)?;
     let chosen = first.to_string();
+    (!chosen.is_empty()).then(|| std::path::PathBuf::from(chosen))
+}
+
+/// A folder picker: the same dialog in directory mode.
+pub fn choose_folder(parent: H<QWidget>, dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let caption = qs("Open folder");
+    let start = qs(&dir.display().to_string());
+    let filter = qs("");
+    let dialog = H(unsafe { new_file_dialog(parent.0, &caption, &start, &filter) });
+    if dialog.0.is_null() {
+        return None;
+    }
+    pin!(dialog).setFileMode(FileMode(2)); // QFileDialog::Directory
+    if pin!(dialog).exec_dialog() == 0 {
+        return None;
+    }
+    let files = unsafe { &*dialog.0 }.selected_files();
+    let chosen = files.get(0)?.to_string();
     (!chosen.is_empty()).then(|| std::path::PathBuf::from(chosen))
 }
 
