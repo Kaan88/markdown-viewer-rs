@@ -998,7 +998,18 @@ impl<'a, 'b> Pager<'a, 'b> {
         if let Some(cached) = self.images.get(&index) {
             return cached.clone();
         }
-        let src = self.doc.str(self.doc.images[index as usize].src);
+        let info = self.doc.images[index as usize];
+        // `<picture>` may name a source per colour scheme; the matching one wins when present.
+        let themed = if self.theme.name == "dark" {
+            self.doc.str(info.dark_src)
+        } else {
+            self.doc.str(info.light_src)
+        };
+        let src = if themed.is_empty() {
+            self.doc.str(info.src)
+        } else {
+            themed
+        };
         let decoded = if src.is_empty() {
             None
         } else {

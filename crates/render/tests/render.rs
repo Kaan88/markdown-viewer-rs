@@ -184,6 +184,33 @@ fn an_html_image_honours_its_width_and_height() {
 }
 
 #[test]
+fn a_picture_uses_the_source_for_the_colour_scheme() {
+    let dir = temp_dir("picture");
+    write_red_png(&dir.join("red.png"));
+    let md = "<picture>\n<source media=\"(prefers-color-scheme: dark)\" srcset=\"red.png\">\n<img src=\"missing.png\" alt=\"x\">\n</picture>\n";
+    let doc = mdview_core::parse(md);
+    let red = |theme| {
+        let options = Options {
+            width: 400.0,
+            scale: 1.0,
+            theme,
+            max_height: None,
+            base_dir: Some(dir.clone()),
+        };
+        let mut renderer = DocumentRenderer::new();
+        let page = renderer.layout(&doc, &options);
+        let view = renderer.view(&doc, &options, &page, 0.0, 300.0);
+        view.bitmap
+            .pixels
+            .chunks_exact(4)
+            .filter(|p| p[2] > 180 && p[0] < 80 && p[1] < 80)
+            .count()
+    };
+    assert!(red(mdview_render::DARK) > 1000, "dark theme should draw the dark source");
+    assert_eq!(red(LIGHT), 0, "light theme falls back to the missing default");
+}
+
+#[test]
 fn a_png_on_disk_is_drawn_inline() {
     let dir = temp_dir("image-drawn");
     let path = dir.join("red.png");

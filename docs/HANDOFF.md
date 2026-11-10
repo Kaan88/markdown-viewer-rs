@@ -746,7 +746,7 @@ Qt's event path instead).
 
 - Links have no context menu (copy works in both shells).
 - **Images:** PNG and JPEG decode in-process, SVG and math through `mdview-engine`; `<picture>`
-  light/dark sources are ignored; `width`/`height` on `<img>` are honoured (pixels or percent of the
+  light/dark sources pick the source for the current theme; `width`/`height` on `<img>` are honoured (pixels or percent of the
   content width, aspect kept when only one is given, clamped to the content width; Markdown images
   carry none). Any other format keeps its
   placeholder. A blocked image is retried on every render.
