@@ -184,6 +184,7 @@ fn inline_range(
             SpanKind::Underline => ("<u>".into(), "</u>"),
             SpanKind::Code => ("<code>".into(), "</code>"),
             SpanKind::Kbd => ("<kbd>".into(), "</kbd>"),
+            SpanKind::Quote => ("<q>".into(), "</q>"),
             SpanKind::Small => ("<small>".into(), "</small>"),
             SpanKind::Sub => ("<sub>".into(), "</sub>"),
             SpanKind::Sup => ("<sup>".into(), "</sup>"),

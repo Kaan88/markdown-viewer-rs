@@ -80,7 +80,8 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 | `<img>` with no usable `src` | Supported in model | Keeps its alt text, as on GitHub |
 | Raw `<input>` outside a task list | Supported | Ignored, as GitHub's sanitizer removes it; a Markdown task box still draws |
 | `<dl>`, `<figure>`, `<section>` and similar | Supported as plain blocks | No term or caption styling yet |
-| `<ruby>`, `<abbr>`, `<small>`, `<q>`, `<bdo>`, `<time>` and similar | Planned, Phase 2 | Text is kept without the styling. The corpus study decides priority |
+| `<small>`, `<q>` | Supported | `<small>` draws at the small size; `<q>` between curly quotes (`SpanKind::Small`/`Quote`) |
+| `<ruby>`, `<abbr>`, `<bdo>`, `<time>` and similar | Text only | Text is kept without the styling (no tooltip, ruby annotation or direction override) |
 | Inline CSS `style=` | Excluded | GitHub strips it too |
 | `hspace` on images; `cellpadding`, `cellspacing` on tables; `nowrap` on cells | Excluded | GitHub keeps these and the model drops them. Spacing only. Worth adding if the Phase 2 corpus shows them |
 | `<li value>` | Excluded | GitHub keeps it; numbering here ignores it |

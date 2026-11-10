@@ -1991,6 +1991,10 @@ impl<'a> Builder<'a> {
             Tag::Sup => self.open_html_span(tag, SpanKind::Sup),
             Tag::Mark => self.open_html_span(tag, SpanKind::Mark),
             Tag::Small => self.open_html_span(tag, SpanKind::Small),
+            Tag::Q => {
+                self.open_html_span(tag, SpanKind::Quote);
+                self.push_inline_text("\u{201c}");
+            }
             Tag::A => self.html_link(attrs),
             Tag::Img => self.html_image(attrs),
             Tag::Br => {
@@ -2277,6 +2281,7 @@ impl<'a> Builder<'a> {
                 | Tag::Sup
                 | Tag::Mark
                 | Tag::Small
+                | Tag::Q
         );
         if is_span {
             self.close_html_span(tag);
@@ -2286,6 +2291,9 @@ impl<'a> Builder<'a> {
     }
 
     fn close_html_span(&mut self, tag: Tag) {
+        if tag == Tag::Q && self.open_html[tag.slot()] > 0 {
+            self.push_inline_text("\u{201d}");
+        }
         if self.open_html[tag.slot()] > 0 {
             let mut found = None;
             for (i, o) in self.stack.iter().enumerate().rev() {

@@ -3102,3 +3102,11 @@ fn small_is_a_span() {
     let d = parse("a <small>fine print</small> b");
     assert!(d.spans.iter().any(|s| s.kind == SpanKind::Small && span_text(&d, s) == "fine print"));
 }
+
+#[test]
+fn q_is_drawn_between_curly_quotes() {
+    let d = parse("He said <q>stop</q> twice, and a stray </q> is ignored.");
+    let text = d.block_text(0);
+    assert!(text.contains("\u{201c}stop\u{201d} twice"), "{text:?}");
+    assert_eq!(text.matches('\u{201d}').count(), 1, "{text:?}");
+}
