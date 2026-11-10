@@ -946,3 +946,11 @@ added the ProgID under `.md\OpenWithProgids` and left the `.md` default untouche
 the keys (`unins000.exe` removes itself a moment later). Not run: the interactive wizard, the runtime
 download branch (the runtime is already installed there), upgrade over an older version,
 `build-installer.ps1` end to end, and what Windows' "Open with" list then looks like.
+
+## 19. Qt page context menu (2026-11-10)
+
+Right click on the page (`canvas_menu` in `shell.rs`, `H<QWidget>::on_context_menu_at`): over a link it offers Open
+link and Copy link address; with a selection it adds Copy; elsewhere nothing. The existing scripted checks still
+pass (tabs, select, link, details, find, outline, copy, drop). The menu itself was never opened: the offscreen
+platform cannot show a popup and no check synthesises a right click, so only the build is verified. Not done:
+WinUI has no link context menu.

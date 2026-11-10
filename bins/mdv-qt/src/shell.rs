@@ -720,6 +720,40 @@ impl Shell {
         }
     }
 
+    /// Right click on the page: a link offers Open and Copy link address; a selection offers Copy.
+    fn canvas_menu(self: &Rc<Self>, local: (i32, i32), at: (i32, i32)) {
+        let link = self
+            .hit(local.0 as f64, local.1 as f64)
+            .and_then(|hit| hit.link);
+        let has_selection = self
+            .selection
+            .get()
+            .is_some_and(|(a, b)| a != b);
+        if link.is_none() && !has_selection {
+            return;
+        }
+        let menu = H::<QMenu>::new_popup();
+        if let Some(index) = link {
+            let destination = self
+                .document
+                .borrow()
+                .as_ref()
+                .and_then(|d| d.links.get(index as usize).map(|l| d.str(l.dest).to_string()));
+            let s = self.clone();
+            menu.add_action("&Open link").on_triggered(move |_| s.follow_link(index));
+            if let Some(destination) = destination {
+                menu.add_action("Copy link &address")
+                    .on_triggered(move |_| set_clipboard(&destination));
+            }
+        }
+        if has_selection {
+            let s = self.clone();
+            menu.add_action("&Copy").on_triggered(move |_| s.copy_selection());
+        }
+        // Leaks one small popup per use at most; the popup deletes itself when it closes.
+        menu.popup(at);
+    }
+
     /// The tab context menu: shown over a tab only, as in the original.
     fn tab_menu(self: &Rc<Self>, tab: Option<usize>, at: (i32, i32)) {
         let Some(index) = tab.filter(|&i| i < self.pages.borrow().len()) else {
@@ -2377,6 +2411,12 @@ fn build(
     });
     let s = shell.clone();
     tabs.on_context_menu(move |tab, at| s.tab_menu(tab, at));
+    if let Some(canvas) = shell.canvas.get() {
+        let s = shell.clone();
+        canvas
+            .widget()
+            .on_context_menu_at(move |local, global| s.canvas_menu(local, global));
+    }
     shell.tab_bar.set(Some(tabs));
     let central = new_plain_widget();
     layout_column(central, tabs.widget(), page);

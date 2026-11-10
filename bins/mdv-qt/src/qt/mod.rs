@@ -441,6 +441,18 @@ impl H<Canvas> {
 }
 
 impl H<QWidget> {
+    /// A right click anywhere on the widget: the point in widget coordinates, then in global ones.
+    pub fn on_context_menu_at(&self, mut f: impl FnMut((i32, i32), (i32, i32)) + 'static) {
+        let widget = *self;
+        pin!(widget).setContextMenuPolicy(ContextMenuPolicy(2)); // Qt::CustomContextMenu
+        let mut f = GuiThreadOnly(move |p: &QPoint| {
+            let g = unsafe { &*widget.0 }.mapToGlobal(p);
+            f((p.x(), p.y()), (g.x(), g.y()));
+        });
+        pin!(widget)
+            .on_custom_context_menu_requested(move |_, p| f.get()(p))
+            .release();
+    }
     pub fn show(&self) {
         pin!(self).show()
     }
