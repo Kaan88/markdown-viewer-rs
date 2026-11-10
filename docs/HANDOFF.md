@@ -785,8 +785,9 @@ Qt's event path instead).
      the WinApps Windows 11 VM (the menu is built and popped, not clicked). Also done 2026-11-10 (Qt, `--tabs-test` covers them, Linux only so far):
      zoom Ctrl+= / Ctrl+- / Ctrl+0 (60-250%, step 10, View menu), Refresh (F5, File menu),
      focus reading mode (Ctrl+Shift+F, Escape leaves; hides menu bar, status bar, outline, find
-     bar) and Help > Keyboard shortcuts (status bar text, no dialog binding yet). Not done yet:
-     the Manage recent dialog, session restore of theme and zoom, System theme, folder tree,
+     bar) and Help > Keyboard shortcuts (status bar text, no dialog binding yet). Theme (System/Light/Dark,
+     System follows `QStyleHints::colorScheme`) and zoom are saved in the session and restored unless
+     `--light`/`--dark`/`--zoom` is given. Not done yet: the Manage recent dialog, folder tree,
      auto-refresh, single instance.
    - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.

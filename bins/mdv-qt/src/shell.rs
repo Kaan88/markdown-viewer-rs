@@ -8,7 +8,7 @@ use crate::qt::*;
 use mdview_core::commands::strings;
 use mdview_core::files::{canonical_or_absolute, tab_labels};
 use mdview_core::links::{classify_link, LinkAction};
-use mdview_core::session::{Recents, Session};
+use mdview_core::session::{Recents, Session, Theme as ThemeChoice};
 use mdview_core::parse_bytes;
 use mdview_render::{DocumentRenderer, Hit, Options, PageLayout, Rect, Theme, DARK, LIGHT};
 use std::cell::{Cell, RefCell};
@@ -106,6 +106,8 @@ struct Shell {
     viewport: Cell<i32>,
     theme: Cell<Theme>,
     zoom: Cell<f64>,
+    /// What the View menu picked; `theme` is what it resolves to (System follows the desktop).
+    choice: Cell<ThemeChoice>,
     /// Device px per logical px, as the last paint saw it, for mouse coordinates.
     scale: Cell<f64>,
     /// The options of the last paint, so a hit test lays out for the same width/scale/theme.
@@ -158,6 +160,7 @@ impl Shell {
             viewport: Cell::new(0),
             theme: Cell::new(theme),
             zoom: Cell::new(zoom),
+            choice: Cell::new(if theme.name == DARK.name { ThemeChoice::Dark } else { ThemeChoice::Light }),
             scale: Cell::new(1.0),
             options: RefCell::new(None),
             selection: Cell::new(None),
@@ -680,6 +683,8 @@ impl Shell {
         session.tabs = self.pages.borrow().iter().map(|p| p.path.clone()).collect();
         session.active = self.current.get().unwrap_or(0);
         session.recent = self.recent.borrow().clone();
+        session.theme = self.choice.get();
+        session.zoom = (self.zoom.get() * 100.0).round() as u16;
         if let Err(e) = session.save(path) {
             eprintln!("mdview-qt: could not save {}: {e}", path.display());
         }
@@ -723,6 +728,25 @@ impl Shell {
             .map_or(0, |doc| doc.blocks.len())
     }
 
+    /// Applies a theme choice; System follows the desktop's colour scheme.
+    fn set_theme_choice(&self, choice: ThemeChoice) {
+        self.choice.set(choice);
+        self.theme.set(match choice {
+            ThemeChoice::Light => LIGHT,
+            ThemeChoice::Dark => DARK,
+            ThemeChoice::System => {
+                if system_is_dark() {
+                    DARK
+                } else {
+                    LIGHT
+                }
+            }
+        });
+        *self.layout.borrow_mut() = None;
+        self.redraw();
+        self.save_session();
+    }
+
     /// Sets the zoom (clamped to 60-250%), keeping the reading position roughly in place.
     fn set_zoom(&self, zoom: f64) {
         let zoom = ((zoom * 10.0).round() / 10.0).clamp(ZOOM_MIN, ZOOM_MAX);
@@ -735,6 +759,7 @@ impl Shell {
         *self.layout.borrow_mut() = None;
         self.message(&format!("Zoom {}%", (zoom * 100.0).round() as i32));
         self.redraw();
+        self.save_session();
     }
 
     /// Focus reading mode: hides the menu bar, status bar, outline and find bar, and restores
@@ -1468,6 +1493,21 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
     }
     expect((shell.zoom.get() - ZOOM_MAX).abs() < 1e-9, "zoom ceiling".into());
     shell.set_zoom(1.0);
+    // Theme and zoom reach the saved session file.
+    let scratch = std::env::temp_dir().join(format!("mdview-theme-{}.ini", std::process::id()));
+    let kept = shell.session.borrow_mut().replace((scratch.clone(), Session::default()));
+    shell.set_theme_choice(ThemeChoice::Dark);
+    shell.set_zoom(1.3);
+    let saved = Session::load(&scratch);
+    _ = std::fs::remove_file(&scratch);
+    *shell.session.borrow_mut() = kept;
+    expect(
+        saved.theme == ThemeChoice::Dark && saved.zoom == 130 && shell.theme.get().name == DARK.name,
+        format!("theme/zoom not saved: {:?} {}", saved.theme, saved.zoom),
+    );
+    shell.set_theme_choice(ThemeChoice::System);
+    shell.set_theme_choice(ThemeChoice::Light);
+    shell.set_zoom(1.0);
     shell.control_key(KEY_F, true);
     expect(shell.focus.get().is_some(), "focus mode on".into());
     shell.key(KEY_ESCAPE);
@@ -1881,13 +1921,14 @@ fn build(
     let about = help.add_action("&About");
     let s = shell.clone();
     about.on_triggered(move |_| s.message("mdview 0.1 - Qt shell"));
-    for (action, theme) in [(light, LIGHT), (dark, DARK)] {
+    let system = view_menu.add_action("&System theme");
+    for (action, choice) in [
+        (system, ThemeChoice::System),
+        (light, ThemeChoice::Light),
+        (dark, ThemeChoice::Dark),
+    ] {
         let s = shell.clone();
-        action.on_triggered(move |_| {
-            s.theme.set(theme);
-            *s.layout.borrow_mut() = None;
-            s.redraw();
-        });
+        action.on_triggered(move |_| s.set_theme_choice(choice));
     }
 
     let canvas = H::<Canvas>::new(shell.clone() as Rc<dyn CanvasHandler>);
@@ -2017,12 +2058,20 @@ pub fn run() -> i32 {
     let mut check = None;
     let mut theme = LIGHT;
     let mut zoom = 1.0f64;
+    let mut theme_flag = false;
+    let mut zoom_flag = false;
     let mut scroll = 0.0f64;
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
-            "--light" => theme = LIGHT,
-            "--dark" => theme = DARK,
+            "--light" => {
+                theme = LIGHT;
+                theme_flag = true;
+            }
+            "--dark" => {
+                theme = DARK;
+                theme_flag = true;
+            }
             "--scroll" => {
                 scroll = args
                     .next()
@@ -2042,6 +2091,7 @@ pub fn run() -> i32 {
             "--tabs-test" => check = Some(Check::Tabs),
             "--no-session" => use_session = false,
             "--zoom" => {
+                zoom_flag = true;
                 zoom = args.next().expect("--zoom needs a number").parse().unwrap();
             }
             "--drop-test" => {
@@ -2065,6 +2115,12 @@ pub fn run() -> i32 {
     };
     if let Some(path) = settings.filter(|_| use_session) {
         let saved = Session::load(&path);
+        if !theme_flag {
+            shell.set_theme_choice(saved.theme);
+        }
+        if !zoom_flag {
+            shell.zoom.set(f64::from(saved.zoom) / 100.0);
+        }
         *shell.session.borrow_mut() = Some((path, saved));
     }
     run_app(move || build(&shell, files, drop_test, check, scroll))

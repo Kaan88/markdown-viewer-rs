@@ -37,6 +37,7 @@ trivial_cxx!(Orientation, "Qt::Orientation");
 trivial_cxx!(FocusPolicy, "Qt::FocusPolicy");
 trivial_cxx!(CursorShape, "Qt::CursorShape");
 trivial_cxx!(ContextMenuPolicy, "Qt::ContextMenuPolicy");
+trivial_cxx!(ColorScheme, "Qt::ColorScheme");
 trivial_cxx!(ClipboardMode, "QClipboard::Mode");
 /// `QClipboard::Clipboard`, the system clipboard (not the X11 selection).
 const CLIPBOARD: ClipboardMode = ClipboardMode(0);
@@ -121,6 +122,15 @@ pub fn set_clipboard(text: &str) {
     }
     // Owned by the application object, which outlives every caller.
     unsafe { Pin::new_unchecked(&mut *clipboard) }.clipboard_set_text(&qs(text), CLIPBOARD);
+}
+
+/// True when the desktop reports a dark colour scheme (Qt 6.5+); false when light or unknown.
+pub fn system_is_dark() -> bool {
+    let hints = QApplication::styleHints();
+    if hints.is_null() {
+        return false;
+    }
+    unsafe { &*hints }.colorScheme().0 == 2
 }
 
 pub fn read_clipboard() -> String {
