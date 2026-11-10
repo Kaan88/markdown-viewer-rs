@@ -824,6 +824,11 @@ Qt's event path instead).
      file with the tab and the recent entry, and a second run with no arguments reopened it. Not
      checked: the Recent menu opening (the VM's menu popups are unreliable), the theme saving from the
      menu, and no System theme choice (WinUI follows Windows when nothing is saved).
+   - **Single instance, both shells (2026-11-10):** the logic moved to `crates/core/src/single.rs`
+     (std only). WinUI: a later launch forwards its file and exits, the first window loads it on
+     its next 800 ms tick and restores/raises itself (`ShowWindow`/`SetForegroundWindow`). Checked
+     on the VM: the second process exited 0 and the first window parsed the second file 6.5 s in.
+     Whether Windows brings the window to the front (versus flashing the taskbar) was not looked at.
    - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.

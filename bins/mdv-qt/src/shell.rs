@@ -2528,12 +2528,12 @@ pub fn run() -> i32 {
     };
     if let Some(path) = settings.filter(|_| use_session) {
         // A window is already open: hand it the files and quit. Scripted checks skip this.
-        if !scripted && crate::single::forward(&path, &files) {
+        if !scripted && mdview_core::single::forward(&path, &files) {
             eprintln!("mdview-qt: sent {} file(s) to the running window", files.len());
             std::process::exit(0);
         }
         if !scripted {
-            *shell.incoming.borrow_mut() = crate::single::listen(&path);
+            *shell.incoming.borrow_mut() = mdview_core::single::listen(&path);
             *shell.updating.borrow_mut() = crate::appimage_update::spawn_check();
         }
         let saved = Session::load(&path);

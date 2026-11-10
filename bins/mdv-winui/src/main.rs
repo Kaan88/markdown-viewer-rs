@@ -173,6 +173,14 @@ fn run() -> Result<()> {
             if document.is_none() {
                 document = saved.tabs.get(saved.active).filter(|p| p.is_file()).cloned();
             }
+            // A window is already open: hand it the file and quit. Otherwise listen for later launches.
+            let sent: Vec<PathBuf> = args.document.iter().cloned().collect();
+            if mdview_core::single::forward(&path, &sent) {
+                return Ok(());
+            }
+            if let Some(receiver) = mdview_core::single::listen(&path) {
+                ui::set_incoming(receiver);
+            }
             ui::set_settings(path);
         }
     }

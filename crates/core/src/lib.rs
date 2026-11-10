@@ -14,6 +14,7 @@ pub mod slug;
 pub mod status;
 pub mod emoji;
 pub mod frontmatter;
+pub mod single;
 pub mod update;
 
 pub use model::{Document, parse_bytes};

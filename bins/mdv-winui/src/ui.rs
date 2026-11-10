@@ -41,6 +41,8 @@ windows_core::link!("user32.dll" "system" fn SetWindowPos(window: *mut c_void, a
 windows_core::link!("comdlg32.dll" "system" fn GetOpenFileNameW(ofn: *mut OpenFileNameW) -> i32);
 windows_core::link!("advapi32.dll" "system" fn RegGetValueW(hkey: *mut c_void, subkey: PCWSTR, value: PCWSTR, flags: u32, ty: *mut u32, data: *mut c_void, size: *mut u32) -> i32);
 windows_core::link!("user32.dll" "system" fn GetKeyState(key: i32) -> i16);
+windows_core::link!("user32.dll" "system" fn SetForegroundWindow(hwnd: *mut c_void) -> i32);
+windows_core::link!("user32.dll" "system" fn ShowWindow(hwnd: *mut c_void, command: i32) -> i32);
 windows_core::link!("user32.dll" "system" fn SetTimer(hwnd: *mut c_void, id: usize, ms: u32, callback: unsafe extern "system" fn(*mut c_void, u32, usize, u32)) -> usize);
 windows_core::link!("user32.dll" "system" fn OpenClipboard(owner: *mut c_void) -> i32);
 windows_core::link!("user32.dll" "system" fn CloseClipboard() -> i32);
@@ -60,6 +62,11 @@ pub fn set_settings(path: PathBuf) {
     _ = SETTINGS.set(path);
 }
 
+/// Starts receiving files from later launches (see `mdview_core::single`).
+pub fn set_incoming(receiver: std::sync::mpsc::Receiver<PathBuf>) {
+    INCOMING.with(|cell| *cell.borrow_mut() = Some(receiver));
+}
+
 /// Loads the session, lets `f` change it and writes it back, so keys this shell does not use
 /// (and the Qt shell's tabs) survive.
 fn session_update(f: impl FnOnce(&mut mdview_core::session::Session)) {
@@ -73,6 +80,8 @@ fn session_update(f: impl FnOnce(&mut mdview_core::session::Session)) {
 }
 
 thread_local! {
+    /// Paths later launches sent to this window; drained by the poll timer.
+    static INCOMING: RefCell<Option<std::sync::mpsc::Receiver<PathBuf>>> = const { RefCell::new(None) };
     static SHELL: RefCell<Option<Rc<Shell>>> = const { RefCell::new(None) };
 }
 
@@ -809,6 +818,27 @@ fn refresh_recent(shell: &Shell) {
 /// say so in the title when it was deleted, keeping what was loaded.
 unsafe extern "system" fn poll_timer(_: *mut c_void, _: u32, _: usize, _: u32) {
     if let Some(shell) = SHELL.with(|cell| cell.borrow().clone()) {
+        let sent: Vec<PathBuf> = INCOMING.with(|cell| {
+            cell.borrow()
+                .as_ref()
+                .map(|r| r.try_iter().collect())
+                .unwrap_or_default()
+        });
+        if !sent.is_empty() {
+            // Restore if minimised (SW_RESTORE = 9), then ask to be foreground; Windows may only
+            // flash the taskbar button, which is still the right signal.
+            let hwnd = winui_window() as *mut c_void;
+            unsafe {
+                ShowWindow(hwnd, 9);
+                SetForegroundWindow(hwnd);
+            }
+        }
+        for path in sent {
+            match load(&shell, &path) {
+                Ok(()) => shell.show(),
+                Err(e) => diag::error_box(&e),
+            }
+        }
         shell.poll_file();
     }
 }
