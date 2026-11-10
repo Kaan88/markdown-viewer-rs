@@ -104,7 +104,9 @@ upcast_widget!(
     QDockWidget,
     QTreeWidget,
     QScrollBar,
-    QToolBar
+    QToolBar,
+    QMenuBar,
+    QStatusBar
 );
 
 fn qs(s: &str) -> QString {
@@ -201,7 +203,10 @@ impl Canvas {
             self.handler().copy();
             return;
         }
-        if modifiers.test_flag(KeyboardModifier::ControlModifier) && matches!(code, 0x46 | 0x66) {
+        if modifiers.test_flag(KeyboardModifier::ControlModifier)
+            && !modifiers.test_flag(KeyboardModifier::ShiftModifier)
+            && matches!(code, 0x46 | 0x66)
+        {
             self.handler().find();
             return;
         }

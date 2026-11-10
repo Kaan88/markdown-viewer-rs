@@ -42,6 +42,16 @@ const KEY_TAB: i32 = 0x0100_0001;
 /// Shift+Tab arrives as Backtab.
 const KEY_BACKTAB: i32 = 0x0100_0002;
 const KEY_F4: i32 = 0x0100_0033;
+const KEY_F5: i32 = 0x0100_0034;
+const KEY_PLUS: i32 = 0x2b;
+const KEY_EQUAL: i32 = 0x3d;
+const KEY_MINUS: i32 = 0x2d;
+const KEY_0: i32 = 0x30;
+const KEY_F: i32 = 0x46;
+/// Zoom limits and step, from the original (60-250%, step 10).
+const ZOOM_MIN: f64 = 0.6;
+const ZOOM_MAX: f64 = 2.5;
+const ZOOM_STEP: f64 = 0.1;
 const KEY_O: i32 = 0x4f;
 const KEY_W: i32 = 0x57;
 /// One arrow-key step, in device px.
@@ -82,6 +92,9 @@ struct Shell {
     window: Cell<Option<H<QMainWindow>>>,
     canvas: Cell<Option<H<Canvas>>>,
     status: Cell<Option<H<QStatusBar>>>,
+    menu_bar: Cell<Option<H<QMenuBar>>>,
+    /// Focus reading mode, and what was visible before it: (menu bar, status bar, outline, find).
+    focus: Cell<Option<[bool; 4]>>,
     document: RefCell<Option<mdview_core::Document>>,
     layout: RefCell<Option<PageLayout>>,
     renderer: RefCell<DocumentRenderer>,
@@ -133,6 +146,8 @@ impl Shell {
             window: Cell::new(None),
             canvas: Cell::new(None),
             status: Cell::new(None),
+            menu_bar: Cell::new(None),
+            focus: Cell::new(None),
             document: RefCell::new(None),
             layout: RefCell::new(None),
             renderer: RefCell::new(DocumentRenderer::new()),
@@ -708,6 +723,78 @@ impl Shell {
             .map_or(0, |doc| doc.blocks.len())
     }
 
+    /// Sets the zoom (clamped to 60-250%), keeping the reading position roughly in place.
+    fn set_zoom(&self, zoom: f64) {
+        let zoom = ((zoom * 10.0).round() / 10.0).clamp(ZOOM_MIN, ZOOM_MAX);
+        let old = self.zoom.get();
+        if (zoom - old).abs() < 1e-9 {
+            return;
+        }
+        self.zoom.set(zoom);
+        self.scroll.set(self.scroll.get() * zoom / old);
+        *self.layout.borrow_mut() = None;
+        self.message(&format!("Zoom {}%", (zoom * 100.0).round() as i32));
+        self.redraw();
+    }
+
+    /// Focus reading mode: hides the menu bar, status bar, outline and find bar, and restores
+    /// exactly what was showing. The tab bar stays. Ctrl+Shift+F toggles; Escape leaves.
+    fn toggle_focus(&self) {
+        let (Some(menu), Some(status)) = (self.menu_bar.get(), self.status.get()) else {
+            return;
+        };
+        let outline = self.outline_dock.get().map(|d| d.widget());
+        let find = self.find_bar.get().map(|b| b.widget());
+        match self.focus.take() {
+            None => {
+                let seen = |w: Option<H<QWidget>>| w.is_some_and(|w| w.is_visible());
+                self.focus.set(Some([
+                    menu.widget().is_visible(),
+                    status.widget().is_visible(),
+                    seen(outline),
+                    seen(find),
+                ]));
+                menu.widget().set_visible(false);
+                status.widget().set_visible(false);
+                for w in [outline, find].into_iter().flatten() {
+                    w.set_visible(false);
+                }
+            }
+            Some([m, st, o, f]) => {
+                menu.widget().set_visible(m);
+                status.widget().set_visible(st);
+                if let Some(w) = outline {
+                    w.set_visible(o);
+                }
+                if let Some(w) = find {
+                    w.set_visible(f);
+                }
+            }
+        }
+        if let Some(canvas) = self.canvas.get() {
+            canvas.widget().set_focus();
+        }
+        self.redraw();
+    }
+
+    /// Re-reads the showing file from disk, keeping the scroll offset. F5 and File > Refresh.
+    fn refresh(&self) {
+        let Some(path) = self.path.borrow().clone() else {
+            return;
+        };
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                let document = parse_bytes(&bytes);
+                let scroll = self.scroll.get();
+                *self.document.borrow_mut() = Some(document);
+                *self.renderer.borrow_mut() = DocumentRenderer::new();
+                self.show_page(scroll, None);
+                self.message(&format!("Refreshed {}: {} blocks", file_name(&path), self.blocks()));
+            }
+            Err(e) => self.message(&format!("{}: {e}", path.display())),
+        }
+    }
+
     fn redraw(&self) {
         if let Some(canvas) = self.canvas.get() {
             canvas.widget().update();
@@ -777,6 +864,10 @@ impl Shell {
 
     /// Home, End, the arrows and Page Up/Down, in device px.
     fn key(&self, code: i32) {
+        if code == KEY_ESCAPE && self.focus.get().is_some() {
+            self.toggle_focus();
+            return;
+        }
         if code == KEY_ESCAPE
             && self
                 .find_bar
@@ -794,6 +885,7 @@ impl Shell {
             KEY_PAGE_UP => self.scroll_to(self.scroll.get() - viewport * 0.9),
             KEY_HOME => self.scroll_to(0.0),
             KEY_END => self.scroll_to(f64::MAX),
+            KEY_F5 => self.refresh(),
             _ => {}
         }
     }
@@ -1220,6 +1312,10 @@ impl CanvasHandler for Shell {
         match code {
             KEY_TAB => self.cycle(1),
             KEY_BACKTAB => self.cycle(-1),
+            KEY_PLUS | KEY_EQUAL => self.set_zoom(self.zoom.get() + ZOOM_STEP),
+            KEY_MINUS => self.set_zoom(self.zoom.get() - ZOOM_STEP),
+            KEY_0 => self.set_zoom(1.0),
+            KEY_F if shift => self.toggle_focus(),
             KEY_W if shift => self.close_all(),
             KEY_W | KEY_F4 => {
                 if let Some(current) = self.current.get() {
@@ -1298,6 +1394,9 @@ enum Check {
     Tabs,
 }
 
+/// Shown by Help > Keyboard shortcuts (the status bar; there is no dialog binding yet).
+const SHORTCUTS: &str = "Ctrl+O open | Ctrl+W close | Ctrl+Tab next tab | Ctrl+F find, F3 next | F5 refresh | Ctrl++ / Ctrl+- / Ctrl+0 zoom | Ctrl+C copy";
+
 /// Opens the folder holding `path`, with the file selected where the platform supports it.
 fn reveal_in_file_manager(path: &Path) {
     if cfg!(windows) {
@@ -1355,6 +1454,27 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
         "move did not carry the current tab".into(),
     );
     shell.tab_moved(0, 1);
+    shell.set_zoom(1.0);
+    shell.control_key(KEY_EQUAL, false);
+    expect((shell.zoom.get() - 1.1).abs() < 1e-9, "zoom in".into());
+    shell.control_key(KEY_0, false);
+    expect((shell.zoom.get() - 1.0).abs() < 1e-9, "zoom reset".into());
+    for _ in 0..40 {
+        shell.control_key(KEY_MINUS, false);
+    }
+    expect((shell.zoom.get() - ZOOM_MIN).abs() < 1e-9, "zoom floor".into());
+    for _ in 0..40 {
+        shell.control_key(KEY_PLUS, false);
+    }
+    expect((shell.zoom.get() - ZOOM_MAX).abs() < 1e-9, "zoom ceiling".into());
+    shell.set_zoom(1.0);
+    shell.control_key(KEY_F, true);
+    expect(shell.focus.get().is_some(), "focus mode on".into());
+    shell.key(KEY_ESCAPE);
+    expect(shell.focus.get().is_none(), "Escape leaves focus mode".into());
+    let blocks = shell.blocks();
+    shell.key(KEY_F5);
+    expect(shell.blocks() == blocks && shell.document.borrow().is_some(), "refresh".into());
     shell.tab_menu(Some(0), (20, 20)); // builds and pops the menu; must not crash or change tabs
     shell.tab_menu(None, (20, 20));
     expect(shell.pages.borrow().len() == 2, "tab menu changed the tabs".into());
@@ -1660,6 +1780,9 @@ fn build(
             }
         }
     });
+    let refresh = file_menu.add_action("&Refresh\tF5");
+    let s = shell.clone();
+    refresh.on_triggered(move |_| s.refresh());
     let recent_menu = file_menu.add_menu("Open &recent");
     recent_menu.show_tool_tips();
     let s = shell.clone();
@@ -1738,7 +1861,23 @@ fn build(
     });
     let light = view_menu.add_action("&Light theme");
     let dark = view_menu.add_action("&Dark theme");
+    view_menu.add_separator();
+    let zoom_in = view_menu.add_action("Zoom &in\tCtrl++");
+    let zoom_out = view_menu.add_action("Zoom &out\tCtrl+-");
+    let zoom_reset = view_menu.add_action("&Reset zoom\tCtrl+0");
+    let s = shell.clone();
+    zoom_in.on_triggered(move |_| s.set_zoom(s.zoom.get() + ZOOM_STEP));
+    let s = shell.clone();
+    zoom_out.on_triggered(move |_| s.set_zoom(s.zoom.get() - ZOOM_STEP));
+    let s = shell.clone();
+    zoom_reset.on_triggered(move |_| s.set_zoom(1.0));
+    let focus_mode = view_menu.add_action("&Focus reading mode\tCtrl+Shift+F");
+    let s = shell.clone();
+    focus_mode.on_triggered(move |_| s.toggle_focus());
     let help = menus.add_menu("&Help");
+    let shortcuts = help.add_action("&Keyboard shortcuts");
+    let s = shell.clone();
+    shortcuts.on_triggered(move |_| s.message(SHORTCUTS));
     let about = help.add_action("&About");
     let s = shell.clone();
     about.on_triggered(move |_| s.message("mdview 0.1 - Qt shell"));
@@ -1798,6 +1937,7 @@ fn build(
     shell.scrollbar.set(Some(bar));
     shell.window.set(Some(window));
     shell.status.set(Some(window.status_bar()));
+    shell.menu_bar.set(Some(window.menu_bar()));
     window.widget().show();
     if let Some(canvas) = shell.canvas.get() {
         canvas.widget().set_focus();

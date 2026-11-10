@@ -782,8 +782,12 @@ Qt's event path instead).
      `--tabs-test` checks it and passes on Windows and on the VM (xvfb). A right-click tab
      menu (Close tab, Close other tabs, Copy file path, Show in file manager: `explorer /select,` on
      Windows, the folder through `openUrl` elsewhere) was added 2026-11-10; `--tabs-test` covers it and passes on Linux (offscreen) and on
-     the WinApps Windows 11 VM (the menu is built and popped, not clicked). Not done yet: the Manage recent dialog, and session restore of theme
-     and zoom.
+     the WinApps Windows 11 VM (the menu is built and popped, not clicked). Also done 2026-11-10 (Qt, `--tabs-test` covers them, Linux only so far):
+     zoom Ctrl+= / Ctrl+- / Ctrl+0 (60-250%, step 10, View menu), Refresh (F5, File menu),
+     focus reading mode (Ctrl+Shift+F, Escape leaves; hides menu bar, status bar, outline, find
+     bar) and Help > Keyboard shortcuts (status bar text, no dialog binding yet). Not done yet:
+     the Manage recent dialog, session restore of theme and zoom, System theme, folder tree,
+     auto-refresh, single instance.
    - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.
