@@ -1593,6 +1593,8 @@ impl<'a> Builder<'a> {
     }
 
     fn md_text(&mut self, t: &str, range: Range<usize>) {
+        let swapped = crate::emoji::replace(t);
+        let t: &str = &swapped;
         let escaped = self.is_escaped(range.start);
         self.text_floor = range.end;
         // Text resuming after a block tag, as in ` done` after `</ul>`, starts a block of its own.

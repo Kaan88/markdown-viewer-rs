@@ -12,6 +12,7 @@ mod parse;
 pub mod session;
 pub mod slug;
 pub mod status;
+pub mod emoji;
 pub mod frontmatter;
 pub mod update;
 
