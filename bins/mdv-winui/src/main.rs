@@ -148,9 +148,34 @@ fn run() -> Result<()> {
     diag::trace("STA ready, calling Application::Start");
 
     let args = Args::parse(std::env::args().skip(1));
-    let document = args.document.clone();
-    let theme = args.theme;
-    let zoom = args.zoom;
+    let mut document = args.document.clone();
+    let mut theme = args.theme;
+    let mut zoom = args.zoom;
+    // The saved session (last document, Recent, theme, zoom) is off for `--no-session` and for the
+    // scripted checks, so they start from a known state and never touch the user's file.
+    let scripted = args.flags.iter().any(|f| f.ends_with("-test") || f.starts_with("--measure"));
+    if !args.has("--no-session") && !scripted {
+        let path = std::env::var_os("MDVIEW_SETTINGS")
+            .map(PathBuf::from)
+            .or_else(mdview_core::session::default_settings_path);
+        if let Some(path) = path {
+            let saved = mdview_core::session::Session::load(&path);
+            if theme.is_none() {
+                theme = match saved.theme {
+                    mdview_core::session::Theme::Light => Some(mdview_render::LIGHT),
+                    mdview_core::session::Theme::Dark => Some(mdview_render::DARK),
+                    mdview_core::session::Theme::System => None,
+                };
+            }
+            if (zoom - 1.0).abs() < 1e-6 {
+                zoom = f32::from(saved.zoom) / 100.0;
+            }
+            if document.is_none() {
+                document = saved.tabs.get(saved.active).filter(|p| p.is_file()).cloned();
+            }
+            ui::set_settings(path);
+        }
+    }
     // A shifted frame has to look exactly like a whole one; `--no-shift` sends every frame whole,
     // which is the picture to compare against.
     let startup = ui::Startup {

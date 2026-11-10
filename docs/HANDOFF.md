@@ -815,6 +815,15 @@ Qt's event path instead).
      says so in the title. Checked on the WinApps VM by appending to the open file: the trace shows
      `auto-refresh: file changed on disk, reloaded` 600 ms after the write. The deleted-file title was
      not looked at.
+   - **WinUI session and Recent: done 2026-11-10.** The same `settings.ini` as Qt (`MDVIEW_SETTINGS`
+     overrides; `--no-session` and every `--*-test`/`--measure` run skip it). It keeps the last
+     document (`tab=`/`active=`), Recent, theme and zoom; with no file argument the last document
+     reopens, and View > Light/Dark theme and the zoom keys save. `--light`/`--dark`/`--zoom` are
+     overrides and are not saved. A top-level **Recent** menu is rebuilt after every load (missing files
+     marked, clicking one removes it, Clear recent files). Checked on the VM: a first run wrote the
+     file with the tab and the recent entry, and a second run with no arguments reopened it. Not
+     checked: the Recent menu opening (the VM's menu popups are unreliable), the theme saving from the
+     menu, and no System theme choice (WinUI follows Windows when nothing is saved).
    - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.

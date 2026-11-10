@@ -53,6 +53,25 @@ windows_core::link!("kernel32.dll" "system" fn GlobalUnlock(mem: *mut c_void) ->
 windows_core::link!("kernel32.dll" "system" fn GlobalFree(mem: *mut c_void) -> *mut c_void);
 windows_core::link!("shell32.dll" "system" fn ShellExecuteW(window: *mut c_void, operation: PCWSTR, file: PCWSTR, parameters: PCWSTR, directory: PCWSTR, show: i32) -> isize);
 
+static SETTINGS: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Turns on the saved session: the file `path` holds the last document, Recent, theme and zoom.
+pub fn set_settings(path: PathBuf) {
+    _ = SETTINGS.set(path);
+}
+
+/// Loads the session, lets `f` change it and writes it back, so keys this shell does not use
+/// (and the Qt shell's tabs) survive.
+fn session_update(f: impl FnOnce(&mut mdview_core::session::Session)) {
+    if let Some(path) = SETTINGS.get() {
+        let mut session = mdview_core::session::Session::load(path);
+        f(&mut session);
+        if let Err(e) = session.save(path) {
+            diag::trace(&format!("could not save {}: {e}", path.display()));
+        }
+    }
+}
+
 thread_local! {
     static SHELL: RefCell<Option<Rc<Shell>>> = const { RefCell::new(None) };
 }
@@ -267,6 +286,8 @@ struct Shell {
     zoom_test: Cell<bool>,
     /// The Outline menu, rebuilt when a document loads.
     outline_menu: RefCell<Option<MenuBarItem>>,
+    /// The Recent menu, rebuilt from the saved session after every load.
+    recent_menu: RefCell<Option<MenuBarItem>>,
     outline_entries: Cell<usize>,
 }
 
@@ -372,6 +393,7 @@ impl Shell {
         let next = ((next * 10.0).round() / 10.0).clamp(0.6, 2.5);
         if (next - now).abs() > 1e-4 {
             self.renderer.borrow_mut().set_zoom(next);
+            session_update(|s| s.zoom = (next * 100.0).round() as u16);
             self.show();
         }
         next
@@ -706,8 +728,81 @@ fn load(shell: &Shell, path: &Path) -> std::result::Result<(), String> {
         .map_err(|e| e.to_string())?;
     *shell.path.borrow_mut() = Some(path.to_path_buf());
     shell.stamp.set(mdview_core::files::stamp(path));
+    let saved = mdview_core::files::canonical_or_absolute(path);
+    session_update(|s| {
+        s.tabs = vec![saved.clone()];
+        s.active = 0;
+        s.recent.add(saved);
+    });
     refresh_outline(shell);
+    refresh_recent(shell);
     Ok(())
+}
+
+/// Rebuilds the Recent menu from the saved session: missing files are marked and clicking one
+/// removes it; Clear empties the list.
+fn refresh_recent(shell: &Shell) {
+    let Some(menu) = shell.recent_menu.borrow().clone() else {
+        return;
+    };
+    let Ok(items) = menu.Items() else {
+        return;
+    };
+    _ = items.Clear();
+    let entries = SETTINGS
+        .get()
+        .map(|p| mdview_core::session::Session::load(p).recent.entries())
+        .unwrap_or_default();
+    let add = |text: &str, enabled: bool, action: Box<dyn Fn() + 'static>| {
+        let Ok(item) = MenuFlyoutItem::new() else {
+            return;
+        };
+        if item.SetText(text).is_err() {
+            return;
+        }
+        // The bindings have no `IsEnabled`, so an inert entry just does nothing when clicked.
+        let _ = enabled;
+        if item.Click(move |_, _| action()).is_err() {
+            return;
+        }
+        if let Ok(base) = item.cast::<MenuFlyoutItemBase>() {
+            _ = items.Append(&base);
+        }
+    };
+    if entries.is_empty() {
+        add("No recent files", false, Box::new(|| {}));
+    }
+    for entry in entries {
+        let path = entry.path.clone();
+        let missing = entry.missing;
+        add(
+            &entry.label.replace('&', "&&"),
+            true,
+            Box::new(move || {
+                let Some(shell) = SHELL.with(|cell| cell.borrow().clone()) else {
+                    return;
+                };
+                if missing {
+                    session_update(|s| s.recent.remove(&path));
+                    refresh_recent(&shell);
+                } else if let Err(e) = load(&shell, &path) {
+                    diag::error_box(&e);
+                } else {
+                    shell.show();
+                }
+            }),
+        );
+    }
+    add(
+        "Clear recent files",
+        true,
+        Box::new(|| {
+            session_update(|s| s.recent.clear());
+            if let Some(shell) = SHELL.with(|cell| cell.borrow().clone()) {
+                refresh_recent(&shell);
+            }
+        }),
+    );
 }
 
 /// Every 800 ms: reload the open file when it changed on disk (keeping the scroll offset), and
@@ -916,6 +1011,11 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
     menu.Items()?.Append(&outline)?;
     *shell.outline_menu.borrow_mut() = Some(outline);
 
+    let recent = MenuBarItem::new()?;
+    recent.SetTitle("Recent")?;
+    menu.Items()?.Append(&recent)?;
+    *shell.recent_menu.borrow_mut() = Some(recent);
+
     let view = MenuBarItem::new()?;
     view.SetTitle("View")?;
     for (title, theme) in [("Light theme", LIGHT), ("Dark theme", DARK)] {
@@ -926,6 +1026,12 @@ fn build_menu(shell: &Rc<Shell>) -> Result<()> {
             target.renderer.borrow_mut().set_theme(theme);
             _ = set_root_background(&target.root, theme);
             _ = set_chrome_theme(&target.root, theme);
+            let choice = if theme.name == DARK.name {
+                mdview_core::session::Theme::Dark
+            } else {
+                mdview_core::session::Theme::Light
+            };
+            session_update(|s| s.theme = choice);
             target.show();
         })?
         .forget();
@@ -1056,6 +1162,7 @@ pub fn build(
         copy_test: Cell::new(startup.copy),
         zoom_test: Cell::new(startup.zoom),
         outline_menu: RefCell::new(None),
+        recent_menu: RefCell::new(None),
         outline_entries: Cell::new(0),
     });
     if let Some(path) = &file
@@ -1063,6 +1170,7 @@ pub fn build(
     {
         diag::error_box(&e);
     }
+    refresh_recent(&shell);
 
     let framework: FrameworkElement = panel.cast()?;
     {
