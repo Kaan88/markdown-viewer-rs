@@ -53,6 +53,15 @@ pub fn parse(src: &str) -> Document {
     } else {
         src
     };
+    // GitHub's `$`x`$` inline math is rewritten to `$x$` before parsing.
+    let github;
+    let src = match github_math(src) {
+        Cow::Owned(rewritten) => {
+            github = rewritten;
+            github.as_str()
+        }
+        Cow::Borrowed(same) => same,
+    };
     let protected = autolink::protect_url_delimiters(src);
     let restore = matches!(protected, Cow::Owned(_));
     if memchr::memchr(b'$', protected.as_bytes()).is_none() {
@@ -68,6 +77,60 @@ pub fn parse(src: &str) -> Document {
         return parse_with_checks(protected, restore, rejected);
     }
     parse_with_checks(protected, restore, Vec::new())
+}
+
+/// GitHub writes inline math as ``$`x`$`` so that Markdown cannot touch the formula. This rewrites
+/// each such pair on one line to `$x$`, outside fenced code. A formula containing `$` or a backtick
+/// is left alone. Documents without the two-character opener are not copied.
+fn github_math(src: &str) -> Cow<'_, str> {
+    if memchr::memmem::find(src.as_bytes(), b"$`").is_none() {
+        return Cow::Borrowed(src);
+    }
+    let mut out = String::with_capacity(src.len());
+    let mut fence: Option<(char, usize)> = None;
+    let mut changed = false;
+    for line in src.split_inclusive('\n') {
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        let rest = line[indent..].trim_end_matches(['\n', '\r']);
+        let marker = rest.chars().next().filter(|c| matches!(c, '`' | '~'));
+        let run = marker.map_or(0, |m| rest.chars().take_while(|&c| c == m).count());
+        match (fence, marker) {
+            (Some((m, n)), Some(c)) if indent < 4 && c == m && run >= n && rest[run..].trim().is_empty() => {
+                fence = None;
+            }
+            (None, Some(c)) if indent < 4 && run >= 3 && !(c == '`' && rest[run..].contains('`')) => {
+                fence = Some((c, run));
+            }
+            _ => {}
+        }
+        if fence.is_some() || marker.is_some() && run >= 3 || !line.contains("$`") {
+            out.push_str(line);
+            continue;
+        }
+        let mut at = 0;
+        while let Some(open) = line[at..].find("$`").map(|i| at + i) {
+            let body = open + 2;
+            let close = line[body..].find("`$").map(|i| body + i);
+            match close {
+                Some(close)
+                    if close > body && !line[body..close].contains(['`', '$']) =>
+                {
+                    out.push_str(&line[at..open]);
+                    out.push('$');
+                    out.push_str(&line[body..close]);
+                    out.push('$');
+                    at = close + 2;
+                    changed = true;
+                }
+                _ => {
+                    out.push_str(&line[at..body]);
+                    at = body;
+                }
+            }
+        }
+        out.push_str(&line[at..]);
+    }
+    if changed { Cow::Owned(out) } else { Cow::Borrowed(src) }
 }
 
 /// Passes that may hide rejected delimiters before the rest are shown as literal text. The first

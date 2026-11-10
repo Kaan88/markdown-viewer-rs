@@ -3083,3 +3083,16 @@ fn find_matches_a_crlf_line_break() {
     assert_eq!(find(&d, "foo").hits.len(), 1);
     assert_eq!(find(&d, "foo\nbar").hits.len(), 0);
 }
+
+#[test]
+fn github_backtick_math_is_inline_math() {
+    let d = parse("Euler: $`e^{i\\pi} + 1 = 0`$ and ($`a_b`$) done");
+    assert_eq!(math_spans(&d), vec!["e^{i\\pi} + 1 = 0", "a_b"], "{:?}", math_spans(&d));
+    // Inside a fence it is code, untouched.
+    let d = parse("```\n$`x`$\n```\n");
+    assert!(math_spans(&d).is_empty());
+    assert!(d.block_text(0).contains("$`x`$"), "{:?}", d.block_text(0));
+    // An unpaired opener or a formula with a `$` inside stays as written.
+    let d = parse("cost $`5 and $`a$b`$ here");
+    assert!(math_spans(&d).is_empty(), "{:?}", math_spans(&d));
+}
