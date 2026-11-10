@@ -779,8 +779,11 @@ Qt's event path instead).
      The session (`tabs`, `active`, `recent`) is saved after every open, close and move, not only on
      exit, and saved tabs reopen at startup, missing ones with the not-found text. `MDVIEW_SETTINGS`
      names the file; `--no-session` turns it off; scripted checks never touch the user's file.
-     `--tabs-test` checks it and passes on Windows and on the VM (xvfb). Not done yet: the tab
-     context menu, the Manage recent dialog, and session restore of theme and zoom.
+     `--tabs-test` checks it and passes on Windows and on the VM (xvfb). A right-click tab
+     menu (Close tab, Close other tabs, Copy file path, Show in file manager: `explorer /select,` on
+     Windows, the folder through `openUrl` elsewhere) was added 2026-11-10; `--tabs-test` covers it and passes on Linux (offscreen) and on
+     the WinApps Windows 11 VM (the menu is built and popped, not clicked). Not done yet: the Manage recent dialog, and session restore of theme
+     and zoom.
    - **WinUI tabs: not started.** It needs `TabView` bindings in `bins/mdv-winui`; the same `Page`
      swap should carry over.
 3. **Bundled fonts**: the user chose on 2026-11-08 to decide later, so system fonts stay for now.

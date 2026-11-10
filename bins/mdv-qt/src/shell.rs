@@ -73,6 +73,8 @@ struct Shell {
     tab_bar: Cell<Option<H<QTabBar>>>,
     /// Set while the shell changes the tab bar itself, so its signals do not re-enter.
     tabs_busy: Cell<bool>,
+    /// The tab context menu, created on first use and rebuilt for each right click.
+    tab_popup: Cell<Option<H<QMenu>>>,
     recent: RefCell<Recents>,
     /// The saved session, kept so keys this shell does not use round-trip. `None` with the
     /// session off (`--no-session` and the scripted checks).
@@ -125,6 +127,7 @@ impl Shell {
             current: Cell::new(None),
             tab_bar: Cell::new(None),
             tabs_busy: Cell::new(false),
+            tab_popup: Cell::new(None),
             recent: RefCell::new(Recents::default()),
             session: RefCell::new(None),
             window: Cell::new(None),
@@ -541,6 +544,46 @@ impl Shell {
             self.activate(next.unwrap_or(index).min(last));
         }
         self.save_session();
+    }
+
+    /// Closes every tab but `keep`, last first so the indices ahead stay valid.
+    fn close_others(&self, keep: usize) {
+        let count = self.pages.borrow().len();
+        for index in (0..count).rev() {
+            if index != keep {
+                self.close_tab(index);
+            }
+        }
+    }
+
+    /// The tab context menu: shown over a tab only, as in the original.
+    fn tab_menu(self: &Rc<Self>, tab: Option<usize>, at: (i32, i32)) {
+        let Some(index) = tab.filter(|&i| i < self.pages.borrow().len()) else {
+            return;
+        };
+        let menu = match self.tab_popup.get() {
+            Some(menu) => menu,
+            None => {
+                let menu = H::<QMenu>::new_popup();
+                self.tab_popup.set(Some(menu));
+                menu
+            }
+        };
+        menu.clear();
+        let path = self.pages.borrow()[index].path.clone();
+        let s = self.clone();
+        menu.add_action("&Close tab").on_triggered(move |_| s.close_tab(index));
+        let others = menu.add_action("Close &other tabs");
+        others.set_enabled(self.pages.borrow().len() > 1);
+        let s = self.clone();
+        others.on_triggered(move |_| s.close_others(index));
+        menu.add_separator();
+        let copy_path = path.clone();
+        menu.add_action("Copy file &path")
+            .on_triggered(move |_| set_clipboard(&copy_path.display().to_string()));
+        menu.add_action("&Show in file manager")
+            .on_triggered(move |_| reveal_in_file_manager(&path));
+        menu.popup(at);
     }
 
     fn close_all(&self) {
@@ -1255,6 +1298,17 @@ enum Check {
     Tabs,
 }
 
+/// Opens the folder holding `path`, with the file selected where the platform supports it.
+fn reveal_in_file_manager(path: &Path) {
+    if cfg!(windows) {
+        let _ = std::process::Command::new("explorer.exe")
+            .arg(format!("/select,{}", path.display()))
+            .spawn();
+    } else if let Some(parent) = path.parent() {
+        open_url(&parent.display().to_string());
+    }
+}
+
 /// `--tabs-test`: with one document open, opens `linked.md` beside it, switches back by opening the
 /// first again, cycles with Ctrl+Tab, closes both, and checks tabs, scroll, labels and Recent.
 fn run_tabs_check(shell: &Rc<Shell>) -> ! {
@@ -1301,6 +1355,19 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
         "move did not carry the current tab".into(),
     );
     shell.tab_moved(0, 1);
+    shell.tab_menu(Some(0), (20, 20)); // builds and pops the menu; must not crash or change tabs
+    shell.tab_menu(None, (20, 20));
+    expect(shell.pages.borrow().len() == 2, "tab menu changed the tabs".into());
+    // "Close other tabs" from the first tab's menu leaves just that tab; reopen the second.
+    shell.close_others(0);
+    expect(
+        shell.pages.borrow().len() == 1 && bar.count() == 1 && shell.current.get() == Some(0),
+        "Close other tabs".into(),
+    );
+    shell.open(&other);
+    expect(shell.pages.borrow().len() == 2 && shell.current.get() == Some(1), "reopen".into());
+    shell.open(&first); // keeps `first` the most recent, as the Recent check below expects
+    shell.activate(1);
     shell.control_key(KEY_W, false);
     expect(
         shell.pages.borrow().len() == 1
@@ -1721,6 +1788,8 @@ fn build(
             s.tab_moved(from, to);
         }
     });
+    let s = shell.clone();
+    tabs.on_context_menu(move |tab, at| s.tab_menu(tab, at));
     shell.tab_bar.set(Some(tabs));
     let central = new_plain_widget();
     layout_column(central, tabs.widget(), page);

@@ -25,6 +25,7 @@ pub mod ffi {
         type Orientation = crate::qt::Orientation;
         type FocusPolicy = crate::qt::FocusPolicy;
         type CursorShape = crate::qt::CursorShape;
+        type ContextMenuPolicy = crate::qt::ContextMenuPolicy;
     }
 
     #[namespace = "QClipboard"]
@@ -194,6 +195,9 @@ pub mod ffi {
         #[cxx_name = "tabMoved"]
         fn tab_moved(self: Pin<&mut QTabBar>, from: i32, to: i32);
         #[qsignal]
+        #[cxx_name = "customContextMenuRequested"]
+        fn custom_context_menu_requested(self: Pin<&mut QWidget>, pos: &QPoint);
+        #[qsignal]
         #[cxx_name = "aboutToShow"]
         fn about_to_show(self: Pin<&mut QMenu>);
 
@@ -356,6 +360,8 @@ pub mod ffi {
         fn new_ptr() -> *mut QTabWidget;
         #[rust_name = "new_tab_bar"]
         fn new_ptr() -> *mut QTabBar;
+        #[rust_name = "new_menu"]
+        fn new_ptr() -> *mut QMenu;
         #[rust_name = "new_line_edit"]
         fn new_ptr() -> *mut QLineEdit;
         #[rust_name = "new_tree"]
@@ -455,6 +461,10 @@ pub mod ffi {
         fn setMaximumWidth(self: Pin<&mut QWidget>, w: i32);
         fn setFocusPolicy(self: Pin<&mut QWidget>, p: FocusPolicy);
         fn setFocus(self: Pin<&mut QWidget>);
+        fn setContextMenuPolicy(self: Pin<&mut QWidget>, p: ContextMenuPolicy);
+        fn mapToGlobal(self: &QWidget, p: &QPoint) -> QPoint;
+        fn tabAt(self: &QTabBar, p: &QPoint) -> i32;
+        unsafe fn popup(self: Pin<&mut QMenu>, p: &QPoint, at: *mut QAction);
         fn setCursor(self: Pin<&mut QWidget>, cursor: &QCursor);
         fn windowHandle(self: &QWidget) -> *mut QWindow;
         fn devicePixelRatioF(self: &QWidget) -> f64;

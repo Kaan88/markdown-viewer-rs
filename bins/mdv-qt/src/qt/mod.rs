@@ -36,6 +36,7 @@ trivial_cxx!(Alignment, "Qt::Alignment");
 trivial_cxx!(Orientation, "Qt::Orientation");
 trivial_cxx!(FocusPolicy, "Qt::FocusPolicy");
 trivial_cxx!(CursorShape, "Qt::CursorShape");
+trivial_cxx!(ContextMenuPolicy, "Qt::ContextMenuPolicy");
 trivial_cxx!(ClipboardMode, "QClipboard::Mode");
 /// `QClipboard::Clipboard`, the system clipboard (not the X11 selection).
 const CLIPBOARD: ClipboardMode = ClipboardMode(0);
@@ -655,6 +656,16 @@ impl H<QMenuBar> {
     }
 }
 impl H<QMenu> {
+    /// A free-standing menu for `popup`; it lives until the process exits, like the other handles.
+    pub fn new_popup() -> Self {
+        H(new_menu())
+    }
+    /// Shows the menu at global point `at` without blocking.
+    pub fn popup(&self, at: (i32, i32)) {
+        unsafe { pin!(self).popup(&QPoint::new(at.0, at.1), std::ptr::null_mut()) }
+    }
+}
+impl H<QMenu> {
     pub fn add_action(&self, t: &str) -> H<QAction> {
         H(pin!(self).addAction(&qs(t)))
     }
@@ -783,6 +794,21 @@ impl H<QTabBar> {
         let mut f = GuiThreadOnly(f);
         pin!(self)
             .on_tab_close_requested(move |_, i| f.get()(i))
+            .release();
+    }
+    /// A right click: the tab under the point (`None` on empty bar) and the point in global
+    /// coordinates, where a menu belongs.
+    pub fn on_context_menu(&self, mut f: impl FnMut(Option<usize>, (i32, i32)) + 'static) {
+        let widget = self.widget();
+        pin!(widget).setContextMenuPolicy(ContextMenuPolicy(2)); // Qt::CustomContextMenu
+        let bar = *self;
+        let mut f = GuiThreadOnly(move |p: &QPoint| {
+            let tab = usize::try_from(unsafe { &*bar.0 }.tabAt(p)).ok();
+            let g = unsafe { &*widget.0 }.mapToGlobal(p);
+            f(tab, (g.x(), g.y()));
+        });
+        pin!(widget)
+            .on_custom_context_menu_requested(move |_, p| f.get()(p))
             .release();
     }
     pub fn on_moved(&self, f: impl FnMut(i32, i32) + 'static) {
