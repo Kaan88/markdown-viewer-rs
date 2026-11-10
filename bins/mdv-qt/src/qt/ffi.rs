@@ -463,6 +463,8 @@ pub mod ffi {
 
         // QWidget
         fn show(self: Pin<&mut QWidget>);
+        fn raise(self: Pin<&mut QWidget>);
+        fn activateWindow(self: Pin<&mut QWidget>);
         fn update(self: Pin<&mut QWidget>);
         fn repaint(self: Pin<&mut QWidget>);
         fn resize(self: Pin<&mut QWidget>, w: i32, h: i32);

@@ -459,6 +459,11 @@ impl H<QWidget> {
     pub fn resize(&self, w: i32, h: i32) {
         pin!(self).resize(w, h)
     }
+    /// Brings the window to the front (a request; Wayland may only flash it).
+    pub fn bring_to_front(&self) {
+        pin!(self).raise();
+        pin!(self).activateWindow();
+    }
     pub fn set_title(&self, t: &str) {
         pin!(self).setWindowTitle(&qs(t))
     }

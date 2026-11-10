@@ -976,6 +976,11 @@ impl Shell {
             .as_ref()
             .map(|r| r.try_iter().collect())
             .unwrap_or_default();
+        if !sent.is_empty() {
+            if let Some(window) = self.window.get() {
+                window.widget().bring_to_front();
+            }
+        }
         for path in sent {
             self.open(&path);
         }
