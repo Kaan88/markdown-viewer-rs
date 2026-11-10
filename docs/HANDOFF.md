@@ -835,3 +835,21 @@ Markdown as an openable type and never sets a default. Built here on 2026-11-10 
 panic messages). Not installed or launched from the package yet. Still open for Phase 6: PGO, the
 allocator check, the Inno Setup installer and the all-four-extensions Windows registration.
 
+## 14. Updates and installers (foundation only)
+
+Written 2026-11-10 by two delegated agents and reviewed here; **none of it has been run end to end**.
+
+- `crates/core/src/update.rs`: `Version`, strict line-based `UpdateManifest`, `newer`, SHA-256 verify
+  (own implementation, 10 unit tests pass). No network code; the shells will download.
+- `docs/UPDATE.md`: the design for both platforms and the manifest format.
+- `packaging/windows/mdview.iss` and `build-installer.ps1`: Inno Setup script with a per-user
+  install, an optional file-association task (ProgID `mdview.Markdown` under each extension's
+  `OpenWithProgids`; it never writes an extension's default value), and a Windows App Runtime 2.6.4
+  check that downloads Microsoft's installer and checks its signature. Never compiled: no
+  `ISCC.exe` here, and the Inno 7 syntax is unchecked.
+- `packaging/appimage/`: `build-appimage.sh` (`--appdir-only` works and its `usr/bin/mdview
+  --tabs-test` passes offscreen), `update-check.sh`, desktop file, placeholder icon. linuxdeploy and
+  the Qt plugin are not installed, so no AppImage has been built; `tools.sha256` is all `TODO`.
+- Still to do: the shells' update check (read the manifest, once per 24 h, opt-out), the installer
+  run on Windows, and an actual AppImage build.
+

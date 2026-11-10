@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=mdview
+GenericName=Markdown viewer
+Comment=A fast, read-only Markdown viewer
+Exec=mdview %F
+Icon=mdview
+Terminal=false
+Categories=Utility;Viewer;TextEditor;
+MimeType=text/markdown;text/x-markdown;
+StartupNotify=false

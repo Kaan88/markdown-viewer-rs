@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Placeholder icon: replace with real artwork before a public release. -->
+  <rect x="16" y="48" width="224" height="160" rx="24" fill="#2b5fab"/>
+  <path d="M56 176V80h24l24 32 24-32h24v96h-24v-56l-24 32-24-32v56zM184 144h-20l32 32 32-32h-20V80h-24z" fill="#fff"/>
+</svg>

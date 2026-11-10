@@ -36,6 +36,15 @@ pub fn parse(src: &str) -> Document {
             ..Document::default()
         };
     }
+    // YAML front matter becomes a table (or a yaml block) before anything else sees the source.
+    let with_front;
+    let src = match crate::frontmatter::take(src) {
+        Some((head, used)) => {
+            with_front = format!("{head}{}", &src[used..]);
+            with_front.as_str()
+        }
+        None => src,
+    };
     // CommonMark requires this, and pulldown-cmark leaves NUL in its text events.
     let no_nul;
     let src = if memchr::memchr(0, src.as_bytes()).is_some() {
