@@ -6,6 +6,16 @@
 //! memory, then exits; `--trace` writes startup checkpoints to `mdview.trace.log` beside the exe.
 #![windows_subsystem = "windows"]
 
+mod bar;
+#[allow(
+    clippy::all,
+    dead_code,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unused_imports
+)]
+mod bar_bindings;
 #[allow(
     clippy::all,
     dead_code,

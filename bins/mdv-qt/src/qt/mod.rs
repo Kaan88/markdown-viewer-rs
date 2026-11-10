@@ -39,6 +39,20 @@ trivial_cxx!(CursorShape, "Qt::CursorShape");
 trivial_cxx!(ContextMenuPolicy, "Qt::ContextMenuPolicy");
 trivial_cxx!(FileMode, "QFileDialog::FileMode");
 trivial_cxx!(ClipboardMode, "QClipboard::Mode");
+trivial_cxx!(SizePolicy, "QSizePolicy::Policy");
+trivial_cxx!(WindowType, "Qt::WindowType");
+trivial_cxx!(ToolBarArea, "Qt::ToolBarArea");
+const FRAMELESS: WindowType = WindowType(0x0800); // Qt::FramelessWindowHint
+const TOP_TOOLBAR: ToolBarArea = ToolBarArea(0x4); // Qt::TopToolBarArea
+const EV_MOUSE_DOUBLE_CLICK: u32 = 4;
+
+thread_local! {
+    /// The title row's drag area; a press there moves the window, a double click maximizes.
+    static TITLE_DRAG: std::cell::Cell<(*mut QObject, *mut QWidget)> =
+        const { std::cell::Cell::new((std::ptr::null_mut(), std::ptr::null_mut())) };
+}
+const SIZE_PREFERRED: SizePolicy = SizePolicy(5); // QSizePolicy::Preferred
+const SIZE_EXPANDING: SizePolicy = SizePolicy(7); // QSizePolicy::Expanding
 /// `QClipboard::Clipboard`, the system clipboard (not the X11 selection).
 const CLIPBOARD: ClipboardMode = ClipboardMode(0);
 
@@ -281,9 +295,22 @@ impl Canvas {
     unsafe fn timer_event(self: Pin<&mut Self>, e: *mut QTimerEvent) {
         self.handler().timer((*e).timerId());
     }
-    unsafe fn event_filter(self: Pin<&mut Self>, _w: *mut QObject, e: *mut QEvent) -> bool {
-        if (*e).event_type().0 == EV_UPDATE_REQUEST {
+    unsafe fn event_filter(self: Pin<&mut Self>, w: *mut QObject, e: *mut QEvent) -> bool {
+        let kind = (*e).event_type().0;
+        if kind == EV_UPDATE_REQUEST {
             self.handler().update_request();
+        }
+        let (drag, widget) = TITLE_DRAG.with(|d| d.get());
+        if !drag.is_null() && w == drag {
+            let window = H(widget).top_level();
+            if kind == EV_MOUSE_PRESS {
+                window.start_move();
+                return true;
+            }
+            if kind == EV_MOUSE_DOUBLE_CLICK {
+                window.toggle_maximized();
+                return true;
+            }
         }
         false
     }
@@ -479,6 +506,14 @@ impl H<Canvas> {
     pub fn watch(&self, window: H<QWindow>) {
         let me = unsafe { <QWidget as Upcast<QObject>>::upcast_ptr(self.widget().0) }.cast_mut();
         unsafe { pin!(window).installEventFilter(me) };
+    }
+    /// Makes `drag` the title row's drag area: a press there moves the window and a double click
+    /// maximizes or restores it (see `event_filter`).
+    pub fn watch_title_drag(&self, drag: H<QWidget>) {
+        let me = unsafe { <QWidget as Upcast<QObject>>::upcast_ptr(self.widget().0) }.cast_mut();
+        let target = unsafe { <QWidget as Upcast<QObject>>::upcast_ptr(drag.0) }.cast_mut();
+        TITLE_DRAG.with(|d| d.set((target, drag.0)));
+        unsafe { pin!(drag).widget_install_event_filter(me) };
     }
 }
 
@@ -796,11 +831,80 @@ impl H<QAction> {
     pub fn trigger(&self) {
         pin!(self).trigger()
     }
+    pub fn set_text(&self, t: &str) {
+        pin!(self).action_set_text(&qs(t))
+    }
 }
 impl H<QToolBar> {
     pub fn add_widget(&self, w: H<QWidget>) {
         unsafe { pin!(self).addWidget(w.0) };
     }
+    pub fn set_movable(&self, on: bool) {
+        pin!(self).toolbar_set_movable(on)
+    }
+    pub fn add_separator(&self) {
+        pin!(self).toolbar_add_separator();
+    }
+    /// An empty widget that takes all spare width, so what follows sits at the right edge.
+    pub fn add_spacer(&self) -> H<QWidget> {
+        let spacer = H(new_widget());
+        pin!(spacer).set_size_policy(SIZE_EXPANDING, SIZE_PREFERRED);
+        self.add_widget(spacer);
+        spacer
+    }
+    /// Global coordinates of the bottom-left corner of `action`'s button, where its menu opens.
+    pub fn below(&self, action: H<QAction>) -> Option<(i32, i32)> {
+        let button = unsafe { (*self.0).toolbar_widget_for_action(action.0) };
+        if button.is_null() {
+            return None;
+        }
+        let button = unsafe { &*button };
+        let p = button.mapToGlobal(&QPoint::new(0, button.height()));
+        Some((p.x(), p.y()))
+    }
+}
+impl H<QMainWindow> {
+    /// Starts a new row of toolbars, so the next one goes under the ones added so far.
+    pub fn add_tool_bar_break(&self) {
+        pin!(self).add_tool_bar_break(TOP_TOOLBAR)
+    }
+}
+impl H<QWidget> {
+    /// Drops the system title bar; the window draws its own title row.
+    pub fn set_frameless(&self) {
+        pin!(self).set_window_flag(FRAMELESS, true)
+    }
+    pub fn top_level(&self) -> H<QWidget> {
+        H(unsafe { &*self.0 }.window())
+    }
+    pub fn minimize(&self) {
+        pin!(self).show_minimized()
+    }
+    pub fn toggle_maximized(&self) {
+        if unsafe { &*self.0 }.is_maximized() {
+            pin!(self).show_normal()
+        } else {
+            pin!(self).show_maximized()
+        }
+    }
+    pub fn close(&self) {
+        pin!(self).close_widget();
+    }
+    /// Hands the window to the system to move with the mouse, as a title bar press does.
+    pub fn start_move(&self) {
+        let window = unsafe { &*self.0 }.windowHandle();
+        if !window.is_null() {
+            unsafe { Pin::new_unchecked(&mut *window) }.start_system_move();
+        }
+    }
+    pub fn set_tool_tip(&self, t: &str) {
+        pin!(self).set_tool_tip(&qs(t))
+    }
+    pub fn set_fixed_width(&self, w: i32) {
+        pin!(self).set_fixed_width(w)
+    }
+}
+impl H<QToolBar> {
     pub fn add_action(&self, t: &str) -> H<QAction> {
         H(pin!(self).add_toolbar_action(&qs(t)))
     }
@@ -851,7 +955,9 @@ impl H<QTabBar> {
         pin!(bar).bar_set_document_mode(true);
         pin!(bar).bar_set_closable(true);
         pin!(bar).bar_set_movable(true);
-        pin!(bar).bar_set_auto_hide(true);
+        // Always shown: the tabs live in the title row, and a toolbar does not re-show a widget it
+        // saw hidden, so auto-hide would lose them.
+        pin!(bar).bar_set_auto_hide(false);
         pin!(bar).bar_set_expanding(false);
         bar.widget().set_focus_policy(0); // Qt::NoFocus: keys stay with the page
         bar

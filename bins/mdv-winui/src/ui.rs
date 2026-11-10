@@ -375,7 +375,7 @@ struct Shell {
     /// scripted checks unless `MDVIEW_SETTINGS` is set).
     session: RefCell<Option<(PathBuf, Session)>>,
     /// The Recent menu, rebuilt whenever Recent changes.
-    recent_menu: RefCell<Option<MenuBarItem>>,
+    recent_menu: RefCell<Option<MenuFlyout>>,
     /// Run the tabs check after the first frame, for `--tabs-test`.
     tabs_test: Cell<bool>,
     /// What the showing tab's file looked like when last read; the 800 ms poll compares against it.
@@ -409,8 +409,14 @@ struct Shell {
     /// Run the clipboard check after the first frame, for `--copy-test`.
     copy_test: Cell<bool>,
     /// The Outline menu, rebuilt when a document loads.
-    outline_menu: RefCell<Option<MenuBarItem>>,
+    outline_menu: RefCell<Option<MenuFlyout>>,
     outline_entries: Cell<usize>,
+    /// The command bar's zoom percentage, find box and find status.
+    zoom_label: RefCell<Option<crate::bar_bindings::TextBlock>>,
+    find_box: RefCell<Option<crate::bar_bindings::ITextBox>>,
+    find_status: RefCell<Option<crate::bar_bindings::TextBlock>>,
+    /// The find box has the keyboard, so typed characters are its own, not the page's.
+    find_box_focused: Cell<bool>,
 }
 
 impl Shell {
@@ -545,6 +551,7 @@ impl Shell {
         let next = ((next * 10.0).round() / 10.0).clamp(0.6, 2.5);
         if (next - now).abs() > 1e-4 {
             self.renderer.borrow_mut().set_zoom(next);
+            self.refresh_zoom_label();
             if let Some((_, session)) = self.session.borrow_mut().as_mut() {
                 session.zoom = (next * 100.0).round() as u16;
             }
@@ -558,7 +565,7 @@ impl Shell {
     fn character(&self, wparam: usize) -> bool {
         {
             {
-                if !self.find_active.get() {
+                if !self.find_active.get() || self.find_box_focused.get() {
                     return false;
                 }
                 match wparam {
@@ -587,14 +594,33 @@ impl Shell {
     /// Ctrl+F: start a find. The next typed characters build the query; the title shows its state.
     fn find_open(&self) {
         self.find_active.set(true);
-        self.renderer.borrow_mut().find_update("");
+        let query = self
+            .find_box
+            .borrow()
+            .as_ref()
+            .and_then(|field| field.Text().ok())
+            .map(|text| text.to_string())
+            .unwrap_or_default();
+        self.renderer.borrow_mut().find_update(&query);
         self.refresh_find_title();
+        if let Some(field) = self.find_box.borrow().as_ref()
+            && let Ok(element) = field.cast::<UIElement>()
+        {
+            _ = crate::input::focus(&element, crate::input::FOCUS_PROGRAMMATIC);
+        }
         self.show();
     }
 
     fn find_close(&self) {
         self.find_active.set(false);
         self.renderer.borrow_mut().find_update("");
+        if let Some(field) = self.find_box.borrow().as_ref() {
+            _ = field.SetText("");
+        }
+        if let Some(status) = self.find_status.borrow().as_ref() {
+            _ = status.SetText("");
+        }
+        self.focus_page();
         let name = self
             .path
             .borrow()
@@ -607,6 +633,16 @@ impl Shell {
     }
 
     fn find_set_query(&self, query: String) {
+        // Typing on the page (find mode without the box focused) shows up in the box too.
+        if !self.find_box_focused.get()
+            && let Some(field) = self.find_box.borrow().as_ref()
+            && field
+                .Text()
+                .map(|t| t.to_string() != query)
+                .unwrap_or(false)
+        {
+            _ = field.SetText(&query);
+        }
         self.renderer.borrow_mut().find_update(&query);
         self.refresh_find_title();
         self.show();
@@ -658,6 +694,16 @@ impl Shell {
         _ = self
             .window
             .SetTitle(&format!("mdview - {name} — Find: {query} [{status}]"));
+        if let Some(label) = self.find_status.borrow().as_ref() {
+            _ = label.SetText(if query.is_empty() { "" } else { &status });
+        }
+    }
+
+    fn refresh_zoom_label(&self) {
+        if let Some(label) = self.zoom_label.borrow().as_ref() {
+            let percent = (self.renderer.borrow().zoom() * 100.0).round() as i32;
+            _ = label.SetText(&format!("{percent}%"));
+        }
     }
 
     /// Follows the link or footnote under a click. A `#fragment` scrolls here, another Markdown
@@ -1120,13 +1166,8 @@ impl Shell {
         }
     }
 
-    /// The strip shows only while a tab is open.
-    fn update_strip(&self) {
-        let any = !self.pages.borrow().is_empty();
-        if let Ok(element) = self.tab_view.cast::<UIElement>() {
-            _ = tabs::set_visible(&element, any);
-        }
-    }
+    /// The strip is the title bar (logo, tabs and the drag area), so it always shows.
+    fn update_strip(&self) {}
 
     /// The page shown with no tab open.
     fn show_empty(&self, status: &str) {
@@ -1721,6 +1762,10 @@ fn set_root_background(root: &Grid, theme: mdview_render::Theme) -> Result<()> {
 /// Rebuilds the Outline menu from the renderer's headings. Called after a document loads, because
 /// the menu is created once but its items depend on the document.
 fn refresh_outline(shell: &Shell) {
+    // The headings are counted even with no outline UI, so `--outline-test` checks the document.
+    shell
+        .outline_entries
+        .set(shell.renderer.borrow().headings().len());
     let Some(menu) = shell.outline_menu.borrow().clone() else {
         return;
     };
@@ -1758,138 +1803,192 @@ fn refresh_outline(shell: &Shell) {
     shell.outline_entries.set(headings.len());
 }
 
-fn build_menu(shell: &Rc<Shell>) -> Result<()> {
-    let menu = MenuBar::new()?;
-    let file = MenuBarItem::new()?;
-    file.SetTitle("File")?;
+/// Applies a theme choice from the Theme menu. `None` is the System choice: the page and chrome
+/// take the Windows app theme as read now, and the session records System so the next launch
+/// follows Windows again.
+fn choose_theme(shell: &Shell, choice: Option<mdview_render::Theme>) {
+    let theme = choice.unwrap_or_else(system_theme);
+    shell.renderer.borrow_mut().set_theme(theme);
+    _ = set_root_background(&shell.root, theme);
+    _ = set_chrome_theme(&shell.root, theme);
+    if let Some((_, session)) = shell.session.borrow_mut().as_mut() {
+        session.theme = match choice {
+            None => mdview_core::session::Theme::System,
+            Some(t) if t.name == DARK.name => mdview_core::session::Theme::Dark,
+            Some(_) => mdview_core::session::Theme::Light,
+        };
+    }
+    shell.save_session();
+    shell.show();
+}
 
-    let open = MenuFlyoutItem::new()?;
-    open.SetText("Open...\tCtrl+O")?;
+/// The command bar (layout A): Open, Reload, Recent | Files, Outline | zoom on the left; the find
+/// box, Theme and More on the right. It replaces the menu bar; every former menu entry is on a
+/// button or in one of these flyouts.
+fn build_bar(shell: &Rc<Shell>) -> Result<()> {
+    use crate::bar::{self, glyph};
+    let strip = Grid::new()?;
+    bar::column(&strip, GridUnitType::Star, 1.0)?;
+    bar::column(&strip, GridUnitType::Auto, 1.0)?;
+    bar::set_margin(&strip, 8.0, 8.0)?;
+    strip
+        .cast::<crate::bar_bindings::IFrameworkElement>()?
+        .SetHeight(48.0)?;
+
+    let left = bar::row()?;
+    let right = bar::row()?;
+
+    let open = bar::button(glyph::OPEN, Some("Open"), "Open a file (Ctrl+O)")?;
     let target = shell.clone();
-    open.Click(move |_, _| target.open_dialog())?.forget();
-    file.Items()?.Append(&open.cast::<MenuFlyoutItemBase>()?)?;
+    bar::on_click(&open, move || target.open_dialog())?;
+    bar::append(&left, &open)?;
 
-    let open_folder = MenuFlyoutItem::new()?;
-    open_folder.SetText("Open folder...\tCtrl+Shift+O")?;
+    let refresh = bar::button(glyph::RELOAD, None, "Reload (F5)")?;
     let target = shell.clone();
-    open_folder
-        .Click(move |_, _| target.open_folder_dialog())?
-        .forget();
-    file.Items()?
-        .Append(&open_folder.cast::<MenuFlyoutItemBase>()?)?;
+    bar::on_click(&refresh, move || reload(&target))?;
+    bar::append(&left, &refresh)?;
 
-    let close_tab = MenuFlyoutItem::new()?;
-    close_tab.SetText("Close tab\tCtrl+W")?;
-    let target = shell.clone();
-    close_tab
-        .Click(move |_, _| {
-            if let Some(current) = target.current.get() {
-                target.close_tab(current);
-            }
-        })?
-        .forget();
-    file.Items()?
-        .Append(&close_tab.cast::<MenuFlyoutItemBase>()?)?;
-
-    let close_all = MenuFlyoutItem::new()?;
-    close_all.SetText("Close all tabs\tCtrl+Shift+W")?;
-    let target = shell.clone();
-    close_all.Click(move |_, _| target.close_all())?.forget();
-    file.Items()?
-        .Append(&close_all.cast::<MenuFlyoutItemBase>()?)?;
-
-    let refresh = MenuFlyoutItem::new()?;
-    refresh.SetText("Reload")?;
-    let target = shell.clone();
-    refresh.Click(move |_, _| reload(&target))?.forget();
-    file.Items()?
-        .Append(&refresh.cast::<MenuFlyoutItemBase>()?)?;
-
-    let close = MenuFlyoutItem::new()?;
-    close.SetText("Exit")?;
-    let window = shell.window.clone();
-    close
-        .Click(move |_, _| {
-            _ = window.Close();
-        })?
-        .forget();
-    file.Items()?.Append(&close.cast::<MenuFlyoutItemBase>()?)?;
-    menu.Items()?.Append(&file)?;
-
-    let recent = MenuBarItem::new()?;
-    recent.SetTitle("Recent")?;
-    menu.Items()?.Append(&recent)?;
+    let recent_button = bar::button(glyph::RECENT, None, "Recent files")?;
+    let recent = MenuFlyout::new()?;
+    bar::set_menu(&recent_button, &recent)?;
+    bar::append(&left, &recent_button)?;
     *shell.recent_menu.borrow_mut() = Some(recent);
 
-    let edit = MenuBarItem::new()?;
-    edit.SetTitle("Edit")?;
-    let find = MenuFlyoutItem::new()?;
-    find.SetText("Find...\tCtrl+F")?;
-    let target = shell.clone();
-    find.Click(move |_, _| target.find_open())?.forget();
-    edit.Items()?.Append(&find.cast::<MenuFlyoutItemBase>()?)?;
-    let next = MenuFlyoutItem::new()?;
-    next.SetText("Find Next\tF3")?;
-    let target = shell.clone();
-    next.Click(move |_, _| target.find_step(1))?.forget();
-    edit.Items()?.Append(&next.cast::<MenuFlyoutItemBase>()?)?;
-    let previous = MenuFlyoutItem::new()?;
-    previous.SetText("Find Previous\tShift+F3")?;
-    let target = shell.clone();
-    previous.Click(move |_, _| target.find_step(-1))?.forget();
-    edit.Items()?
-        .Append(&previous.cast::<MenuFlyoutItemBase>()?)?;
-    let copy = MenuFlyoutItem::new()?;
-    copy.SetText("Copy\tCtrl+C")?;
-    let target = shell.clone();
-    copy.Click(move |_, _| target.copy_selection())?.forget();
-    edit.Items()?.Append(&copy.cast::<MenuFlyoutItemBase>()?)?;
-    menu.Items()?.Append(&edit)?;
+    bar::append(&left, &bar::separator()?)?;
 
-    let outline = MenuBarItem::new()?;
-    outline.SetTitle("Outline")?;
-    menu.Items()?.Append(&outline)?;
-    *shell.outline_menu.borrow_mut() = Some(outline);
+    let files = bar::button(glyph::FILES, None, "Files pane (Ctrl+B)")?;
+    let target = shell.clone();
+    bar::on_click(&files, move || target.toggle_files())?;
+    bar::append(&left, &files)?;
 
-    let view = MenuBarItem::new()?;
-    view.SetTitle("View")?;
-    // `None` is the System choice: the page and chrome take the Windows app theme as read now, and the
-    // session records System so the next launch follows Windows again.
+    bar::append(&left, &bar::separator()?)?;
+
+    let zoom_out = bar::button(glyph::ZOOM_OUT, None, "Zoom out (Ctrl+-)")?;
+    let target = shell.clone();
+    bar::on_click(&zoom_out, move || {
+        target.zoom_step(-1);
+    })?;
+    bar::append(&left, &zoom_out)?;
+    let zoom_label = bar::text("100%", 13.0)?;
+    zoom_label
+        .cast::<crate::bar_bindings::IFrameworkElement>()?
+        .SetMinWidth(44.0)?;
+    bar::set_margin(&zoom_label, 4.0, 4.0)?;
+    bar::append(&left, &zoom_label)?;
+    let zoom_in = bar::button(glyph::ZOOM_IN, None, "Zoom in (Ctrl+=)")?;
+    let target = shell.clone();
+    bar::on_click(&zoom_in, move || {
+        target.zoom_step(1);
+    })?;
+    bar::append(&left, &zoom_in)?;
+    *shell.zoom_label.borrow_mut() = Some(zoom_label);
+    shell.refresh_zoom_label();
+
+    // Right: find box with its status and step buttons, Theme, More.
+    let status = bar::text("", 12.0)?;
+    bar::set_margin(&status, 0.0, 6.0)?;
+    bar::append(&right, &status)?;
+    *shell.find_status.borrow_mut() = Some(status);
+    let field = bar::find_box()?;
+    {
+        let target = shell.clone();
+        field
+            .TextChanged(move |sender, _| {
+                let Some(sender) = sender.as_ref() else {
+                    return;
+                };
+                let Ok(field) = sender.cast::<crate::bar_bindings::ITextBox>() else {
+                    return;
+                };
+                let text = field.Text().map(|t| t.to_string()).unwrap_or_default();
+                diag::trace(&format!("find box text: {text:?}"));
+                if text == target.renderer.borrow().find_query() {
+                    return;
+                }
+                if !target.find_active.get() {
+                    if text.is_empty() {
+                        return;
+                    }
+                    target.find_active.set(true);
+                }
+                target.find_set_query(text);
+            })?
+            .forget();
+    }
+    {
+        let element: crate::bar_bindings::IUIElement = field.cast()?;
+        let target = shell.clone();
+        element
+            .GotFocus(move |_, _| {
+                diag::trace("find box focused");
+                target.find_box_focused.set(true)
+            })?
+            .forget();
+        let target = shell.clone();
+        element
+            .LostFocus(move |_, _| target.find_box_focused.set(false))?
+            .forget();
+    }
+    bar::append(&right, &field)?;
+    *shell.find_box.borrow_mut() = Some(field);
+
+    let previous = bar::button(glyph::UP, None, "Previous match (Shift+F3)")?;
+    let target = shell.clone();
+    bar::on_click(&previous, move || target.find_step(-1))?;
+    bar::append(&right, &previous)?;
+    let next = bar::button(glyph::DOWN, None, "Next match (F3)")?;
+    let target = shell.clone();
+    bar::on_click(&next, move || target.find_step(1))?;
+    bar::append(&right, &next)?;
+
+    bar::append(&right, &bar::separator()?)?;
+
+    let theme_button = bar::button(glyph::THEME, None, "Theme")?;
+    let theme_menu = MenuFlyout::new()?;
     for (title, choice) in [
         ("System theme", None),
         ("Light theme", Some(LIGHT)),
         ("Dark theme", Some(DARK)),
     ] {
-        let item = MenuFlyoutItem::new()?;
-        item.SetText(title)?;
         let target = shell.clone();
-        item.Click(move |_, _| {
-            let theme = choice.unwrap_or_else(system_theme);
-            target.renderer.borrow_mut().set_theme(theme);
-            _ = set_root_background(&target.root, theme);
-            _ = set_chrome_theme(&target.root, theme);
-            if let Some((_, session)) = target.session.borrow_mut().as_mut() {
-                session.theme = match choice {
-                    None => mdview_core::session::Theme::System,
-                    Some(t) if t.name == DARK.name => mdview_core::session::Theme::Dark,
-                    Some(_) => mdview_core::session::Theme::Light,
-                };
-            }
-            target.save_session();
-            target.show();
-        })?
-        .forget();
-        view.Items()?.Append(&item.cast::<MenuFlyoutItemBase>()?)?;
+        bar::menu_item(&theme_menu, title, move || choose_theme(&target, choice))?;
     }
-    let files = MenuFlyoutItem::new()?;
-    files.SetText("Files panel\tCtrl+B")?;
-    let target = shell.clone();
-    files.Click(move |_, _| target.toggle_files())?.forget();
-    view.Items()?.Append(&files.cast::<MenuFlyoutItemBase>()?)?;
-    menu.Items()?.Append(&view)?;
+    bar::set_menu(&theme_button, &theme_menu)?;
+    bar::append(&right, &theme_button)?;
 
-    place(&shell.root, &menu, 0, 0)?;
-    Grid::SetColumnSpan(&menu.cast::<FrameworkElement>()?, 2)?;
+    let more_button = bar::button(glyph::MORE, None, "More options")?;
+    let more = MenuFlyout::new()?;
+    let target = shell.clone();
+    bar::menu_item(&more, "Open folder...	Ctrl+Shift+O", move || {
+        target.open_folder_dialog()
+    })?;
+    let target = shell.clone();
+    bar::menu_item(&more, "Close tab	Ctrl+W", move || {
+        if let Some(current) = target.current.get() {
+            target.close_tab(current);
+        }
+    })?;
+    let target = shell.clone();
+    bar::menu_item(&more, "Close all tabs	Ctrl+Shift+W", move || {
+        target.close_all()
+    })?;
+    let target = shell.clone();
+    bar::menu_item(&more, "Copy	Ctrl+C", move || target.copy_selection())?;
+    let target = shell.clone();
+    bar::menu_item(&more, "Actual size	Ctrl+0", move || {
+        target.zoom_step(0);
+    })?;
+    let window = shell.window.clone();
+    bar::menu_item(&more, "Exit", move || {
+        _ = window.Close();
+    })?;
+    bar::set_menu(&more_button, &more)?;
+    bar::append(&right, &more_button)?;
+
+    place(&strip, &left, 0, 0)?;
+    place(&strip, &right, 0, 1)?;
+    place(&shell.root, &strip, 1, 0)?;
+    Grid::SetColumnSpan(&strip.cast::<FrameworkElement>()?, 2)?;
     refresh_outline(shell);
     refresh_recent(shell);
     Ok(())
@@ -1956,8 +2055,8 @@ pub fn build(
     set_window_size(startup.size.0, startup.size.1);
 
     let root = Grid::new()?;
-    add_row(&root, GridUnitType::Auto, 1.0)?; // menu
-    add_row(&root, GridUnitType::Auto, 1.0)?; // tabs
+    add_row(&root, GridUnitType::Auto, 1.0)?; // title bar: logo, tabs, drag area
+    add_row(&root, GridUnitType::Auto, 1.0)?; // command bar
     add_row(&root, GridUnitType::Star, 1.0)?; // page
     // Column 0 holds the Files pane (0 wide until a folder is open); column 1 the tabs and the page.
     let tree_column = ColumnDefinition::new()?;
@@ -1999,13 +2098,22 @@ pub fn build(
     let tab_view = TabView::new()?;
     tabs::set_add_tab_button_visible(&tab_view, false)?;
     tabs::set_can_reorder_tabs(&tab_view, true)?;
-    tabs::set_visible(&tab_view.cast::<UIElement>()?, false)?;
-    place(&root, &tab_view, 1, 1)?;
+    // The strip is the window's title bar: the logo as its header, the tabs, and an empty footer
+    // that is the drag area (it fills the rest of the row, under the caption buttons).
+    tab_view
+        .cast::<crate::bar_bindings::ITabView>()?
+        .SetTabStripHeader(&crate::bar::brand()?)?;
+    let drag = Grid::new()?;
+    drag.cast::<crate::bar_bindings::IFrameworkElement>()?
+        .SetMinWidth(160.0)?;
+    crate::bar::set_tab_strip_footer(&tab_view, &drag)?;
+    place(&root, &tab_view, 0, 0)?;
+    Grid::SetColumnSpan(&tab_view.cast::<FrameworkElement>()?, 2)?;
+    crate::bar::extend_into_title_bar(&window, &drag)?;
 
     let tree = TreeView::new()?;
     tabs::set_visible(&tree.cast::<UIElement>()?, false)?;
-    place(&root, &tree, 1, 0)?;
-    Grid::SetRowSpan(&tree.cast::<FrameworkElement>()?, 2)?;
+    place(&root, &tree, 2, 0)?;
 
     let gpu = gpu
         .join()
@@ -2063,6 +2171,10 @@ pub fn build(
         copy_test: Cell::new(startup.copy),
         outline_menu: RefCell::new(None),
         outline_entries: Cell::new(0),
+        zoom_label: RefCell::new(None),
+        find_box: RefCell::new(None),
+        find_status: RefCell::new(None),
+        find_box_focused: Cell::new(false),
     });
     let framework: FrameworkElement = panel.cast()?;
     {
@@ -2224,7 +2336,7 @@ pub fn build(
     SHELL.with(|cell| *cell.borrow_mut() = Some(shell.clone()));
     // The poll runs on this thread's message loop; a null window means no HWND is needed.
     unsafe { SetTimer(std::ptr::null_mut(), 0, 800, poll_timer) };
-    build_menu(&shell)?;
+    build_bar(&shell)?;
     {
         let target = shell.clone();
         tabs::selection_changed(&tab_view, move || target.tab_selected())?.forget();
@@ -2295,19 +2407,20 @@ pub fn build(
     let root_element: UIElement = root.cast()?;
     {
         let shell = shell.clone();
-        // Shortcuts work from anywhere, including the menu bar. Ctrl+F moves focus to the page, so
-        // the query, Enter and Escape that follow go to find rather than to a menu item.
-        let page: UIElement = panel.cast()?;
+        // Shortcuts work from anywhere, including the command bar. Ctrl+F puts the keyboard in the
+        // find box (`find_open`); Enter there steps to the next match.
         crate::input::key_down(&root_element, move |_, args| {
             let Some(args) = args.as_ref() else { return };
             let ctrl = unsafe { GetKeyState(0x11) } < 0;
             let Ok(key) = args.key() else { return };
             let find_escape = key == 0x1b && shell.find_active.get();
+            if key == 0x0d && shell.find_box_focused.get() {
+                shell.find_step(1);
+                _ = args.set_handled(true);
+                return;
+            }
             if (ctrl || key == 0x72 || key == 0x74 || find_escape) && shell.key(key as usize) {
                 _ = args.set_handled(true);
-                if ctrl && key == 0x46 {
-                    _ = crate::input::focus(&page, crate::input::FOCUS_PROGRAMMATIC);
-                }
             }
         })?
         .forget();
@@ -2331,7 +2444,10 @@ pub fn build(
         crate::input::character_received(&root_element, move |_, args| {
             let Some(args) = args.as_ref() else { return };
             if let Ok(unit) = args.character()
-                && shell.character(unit as usize)
+                && {
+                    diag::trace(&format!("character {unit:#x}"));
+                    shell.character(unit as usize)
+                }
             {
                 _ = args.set_handled(true);
             }

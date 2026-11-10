@@ -26,6 +26,8 @@ pub mod ffi {
         type FocusPolicy = crate::qt::FocusPolicy;
         type CursorShape = crate::qt::CursorShape;
         type ContextMenuPolicy = crate::qt::ContextMenuPolicy;
+        type WindowType = crate::qt::WindowType;
+        type ToolBarArea = crate::qt::ToolBarArea;
     }
 
     #[namespace = "QFileDialog"]
@@ -43,6 +45,13 @@ pub mod ffi {
     unsafe extern "C++" {
         #[cxx_name = "Type"]
         type EventType = crate::qt::EventType;
+    }
+
+    #[namespace = "QSizePolicy"]
+    unsafe extern "C++" {
+        include!(<QtWidgets/QSizePolicy>);
+        #[cxx_name = "Policy"]
+        type SizePolicy = crate::qt::SizePolicy;
     }
 
     unsafe extern "C++" {
@@ -290,6 +299,58 @@ pub mod ffi {
         #[rust_name = "add_toolbar_action"]
         #[cxx_name = "addAction"]
         fn addActionToolbar(self: Pin<&mut QToolBar>, text: &QString) -> *mut QAction;
+        // The command bar (layout A): a fixed toolbar with separators, a stretching spacer, a
+        // zoom label kept as an action's text, and menus popped up under their buttons.
+        #[rust_name = "toolbar_set_movable"]
+        #[cxx_name = "setMovable"]
+        fn setMovableToolbar(self: Pin<&mut QToolBar>, on: bool);
+        #[rust_name = "toolbar_add_separator"]
+        #[cxx_name = "addSeparator"]
+        fn addSeparatorToolbar(self: Pin<&mut QToolBar>) -> *mut QAction;
+        #[rust_name = "toolbar_widget_for_action"]
+        #[cxx_name = "widgetForAction"]
+        unsafe fn widgetForActionToolbar(self: &QToolBar, action: *mut QAction) -> *mut QWidget;
+        #[rust_name = "action_set_text"]
+        #[cxx_name = "setText"]
+        fn setTextAction(self: Pin<&mut QAction>, t: &QString);
+        #[rust_name = "set_size_policy"]
+        #[cxx_name = "setSizePolicy"]
+        fn setSizePolicyWidget(self: Pin<&mut QWidget>, h: SizePolicy, v: SizePolicy);
+        #[rust_name = "set_tool_tip"]
+        #[cxx_name = "setToolTip"]
+        fn setToolTipWidget(self: Pin<&mut QWidget>, t: &QString);
+        // The title row (tabs in the title bar): a frameless window moved by the system from an
+        // empty part of the row, with its own minimize, maximize and close buttons.
+        #[rust_name = "set_window_flag"]
+        #[cxx_name = "setWindowFlag"]
+        fn setWindowFlagWidget(self: Pin<&mut QWidget>, flag: WindowType, on: bool);
+        #[rust_name = "show_minimized"]
+        #[cxx_name = "showMinimized"]
+        fn showMinimizedWidget(self: Pin<&mut QWidget>);
+        #[rust_name = "show_maximized"]
+        #[cxx_name = "showMaximized"]
+        fn showMaximizedWidget(self: Pin<&mut QWidget>);
+        #[rust_name = "show_normal"]
+        #[cxx_name = "showNormal"]
+        fn showNormalWidget(self: Pin<&mut QWidget>);
+        #[rust_name = "is_maximized"]
+        #[cxx_name = "isMaximized"]
+        fn isMaximizedWidget(self: &QWidget) -> bool;
+        #[rust_name = "close_widget"]
+        #[cxx_name = "close"]
+        fn closeWidget(self: Pin<&mut QWidget>) -> bool;
+        #[rust_name = "start_system_move"]
+        #[cxx_name = "startSystemMove"]
+        fn startSystemMoveWindow(self: Pin<&mut QWindow>) -> bool;
+        #[rust_name = "widget_install_event_filter"]
+        #[cxx_name = "installEventFilter"]
+        unsafe fn installEventFilterWidget(self: Pin<&mut QWidget>, f: *mut QObject);
+        #[rust_name = "add_tool_bar_break"]
+        #[cxx_name = "addToolBarBreak"]
+        fn addToolBarBreakMain(self: Pin<&mut QMainWindow>, area: ToolBarArea);
+        #[rust_name = "set_fixed_width"]
+        #[cxx_name = "setFixedWidth"]
+        fn setFixedWidthWidget(self: Pin<&mut QWidget>, w: i32);
         // The clipboard, bound directly: `clipboard` is QGuiApplication's static accessor, and the
         // explicit `Mode` argument picks `text(Mode)` out of its overloads, because cxx names the
         // member through a pointer of exactly this signature.

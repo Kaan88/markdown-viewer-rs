@@ -127,7 +127,10 @@ struct Shell {
     /// A fragment to scroll to once the next layout exists, for links into another document.
     pending_anchor: RefCell<Option<String>>,
     /// The find bar, its input and the current matches.
+    /// The command bar (layout A), which also holds the find box.
     find_bar: Cell<Option<H<QToolBar>>>,
+    /// The command bar's zoom percentage; clicking it resets to 100%.
+    zoom_label: Cell<Option<H<QAction>>>,
     find_edit: Cell<Option<H<QLineEdit>>>,
     find: RefCell<Find>,
     /// The outline dock and its heading items, each paired with its block.
@@ -199,6 +202,7 @@ impl Shell {
             moved: Cell::new(false),
             pending_anchor: RefCell::new(None),
             find_bar: Cell::new(None),
+            zoom_label: Cell::new(None),
             find_edit: Cell::new(None),
             find: RefCell::new(Find::default()),
             outline_dock: Cell::new(None),
@@ -244,8 +248,9 @@ impl Shell {
     }
 
     fn hide_find(&self) {
-        if let Some(bar) = self.find_bar.get() {
-            bar.widget().set_visible(false);
+        // The find box lives in the command bar, which stays; emptying it ends the find.
+        if let Some(edit) = self.find_edit.get() {
+            edit.set_text("");
         }
         self.find.borrow_mut().hits.clear();
         self.find.borrow_mut().query.clear();
@@ -691,8 +696,8 @@ impl Shell {
         self.anchor.set(None);
         self.find.borrow_mut().query.clear();
         self.find.borrow_mut().hits.clear();
-        if let Some(bar) = self.find_bar.get() {
-            bar.widget().set_visible(false);
+        if let Some(edit) = self.find_edit.get() {
+            edit.set_text("");
         }
         self.pending_anchor.borrow_mut().take();
         // The outline tree is only filled while it is showing (View > Outline fills it on open).
@@ -982,8 +987,15 @@ impl Shell {
         self.scroll.set(self.scroll.get() * zoom / old);
         *self.layout.borrow_mut() = None;
         self.message(&format!("Zoom {}%", (zoom * 100.0).round() as i32));
+        self.refresh_zoom_label();
         self.redraw();
         self.save_session();
+    }
+
+    fn refresh_zoom_label(&self) {
+        if let Some(label) = self.zoom_label.get() {
+            label.set_text(&format!("{}%", (self.zoom.get() * 100.0).round() as i32));
+        }
     }
 
     /// Focus reading mode: hides the menu bar, status bar, outline and find bar, and restores
@@ -1210,12 +1222,7 @@ impl Shell {
             self.toggle_focus();
             return;
         }
-        if code == KEY_ESCAPE
-            && self
-                .find_bar
-                .get()
-                .is_some_and(|bar| bar.widget().is_visible())
-        {
+        if code == KEY_ESCAPE && !self.find.borrow().query.is_empty() {
             self.hide_find();
             return;
         }
@@ -2328,7 +2335,8 @@ fn build(
     window.widget().set_title("mdview");
     window.widget().resize(1100, 900);
 
-    let menus = window.menu_bar();
+    // The menus live in the command bar's main menu (☰); the menu bar itself is hidden.
+    let menus = H::<QMenu>::new_popup();
     let file_menu = menus.add_menu("&File");
     let open = file_menu.add_action("&Open...\tCtrl+O");
     let s = shell.clone();
@@ -2384,14 +2392,60 @@ fn build(
     copy.on_triggered(move |_| s.copy_selection());
 
     mark("menus (File, Open recent)");
-    let find_bar = window.add_tool_bar("Find");
-    find_bar.widget().set_visible(false);
+    // The command bar (layout A): Open, Reload, Recent | Files, Outline | zoom on the left; the find
+    // box, Theme and the main menu on the right. It is the window's only toolbar and cannot move.
+    // The title row comes first: the window is frameless, and this row holds the logo, the tabs, the
+    // drag area and the window buttons (filled once the tab bar exists, below).
+    window.widget().set_frameless();
+    let title = window.add_tool_bar("Title");
+    title.set_movable(false);
+    window.add_tool_bar_break();
+    let bar = window.add_tool_bar("Commands");
+    bar.set_movable(false);
+    let open_button = bar.add_action("Open");
+    open_button.set_tool_tip("Open a file (Ctrl+O)");
+    open_button.on_triggered(move |_| open.trigger());
+    let reload_button = bar.add_action("↻");
+    reload_button.set_tool_tip("Reload (F5)");
+    reload_button.on_triggered(move |_| refresh.trigger());
+    let recent_button = bar.add_action("Recent ▾");
+    recent_button.set_tool_tip("Recent files");
+    let s = shell.clone();
+    recent_button.on_triggered(move |_| {
+        s.fill_recent(recent_menu);
+        if let Some(at) = bar.below(recent_button) {
+            recent_menu.popup(at);
+        }
+    });
+    bar.add_separator();
+    let files_button = bar.add_action("Files");
+    files_button.set_tool_tip("Files pane (Ctrl+B)");
+    let outline_button = bar.add_action("Outline");
+    outline_button.set_tool_tip("Outline pane");
+    bar.add_separator();
+    let zoom_out_button = bar.add_action("−");
+    zoom_out_button.set_tool_tip("Zoom out (Ctrl+-)");
+    let s = shell.clone();
+    zoom_out_button.on_triggered(move |_| s.set_zoom(s.zoom.get() - ZOOM_STEP));
+    let zoom_label = bar.add_action("100%");
+    zoom_label.set_tool_tip("Reset zoom (Ctrl+0)");
+    let s = shell.clone();
+    zoom_label.on_triggered(move |_| s.set_zoom(1.0));
+    let zoom_in_button = bar.add_action("+");
+    zoom_in_button.set_tool_tip("Zoom in (Ctrl++)");
+    let s = shell.clone();
+    zoom_in_button.on_triggered(move |_| s.set_zoom(s.zoom.get() + ZOOM_STEP));
+    shell.zoom_label.set(Some(zoom_label));
+    shell.refresh_zoom_label();
+    bar.add_spacer();
     let find_edit = H::<QLineEdit>::new();
-    find_edit.set_placeholder("Find in document");
-    find_bar.add_widget(find_edit.widget());
-    let previous = find_bar.add_action("Previous");
-    let next = find_bar.add_action("Next");
-    let close = find_bar.add_action("Close");
+    find_edit.set_placeholder("Find in document   Ctrl+F");
+    find_edit.widget().set_fixed_width(260);
+    bar.add_widget(find_edit.widget());
+    let previous = bar.add_action("↑");
+    previous.set_tool_tip("Previous match (Shift+F3)");
+    let next = bar.add_action("↓");
+    next.set_tool_tip("Next match (F3)");
     let s = shell.clone();
     find_edit.on_text_changed(move |text| s.find_update(&text));
     let s = shell.clone();
@@ -2400,9 +2454,33 @@ fn build(
     previous.on_triggered(move |_| s.find_step(-1));
     let s = shell.clone();
     next.on_triggered(move |_| s.find_step(1));
-    let s = shell.clone();
-    close.on_triggered(move |_| s.hide_find());
-    shell.find_bar.set(Some(find_bar));
+    bar.add_separator();
+    let theme_button = bar.add_action("Theme ▾");
+    theme_button.set_tool_tip("Theme");
+    let theme_menu = H::<QMenu>::new_popup();
+    for (label, choice) in [
+        ("System theme", ThemeChoice::System),
+        ("Light theme", ThemeChoice::Light),
+        ("Dark theme", ThemeChoice::Dark),
+    ] {
+        let s = shell.clone();
+        theme_menu
+            .add_action(label)
+            .on_triggered(move |_| s.set_theme_choice(choice));
+    }
+    theme_button.on_triggered(move |_| {
+        if let Some(at) = bar.below(theme_button) {
+            theme_menu.popup(at);
+        }
+    });
+    let main_button = bar.add_action("☰");
+    main_button.set_tool_tip("Main menu");
+    main_button.on_triggered(move |_| {
+        if let Some(at) = bar.below(main_button) {
+            menus.popup(at);
+        }
+    });
+    shell.find_bar.set(Some(bar));
     shell.find_edit.set(Some(find_edit));
 
     let outline_dock = H::<QDockWidget>::new("Outline", window.clone());
@@ -2479,6 +2557,8 @@ fn build(
             .is_some_and(|dock| dock.widget().is_visible());
         s.show_outline(!visible);
     });
+    files_button.on_triggered(move |_| files_toggle.trigger());
+    outline_button.on_triggered(move |_| outline.trigger());
     let light = view_menu.add_action("&Light theme");
     let dark = view_menu.add_action("&Dark theme");
     view_menu.add_separator();
@@ -2585,14 +2665,29 @@ fn build(
             .on_context_menu_at(move |local, global| s.canvas_menu(local, global));
     }
     shell.tab_bar.set(Some(tabs));
-    let central = new_plain_widget();
-    layout_column(central, tabs.widget(), page);
+    let brand = title.add_action("mdview");
+    brand.set_tool_tip("mdview");
+    title.add_widget(tabs.widget());
+    let drag = title.add_spacer();
+    drag.set_tool_tip("Drag to move the window; double-click to maximize");
+    canvas.watch_title_drag(drag);
+    let top = window.widget();
+    let minimize = title.add_action("—");
+    minimize.set_tool_tip("Minimize");
+    minimize.on_triggered(move |_| top.minimize());
+    let maximize = title.add_action("☐");
+    maximize.set_tool_tip("Maximize");
+    maximize.on_triggered(move |_| top.toggle_maximized());
+    let close_window = title.add_action("✕");
+    close_window.set_tool_tip("Close");
+    close_window.on_triggered(move |_| top.close());
     mark("canvas and tabs");
-    window.set_central(central);
+    window.set_central(page);
     shell.canvas.set(Some(canvas));
     shell.scrollbar.set(Some(bar));
     shell.window.set(Some(window));
     shell.status.set(Some(window.status_bar()));
+    window.menu_bar().widget().set_visible(false);
     shell.menu_bar.set(Some(window.menu_bar()));
     window.widget().show();
     mark("window shown");
