@@ -38,7 +38,10 @@ $env:PATH = "$QtDir\bin;$env:PATH"; $env:QMAKE = "$QtDir\bin\qmake.exe"; $env:CM
 $tmp = Join-Path $root 'target\tmp'; New-Item -ItemType Directory -Force $tmp | Out-Null
 $env:TEMP = $tmp; $env:TMP = $tmp   # CXX-Qt's build fails under paths it cannot write
 
-cargo build --release --manifest-path (Join-Path $root 'bins\mdv-qt\Cargo.toml')
+# Run from the crate's own directory: cargo reads .cargo\config.toml from the working directory, and
+# bins\mdv-qt\.cargo\config.toml turns off the repo-level +crt-static (Qt needs the dynamic CRT).
+Push-Location (Join-Path $root 'bins\mdv-qt')
+try { cargo build --release } finally { Pop-Location }
 if ($LASTEXITCODE -ne 0) { Fail 'cargo build failed.' }
 
 $stage = Join-Path $root 'target\qt-deploy'
