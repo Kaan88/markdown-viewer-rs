@@ -12,10 +12,12 @@
 //!
 //! **One renderer for the workspace.** Only the active tab is ever laid out or painted, so one
 //! `DocumentRenderer` serves every tab: its glyph cache stays warm across tab switches, and an
-//! inactive tab costs only its parsed `Document`. Leaving a tab drops its `PageLayout`; the next
-//! `renderer.layout` call for the new tab clears the renderer's per-document paint cache and frame.
-//! `<details>` toggles are view state the renderer holds, so each tab keeps a copy and the copy is
-//! applied to the renderer when the tab becomes active.
+//! inactive tab costs only its parsed `Document`. The renderer owns the active tab's `PageLayout`
+//! and corrects it in place (a `<details>` toggle, an arrived image), keeping the content under
+//! the viewport still; the workspace follows with [`Workspace::adopt`]. Leaving a tab drops its
+//! view; the next `renderer.layout` call for the new tab replaces the layout, paint cache and
+//! frame. `<details>` toggles are view state the renderer holds, so each tab keeps a copy and the
+//! copy is applied to the renderer when the tab becomes active.
 //!
 //! Ported from `bins/mdv-qt/src/shell.rs`; differences are noted where they are made.
 
@@ -25,7 +27,9 @@ use mdview_core::links::{LinkAction, classify_link};
 use mdview_core::model::{NONE, ScrollPos};
 use mdview_core::session::{self, RecentEntry, Recents, Session};
 use mdview_core::{Document, parse_bytes};
-use mdview_render::{DARK, DocumentRenderer, Frame, Hit, LIGHT, Options, PageLayout, Rect, Theme};
+use mdview_render::{
+    DARK, DocumentRenderer, Frame, Hit, Jump, LIGHT, Options, PageLayout, Rect, Theme,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -169,12 +173,14 @@ enum Reveal {
     Range(u32, u32),
 }
 
-/// A tab's layout and the options it was made for.
+/// The active tab's layout: the options it was made for and what the workspace derives from it.
+/// The layout itself is the renderer's, which corrects it in place (a `<details>` toggle, an
+/// arrived image); `generation` says which version `heading_ys` was taken from.
 struct View {
-    layout: PageLayout,
     options: Options,
     /// The page y of each heading in `Document::headings`, non-decreasing.
     heading_ys: Vec<f32>,
+    generation: u64,
 }
 
 /// One open file. A tab restored from the session holds only its path until it is first shown.
@@ -247,11 +253,12 @@ impl Tab {
         self.doc.as_ref()
     }
 
-    /// Records the reading position from the current layout, then drops the layout.
-    fn drop_view(&mut self) {
-        if let (Some(view), Some(_)) = (self.view.take(), self.doc.as_ref())
+    /// Records the reading position from the current layout (the renderer's, which is this tab's
+    /// while it has a view), then drops the view.
+    fn drop_view(&mut self, layout: Option<&PageLayout>) {
+        if let (Some(view), Some(_), Some(layout)) = (self.view.take(), self.doc.as_ref(), layout)
             && self.keep.is_none()
-            && let Some(span) = view.layout.block_at(self.scroll)
+            && let Some(span) = layout.block_at(self.scroll)
         {
             self.keep = Some(ScrollPos {
                 block: span.block,
@@ -473,6 +480,12 @@ impl Workspace {
     }
 
     /// `strings::window_title` with the active file's name.
+    /// Images decoded and engine jobs sent so far, for traces.
+    #[allow(dead_code)] // Only the windowed startup trace reads it.
+    pub fn image_stats(&self) -> mdview_render::ImageStats {
+        self.renderer.image_stats()
+    }
+
     pub fn title(&self) -> String {
         strings::window_title(self.active_tab().map(|t| file_name(&t.path)).as_deref())
     }
@@ -532,7 +545,7 @@ impl Workspace {
             return false;
         }
         if let Some(old) = self.active.and_then(|i| self.tabs.get_mut(i)) {
-            old.drop_view();
+            old.drop_view(self.renderer.page_layout());
             old.left_at = Some(Instant::now());
         }
         self.active = Some(index);
@@ -540,8 +553,10 @@ impl Workspace {
         let tab = &mut self.tabs[index];
         tab.left_at = None;
         self.renderer.clear_details();
-        for (&block, &open) in &tab.details {
-            self.renderer.set_details(block, open);
+        if let Some(doc) = tab.doc.as_ref() {
+            for (&block, &open) in &tab.details {
+                self.renderer.set_details(doc, block, open);
+            }
         }
         self.find = Find::default();
         self.press = None;
@@ -785,7 +800,7 @@ impl Workspace {
             }
         };
         let active = self.active == Some(index);
-        tab.drop_view();
+        tab.drop_view(self.renderer.page_layout());
         let document = parse_bytes(&loaded.bytes);
         if let (Some(old), Some(pos)) = (tab.doc.as_ref(), tab.keep) {
             tab.keep = Some(document.remap_scroll(old, pos));
@@ -982,19 +997,77 @@ impl Workspace {
         let tab = &mut self.tabs[self.active?];
         let doc = tab.doc.as_ref()?;
         let view = tab.view.as_ref()?;
-        let total = view.layout.total_height();
-        tab.scroll = tab.scroll.clamp(0.0, (total - height).max(0.0)).round();
-        let frame = self
+        let background = view.options.theme.bg;
+        // The frame measures what it shows first, which may correct the layout above the top; it
+        // keeps the anchored content still and reports the top it drew.
+        let top = self
             .renderer
-            .view_frame(doc, &view.options, &view.layout, tab.scroll, height);
+            .view_frame(doc, &view.options, tab.scroll, height)
+            .top;
+        tab.scroll = top;
+        self.adopt();
+        let frame = self.renderer.frame()?;
+        let total = self.renderer.page_layout()?.total_height();
         let x = ((width_px as i32 - frame.bitmap.width as i32) / 2).max(0);
         Some(PageView {
             frame,
             x,
-            scroll: tab.scroll,
+            scroll: top,
             total_height: total,
-            background: view.options.theme.bg,
+            background,
         })
+    }
+
+    /// Takes the renderer's corrections to the active layout since the last call: the scroll
+    /// offset follows the anchored content and the heading positions are taken again. True when
+    /// the layout changed.
+    fn adopt(&mut self) -> bool {
+        let Some(tab) = self.active.and_then(|i| self.tabs.get_mut(i)) else {
+            return false;
+        };
+        let (Some(doc), Some(view)) = (tab.doc.as_ref(), tab.view.as_mut()) else {
+            return false;
+        };
+        let Some(layout) = self.renderer.page_layout() else {
+            return false;
+        };
+        if layout.generation() == view.generation {
+            return false;
+        }
+        view.generation = layout.generation();
+        view.heading_ys = heading_ys(doc, layout);
+        if let Some(top) = self.renderer.top() {
+            tab.scroll = top.round();
+        }
+        self.dirty = true;
+        true
+    }
+
+    /// Measures more of the active page's estimated blocks, for about `budget`; true while some
+    /// are left. The window calls this between events until it returns false, then stops (a
+    /// refined page needs no idle work). Corrections above the viewport move the scroll offset
+    /// with the content and mark the page dirty.
+    pub fn refine(&mut self, budget: Duration) -> bool {
+        let Some(tab) = self.active.and_then(|i| self.tabs.get(i)) else {
+            return false;
+        };
+        let (Some(doc), Some(view)) = (tab.doc.as_ref(), tab.view.as_ref()) else {
+            return false;
+        };
+        let more = self.renderer.refine(doc, &view.options, budget);
+        self.adopt();
+        more
+    }
+
+    /// Whether the active page still has estimated heights for [`refine`](Self::refine).
+    pub fn refining(&self) -> bool {
+        self.layout().is_some() && self.renderer.estimating()
+    }
+
+    /// The active tab's layout, while it has one.
+    fn layout(&self) -> Option<&PageLayout> {
+        self.active_tab()?.view.as_ref()?;
+        self.renderer.page_layout()
     }
 
     /// Makes sure the active tab has a layout for the current viewport, theme and zoom, then
@@ -1015,7 +1088,7 @@ impl Workspace {
                 && v.options.theme.name == theme.name
         });
         if !fresh {
-            tab.drop_view();
+            tab.drop_view(self.renderer.page_layout());
             let Some(doc) = tab.doc.as_ref() else {
                 return false;
             };
@@ -1027,17 +1100,11 @@ impl Workspace {
                 base_dir: tab.path.parent().map(Path::to_path_buf),
             };
             let layout = self.renderer.layout(doc, &options);
-            let heading_ys = heading_ys(doc, &layout);
             tab.view = Some(View {
-                layout,
+                heading_ys: heading_ys(doc, layout),
+                generation: layout.generation(),
                 options,
-                heading_ys,
             });
-            if let (Some(pos), Some(view)) = (tab.keep.take(), tab.view.as_ref())
-                && let Some(y) = view.layout.y_of(doc, pos.block)
-            {
-                tab.scroll = y + pos.offset * scale;
-            }
             self.dirty = true;
         }
         let height = viewport.height as f32;
@@ -1048,27 +1115,58 @@ impl Workspace {
             return false;
         };
         let margin = JUMP_MARGIN * view.options.scale;
+        // A new layout moves the renderer's anchor to the tab's offset, unless a reading position
+        // or a jump puts it on a block; otherwise the anchor leads, since the renderer may have
+        // corrected the layout around it. A jump measures the viewport it lands on first, so it
+        // is exact while the rest of the page is still estimated.
+        let mut moved = !fresh;
+        let renderer = &mut self.renderer;
+        let mut jump = |target: Jump, margin: f32, scroll: &mut f32, moved: &mut bool| {
+            if let Some(top) = renderer.jump_to(doc, &view.options, target, margin, height) {
+                *scroll = top.round();
+                *moved = false;
+            }
+        };
+        if !fresh && let Some(pos) = tab.keep.take() {
+            let below = pos.offset * view.options.scale;
+            jump(Jump::Block(pos.block), -below, &mut tab.scroll, &mut moved);
+        }
         match tab.reveal.take() {
             Some(Reveal::Anchor(fragment)) => {
-                if let Some(y) = doc
-                    .resolve_fragment(&fragment)
-                    .and_then(|block| view.layout.y_of(doc, block))
-                {
-                    tab.scroll = y - margin;
+                if let Some(block) = doc.resolve_fragment(&fragment) {
+                    jump(Jump::Block(block), margin, &mut tab.scroll, &mut moved);
                 }
             }
             Some(Reveal::Range(from, to)) => {
-                let rects =
-                    self.renderer
-                        .selection_rects(doc, &view.options, &view.layout, from, to);
-                if let Some(y) = into_view(&rects, tab.scroll, height, margin) {
-                    tab.scroll = y;
+                let rects = self.renderer.selection_rects(doc, &view.options, from, to);
+                if !moved && let Some(top) = self.renderer.top() {
+                    tab.scroll = top.round();
+                }
+                if into_view(&rects, tab.scroll, height, margin).is_some() {
+                    let renderer = &mut self.renderer;
+                    if let Some(top) = renderer.jump_to(
+                        doc,
+                        &view.options,
+                        Jump::Text(from.min(to)),
+                        margin,
+                        height,
+                    ) {
+                        tab.scroll = top.round();
+                        moved = false;
+                    }
                 }
             }
             None => {}
         }
-        let max = (view.layout.total_height() - height).max(0.0);
-        tab.scroll = tab.scroll.clamp(0.0, max).round();
+        let Some(total) = self.renderer.page_layout().map(PageLayout::total_height) else {
+            return false;
+        };
+        let clamped = tab.scroll.clamp(0.0, (total - height).max(0.0)).round();
+        if moved || clamped != tab.scroll {
+            tab.scroll = clamped;
+            self.renderer.set_top(clamped);
+        }
+        self.adopt();
         true
     }
 
@@ -1081,19 +1179,15 @@ impl Workspace {
 
     /// The largest scroll offset; 0 before the page is laid out.
     pub fn max_scroll(&self) -> f32 {
-        let (Some(tab), Some(viewport)) = (self.active_tab(), self.viewport) else {
+        let (Some(layout), Some(viewport)) = (self.layout(), self.viewport) else {
             return 0.0;
         };
-        tab.view.as_ref().map_or(0.0, |v| {
-            (v.layout.total_height() - viewport.height as f32).max(0.0)
-        })
+        (layout.total_height() - viewport.height as f32).max(0.0)
     }
 
     /// The page height, device px; 0 before the page is laid out.
     pub fn total_height(&self) -> f32 {
-        self.active_tab()
-            .and_then(|t| t.view.as_ref())
-            .map_or(0.0, |v| v.layout.total_height())
+        self.layout().map_or(0.0, PageLayout::total_height)
     }
 
     /// Scrolls to `y` device px, clamped. True if the offset changed.
@@ -1114,6 +1208,9 @@ impl Workspace {
             return false;
         }
         tab.scroll = next;
+        if laid_out {
+            self.renderer.set_top(next);
+        }
         self.dirty = true;
         true
     }
@@ -1150,22 +1247,37 @@ impl Workspace {
     /// Scrolls so `block` (nested blocks too) sits just below the top edge, as an outline click or
     /// an anchor does. False if the block is not on the page or there is no layout yet.
     pub fn scroll_to_block(&mut self, block: u32) -> bool {
+        self.jump(Jump::Block(block))
+    }
+
+    /// Brings a block or footnote entry to just below the top edge through the renderer, which
+    /// measures the viewport it lands on first. False if the target is not on the page or there
+    /// is no layout yet.
+    fn jump(&mut self, target: Jump) -> bool {
         if !self.ensure_layout() {
             return false;
         }
-        let y = {
-            let Some(tab) = self.active_tab() else {
-                return false;
-            };
-            let (Some(doc), Some(view)) = (tab.doc.as_ref(), tab.view.as_ref()) else {
-                return false;
-            };
-            let Some(y) = view.layout.y_of(doc, block) else {
-                return false;
-            };
-            y - JUMP_MARGIN * view.options.scale
+        let Some(viewport) = self.viewport else {
+            return false;
         };
-        self.scroll_to(y);
+        let Some(tab) = self.active.and_then(|i| self.tabs.get_mut(i)) else {
+            return false;
+        };
+        let (Some(doc), Some(view)) = (tab.doc.as_ref(), tab.view.as_ref()) else {
+            return false;
+        };
+        let margin = JUMP_MARGIN * view.options.scale;
+        let height = viewport.height as f32;
+        let Some(top) = self
+            .renderer
+            .jump_to(doc, &view.options, target, margin, height)
+        else {
+            return false;
+        };
+        tab.keep = None;
+        tab.scroll = top.round();
+        self.dirty = true;
+        self.adopt();
         true
     }
 
@@ -1178,8 +1290,12 @@ impl Workspace {
         }
         let tab = self.tabs.get(self.active?)?;
         let (doc, view) = (tab.doc.as_ref()?, tab.view.as_ref()?);
-        self.renderer
-            .hit_test(doc, &view.options, &view.layout, x, y + tab.scroll)
+        let hit = self
+            .renderer
+            .hit_test(doc, &view.options, x, y + tab.scroll);
+        // A pending correction may have moved the content: the next frame shows where.
+        self.adopt();
+        hit
     }
 
     /// What is under the pointer while no button is down.
@@ -1375,30 +1491,15 @@ impl Workspace {
 
     /// Scrolls to footnote `index`'s entry at the end of the page.
     pub fn follow_footnote(&mut self, index: u32) -> bool {
-        if !self.ensure_layout() {
-            return false;
-        }
-        let y = {
-            let Some(tab) = self.active_tab() else {
-                return false;
-            };
-            let (Some(doc), Some(view)) = (tab.doc.as_ref(), tab.view.as_ref()) else {
-                return false;
-            };
-            let Some(number) = doc.footnotes.get(index as usize).map(|n| n.number) else {
-                return false;
-            };
-            let Some(y) = view.layout.footnote_y(number) else {
-                return false;
-            };
-            y - JUMP_MARGIN * view.options.scale
-        };
-        self.scroll_to(y);
-        true
+        let number = self
+            .active_document()
+            .and_then(|doc| doc.footnotes.get(index as usize))
+            .map(|note| note.number);
+        number.is_some_and(|number| self.jump(Jump::Footnote(number)))
     }
 
-    /// Opens or closes a `<details>`; the page is measured again at the next paint, and find runs
-    /// again because the visible text changed.
+    /// Opens or closes a `<details>`; the renderer measures its block again at the next paint
+    /// (the rest of the layout stays), and find runs again because the visible text changed.
     pub fn toggle_details(&mut self, block: u32) -> bool {
         let Some(index) = self.active else {
             return false;
@@ -1415,9 +1516,8 @@ impl Workspace {
             return false;
         }
         let open = !self.renderer.details_open(doc, block);
-        self.renderer.set_details(block, open);
+        self.renderer.set_details(doc, block, open);
         tab.details.insert(block, open);
-        tab.drop_view();
         self.refind();
         self.dirty = true;
         true
@@ -1613,7 +1713,7 @@ impl Workspace {
     pub fn current_heading_at(&self, top: f32) -> Option<usize> {
         let view = self.active_tab()?.view.as_ref()?;
         let height = self.viewport_height();
-        let max = (view.layout.total_height() - height).max(0.0);
+        let max = (self.layout()?.total_height() - height).max(0.0);
         let line = if max > 0.0 && top >= max - 1.0 {
             top + height
         } else {
@@ -1703,7 +1803,10 @@ impl Workspace {
             return out;
         };
         let height = viewport.height as f32;
-        let Some((lo, hi)) = visible_text(doc, &view.layout, tab.scroll, height) else {
+        let Some(layout) = self.renderer.page_layout() else {
+            return out;
+        };
+        let Some((lo, hi)) = visible_text(doc, layout, tab.scroll, height) else {
             return out;
         };
         let first = ranges.partition_point(|r| r.0.max(r.1) <= lo);
@@ -1717,9 +1820,7 @@ impl Workspace {
                 continue;
             }
             drawn += 1;
-            let rects = self
-                .renderer
-                .selection_rects(doc, &view.options, &view.layout, from, to);
+            let rects = self.renderer.selection_rects(doc, &view.options, from, to);
             let target = if Some(i) == marked {
                 &mut out.1
             } else {
@@ -2038,8 +2139,7 @@ mod tests {
         let y_of = |ws: &Workspace| {
             let doc = ws.active_document().unwrap();
             let block = doc.block_at(doc.text.find(target).unwrap() as u32).unwrap();
-            let view = ws.active_tab().unwrap().view.as_ref().unwrap();
-            view.layout.y_of(doc, block).unwrap()
+            ws.layout().unwrap().y_of(doc, block).unwrap()
         };
         let before = y_of(&ws);
         assert!(ws.scroll_to(before));
@@ -2383,5 +2483,88 @@ mod tests {
         let later = Instant::now() + Duration::from_secs(10);
         assert_eq!(ws.status(Instant::now()), Some("hello"));
         assert_eq!(ws.status(later), None);
+    }
+
+    /// An outline jump right after opening lands exactly while most of the page is estimated, and
+    /// refining the rest keeps the heading where it is on screen.
+    #[test]
+    fn a_jump_before_refinement_stays_put_through_it() {
+        let dir = temp_dir("jump-refine");
+        let mut text = String::new();
+        for i in 0..60 {
+            text.push_str(&format!(
+                "## Part {i}\n\n{}\n",
+                paragraphs("Words", i % 4 + 1)
+            ));
+        }
+        let path = write(&dir, "doc.md", &text);
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        ws.paint(800, 600, 1.0).unwrap();
+        assert!(ws.refining(), "the first layout is estimated");
+        let block = ws.outline()[45].block;
+        assert!(ws.scroll_to_block(block));
+        let at = |ws: &Workspace| {
+            let doc = ws.active_document().unwrap();
+            ws.layout().unwrap().y_of(doc, block).unwrap() - ws.scroll()
+        };
+        assert_eq!(at(&ws), JUMP_MARGIN);
+        ws.paint(800, 600, 1.0).unwrap();
+        while ws.refine(Duration::from_millis(1)) {}
+        assert!(!ws.refining());
+        ws.paint(800, 600, 1.0).unwrap();
+        assert_eq!(at(&ws), JUMP_MARGIN);
+        assert_eq!(ws.current_heading(), Some(45));
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A `<details>` opened above the viewport (as a click on its summary would, then scrolling
+    /// on) moves the page under the reader, not the reader: the scroll offset grows by the body's
+    /// height and the text at the top stays where it was. The headings move with it.
+    #[test]
+    fn a_details_toggle_above_keeps_the_reading_position() {
+        let dir = temp_dir("details-above");
+        let body = paragraphs("Body", 120);
+        let path = write(
+            &dir,
+            "doc.md",
+            &format!(
+                "<details>\n<summary>More</summary>\n\n{}\n</details>\n\n# Middle\n\n{body}",
+                paragraphs("Hidden", 6)
+            ),
+        );
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        ws.paint(800, 600, 1.0).unwrap();
+        let details = {
+            let doc = ws.active_document().unwrap();
+            (0..doc.blocks.len() as u32)
+                .find(|&b| {
+                    matches!(
+                        doc.blocks[b as usize].kind,
+                        mdview_core::model::BlockKind::Details { .. }
+                    )
+                })
+                .unwrap()
+        };
+        let target = "Body paragraph number 60 ";
+        let top_of = |ws: &mut Workspace| {
+            let doc = ws.active_document().unwrap();
+            let start = doc.text.find(target).unwrap() as u32;
+            let rects = ws.visible_rects(&[(start, start + 4)]).0;
+            rects.first().map(|r| r.y)
+        };
+        assert!(ws.scroll_to(ws.layout().unwrap().total_height() / 2.0));
+        ws.paint(800, 600, 1.0).unwrap();
+        let (scroll, at, total) = (ws.scroll(), top_of(&mut ws), ws.total_height());
+        let heading = ws.current_heading();
+        assert!(at.is_some(), "the target is on screen");
+        assert!(ws.toggle_details(details));
+        let view = ws.paint(800, 600, 1.0).unwrap();
+        assert!(view.total_height > total + 100.0, "the body opened");
+        assert!(ws.scroll() > scroll + 100.0, "the offset followed");
+        assert_eq!(top_of(&mut ws), at, "the text stayed put");
+        assert_eq!(ws.current_heading(), heading);
+        _ = std::fs::remove_dir_all(&dir);
     }
 }

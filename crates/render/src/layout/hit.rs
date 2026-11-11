@@ -3,8 +3,7 @@
 //! footnote reference or a `<details>` summary.
 
 use super::inline::Inline;
-use super::pager::Pager;
-use super::{DocumentRenderer, Hit, Options, PageLayout};
+use super::{DocumentRenderer, Hit, Options};
 use crate::text::Brush;
 use mdview_core::model::{BlockKind, Document, NONE, SpanKind};
 use parley::{Cluster, ClusterSide, Layout};
@@ -43,19 +42,17 @@ impl DocumentRenderer {
     /// What is at page position `x, y`: the document offset, plus a link or footnote reference when
     /// the point is over one. Lays out the one block that was hit if the frame has not painted it
     /// yet, so this works before or after [`view_frame`](Self::view_frame) for that row.
-    pub fn hit_test(
-        &mut self,
-        doc: &Document,
-        options: &Options,
-        page: &PageLayout,
-        x: f32,
-        y: f32,
-    ) -> Option<Hit> {
-        let index = page.index_at(y)?;
-        let span = page.spans[index];
-        self.ensure_block(doc, options, page, index);
+    pub fn hit_test(&mut self, doc: &Document, options: &Options, x: f32, y: f32) -> Option<Hit> {
+        self.ensure_layout(doc, options);
+        self.correct_pending(doc);
+        let index = self.page.as_ref()?.index_at(y)?;
+        if !self.ready(index) {
+            self.measure(doc, index, true, true);
+            self.settle();
+        }
+        let span = self.page.as_ref()?.spans[index];
         let cached = self.cache.get(&span.block)?;
-        let local = y - span.y;
+        let local = y - (span.y - cached.phase);
         let line = cached.lines.iter().min_by(|a, b| {
             distance(a, local)
                 .total_cmp(&distance(b, local))
@@ -102,30 +99,6 @@ impl DocumentRenderer {
             }
         }
         Some(hit)
-    }
-
-    /// Lays out one block so its paint cache and caret stops exist. Blocks painted by a frame are
-    /// already cached; this covers a click before the block has come on screen.
-    pub(super) fn ensure_block(
-        &mut self,
-        doc: &Document,
-        options: &Options,
-        page: &PageLayout,
-        index: usize,
-    ) {
-        if self.cache.contains_key(&page.spans[index].block) {
-            return;
-        }
-        let mut pager = Pager::new(
-            doc,
-            options,
-            &mut self.fonts,
-            &mut self.layouts,
-            Some(&mut self.cache),
-            &mut self.images,
-            &self.details,
-        );
-        pager.block_paints(page, index);
     }
 }
 

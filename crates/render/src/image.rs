@@ -14,6 +14,7 @@ pub const MAX_BYTES: u64 = 12 * 1024 * 1024;
 pub const MAX_PIXELS: u64 = 24_000_000;
 
 /// Straight-alpha RGBA, row-major.
+#[derive(Debug, Clone)]
 pub struct DecodedImage {
     pub width: u32,
     pub height: u32,
@@ -22,7 +23,13 @@ pub struct DecodedImage {
     pub rgba: Vec<u8>,
 }
 
+#[cfg(test)]
 pub fn load(path: &Path) -> Option<DecodedImage> {
+    decode(&read(path)?)
+}
+
+/// The file's bytes, or `None` when it is unreadable or over [`MAX_BYTES`].
+pub(crate) fn read(path: &Path) -> Option<Vec<u8>> {
     let file = std::fs::File::open(path).ok()?;
     if file.metadata().ok()?.len() > MAX_BYTES {
         return None;
@@ -33,7 +40,14 @@ pub fn load(path: &Path) -> Option<DecodedImage> {
     if bytes.len() as u64 > MAX_BYTES {
         return None;
     }
-    decode(&bytes)
+    Some(bytes)
+}
+
+/// Decodes image bytes the way a document's image is: PNG, JPEG, GIF and WebP in-process, SVG
+/// through the engine at its natural size. For a caller that fetched the bytes itself (a remote
+/// image) and hands the result to `DocumentRenderer::image_arrived`.
+pub fn decode_image(bytes: &[u8]) -> Option<DecodedImage> {
+    decode(bytes)
 }
 
 /// Picks the decoder from the leading bytes. A decoder that panics on hostile input counts as a
@@ -62,7 +76,7 @@ fn decode_unchecked(bytes: &[u8]) -> Option<DecodedImage> {
 
 /// A text file whose first tag is `<svg`: XML declarations, comments and whitespace may come
 /// first, and there is no binary signature to rely on.
-fn looks_like_svg(bytes: &[u8]) -> bool {
+pub(crate) fn looks_like_svg(bytes: &[u8]) -> bool {
     let head = &bytes[..bytes.len().min(1024)];
     let text = String::from_utf8_lossy(head);
     let trimmed = text.trim_start_matches('\u{feff}').trim_start();

@@ -10,8 +10,8 @@
 
 use crate::image::{DecodedImage, MAX_PIXELS};
 use mdview_engine_proto::{
-    KIND_MATH, KIND_MERMAID, KIND_SVG, MAX_REPLY, Request, STATUS_OK, math_payload,
-    mermaid_payload, read_reply, write_request,
+    KIND_MATH, KIND_MERMAID, KIND_SVG, KIND_SVG_AT, MAX_REPLY, Request, STATUS_OK, math_payload,
+    mermaid_payload, read_reply, svg_at_payload, write_request,
 };
 use std::io;
 use std::path::PathBuf;
@@ -141,6 +141,16 @@ fn invalidate(handle: &Handle) {
 /// fails, or returns something the image cache cannot use.
 pub fn render_svg(bytes: &[u8]) -> Option<DecodedImage> {
     let reply = submit(KIND_SVG, bytes.to_vec())?;
+    decode(reply)
+}
+
+/// Renders SVG bytes at `scale` device pixels per SVG unit, so a vector image is drawn sharp at
+/// the device scale rather than stretched from its natural size.
+pub fn render_svg_at(bytes: &[u8], scale: f32) -> Option<DecodedImage> {
+    if !scale.is_finite() || scale < 0.05 || scale > 8.0 {
+        return None;
+    }
+    let reply = submit(KIND_SVG_AT, svg_at_payload(scale, bytes))?;
     decode(reply)
 }
 

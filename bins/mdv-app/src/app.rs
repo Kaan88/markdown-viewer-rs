@@ -54,6 +54,9 @@ const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
 const IDLE_UNLOAD: Duration = Duration::from_secs(60);
 const SIZE_SAVE_DELAY: Duration = Duration::from_millis(800);
+/// How long the page's refinement may run between events: short enough that input waiting
+/// behind it is not noticed.
+const REFINE_SLICE: Duration = Duration::from_millis(4);
 /// One wheel notch scrolls this many of the workspace's line steps (48 logical px each).
 const WHEEL_LINES: f32 = 2.0;
 /// Pane wheel step, logical px per notch.
@@ -589,6 +592,26 @@ impl App {
         }
     }
 
+    /// Gives the page's refinement one slice between events (the first layout only estimated the
+    /// blocks off screen). True while there is more; once the page is refined this does nothing,
+    /// so an idle window costs no CPU.
+    fn refine_slice(&mut self) -> bool {
+        if self.first || !self.ws.refining() {
+            return false;
+        }
+        let more = self.ws.refine(REFINE_SLICE);
+        if !more && (self.trace || std::env::var_os("MDVIEW_STARTUP_TRACE").is_some()) {
+            let images = self.ws.image_stats();
+            eprintln!(
+                "mdview: page refined after {:.1} ms ({} image decodes, {} engine jobs)",
+                self.started.elapsed().as_secs_f64() * 1000.0,
+                images.decodes,
+                images.engine_jobs
+            );
+        }
+        more
+    }
+
     fn draw(&mut self) {
         let (damage, mut times) = self.compose();
         let t = Instant::now();
@@ -608,7 +631,7 @@ impl App {
                 times.rows
             );
         }
-        if self.steps.is_some() && !self.first {
+        if self.steps.is_some() && !self.first && !self.ws.refining() {
             self.step_times.push(times);
         }
         let title = self.ws.title();
@@ -624,9 +647,12 @@ impl App {
                 w.set_visible(true);
             }
             if std::env::var_os("MDVIEW_STARTUP_TRACE").is_some() || self.trace {
+                let images = self.ws.image_stats();
                 eprintln!(
-                    "mdview: first frame after {:.1} ms",
-                    self.started.elapsed().as_secs_f64() * 1000.0
+                    "mdview: first frame after {:.1} ms ({} image decodes, {} engine jobs)",
+                    self.started.elapsed().as_secs_f64() * 1000.0,
+                    images.decodes,
+                    images.engine_jobs
                 );
             }
             #[cfg(windows)]
@@ -923,6 +949,12 @@ impl ApplicationHandler<Wake> for App {
             return;
         }
         if self.steps.is_some() && !self.first {
+            // The steps measure scrolling a refined page, as a reader who scrolls after the
+            // first second sees it; refinement itself runs first, in its usual slices.
+            if self.refine_slice() {
+                event_loop.set_control_flow(ControlFlow::Poll);
+                return;
+            }
             self.step();
             if self.exit {
                 return;
@@ -935,7 +967,16 @@ impl ApplicationHandler<Wake> for App {
         {
             w.set_files(self.ws.watched_paths());
         }
+        let refining = self.refine_slice();
         let next = self.timers(Instant::now());
+        if refining {
+            // More to measure: come straight back after any events that are waiting.
+            event_loop.set_control_flow(ControlFlow::Poll);
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
+            return;
+        }
         if self.wants_frame {
             self.wants_frame = false;
             if let Some(w) = &self.window {

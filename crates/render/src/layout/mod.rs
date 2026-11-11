@@ -1,14 +1,18 @@
-//! Lays the document model out in one top-down pass and paints it into a bitmap: blocks are
+//! Lays the document model out block by block and paints it into a bitmap: blocks are
 //! virtualized, scroll frames reuse the previous bitmap's rows, and every laid-out text run keeps
 //! its caret stops so a click can be turned back into a document offset, a link or a selection.
 //! Images are drawn through parley inline boxes; math and diagrams are engine-rendered images.
 //!
-//! The pieces: [`page`] holds [`PageLayout`] and the height pass, [`frame`] the scroll frame,
-//! [`hit`] and [`selection`] the caret geometry, [`pager`] the layout walk and text emission,
-//! [`inline`] the model-to-runs conversion, [`paint`] the paint list and raster, and [`prose`],
-//! [`containers`], [`table`] and [`media`] the block kinds.
+//! The pieces: [`page`] holds [`PageLayout`] (per-block heights, derived positions),
+//! [`relayout`] measures blocks and corrects the layout in place around the viewport's anchor,
+//! [`estimate`] guesses heights without shaping, [`refine`] measures the rest in idle slices,
+//! [`frame`] draws the scroll frame, [`hit`] and [`selection`] the caret geometry, [`store`] keeps
+//! every raster across layouts, [`pager`] the layout walk and text emission, [`inline`] the
+//! model-to-runs conversion, [`paint`] the paint list and raster, and [`prose`], [`containers`],
+//! [`table`] and [`media`] the block kinds.
 
 mod containers;
+mod estimate;
 mod frame;
 mod hit;
 mod inline;
@@ -17,13 +21,17 @@ mod page;
 mod pager;
 mod paint;
 mod prose;
+mod refine;
+mod relayout;
 mod selection;
+mod store;
 mod table;
 
 pub use page::PageLayout;
+pub use relayout::{Jump, RemoteState};
+pub use store::ImageStats;
 
 use crate::bitmap::Bitmap;
-use crate::image::DecodedImage;
 use crate::text::{Brush, TextEngine};
 use crate::theme::{DARK, LIGHT, Theme};
 use mdview_core::model::Document;
@@ -32,7 +40,7 @@ use paint::CachedBlock;
 use parley::{FontContext, LayoutContext};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::rc::Rc;
+use store::ImageStore;
 
 #[derive(Clone)]
 pub struct Options {
@@ -40,7 +48,8 @@ pub struct Options {
     pub width: f32,
     pub scale: f32,
     pub theme: Theme,
-    /// Stop laying out past this many logical px. The bitmap is clipped to it.
+    /// Stop laying out past this many logical px. The bitmap is clipped to it. Only
+    /// [`DocumentRenderer::page`] honours it; the scrolling path lays out what is shown.
     pub max_height: Option<f32>,
     /// The directory the document came from, so relative image paths resolve. `None` leaves
     /// images as placeholders.
@@ -72,6 +81,15 @@ impl Options {
             theme: DARK,
             ..Options::default()
         }
+    }
+
+    /// Whether a layout made for `self` serves `other`: same width, scale, theme and image
+    /// directory.
+    fn same_layout(&self, other: &Options) -> bool {
+        self.width == other.width
+            && (self.scale - other.scale).abs() < 0.001
+            && self.theme.name == other.theme.name
+            && self.base_dir == other.base_dir
     }
 }
 
@@ -129,10 +147,12 @@ pub struct Slice {
 /// which is what lets a window send only that difference to the GPU: the rows outside the band moved
 /// by `shift` rows, and the band rows are new. A caller that has lost its copy of the previous frame
 /// (a resize, a new device) must draw the whole frame; `band` is `None` in that case, and also for
-/// the first frame and for any jump of a viewport or more.
+/// the first frame, for any jump of a viewport or more, and whenever a correction changed what the
+/// kept rows show.
 pub struct Frame {
     pub bitmap: Bitmap,
-    /// Absolute device-px row the bitmap's first row shows.
+    /// Absolute device-px row the bitmap's first row shows. A correction above the viewport moves
+    /// it (the rows still show the same content); the shell takes it as its scroll position.
     pub top: f32,
     pub stats: crate::text::CacheStats,
     /// Rows of `bitmap`, in bitmap rows, that were painted this frame. An empty range means the
@@ -142,26 +162,21 @@ pub struct Frame {
     pub shift: i32,
 }
 
-/// Measures the whole document without painting it.
+/// Measures the whole document exactly, without painting it, and hands the layout over.
 pub fn layout(doc: &Document, options: &Options) -> PageLayout {
-    DocumentRenderer::new().layout(doc, options)
-}
-
-/// Renders only the part of the document that reaches `top..top + height`, given a layout made
-/// earlier for the same width, scale and theme. Blocks above and below are not touched, so a scroll
-/// frame costs one viewport of bitmap and one viewport of text layout.
-pub fn render_view(
-    doc: &Document,
-    options: &Options,
-    page: &PageLayout,
-    top: f32,
-    height: f32,
-) -> Slice {
-    DocumentRenderer::new().view(doc, options, page, top, height)
+    let mut renderer = DocumentRenderer::new();
+    renderer.layout_exact(doc, options);
+    renderer.page.take().expect("laid out")
 }
 
 /// Holds the font and layout contexts and the glyph cache across frames, so scrolling a document
 /// does not rebuild them (and keeps the glyph cache warm). One per window, or per benchmark.
+///
+/// It also owns the current document's [`PageLayout`]: every call that lays a block out (a
+/// frame, a hit test, a selection, a jump, a `<details>` toggle, an image arriving, a refinement
+/// slice) may correct that block's height in place. Corrections keep the viewport's anchor (a
+/// block and an offset from its top) fixed, so content on screen does not jump; [`top`](Self::top)
+/// is the viewport top in the corrected coordinates, which a shell adopts as its scroll position.
 pub struct DocumentRenderer {
     fonts: FontContext,
     layouts: LayoutContext<Brush>,
@@ -169,13 +184,21 @@ pub struct DocumentRenderer {
     /// Laid-out paints and caret stops per top-level block, relative to the block's top, for scroll
     /// frames and hit tests.
     cache: HashMap<u32, CachedBlock>,
-    cache_key: Option<(f32, f32, &'static str)>,
-    /// Decoded images, shared by every frame so a cached paint can still find its pixels.
-    images: HashMap<u32, Option<Rc<DecodedImage>>>,
+    /// Every raster drawn, kept across layouts, widths, zooms and documents.
+    store: ImageStore,
     /// `<details>` open overrides, by block, so a toggle is view state the document does not carry.
     details: HashMap<u32, bool>,
     /// The frame [`view_frame`](Self::view_frame) keeps between calls.
     frame: Option<Frame>,
+    /// The current layout and the options it was made for.
+    page: Option<PageLayout>,
+    options: Option<Options>,
+    view: relayout::ViewState,
+    /// Which top-level blocks (by index) used each store id when last laid out, so an arriving
+    /// image re-measures only those.
+    uses: HashMap<u32, Vec<u32>>,
+    /// The average glyph advances estimates use, for the scale and theme they were taken at.
+    metrics: Option<(u32, &'static str, estimate::Metrics)>,
 }
 
 impl Default for DocumentRenderer {
@@ -208,61 +231,25 @@ impl DocumentRenderer {
             layouts: LayoutContext::new(),
             engine: TextEngine::new(4 << 20),
             cache: HashMap::new(),
-            cache_key: None,
-            images: HashMap::new(),
+            store: ImageStore::new(mdview_core::limits::IMAGE_CACHE_BYTES),
             details: HashMap::new(),
             frame: None,
+            page: None,
+            options: None,
+            view: relayout::ViewState::default(),
+            uses: HashMap::new(),
+            metrics: None,
         }
     }
 
-    /// Measures the whole document. Do this once per width, scale and theme.
-    pub fn layout(&mut self, doc: &Document, options: &Options) -> PageLayout {
-        self.cache.clear();
-        self.images.clear();
-        self.frame = None;
-        self.cache_key = Some((options.width, options.scale, options.theme.name));
-        Pager::new(
-            doc,
-            options,
-            &mut self.fonts,
-            &mut self.layouts,
-            None,
-            &mut self.images,
-            &self.details,
-        )
-        .measure_page()
+    /// The current layout, once [`layout`](Self::layout) has made one.
+    pub fn page_layout(&self) -> Option<&PageLayout> {
+        self.page.as_ref()
     }
 
-    /// Renders one viewport slice, reusing the contexts and glyph cache.
-    pub fn view(
-        &mut self,
-        doc: &Document,
-        options: &Options,
-        page: &PageLayout,
-        top: f32,
-        height: f32,
-    ) -> Slice {
-        debug_assert!(page.matches(options), "page layout for different options");
-        let height = height.max(1.0);
-        let top = top.clamp(0.0, (page.total_height - height).max(0.0));
-        let key = (options.width, options.scale, options.theme.name);
-        if self.cache_key != Some(key) {
-            self.cache.clear();
-            self.images.clear();
-            self.cache_key = Some(key);
-            self.frame = None;
-        }
-        let mut pager = Pager::new(
-            doc,
-            options,
-            &mut self.fonts,
-            &mut self.layouts,
-            Some(&mut self.cache),
-            &mut self.images,
-            &self.details,
-        );
-        pager.slice_page(page, top, height);
-        pager.finish_slice(top, height, page.total_height, &mut self.engine)
+    /// Decodes and engine jobs so far, and what the image store holds.
+    pub fn image_stats(&self) -> ImageStats {
+        self.store.stats()
     }
 
     /// The frame [`view_frame`](Self::view_frame) drew last, if any.
@@ -279,33 +266,26 @@ impl DocumentRenderer {
             .unwrap_or_else(|| doc.details_open_as_written(block))
     }
 
-    /// Opens or closes a `<details>`. The block's height changes, so the cached frame and the paint
-    /// cache go; the caller has to measure the page again.
-    pub fn set_details(&mut self, block: u32, open: bool) {
-        self.details.insert(block, open);
-        self.cache.clear();
-        self.frame = None;
-    }
-
-    /// Forgets every toggle, for a new document whose block numbers no longer mean the same.
+    /// Forgets every toggle, for a new document whose block numbers no longer mean the same. The
+    /// layout goes with them; the next [`layout`](Self::layout) starts clean.
     pub fn clear_details(&mut self) {
         if !self.details.is_empty() {
             self.details.clear();
-            self.cache.clear();
-            self.frame = None;
+            self.drop_layout();
         }
     }
 
-    /// Paints the whole page into one bitmap. For tests and small documents; scrolling uses
-    /// [`layout`](Self::layout) and [`view`](Self::view).
+    /// Paints the whole page into one bitmap in one top-down pass. For tests, goldens and small
+    /// documents; scrolling uses [`layout`](Self::layout) and [`view_frame`](Self::view_frame).
     pub fn page(&mut self, doc: &Document, options: &Options) -> Rendered {
+        self.store.begin_frame();
         let mut pager = Pager::new(
             doc,
             options,
             &mut self.fonts,
             &mut self.layouts,
-            None,
-            &mut self.images,
+            false,
+            &mut self.store,
             &self.details,
         );
         pager.page();
@@ -313,10 +293,11 @@ impl DocumentRenderer {
     }
 }
 
-/// One-shot form of [`layout`] plus [`render_view`].
+/// One-shot viewport render: an exact layout, then the rows `top..top + height`.
 pub fn render_slice(doc: &Document, options: &Options, top: f32, height: f32) -> Slice {
-    let page = layout(doc, options);
-    render_view(doc, options, &page, top, height)
+    let mut renderer = DocumentRenderer::new();
+    renderer.layout_exact(doc, options);
+    renderer.view(doc, options, top, height)
 }
 
 pub fn render(doc: &Document, options: &Options) -> Rendered {

@@ -54,11 +54,25 @@ impl Paint {
     }
 }
 
-/// Everything a top-level block keeps for later frames: what to paint and where its text is.
+/// Everything a top-level block keeps for later frames: what to paint and where its text is,
+/// relative to the whole row above the block's top.
+///
+/// Layout rounds rules, chips and underlines to whole rows of the page, so paints made for a top
+/// at one fraction of a row are only right at that fraction: shifted by a fractional amount they
+/// would straddle two rows and blur. `phase` is that fraction; the paints are reused while the
+/// block's top keeps it, and the block is measured again when a correction above changes it.
 #[derive(Clone, Default)]
 pub(super) struct CachedBlock {
     pub(super) paints: Vec<Paint>,
     pub(super) lines: Vec<LineGeom>,
+    pub(super) phase: f32,
+}
+
+impl CachedBlock {
+    /// Whether the paints fit a block whose top is at `y`.
+    pub(super) fn fits(&self, y: f32) -> bool {
+        (y - y.floor()).to_bits() == self.phase.to_bits()
+    }
 }
 
 impl<'a, 'b> Pager<'a, 'b> {
@@ -121,8 +135,12 @@ impl<'a, 'b> Pager<'a, 'b> {
                 } => frame.line((a.0, a.1 - shift), (b.0, b.1 - shift), thickness, color),
                 Paint::Text { layout, x, y } => engine.draw_layout(frame, &layout, x, y - shift),
                 Paint::Image { index, x, y, w, h } => {
-                    if let Some(Some(image)) = self.images.get(&index) {
-                        frame.image(&image.rgba, image.width, image.height, x, y - shift, w, h);
+                    if let Some(image) = self.store.pixels(index) {
+                        // Snapped to a page row before the shift: the bitmap rounds half away
+                        // from zero, so an image whose top sits on a half row above a band's
+                        // first row would otherwise land a row off from the whole-page draw.
+                        let y = y.round() - shift;
+                        frame.image(&image.rgba, image.width, image.height, x, y, w, h);
                     }
                 }
             }
