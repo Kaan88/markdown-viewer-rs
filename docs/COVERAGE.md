@@ -69,7 +69,7 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 | GitHub's `` $`..`$ `` math form | Supported | Rewritten to `$..$` before parsing, outside fenced code, one line, formula without `$` or a backtick (`github_math` in `parse.rs`) |
 | Mermaid | Supported in model | Drawing in Phase 4. Over 64 KiB keeps source and a reason. Family coverage is per the plan |
 | Front matter as a table | Supported | `crates/core/src/frontmatter.rs`: a leading `---` block whose first line is `key:` becomes a Property/Value table of its top-level `key: value` pairs; nested or list values show the block as a `yaml` code block; anything else stays a rule |
-| Emoji shortcodes `:+1:` | Supported (common set) | `crates/core/src/emoji.rs`: 186 common GitHub names in a sorted static table, replaced in running text only; unknown names stay as typed. Not the full GitHub list |
+| Emoji shortcodes `:+1:` | Supported | `crates/core/src/emoji.rs`: all 1913 GitHub (gemoji) shortcodes, generated into `emoji_table.rs` by `crates/core/tools/gen_emoji.py` and looked up by binary search; replaced in running text only, case-sensitive, unknown names and GitHub's image-only ones (`:octocat:`, `:shipit:`) stay as typed |
 | `<kbd>`, `<mark>`, `<code>`, `<tt>`, `<samp>`, `<var>`, `<cite>`, `<dfn>` | Supported | |
 | `<p>`, `<div>`, `<center>`, HTML tables and lists | Supported | Inside a table cell or a paragraph as well: see the known gaps for the differences |
 | `align` on blocks, `<img>`, `<table>`, `<tr>`, `<hr>` | Supported in model | Includes `justify`. On an image: left, right, top, middle, bottom. Drawing in Phase 2 |

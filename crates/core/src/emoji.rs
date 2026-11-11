@@ -1,197 +1,13 @@
 //! Emoji shortcodes such as `:rocket:`, replaced in running text the way GitHub does. The table is
-//! the common set only (about 186 names), sorted so a lookup is a binary search; an unknown
-//! name stays as typed. Code spans, code blocks and link destinations never reach this.
+//! GitHub's full gemoji list (`emoji_table.rs`, generated), sorted so a lookup is a binary
+//! search; an unknown name stays as typed. Code spans, code blocks and link destinations never
+//! reach this.
 
 use std::borrow::Cow;
 
-static TABLE: &[(&str, &str)] = &[
-    ("+1", "👍"),
-    ("-1", "👎"),
-    ("100", "💯"),
-    ("accept", "🉑"),
-    ("airplane", "✈️"),
-    ("alarm_clock", "⏰"),
-    ("alien", "👽"),
-    ("anchor", "⚓"),
-    ("angry", "😠"),
-    ("apple", "🍎"),
-    ("arrow_down", "⬇️"),
-    ("arrow_left", "⬅️"),
-    ("arrow_right", "➡️"),
-    ("arrow_up", "⬆️"),
-    ("art", "🎨"),
-    ("bangbang", "‼️"),
-    ("beer", "🍺"),
-    ("beers", "🍻"),
-    ("bell", "🔔"),
-    ("bike", "🚲"),
-    ("birthday", "🎂"),
-    ("black_heart", "🖤"),
-    ("blue_heart", "💙"),
-    ("blush", "😊"),
-    ("bomb", "💣"),
-    ("book", "📖"),
-    ("bookmark", "🔖"),
-    ("books", "📚"),
-    ("boom", "💥"),
-    ("brain", "🧠"),
-    ("broken_heart", "💔"),
-    ("bug", "🐛"),
-    ("building_construction", "🏗️"),
-    ("bulb", "💡"),
-    ("bus", "🚌"),
-    ("calendar", "📆"),
-    ("camera", "📷"),
-    ("cat", "🐱"),
-    ("chart_with_upwards_trend", "📈"),
-    ("check", "✔️"),
-    ("checkered_flag", "🏁"),
-    ("cherry_blossom", "🌸"),
-    ("clap", "👏"),
-    ("clipboard", "📋"),
-    ("cloud", "☁️"),
-    ("coffee", "☕"),
-    ("computer", "💻"),
-    ("confetti_ball", "🎊"),
-    ("construction", "🚧"),
-    ("cookie", "🍪"),
-    ("cry", "😢"),
-    ("crying_cat_face", "😿"),
-    ("crystal_ball", "🔮"),
-    ("dart", "🎯"),
-    ("dash", "💨"),
-    ("disappointed", "😞"),
-    ("dizzy", "💫"),
-    ("dog", "🐶"),
-    ("exclamation", "❗"),
-    ("eyeglasses", "👓"),
-    ("eyes", "👀"),
-    ("facepalm", "🤦"),
-    ("fire", "🔥"),
-    ("fireworks", "🎆"),
-    ("first_place_medal", "🥇"),
-    ("flags", "🎏"),
-    ("flushed", "😳"),
-    ("folder", "📁"),
-    ("gear", "⚙️"),
-    ("gem", "💎"),
-    ("gift", "🎁"),
-    ("globe_with_meridians", "🌐"),
-    ("green_heart", "💚"),
-    ("grey_question", "❔"),
-    ("grin", "😁"),
-    ("grinning", "😀"),
-    ("hammer", "🔨"),
-    ("hammer_and_wrench", "🛠️"),
-    ("hand", "✋"),
-    ("handshake", "🤝"),
-    ("heart", "❤️"),
-    ("heart_eyes", "😍"),
-    ("heavy_check_mark", "✔️"),
-    ("heavy_minus_sign", "➖"),
-    ("heavy_plus_sign", "➕"),
-    ("hourglass", "⌛"),
-    ("house", "🏠"),
-    ("hugs", "🤗"),
-    ("hushed", "😯"),
-    ("information_source", "ℹ️"),
-    ("innocent", "😇"),
-    ("joy", "😂"),
-    ("key", "🔑"),
-    ("keyboard", "⌨️"),
-    ("kissing_heart", "😘"),
-    ("laughing", "😆"),
-    ("link", "🔗"),
-    ("lock", "🔒"),
-    ("loudspeaker", "📢"),
-    ("mag", "🔍"),
-    ("mag_right", "🔎"),
-    ("memo", "📝"),
-    ("metal", "🤘"),
-    ("microscope", "🔬"),
-    ("moneybag", "💰"),
-    ("monocle_face", "🧐"),
-    ("moon", "🌙"),
-    ("mortar_board", "🎓"),
-    ("muscle", "💪"),
-    ("musical_note", "🎵"),
-    ("nerd_face", "🤓"),
-    ("new", "🆕"),
-    ("no_entry", "⛔"),
-    ("no_entry_sign", "🚫"),
-    ("ok", "🆗"),
-    ("ok_hand", "👌"),
-    ("open_book", "📖"),
-    ("package", "📦"),
-    ("page_facing_up", "📄"),
-    ("palm_tree", "🌴"),
-    ("paperclip", "📎"),
-    ("partying_face", "🥳"),
-    ("pencil", "📝"),
-    ("pencil2", "✏️"),
-    ("penguin", "🐧"),
-    ("pensive", "😔"),
-    ("pizza", "🍕"),
-    ("point_down", "👇"),
-    ("point_left", "👈"),
-    ("point_right", "👉"),
-    ("point_up", "👆"),
-    ("poop", "💩"),
-    ("pray", "🙏"),
-    ("purple_heart", "💜"),
-    ("pushpin", "📌"),
-    ("question", "❓"),
-    ("rabbit", "🐰"),
-    ("rainbow", "🌈"),
-    ("raised_hands", "🙌"),
-    ("recycle", "♻️"),
-    ("red_circle", "🔴"),
-    ("relaxed", "☺️"),
-    ("rocket", "🚀"),
-    ("rofl", "🤣"),
-    ("rose", "🌹"),
-    ("sad", "😥"),
-    ("scream", "😱"),
-    ("see_no_evil", "🙈"),
-    ("shield", "🛡️"),
-    ("shrug", "🤷"),
-    ("skull", "💀"),
-    ("sleeping", "😴"),
-    ("smile", "😄"),
-    ("smiley", "😃"),
-    ("smirk", "😏"),
-    ("snake", "🐍"),
-    ("sob", "😭"),
-    ("sparkles", "✨"),
-    ("sparkling_heart", "💖"),
-    ("speech_balloon", "💬"),
-    ("star", "⭐"),
-    ("star2", "🌟"),
-    ("stopwatch", "⏱️"),
-    ("sunglasses", "😎"),
-    ("sunny", "☀️"),
-    ("sweat_smile", "😅"),
-    ("tada", "🎉"),
-    ("thinking", "🤔"),
-    ("thumbsdown", "👎"),
-    ("thumbsup", "👍"),
-    ("tm", "™️"),
-    ("toolbox", "🧰"),
-    ("trophy", "🏆"),
-    ("turtle", "🐢"),
-    ("unicorn", "🦄"),
-    ("unlock", "🔓"),
-    ("v", "✌️"),
-    ("warning", "⚠️"),
-    ("wave", "👋"),
-    ("white_check_mark", "✅"),
-    ("wink", "😉"),
-    ("wrench", "🔧"),
-    ("x", "❌"),
-    ("yellow_heart", "💛"),
-    ("zap", "⚡"),
-    ("zzz", "💤"),
-];
+#[path = "emoji_table.rs"]
+mod table;
+use table::TABLE;
 
 fn lookup(name: &str) -> Option<&'static str> {
     TABLE
@@ -246,7 +62,12 @@ mod tests {
 
     #[test]
     fn the_table_is_sorted_and_unique() {
-        assert!(TABLE.windows(2).all(|w| w[0].0 < w[1].0));
+        assert!(
+            TABLE
+                .windows(2)
+                .all(|w| w[0].0.as_bytes() < w[1].0.as_bytes())
+        );
+        assert!(TABLE.iter().all(|(n, e)| !n.is_empty() && !e.is_empty()));
     }
 
     #[test]
@@ -259,5 +80,31 @@ mod tests {
         );
         assert_eq!(replace(":tada::tada:"), "🎉🎉");
         assert!(matches!(replace("no colons"), Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn the_full_github_list_is_present() {
+        assert!(TABLE.len() > 1800);
+        assert_eq!(replace(":+1: :100: :e-mail:"), "👍 💯 📧");
+        assert_eq!(replace(":tr: :us:"), "🇹🇷 🇺🇸");
+        assert_eq!(
+            replace(":family_man_woman_girl_boy:"),
+            "👨\u{200d}👩\u{200d}👧\u{200d}👦"
+        );
+        assert_eq!(replace(":man_technologist:"), "👨\u{200d}💻");
+        assert_eq!(replace(":airplane:"), "✈\u{fe0f}");
+        // Aliases of one entry all map to it.
+        assert_eq!(replace(":thumbsup:"), replace(":+1:"));
+        assert_eq!(replace(":smile:"), "😄");
+    }
+
+    #[test]
+    fn unknown_and_custom_names_stay_literal_and_matching_is_case_sensitive() {
+        assert_eq!(
+            replace(":octocat: :shipit: :notanemoji:"),
+            ":octocat: :shipit: :notanemoji:"
+        );
+        assert_eq!(replace(":ROCKET: :Tada: :+1:"), ":ROCKET: :Tada: 👍");
+        assert_eq!(replace("::rocket::"), ":🚀:");
     }
 }
