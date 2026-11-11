@@ -288,6 +288,22 @@ crates and can overlap once A is approved.
 running alongside as soon as A2 passes. Self-contained pieces (B1, B3's test harness, B4) go to
 cheaper models; B2, C2 and the interface review stay with the main session.
 
+**E. After the roadmap: editing (noted 2026-11-11, not scheduled)**
+
+The user wants, for personal use, an editor as fast and pleasant as the viewer: a Notepad
+alternative with syntax highlighting. Not started until the reader has shipped (A3-A6 done).
+
+1. Source view first: a toggle that shows the raw Markdown read-only, highlighted, with selection,
+   find and copy. Reuses the page's text path and scrolling.
+2. Then the editing core: text buffer, undo/redo, caret and selection editing, IME, encodings and
+   line endings, safe save, large files. Every control is hand-drawn, so there is no toolkit text
+   widget to lean on; budget weeks, not days.
+3. Decided 2026-11-11: the editor is a second project with the same goals (light, fast, pleasant),
+   not a mode of mdview. It is a separate binary that opens any text file and shares the shell,
+   text and highlighting code, so the viewer's exe and memory budgets stay untouched. Before it
+   starts, the shared parts of `bins/mdv-app` (window chrome, `gfx`, `textfield`, menus, theme,
+   `platform`) move into a library crate both binaries use.
+
 ### Scope to port
 
 The full inventory is in the research output and gets copied to `docs/PORT_CHECKLIST.md` in Phase 1 as the parity checklist:
