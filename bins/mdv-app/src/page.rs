@@ -1,0 +1,255 @@
+//! The page region: the workspace's frame blitted in, find marks and the selection blended over it,
+//! the overlay scrollbar, the missing-file banner, and the empty state when no tab is open.
+
+use crate::chrome::{Ctx, glyph, logo};
+use crate::gfx::{Face, Rect, mix};
+use crate::panes::{draw_scrollbar, scrollbar};
+use crate::ui::{BANNER_H, Drag, Hit, Scroller, Ui};
+use crate::workspace::Workspace;
+use mdview_core::commands::strings;
+use std::time::{Duration, Instant};
+
+/// The page viewport inside the region: below the banner when the file is missing.
+pub fn viewport(ws: &Workspace, r: Rect) -> Rect {
+    if ws.active_tab().is_some_and(|t| t.is_missing()) {
+        Rect::new(r.x, r.y + BANNER_H, r.w, (r.h - BANNER_H).max(0.0))
+    } else {
+        r
+    }
+}
+
+/// How many Recent entries the empty state lists.
+const EMPTY_RECENTS: usize = 6;
+
+/// Draws the page region. Returns the time the workspace spent laying out and painting.
+pub fn draw_page(c: &mut Ctx, ws: &mut Workspace, ui: &Ui, r: Rect) -> Duration {
+    let pal = *c.pal;
+    if ws.active().is_none() {
+        c.p.fill(r, pal.page);
+        draw_empty(c, ws, r);
+        return Duration::ZERO;
+    }
+    let vr = viewport(ws, r);
+    if vr.y > r.y {
+        let banner = Rect::new(r.x, r.y, r.w, BANNER_H);
+        c.p.fill(banner, pal.warn_bg);
+        c.p.fill(
+            Rect::new(r.x, banner.bottom() - c.p.px(), r.w, c.p.px()),
+            mix(pal.warn_bg, pal.warn, 0.3),
+        );
+        c.p.icon(glyph::WARN, 13.0, r.x + 22.0, banner.cy(), pal.warn);
+        c.p.text(
+            Face::Ui,
+            12.5,
+            r.x + 38.0,
+            banner.cy(),
+            strings::FILE_DELETED,
+            pal.text,
+            r.w - 54.0,
+        );
+    }
+    let scale = c.p.scale;
+    let (x0, y0, x1, y1) = c.p.dev_rect(vr);
+    let (w, h) = ((x1 - x0).max(0) as u32, (y1 - y0).max(0) as u32);
+    let started = Instant::now();
+    let view = ws.paint(w, h, scale);
+    let spent = started.elapsed();
+    let painted = view.map(|view| {
+        let bmp = &view.frame.bitmap;
+        let bx = x0 + view.x;
+        c.p.blit(bmp, 0, bmp.height as i32, bx, y0);
+        let bg = view.background;
+        // Whatever the frame does not cover (rounding at the edges).
+        if bx > x0 {
+            c.p.fill_dev(x0, y0, bx, y1, bg, 1.0);
+        }
+        if bx + (bmp.width as i32) < x1 {
+            c.p.fill_dev(bx + bmp.width as i32, y0, x1, y1, bg, 1.0);
+        }
+        if y0 + (bmp.height as i32) < y1 {
+            c.p.fill_dev(x0, y0 + bmp.height as i32, x1, y1, bg, 1.0);
+        }
+        (view.scroll, view.total_height)
+    });
+    let Some((scroll, total)) = painted else {
+        c.p.fill(vr, pal.page);
+        return spent;
+    };
+
+    // Find marks and the selection, blended over the page; the frame bitmap itself stays clean.
+    let marks = ws.find_marks();
+    let (others_a, current_a) = if pal.dark { (0.38, 0.62) } else { (0.45, 0.62) };
+    for m in &marks.others {
+        mark(c, x0, y0, m, pal.find_mark, others_a);
+    }
+    for m in &marks.current {
+        mark(c, x0, y0, m, pal.find_current, current_a);
+    }
+    for m in ws.selection_rects() {
+        mark(
+            c,
+            x0,
+            y0,
+            &m,
+            pal.selection,
+            if pal.dark { 0.42 } else { 0.30 },
+        );
+    }
+    c.hit(Hit::Page, vr);
+    if let Some((track, thumb)) = scrollbar(vr, total, h as f32, scroll) {
+        let hit = Hit::ScrollBar(Scroller::Page);
+        let active = c.hover == Some(hit)
+            || matches!(
+                ui.drag,
+                Some(Drag::Thumb {
+                    target: Scroller::Page,
+                    ..
+                })
+            );
+        draw_scrollbar(c.p, &pal, track, thumb, active);
+        c.hit(hit, track);
+    }
+    spent
+}
+
+fn mark(
+    c: &mut Ctx,
+    x0: i32,
+    y0: i32,
+    m: &mdview_render::Rect,
+    color: crate::gfx::Rgb,
+    alpha: f32,
+) {
+    let (a, b) = (x0 + m.x.round() as i32, y0 + m.y.round() as i32);
+    let (e, f) = (
+        x0 + (m.x + m.w).round() as i32,
+        y0 + (m.y + m.h).round() as i32,
+    );
+    c.p.fill_dev(a, b, e, f, color, alpha);
+}
+
+/// The empty state: the logo, a hint, a primary button and the recent files.
+fn draw_empty(c: &mut Ctx, ws: &Workspace, r: Rect) {
+    let pal = *c.pal;
+    let recents: Vec<&std::path::PathBuf> = ws.recents().iter().take(EMPTY_RECENTS).collect();
+    let col_w = (r.w - 48.0).clamp(200.0, 460.0);
+    let list_h = if recents.is_empty() {
+        0.0
+    } else {
+        44.0 + recents.len() as f32 * 40.0
+    };
+    let block_h = 64.0 + 24.0 + 30.0 + 26.0 + 28.0 + 36.0 + list_h;
+    let mut y = (r.y + (r.h - block_h) * 0.42).max(r.y + 24.0).round();
+    let cx = r.cx();
+    logo(c.p, Rect::new((cx - 32.0).round(), y, 64.0, 64.0), &pal);
+    y += 64.0 + 24.0;
+    c.p.text_center(
+        Face::Semibold,
+        20.0,
+        Rect::new(r.x, y, r.w, 30.0),
+        strings::APP_NAME,
+        pal.text,
+    );
+    y += 30.0 + 6.0;
+    c.p.text_center(
+        Face::Ui,
+        13.5,
+        Rect::new(r.x + 16.0, y, r.w - 32.0, 20.0),
+        strings::EMPTY_HINT,
+        pal.muted,
+    );
+    y += 20.0 + 28.0;
+    let label = strings::EMPTY_BUTTON;
+    let bw = c.p.measure(Face::Semibold, 13.5, label) + 56.0;
+    let b = Rect::new((cx - bw / 2.0).round(), y, bw.round(), 36.0);
+    let fill = match (
+        c.hover == Some(Hit::EmptyOpen),
+        c.pressed == Some(Hit::EmptyOpen),
+    ) {
+        (true, true) => mix(pal.accent, pal.page, 0.2),
+        (true, false) => mix(pal.accent, pal.page, 0.1),
+        _ => pal.accent,
+    };
+    c.p.rbox(b, 6.0, fill);
+    c.p.icon(glyph::OPEN, 14.0, b.x + 24.0, b.cy(), pal.on_accent);
+    c.p.text(
+        Face::Semibold,
+        13.5,
+        b.x + 38.0,
+        b.cy(),
+        label,
+        pal.on_accent,
+        f32::INFINITY,
+    );
+    c.hit(Hit::EmptyOpen, b);
+    y += 36.0;
+    if recents.is_empty() {
+        return;
+    }
+    y += 28.0;
+    let x = (cx - col_w / 2.0).round();
+    c.p.text(
+        Face::Semibold,
+        11.0,
+        x + 10.0,
+        y + 8.0,
+        "RECENT",
+        pal.muted,
+        col_w,
+    );
+    c.p.fill(
+        Rect::new(x + 70.0, y + 8.0, col_w - 80.0, c.p.px()),
+        pal.line,
+    );
+    y += 20.0;
+    for (i, path) in recents.iter().enumerate() {
+        let row = Rect::new(x, y, col_w, 36.0);
+        let hit = Hit::EmptyRecent(i);
+        if c.hover == Some(hit) {
+            c.p.rbox(
+                row,
+                6.0,
+                if c.pressed == Some(hit) {
+                    pal.press
+                } else {
+                    pal.hover
+                },
+            );
+        }
+        let missing = !path.exists();
+        c.p.icon(
+            if missing { glyph::WARN } else { glyph::DOC },
+            14.0,
+            x + 20.0,
+            row.cy(),
+            if missing { pal.warn } else { pal.accent },
+        );
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        let nw = c.p.text(
+            Face::Ui,
+            13.5,
+            x + 38.0,
+            row.cy(),
+            &name,
+            if missing { pal.faint } else { pal.text },
+            col_w - 60.0,
+        );
+        if let Some(dir) = path.parent() {
+            let left = x + 38.0 + nw + 12.0;
+            c.p.text(
+                Face::Ui,
+                12.0,
+                left,
+                row.cy() + 0.5,
+                &dir.display().to_string(),
+                pal.faint,
+                row.right() - left - 12.0,
+            );
+        }
+        c.hit(hit, row);
+        y += 40.0;
+    }
+}

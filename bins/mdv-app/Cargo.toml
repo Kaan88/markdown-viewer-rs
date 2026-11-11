@@ -1,0 +1,41 @@
+[package]
+name = "mdview"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "mdview: the winit + softbuffer shell. Every control is drawn by this crate."
+
+[[bin]]
+name = "mdview"
+path = "src/main.rs"
+
+[dependencies]
+mdview-core = { path = "../../crates/core" }
+mdview-render = { path = "../../crates/render" }
+parley = "=0.12.0"
+# Views softbuffer's u32 pixels as bytes, so presenting is a row memcpy.
+bytemuck = "1.25"
+
+[target.'cfg(windows)'.dependencies]
+winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }
+softbuffer = { version = "=0.4.8", default-features = false }
+rfd = { version = "0.15.4", default-features = false }
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Registry",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+] }
+
+# Linux is not built or run yet; these are the features it will need.
+[target.'cfg(not(windows))'.dependencies]
+winit = { version = "=0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
+softbuffer = { version = "=0.4.8", default-features = false, features = ["x11", "wayland", "wayland-dlopen"] }
+rfd = { version = "0.15.4", default-features = false, features = ["xdg-portal", "async-std"] }

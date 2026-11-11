@@ -8,9 +8,11 @@
 > sections about WinUI below are history. The Windows installer is
 > `packaging/windows/mdview-qt.iss`, built by `packaging/windows/build-installer-qt.ps1`.
 >
-> **Next direction: a lighter shell than Qt.** fltk-rs and winit + softbuffer mockups are compiled
-> and measured; Slint was tried and rejected for its text. Why, the numbers and the next steps are
-> in `docs/PLAN.md` ("Next: a lighter shell than Qt") and section 28 below.
+> **2026-11-11, later: the next shell is winit + softbuffer, `bins/mdv-app` (binary `mdview`).**
+> Every control is drawn by the crate through the page's own text path. The user approved its look
+> on the Windows PC. Qt stays the shipping shell until the hand checks, the checklist and the
+> installer are done. Read **section 29** first; the roadmap is in `docs/PLAN.md` ("Roadmap from
+> 2026-11-11"). Sections about Qt and WinUI below are history and reference.
 
 This document is the current state: what works, how to build and check it, the traps already found,
 and what to do next. `docs/PLAN.md` is the full plan (budgets, phases, gates). Read this file first,
@@ -1208,3 +1210,84 @@ fltk.
 **Measured, how:** exe size from the release file; private memory and working set from
 `Get-Process` about 3 s after launch, one run each, 100% scaling, dark; first frame from
 `MOCKUP_TRACE`. The memory figures are from one run each and are not medians.
+
+## 29. The winit + softbuffer shell, `bins/mdv-app` (2026-11-11)
+
+On the physical Windows PC. The user chose winit + softbuffer over fltk-rs, then approved the
+finished interface by using the running app. Nothing below has run on Linux.
+
+**What it is.** A workspace member (package and binary `mdview`), pure Rust, no DLLs. winit 0.30
+gives the window and input, softbuffer the pixels; the window is frameless and the crate draws the
+title row, tabs, command bar, panes, menus, dialogs and tooltips itself with parley and
+`mdview_render::TextEngine`, so chrome text and page text are the same. `mdview_render` now exports
+`shared_fonts()` so the chrome clones the renderer's font context instead of enumerating fonts again.
+
+| Module | What is in it |
+|---|---|
+| `workspace.rs` | All tab, document, session, find, selection, link, scroll, outline and status logic, headless and unit-tested. Ported from `bins/mdv-qt/src/shell.rs`. One shared `DocumentRenderer`; only the active tab is laid out |
+| `app.rs`, `app/input.rs`, `app/commands.rs` | State, dirty-region compose and `present_with_damage`, the winit handler, pointer and key handling, every `CommandId`, wakes and timers |
+| `app/tests.rs` | A headless `App` driven through the real handlers |
+| `chrome.rs`, `panes.rs`, `page.rs`, `overlays.rs` | Title row and command bar; Files and Outline; page blit, find and selection overlays, empty state; menus, dialogs, toast, link hint, tooltips |
+| `ui.rs`, `keys.rs`, `args.rs` | Layout and hit types; shortcuts parsed from core's `COMMANDS` strings; command line |
+| `gfx.rs`, `menu.rs`, `textfield.rs`, `tree.rs`, `theme.rs` | Painter (logical px, device snapping, clip), popup menu, single-line editor, lazy folder tree, chrome palettes |
+| `platform.rs` | The only `unsafe`: clipboard, URLs, system theme, dialogs (rfd), DWM corner and dark-mode attributes |
+| `build.rs` | Embeds `assets/mdview.ico` when `rc.exe` is found |
+
+**Changes from the Qt shell,** all in `workspace.rs`'s module doc: restored tabs load when first
+shown and inactive tabs drop their layout; the reading position survives reload, resize and zoom
+as block plus offset; find re-runs after a reload; double click selects a word and triple click a
+block; status messages are toasts (no status bar); the outline highlights the current heading; the
+empty state lists recent files.
+
+**Build and run.**
+
+```powershell
+cargo build --release -p mdview -p mdview-engine   # target/release/mdview.exe, mdview-engine.exe
+cargo test -p mdview                               # 58 tests
+```
+
+Launch from Git Bash, not PowerShell. Flags: `<files>`, `--light`/`--dark`, `--zoom <pct>`,
+`--folder <dir>`, `--maximize`, `--no-session` (neither reads nor writes the user's session, and
+skips the single-instance hand-over; use it for every test). `MDVIEW_STARTUP_TRACE=1` prints the
+first-frame time, `MDVIEW_TRACE=1` per-frame timings.
+
+**Screenshots without a window.** `--shot out.png` draws one frame of the state the other flags
+describe and exits: `--size WxH`, `--scale f`, `--files`/`--no-files`, `--outline`/`--no-outline`,
+`--find q`, `--scroll px`, `--menu main|recent|tab|page`, `--dialog about|shortcuts|recent`,
+`--hover x,y`, `--focus-mode`. `--scroll-steps n` scrolls a real window n wheel steps, logs the
+timings and exits. `tests/golden/shell-app-{dark,light}.png` are the two the user saw; they are
+review copies, not a pixel baseline.
+
+**Checked.** The whole workspace test suite and `cargo fmt --all --check`. Shots of both themes,
+find, the four menus, the three dialogs, the empty state, a 700 px window, scales 1.5 and 2.0,
+focus mode and nine tabs were looked at. The release exe ran on this PC; maximized, its client
+rectangle equals the monitor work area (3440x1392), so the taskbar is not covered. The user tried
+the running app and approved the look.
+
+**Measured** (release, this PC, 100% scaling, single runs unless noted):
+
+| | Value |
+|---|---|
+| `mdview.exe` | 6.8 MB |
+| First frame, `showcase.md` | 187 ms median of 3 with a cold engine; 67 ms on a later launch. About 140 ms of the cold figure is the renderer and engine laying out the diagrams |
+| First frame, `linked.md` | 48-50 ms |
+| Private memory after 3 s | 16 MiB (`linked.md`), about 36 MiB (showcase, 1280x800), 76 MiB (showcase, maximized 3440x1440) |
+| Scroll frame, maximized, both panes, 150 frames | median 3.1 ms, p90 3.5, worst 4.2 (paint 1.2, compose 1.0, copy 0.8, OS present 0.9) |
+
+Qt release has not been measured beside it.
+
+**Not run by hand as a recorded check:** edge resize, title drag and double-click maximize; caret
+blink; clipboard; opening links; drag and drop; the single-instance hand-over; live file watching
+and the missing-file flow; session save and restore (every scripted run used `--no-session`); the
+native open dialogs; a DPI or system-theme change at runtime.
+
+**Known gaps.** No snap-layouts flyout on the maximize button. Pane widths are not saved (which
+panes are open is). The Files pane does not follow folder changes (`FileTree::refresh` exists and
+is not wired to the watcher). Maximized memory is three full-window bitmaps (screen, renderer
+frame, softbuffer's). The system accent colour is not used. The Linux dependency features in
+`Cargo.toml` are untested, and the icons need Segoe Fluent Icons.
+
+**Next:** `docs/PLAN.md`, "Roadmap from 2026-11-11": A3 (hand checks) to A6 (retire Qt on Windows),
+then README fidelity (GIF and WebP, remote images behind a per-document bar, more Mermaid
+families, the full emoji list) and the renderer work (image re-decode check, the `layout.rs` split,
+estimated heights for large files).

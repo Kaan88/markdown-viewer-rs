@@ -12,7 +12,7 @@ mod theme;
 pub use bitmap::Bitmap;
 pub use layout::{
     BlockBox, DocumentRenderer, Frame, Hit, Options, PageLayout, Rect, Rendered, Slice, layout,
-    render, render_slice, render_view,
+    render, render_slice, render_view, shared_fonts,
 };
 pub use text::{CacheStats, TextEngine};
 pub use theme::{Color, DARK, LIGHT, Theme};

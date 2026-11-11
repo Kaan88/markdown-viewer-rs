@@ -1,0 +1,156 @@
+//! Command-line arguments: files to open, start-up overrides, and the flags that render a UI state
+//! to a PNG without a window (`--shot`), so the look can be checked without a human.
+
+use std::path::PathBuf;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShotMenu {
+    Main,
+    Recent,
+    Tab,
+    Page,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShotDialog {
+    About,
+    Shortcuts,
+    Recent,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Args {
+    pub files: Vec<PathBuf>,
+    /// `--light` (false) or `--dark` (true).
+    pub dark: Option<bool>,
+    pub zoom: Option<u16>,
+    pub folder: Option<PathBuf>,
+    /// Do not read or write the user's session (and skip single-instance hand-over).
+    pub no_session: bool,
+    pub shot: Option<PathBuf>,
+    /// Logical window size for `--shot`.
+    pub size: Option<(u32, u32)>,
+    pub scale: Option<f32>,
+    pub files_pane: Option<bool>,
+    pub outline_pane: Option<bool>,
+    pub find: Option<String>,
+    /// Logical px.
+    pub scroll: Option<f32>,
+    pub menu: Option<ShotMenu>,
+    pub dialog: Option<ShotDialog>,
+    /// Logical pointer position.
+    pub hover: Option<(f32, f32)>,
+    pub focus_mode: bool,
+    /// Scroll this many wheel steps after the first frame, log timings, and exit.
+    pub scroll_steps: Option<u32>,
+    /// Start maximized (for checking the frameless maximized geometry).
+    pub maximize: bool,
+}
+
+fn pair<T: std::str::FromStr>(s: &str, sep: char) -> Option<(T, T)> {
+    let (a, b) = s.split_once(sep)?;
+    Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+}
+
+impl Args {
+    /// Parses the arguments after the program name. Unknown flags and bad values are reported on
+    /// stderr and ignored, so a stray flag never stops the viewer from opening.
+    pub fn parse(args: impl IntoIterator<Item = String>) -> Args {
+        let mut out = Args::default();
+        let mut it = args.into_iter();
+        while let Some(a) = it.next() {
+            let mut value = |name: &str| {
+                let v = it.next();
+                if v.is_none() {
+                    eprintln!("mdview: {name} needs a value");
+                }
+                v
+            };
+            match a.as_str() {
+                "--light" => out.dark = Some(false),
+                "--dark" => out.dark = Some(true),
+                "--no-session" => out.no_session = true,
+                "--files" => out.files_pane = Some(true),
+                "--no-files" => out.files_pane = Some(false),
+                "--outline" => out.outline_pane = Some(true),
+                "--no-outline" => out.outline_pane = Some(false),
+                "--focus-mode" => out.focus_mode = true,
+                "--maximize" => out.maximize = true,
+                "--zoom" => out.zoom = value(&a).and_then(|v| v.trim_end_matches('%').parse().ok()),
+                "--folder" => out.folder = value(&a).map(PathBuf::from),
+                "--shot" => out.shot = value(&a).map(PathBuf::from),
+                "--size" => out.size = value(&a).and_then(|v| pair(&v.to_ascii_lowercase(), 'x')),
+                "--scale" => {
+                    out.scale = value(&a)
+                        .and_then(|v| v.parse().ok())
+                        .filter(|s: &f32| *s >= 0.5 && *s <= 4.0)
+                }
+                "--find" => out.find = value(&a),
+                "--scroll" => out.scroll = value(&a).and_then(|v| v.parse().ok()),
+                "--scroll-steps" => out.scroll_steps = value(&a).and_then(|v| v.parse().ok()),
+                "--hover" => out.hover = value(&a).and_then(|v| pair(&v, ',')),
+                "--menu" => {
+                    out.menu = match value(&a).as_deref() {
+                        Some("main") => Some(ShotMenu::Main),
+                        Some("recent") => Some(ShotMenu::Recent),
+                        Some("tab") => Some(ShotMenu::Tab),
+                        Some("page") => Some(ShotMenu::Page),
+                        _ => None,
+                    }
+                }
+                "--dialog" => {
+                    out.dialog = match value(&a).as_deref() {
+                        Some("about") => Some(ShotDialog::About),
+                        Some("shortcuts") => Some(ShotDialog::Shortcuts),
+                        Some("recent") => Some(ShotDialog::Recent),
+                        _ => None,
+                    }
+                }
+                f if f.starts_with("--") => eprintln!("mdview: ignoring {f}"),
+                _ => out.files.push(PathBuf::from(a)),
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(s: &str) -> Args {
+        Args::parse(s.split_whitespace().map(String::from))
+    }
+
+    #[test]
+    fn files_and_flags() {
+        let a = parse("a.md --dark --zoom 125 b.md --folder docs --no-session");
+        assert_eq!(a.files, [PathBuf::from("a.md"), PathBuf::from("b.md")]);
+        assert_eq!(a.dark, Some(true));
+        assert_eq!(a.zoom, Some(125));
+        assert_eq!(a.folder, Some(PathBuf::from("docs")));
+        assert!(a.no_session);
+    }
+
+    #[test]
+    fn shot_flags() {
+        let a = parse(
+            "--shot x.png --size 700x500 --scale 1.5 --hover 10,20 --menu recent --dialog about --scroll 300 --no-files",
+        );
+        assert_eq!(a.shot, Some(PathBuf::from("x.png")));
+        assert_eq!(a.size, Some((700, 500)));
+        assert_eq!(a.scale, Some(1.5));
+        assert_eq!(a.hover, Some((10.0, 20.0)));
+        assert_eq!(a.menu, Some(ShotMenu::Recent));
+        assert_eq!(a.dialog, Some(ShotDialog::About));
+        assert_eq!(a.scroll, Some(300.0));
+        assert_eq!(a.files_pane, Some(false));
+    }
+
+    #[test]
+    fn bad_values_are_ignored() {
+        let a = parse("--zoom lots --scale 9 --size big --bogus --menu nope");
+        assert_eq!(a, Args { ..Args::default() });
+        assert_eq!(parse("--zoom").zoom, None);
+    }
+}

@@ -238,6 +238,56 @@ and only then port the shell. Qt stays the shipping shell until the replacement 
 Not considered, because they are heavier: egui/eframe (redraws every frame, usually a GPU context),
 iced (wgpu), GTK4 (a large runtime on Windows). Tauri is ruled out because it is a webview.
 
+### Roadmap from 2026-11-11: winit shell, then README fidelity, then renderer work
+
+**Decided 2026-11-11:** the shell is winit + softbuffer (`bins/mdv-app`, binary `mdview`), every
+control drawn through the page's own text path. Windows first; Linux is low priority. The user
+approves the interface by looking at it; no stage of it counts as accepted otherwise.
+
+Ordered by what the reader notices first, with each stage's gate. Stages B and C touch different
+crates and can overlap once A is approved.
+
+**A. Finish the shell port** (`bins/mdv-app`)
+
+| Step | Work | Gate |
+|---|---|---|
+| A1 | Layout A chrome over `workspace.rs`: tabs, command bar, panes, find, menus, dialogs, toasts, empty state | Screenshots of every state; tests pass |
+| A2 | User review of the look and feel | **The user's sign-off.** If rejected, the interface is redone |
+| A3 | Checks by hand: real mouse and keys, drag and drop, single instance, file watching, a DPI change at runtime, maximize and snap | Each one run on the Windows PC and recorded |
+| A4 | Tick `docs/PORT_CHECKLIST.md` for the new shell; measure against Qt release (exe, private memory, first frame, 1 MB scroll) | Budget table rows filled with real numbers |
+| A5 | Installer builds `mdview.exe` and the engine with no Qt; update checks become manual only | Install, launch, uninstall on the PC |
+| A6 | Retire the Qt shell on Windows (archive branch, as with WinUI) | Only after A2-A5 |
+
+**B. Make real READMEs look right** (mostly `crates/render` image loading and `crates/engine`)
+
+| Step | Work | Gate |
+|---|---|---|
+| B1 | GIF (first frame, no animation, so idle CPU stays zero) and WebP decoding | Fixture and golden per format; size and pixel limits enforced |
+| B2 | Remote images: fetched off the UI thread and off the launch path, 10 s timeout, 12 MiB and 24 Mpx limits, 64 MiB disk cache, retry rules from `core::status::ImageRequests`. Windows uses WinHTTP so the exe gains no TLS stack. **Decided by the user 2026-11-11:** off until asked. A per-document "Load remote images" bar with an "always" setting, because opening an untrusted file should not contact a server unasked | A README with badges renders; nothing is fetched when off; a slow or hostile server cannot stall the viewer |
+| B3 | Mermaid: test each of the roughly 22 remaining families in merman 0.9.3 for labels, time and memory; enable the ones that pass; per-family size limits. ELK stays excluded | Coverage table lists every family as enabled or excluded with the reason; engine size recorded |
+| B4 | Full GitHub emoji shortcode list (186 names today) | Table generated from gemoji; lookup test |
+| B5 | Small fidelity items: `<ruby>` annotations above the base, `<dl>` and `<figure>` styling, copy a formula or diagram as its source | Fixture and golden each |
+
+**C. Renderer performance and structure** (`crates/render`)
+
+| Step | Work | Gate |
+|---|---|---|
+| C1 | Check whether a resize or zoom re-decodes images and re-requests math and diagrams (`layout()` clears the image map). If so, keep decoded images across layouts, keyed by source and size | Trace shows no decode and no engine job on a pure resize |
+| C2 | Split `layout.rs` (2,839 lines) into measure, paint, hit-test and selection modules. Behaviour-preserving, done only because C3 needs it | Goldens and the byte-identical frame tests unchanged |
+| C3 | First layout of a large document: estimated heights for off-screen blocks, refined as they are laid out (PLAN gate G7's fallback) | 1 MB first paint within +30 ms of a small document; scroll position stable while heights refine |
+| C4 | A `<details>` toggle re-lays out one block instead of the page (falls out of C3's per-block heights) | Toggle under 1 ms on the 1 MB fixture |
+| C5 | Text and bitmap: a clip rectangle in `TextEngine` and `Bitmap`, cheaper LRU bookkeeping, a greyscale mode for BGR and rotated panels, area-averaged downscaling for large images | Measured before and after; goldens reviewed where pixels change |
+
+**D. Housekeeping**
+
+- `docs/COVERAGE.md` still calls the renderer and engine "planned": re-verify each row on screen with a fixture, and rewrite the status column.
+- Rewrite `docs/HANDOFF.md` around the new shell; move the WinUI and Qt sections to history.
+- Linux: build and run the winit shell on KDE (Wayland file drops, portal dialogs, an icon font to replace Segoe Fluent Icons).
+
+**Order:** A1-A2, then C1 (small, and it may be free), B1, B2, then C2-C4, B3, B4-B5, C5, with A3-A6
+running alongside as soon as A2 passes. Self-contained pieces (B1, B3's test harness, B4) go to
+cheaper models; B2, C2 and the interface review stay with the main session.
+
 ### Scope to port
 
 The full inventory is in the research output and gets copied to `docs/PORT_CHECKLIST.md` in Phase 1 as the parity checklist:
