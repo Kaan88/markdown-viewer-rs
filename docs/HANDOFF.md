@@ -89,7 +89,7 @@ denied:
 cd C:\Users\kaank\Desktop\mv
 $env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
 cargo build --release --workspace          # includes mdview.exe and mdview-engine.exe
-cargo test --release --workspace           # 2026-11-12: 353 passed, 0 failed, 6 ignored
+cargo test --release --workspace           # 2026-11-12: 355 passed, 0 failed, 6 ignored
 cargo fmt --all --check
 ```
 
@@ -232,6 +232,14 @@ empty state lists recent files; the page text and the chrome follow the display'
 **Chrome text and icons.** UI text goes through `TextEngine` with the system's ClearType order
 (`platform::subpixel_order`). Icons come from Segoe Fluent Icons or Segoe MDL2 Assets, which Linux
 will not have.
+
+**Back and forward (2026-11-12).** The workspace keeps one history for the window, across tabs:
+following a link, a footnote mark or an outline entry records the file and scroll position left
+behind. The mouse's Back and Forward buttons and Alt+Left / Alt+Right walk it, reopening a tab that
+was closed since. The session also keeps the window's position (`geometry=1010x720 @333,177`,
+restored only if a screen still shows that place) and the side panes' widths
+(`layout=files=1;outline=0;files_w=300`). The text cursor shows only on a line of text; margins,
+gaps and pictures keep the arrow, and a link is a link only where its text is.
 
 ## 5. The renderer (`crates/render`)
 
@@ -420,7 +428,7 @@ writes an extension's default value. The last page offers (unchecked) to open
 | Engine | `mdview-engine.exe` 26 MB | |
 | Installer | 11 MB | 17 MB |
 
-Tests: `cargo test --release --workspace`: 353 passed, 0 failed, 6 ignored.
+Tests: `cargo test --release --workspace`: 355 passed, 0 failed, 6 ignored.
 
 Earlier, 2026-11-11, before estimated heights: a scroll frame in a maximized window with both
 panes, 150 frames, median 3.1 ms, p90 3.5, worst 4.2 (paint 1.2, compose 1.0, copy 0.8, OS

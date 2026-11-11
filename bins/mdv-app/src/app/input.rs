@@ -50,7 +50,7 @@ impl App {
                     let hover = self.ws.hover(px, py);
                     cursor = if hover.pointing {
                         CursorIcon::Pointer
-                    } else if self.ws.hit(px, py).is_some() {
+                    } else if hover.text {
                         CursorIcon::Text
                     } else {
                         CursorIcon::Default
@@ -371,6 +371,11 @@ impl App {
         let (x, y) = self.ui.mouse;
         self.ui.autoscroll_due = None;
         if let Some(drag) = self.ui.drag.take() {
+            if matches!(drag, Drag::Splitter { .. }) {
+                let panes = &self.ui.panes;
+                self.ws
+                    .set_pane_widths(panes.files_w as u32, panes.outline_w as u32);
+            }
             if drag == Drag::Select {
                 let click = self.ws.pointer_release();
                 self.handle_click(click);
@@ -420,6 +425,21 @@ impl App {
                 });
             }
             _ => {}
+        }
+        self.redraw();
+    }
+
+    /// The mouse's Back and Forward buttons, and Alt+Left and Alt+Right.
+    pub(super) fn travel(&mut self, back: bool) {
+        if self.ui.dialog.is_some() {
+            return;
+        }
+        self.ui.popup = None;
+        self.ui.tip = None;
+        if back {
+            self.ws.go_back();
+        } else {
+            self.ws.go_forward();
         }
         self.redraw();
     }
@@ -579,6 +599,10 @@ impl App {
                 KeyName::PageDown => self.set_scroll(Scroller::Dialog, scroll + 300.0),
                 _ => {}
             }
+            return;
+        }
+        if mods.alt && !mods.ctrl && matches!(name, KeyName::Left | KeyName::Right) {
+            self.travel(name == KeyName::Left);
             return;
         }
         if self.ui.find_focused && self.find_key(&name, mods, typed) {

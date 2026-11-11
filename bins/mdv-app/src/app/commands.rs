@@ -54,7 +54,7 @@ impl App {
             Hit::FilesFolder | Hit::FilesOpenFolder => self.command(C::OpenFolder),
             Hit::OutlineRow(i) => {
                 if let Some(block) = self.ws.outline().get(i).map(|e| e.block) {
-                    self.ws.scroll_to_block(block);
+                    self.ws.outline_jump(block);
                 }
             }
             Hit::EmptyOpen => self.command(C::OpenFiles),

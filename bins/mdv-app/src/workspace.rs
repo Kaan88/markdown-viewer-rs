@@ -124,7 +124,20 @@ pub struct Hover {
     pub link: Option<String>,
     /// A link, footnote mark or `<details>` summary: show the pointing hand.
     pub pointing: bool,
+    /// The pointer is on a line of text: show the text cursor. Off it (a margin, the gap
+    /// between blocks, a picture) the arrow stays.
+    pub text: bool,
 }
+
+/// Somewhere the reader was: a file and how far down it. Back and Forward walk these.
+#[derive(Debug, Clone, PartialEq)]
+struct Place {
+    path: PathBuf,
+    scroll: f32,
+}
+
+/// The most places Back remembers.
+const HISTORY_LIMIT: usize = 100;
 
 /// What a right click offers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -319,6 +332,10 @@ struct Press {
 
 /// Every open tab plus the state shared between them.
 pub struct Workspace {
+    /// Where following a link, a footnote or an outline entry took the reader from, oldest
+    /// first, and where Back took them from. One history for the window, across tabs.
+    back: Vec<Place>,
+    forward: Vec<Place>,
     tabs: Vec<Tab>,
     labels: Vec<String>,
     active: Option<usize>,
@@ -360,6 +377,8 @@ impl Workspace {
             .map(Session::load)
             .unwrap_or_default();
         let mut ws = Workspace {
+            back: Vec::new(),
+            forward: Vec::new(),
             tabs: Vec::new(),
             labels: Vec::new(),
             active: None,
@@ -434,6 +453,107 @@ impl Workspace {
     pub fn set_panes(&mut self, files: bool, outline: bool) {
         self.session.set_panes(files, outline);
         self.persist();
+    }
+
+    /// The saved place of the window's top-left corner, in desktop device px.
+    pub fn window_position(&self) -> Option<(i32, i32)> {
+        self.session.window_position()
+    }
+
+    /// Records where the window is. Not saved at once (a drag reports every step); the next
+    /// save, the one at exit at the latest, writes it.
+    pub fn set_window_position(&mut self, x: i32, y: i32) {
+        self.session.set_window_position(x, y);
+    }
+
+    /// The saved widths of the Files and Outline panes, in logical px.
+    pub fn pane_widths(&self) -> (Option<u32>, Option<u32>) {
+        self.session.pane_widths()
+    }
+
+    /// Records the side panes' widths, and saves.
+    pub fn set_pane_widths(&mut self, files: u32, outline: u32) {
+        if self.session.pane_widths() != (Some(files), Some(outline)) {
+            self.session.set_pane_widths(Some(files), Some(outline));
+            self.persist();
+        }
+    }
+
+    // ---- back and forward --------------------------------------------------------------------
+
+    fn place(&self) -> Option<Place> {
+        self.active_tab().map(|tab| Place {
+            path: tab.path.clone(),
+            scroll: tab.scroll,
+        })
+    }
+
+    /// Notes that the reader has just left `from` by a jump, so Back returns there. A jump that
+    /// did not move them is not a place to go back to.
+    fn remember(&mut self, from: Option<Place>) {
+        let Some(from) = from else { return };
+        if self.place().as_ref() == Some(&from) {
+            return;
+        }
+        self.back.push(from);
+        if self.back.len() > HISTORY_LIMIT {
+            self.back.remove(0);
+        }
+        self.forward.clear();
+    }
+
+    pub fn can_go_back(&self) -> bool {
+        !self.back.is_empty()
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        !self.forward.is_empty()
+    }
+
+    /// Returns to where the last jump was made from: that file's tab (opened again if it was
+    /// closed) at that scroll position. False when there is nowhere to go.
+    pub fn go_back(&mut self) -> bool {
+        self.travel(true)
+    }
+
+    /// Undoes [`go_back`](Self::go_back).
+    pub fn go_forward(&mut self) -> bool {
+        self.travel(false)
+    }
+
+    fn travel(&mut self, back: bool) -> bool {
+        loop {
+            let next = if back {
+                self.back.pop()
+            } else {
+                self.forward.pop()
+            };
+            let Some(next) = next else { return false };
+            let here = self.place();
+            // A file that has gone since is skipped, not an error to show.
+            if self.open(&next.path).is_err() {
+                continue;
+            }
+            if let Some(here) = here {
+                if back {
+                    self.forward.push(here);
+                } else {
+                    self.back.push(here);
+                }
+            }
+            self.ensure_layout();
+            self.scroll_to(next.scroll);
+            self.dirty = true;
+            return true;
+        }
+    }
+
+    /// Scrolls to an outline entry's heading, as a jump Back returns from.
+    pub fn outline_jump(&mut self, block: u32) -> bool {
+        let from = self.place();
+        let moved = self.scroll_to_block(block);
+        self.remember(from);
+        moved
     }
 
     /// The saved window size in logical px and whether it was maximized.
@@ -1514,6 +1634,7 @@ impl Workspace {
         Hover {
             link: hit.link.and_then(|i| self.link_destination(i)),
             pointing: hit.link.is_some() || hit.footnote.is_some() || hit.details.is_some(),
+            text: hit.on_text,
         }
     }
 
@@ -1658,6 +1779,15 @@ impl Workspace {
     /// its fragment), or a web/mail address for the caller to open. Core's `classify_link` decides,
     /// so unknown schemes and UNC hosts never do anything.
     pub fn open_link(&mut self, destination: &str) -> LinkOutcome {
+        let from = self.place();
+        let outcome = self.open_link_from_here(destination);
+        if matches!(outcome, LinkOutcome::Scrolled | LinkOutcome::OpenedTab(_)) {
+            self.remember(from);
+        }
+        outcome
+    }
+
+    fn open_link_from_here(&mut self, destination: &str) -> LinkOutcome {
         let doc_dir = self
             .active_tab()
             .and_then(|t| t.path.parent().map(Path::to_path_buf))
@@ -1712,7 +1842,10 @@ impl Workspace {
             .active_document()
             .and_then(|doc| doc.footnotes.get(index as usize))
             .map(|note| note.number);
-        number.is_some_and(|number| self.jump(Jump::Footnote(number)))
+        let from = self.place();
+        let moved = number.is_some_and(|number| self.jump(Jump::Footnote(number)));
+        self.remember(from);
+        moved
     }
 
     /// Opens or closes a `<details>`; the renderer measures its block again at the next paint
@@ -2690,6 +2823,88 @@ mod tests {
         assert!(ws.labels()[1] == "b.md");
         assert!(ws.scroll() > 1000.0, "b.md opened at its #bee heading");
         assert_eq!(ws.current_heading(), Some(1));
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn back_and_forward_return_to_where_a_jump_was_made() {
+        let dir = temp_dir("history");
+        let a = write(
+            &dir,
+            "a.md",
+            &format!(
+                "# Top
+
+A line of text here.
+
+{}## Target
+
+{}",
+                paragraphs("Filler", 120),
+                paragraphs("After", 60)
+            ),
+        );
+        let b = write(
+            &dir,
+            "b.md",
+            &format!(
+                "# B
+
+{}## Bee
+
+{}",
+                paragraphs("Filler", 120),
+                paragraphs("After", 60)
+            ),
+        );
+        let mut ws = workspace();
+        ws.open(&a).unwrap();
+        ws.paint(800, 600, 1.0).unwrap();
+        assert!(!ws.can_go_back() && !ws.go_back());
+
+        // The text cursor is for text: on a line, not in the margin beside it.
+        let (x, y) = point_of(&mut ws, "line");
+        assert!(ws.hover(x, y).text);
+        assert!(!ws.hover(790.0, y).text);
+        assert!(!ws.hover(2.0, y).text);
+
+        ws.scroll_to(30.0);
+        assert_eq!(ws.open_link("#target"), LinkOutcome::Scrolled);
+        let at_target = ws.scroll();
+        assert!(at_target > 1000.0);
+        assert_eq!(ws.open_link("b.md#bee"), LinkOutcome::OpenedTab(1));
+        ws.paint(800, 600, 1.0).unwrap();
+        let at_bee = ws.scroll();
+
+        // Back crosses the tab, to the place in a.md the link was clicked from; then to where
+        // the first jump was made.
+        assert!(ws.go_back());
+        assert_eq!((ws.active(), ws.scroll()), (Some(0), at_target));
+        assert!(ws.go_back());
+        assert_eq!((ws.active(), ws.scroll()), (Some(0), 30.0));
+        assert!(!ws.go_back());
+        assert!(ws.go_forward());
+        assert_eq!(ws.scroll(), at_target);
+        assert!(ws.go_forward());
+        assert_eq!((ws.active(), ws.scroll()), (Some(1), at_bee));
+        assert!(!ws.go_forward());
+
+        // A tab closed since is opened again.
+        assert!(ws.go_back());
+        ws.close(1);
+        assert_eq!(ws.tab_count(), 1);
+        assert!(ws.go_forward());
+        assert_eq!(
+            ws.active_tab().map(|t| t.path().to_path_buf()),
+            Some(b.clone())
+        );
+        ws.paint(800, 600, 1.0).unwrap();
+        assert_eq!(ws.scroll(), at_bee);
+
+        // A new jump drops what Forward held.
+        assert!(ws.go_back());
+        assert_eq!(ws.open_link("#top"), LinkOutcome::Scrolled);
+        assert!(!ws.can_go_forward());
         _ = std::fs::remove_dir_all(&dir);
     }
 

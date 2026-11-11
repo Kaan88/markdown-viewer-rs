@@ -86,6 +86,10 @@ impl DocumentRenderer {
             (None, Some(source)) => source.start,
             (None, None) => return None,
         };
+        let on_text = line.is_some_and(|line| {
+            let slack = 2.0 * options.scale;
+            distance(line, local) == 0.0 && x >= line.x0 - slack && x <= line.x1 + slack
+        });
         let mut hit = Hit {
             block: span.block,
             offset,
@@ -93,6 +97,7 @@ impl DocumentRenderer {
             footnote: None,
             details: None,
             source,
+            on_text,
         };
         if let Some(inner) = doc.block_at(offset) {
             let mut block = inner;
@@ -113,7 +118,12 @@ impl DocumentRenderer {
                 }
                 block = current.parent;
             }
-            for i in doc.blocks[inner as usize].spans.usize() {
+            let spans = if on_text {
+                doc.blocks[inner as usize].spans.usize()
+            } else {
+                0..0
+            };
+            for i in spans {
                 let span = &doc.spans[i];
                 match span.kind {
                     SpanKind::Link(link) if span.start <= offset && offset < span.end => {

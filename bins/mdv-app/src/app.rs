@@ -212,6 +212,12 @@ impl App {
         let (files, outline) = self.ws.panes();
         self.ui.panes.files = a.files_pane.unwrap_or(files);
         self.ui.panes.outline = a.outline_pane.unwrap_or(outline);
+        let (files_w, outline_w) = self.ws.pane_widths();
+        let width = |saved: Option<u32>, default: f32| {
+            saved.map_or(default, |w| (w as f32).clamp(PANE_MIN, PANE_MAX))
+        };
+        self.ui.panes.files_w = width(files_w, self.ui.panes.files_w);
+        self.ui.panes.outline_w = width(outline_w, self.ui.panes.outline_w);
         if let Some(folder) = &a.folder {
             self.ws
                 .set_folder(Some(mdview_core::files::canonical_or_absolute(folder)));
@@ -858,6 +864,21 @@ impl ApplicationHandler<Wake> for App {
             .with_min_inner_size(LogicalSize::new(520.0, 360.0))
             .with_inner_size(LogicalSize::new(w.max(520) as f64, h.max(360) as f64))
             .with_maximized(max || self.args.maximize);
+        // Back where it was, if a screen still shows that place: the title row's left end has
+        // to be on one, or the window could not be reached.
+        if let Some((x, y)) = self.ws.window_position() {
+            let reachable = event_loop.available_monitors().any(|monitor| {
+                let (origin, size) = (monitor.position(), monitor.size());
+                let (px, py) = (x + 60, y + 16);
+                px >= origin.x
+                    && px < origin.x + size.width as i32
+                    && py >= origin.y
+                    && py < origin.y + size.height as i32
+            });
+            if reachable {
+                attributes = attributes.with_position(PhysicalPosition::new(x, y));
+            }
+        }
         #[cfg(windows)]
         {
             use winit::platform::windows::WindowAttributesExtWindows;
@@ -889,6 +910,17 @@ impl ApplicationHandler<Wake> for App {
                     self.expose = true;
                 }
                 self.draw();
+            }
+            WindowEvent::Moved(position) => {
+                // The restored window's place only: maximized and minimized windows report
+                // where the system put them.
+                if let Some(w) = &self.window
+                    && !w.is_maximized()
+                    && w.is_minimized() != Some(true)
+                    && w.fullscreen().is_none()
+                {
+                    self.ws.set_window_position(position.x, position.y);
+                }
             }
             WindowEvent::Resized(size) => {
                 self.size = (size.width.max(1), size.height.max(1));
@@ -952,6 +984,8 @@ impl ApplicationHandler<Wake> for App {
                 (ElementState::Released, MouseButton::Left) => self.left_release(),
                 (ElementState::Pressed, MouseButton::Right) => self.right_press(),
                 (ElementState::Pressed, MouseButton::Middle) => self.middle_press(),
+                (ElementState::Pressed, MouseButton::Back) => self.travel(true),
+                (ElementState::Pressed, MouseButton::Forward) => self.travel(false),
                 _ => {}
             },
             WindowEvent::MouseWheel { delta, .. } => self.wheel(delta),

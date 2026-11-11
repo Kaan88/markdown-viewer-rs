@@ -237,7 +237,45 @@ impl Session {
     }
 
     pub fn set_panes(&mut self, files: bool, outline: bool) {
+        let widths = self.pane_widths();
+        self.write_layout(files, outline, widths);
+    }
+
+    /// The saved widths of the Files and Outline panes in logical px, each `None` until the
+    /// reader has dragged that pane's edge. Written as `files_w=250;outline_w=230` after the
+    /// pane flags.
+    pub fn pane_widths(&self) -> (Option<u32>, Option<u32>) {
+        let mut widths = (None, None);
+        for part in self.layout.split(';') {
+            let Some((key, value)) = part.trim().split_once('=') else {
+                continue;
+            };
+            let value = value
+                .parse::<u32>()
+                .ok()
+                .filter(|v| (40..=4000).contains(v));
+            match key {
+                "files_w" => widths.0 = value,
+                "outline_w" => widths.1 = value,
+                _ => {}
+            }
+        }
+        widths
+    }
+
+    pub fn set_pane_widths(&mut self, files: Option<u32>, outline: Option<u32>) {
+        let (files_on, outline_on) = self.panes();
+        self.write_layout(files_on, outline_on, (files, outline));
+    }
+
+    fn write_layout(&mut self, files: bool, outline: bool, widths: (Option<u32>, Option<u32>)) {
         self.layout = format!("files={};outline={}", u8::from(files), u8::from(outline));
+        if let Some(w) = widths.0 {
+            self.layout.push_str(&format!(";files_w={w}"));
+        }
+        if let Some(w) = widths.1 {
+            self.layout.push_str(&format!(";outline_w={w}"));
+        }
     }
 
     /// The saved window size in device-independent pixels and whether it was maximized, written
@@ -250,11 +288,39 @@ impl Session {
         if !ok(w) || !ok(h) {
             return None;
         }
-        Some((w, h, words.next() == Some("max")))
+        Some((w, h, words.any(|word| word == "max")))
     }
 
     pub fn set_window_size(&mut self, width: u32, height: u32, maximized: bool) {
+        let position = self.window_position();
         self.geometry = format!("{width}x{height}{}", if maximized { " max" } else { "" });
+        if let Some((x, y)) = position {
+            self.geometry.push_str(&format!(" @{x},{y}"));
+        }
+    }
+
+    /// Where the window's top-left corner was, in the desktop's device px, written after the
+    /// size as `@120,80`. It is the place of the restored window: a maximized or minimized one
+    /// does not overwrite it. Whether that place is still on a screen is for the shell to check.
+    pub fn window_position(&self) -> Option<(i32, i32)> {
+        let word = self
+            .geometry
+            .split_whitespace()
+            .find_map(|w| w.strip_prefix('@'))?;
+        let (x, y) = word.split_once(',')?;
+        let (x, y): (i32, i32) = (x.parse().ok()?, y.parse().ok()?);
+        let ok = |v: i32| (-100_000..=100_000).contains(&v);
+        (ok(x) && ok(y)).then_some((x, y))
+    }
+
+    pub fn set_window_position(&mut self, x: i32, y: i32) {
+        let size: String = self
+            .geometry
+            .split_whitespace()
+            .filter(|word| !word.starts_with('@'))
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.geometry = format!("{size} @{x},{y}").trim_start().to_string();
     }
 }
 
@@ -368,6 +434,38 @@ mod window_state_tests {
         assert_eq!(s.panes(), (false, true));
         s.layout = "AAAAqt-state".into();
         assert_eq!(s.panes(), (false, false));
+    }
+
+    #[test]
+    fn position_and_pane_widths_round_trip_beside_the_older_keys() {
+        let mut s = Session::default();
+        assert_eq!(s.window_position(), None);
+        assert_eq!(s.pane_widths(), (None, None));
+        s.set_window_size(1280, 800, true);
+        s.set_window_position(-1900, 40);
+        assert_eq!(s.window_size(), Some((1280, 800, true)));
+        assert_eq!(s.window_position(), Some((-1900, 40)));
+        // A new size keeps the place, and a new place keeps the size.
+        s.set_window_size(1000, 700, false);
+        assert_eq!(s.window_position(), Some((-1900, 40)));
+        s.set_window_position(10, 20);
+        assert_eq!(s.window_size(), Some((1000, 700, false)));
+        assert_eq!(s.window_position(), Some((10, 20)));
+
+        s.set_panes(true, false);
+        s.set_pane_widths(Some(300), None);
+        assert_eq!(s.panes(), (true, false));
+        assert_eq!(s.pane_widths(), (Some(300), None));
+        s.set_panes(true, true);
+        assert_eq!(s.pane_widths(), (Some(300), None));
+        s.set_pane_widths(Some(300), Some(260));
+        assert_eq!(s.panes(), (true, true));
+        // Both survive the file.
+        let again = Session::parse(&s.serialize());
+        assert_eq!(again.window_position(), Some((10, 20)));
+        assert_eq!(again.pane_widths(), (Some(300), Some(260)));
+        s.layout = "files=1;files_w=9999999".into();
+        assert_eq!(s.pane_widths(), (None, None));
     }
 
     #[test]

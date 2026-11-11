@@ -123,6 +123,10 @@ pub struct Hit {
     pub details: Option<u32>,
     /// The formula or diagram drawn at the point, when it is inside the picture itself.
     pub source: Option<Source>,
+    /// Whether the point is on a line of text, rather than beside, above or below the nearest
+    /// one. `offset` is the nearest position either way, which is what a drag wants; a link or
+    /// footnote is reported only when the point is on it.
+    pub on_text: bool,
 }
 
 /// What a rendered picture was made from.
