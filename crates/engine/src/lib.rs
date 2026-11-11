@@ -125,10 +125,122 @@ pub fn render_mermaid(
     } else {
         r##"{"theme":"default","themeVariables":{"fontSize":"11px"},"htmlLabels":false,"flowchart":{"htmlLabels":false},"gantt":{"leftPadding":150,"gridLineStartPadding":35,"useWidth":900}}"##
     };
+    let init = family_init(init, diagram_keyword(source), dark);
     let source = format!("%%{{init: {init}}}%%\n{source}");
     let svg = settle_gantt_ticks(&source, mermaid_svg(&source)?)?;
     let svg = inline_label_uses(&svg);
+    let svg = family_svg_fix(svg, diagram_keyword(&source), dark);
+    // Families that name no font (tree view) would get usvg's serif default. A root attribute loses to any font the diagram's own CSS names, so styled families are
+    // untouched.
+    let svg = svg.replacen("<svg ", "<svg font-family=\"Segoe UI, sans-serif\" ", 1);
     render_svg_at(svg.as_bytes(), scale, max_pixels, options)
+}
+
+/// The first word of the diagram, after blank lines and `%%` directives or comments.
+fn diagram_keyword(source: &str) -> &str {
+    source
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("%%"))
+        .and_then(|line| line.split_whitespace().next())
+        .unwrap_or("")
+}
+
+/// Dark-theme colours that merman hard-codes and no theme variable reaches: the byte numbers and
+/// title of a packet diagram, the journey title and the event-modeling lane titles (all black), and
+/// the relationship lines and labels of a C4 diagram (dark grey) would vanish on the dark page.
+fn family_svg_fix(svg: String, keyword: &str, dark: bool) -> String {
+    // The tree view sizes its canvas from merman's text metrics, and the real font's longest
+    // name ("Cargo.toml") runs past the right edge. Leave room for it.
+    if keyword == "treeView-beta" {
+        return widen_viewbox(svg, 30.0);
+    }
+    if !dark {
+        return svg;
+    }
+    match keyword {
+        "packet-beta" | "packet" => svg
+            .replace(
+                ".packetByte.start{fill:black;}",
+                ".packetByte.start{fill:#c8d0da;}",
+            )
+            .replace(
+                ".packetByte.end{fill:black;}",
+                ".packetByte.end{fill:#c8d0da;}",
+            )
+            .replace(".packetTitle{fill:black;", ".packetTitle{fill:#e4e4e4;"),
+        // The title carries an empty `fill`, which paints black.
+        "journey" => svg.replace("fill=\"\" font-family", "fill=\"#f5f5f5\" font-family"),
+        // Lane titles carry no fill at all.
+        "eventmodeling" => svg.replace(
+            "<text font-weight=\"bold\" ",
+            "<text fill=\"#e4e4e4\" font-weight=\"bold\" ",
+        ),
+        "C4Context" | "C4Container" | "C4Component" | "C4Dynamic" | "C4Deployment" => svg
+            .replace("fill=\"#444444\"", "fill=\"#c8d0da\"")
+            .replace("stroke=\"#444444\"", "stroke=\"#c8d0da\""),
+        _ => svg,
+    }
+}
+
+/// Grows the root `viewBox` width by `extra` user units.
+fn widen_viewbox(svg: String, extra: f32) -> String {
+    let Some(at) = svg.find("viewBox=\"") else {
+        return svg;
+    };
+    let start = at + "viewBox=\"".len();
+    let Some(len) = svg[start..].find('"') else {
+        return svg;
+    };
+    let numbers: Vec<f32> = svg[start..start + len]
+        .split_whitespace()
+        .filter_map(|n| n.parse().ok())
+        .collect();
+    let [x, y, w, h] = numbers[..] else {
+        return svg;
+    };
+    format!(
+        "{}{x} {y} {} {h}{}",
+        &svg[..start],
+        w + extra,
+        &svg[start + len..]
+    )
+}
+
+/// Adds the per-family settings that the shared init does not cover. A fixed-grid layout
+/// (timeline) needs Mermaid's own 16 px text, and several newer families take their colours from
+/// their own theme sections, which the shared dark palette does not reach. Families not named
+/// here, including the original eight, keep the shared init unchanged.
+fn family_init(init: &str, keyword: &str, dark: bool) -> String {
+    let (font, theme, root): (&str, &str, &str) = match (keyword, dark) {
+        ("timeline", false) => ("16px", r##","scaleLabelColor":"#1a1a1a""##, ""),
+        ("timeline", true) => (
+            "16px",
+            r##","scaleLabelColor":"#f2f2f2","cScale0":"#4b5d7a","cScale1":"#6b4f8a","cScale2":"#3f7f7f","cScale3":"#8a6d3b","cScale4":"#7a4b4b","cScale5":"#4b7a52","cScale6":"#5b6b82","cScale7":"#7c5c8a","cScale8":"#2f6f6f","cScale9":"#8a6d3b","cScale10":"#7a4b4b","cScale11":"#4b7a52""##,
+            "",
+        ),
+        // Journey's boxes are a fixed 150 units wide and the whole chart is scaled to the page,
+        // so text measured at 11 px ends up about 5 px tall.
+        ("journey", _) => ("20px", "", ""),
+        ("treeView-beta", true) => (
+            "11px",
+            r##","treeView":{"labelColor":"#e4e4e4","lineColor":"#9aa4b2","descriptionColor":"#9bc785"}"##,
+            "",
+        ),
+        ("quadrantChart", true) => ("11px", r##","quadrantPointFill":"#e4e4e4""##, ""),
+        _ => return init.to_string(),
+    };
+    let mut out = init.replacen(
+        r#""fontSize":"11px""#,
+        &format!(r#""fontSize":"{font}"{theme}"#),
+        1,
+    );
+    if !root.is_empty() {
+        out.pop();
+        out.push_str(root);
+        out.push('}');
+    }
+    out
 }
 
 /// Mermaid source to SVG text.
@@ -205,6 +317,25 @@ fn attr_f32(fragment: &str, name: &str) -> Option<f32> {
     rest[..end].parse().ok()
 }
 
+/// One fallback `<text>` line, sized and squeezed for the real font.
+fn fallback_text(raw: &str) -> String {
+    // The fallback text keeps Mermaid's default 16 px, but the nodes were measured at our
+    // 11 px init size; at 16 the label overflows the circle and boxes.
+    let mut text = raw.replace("font-size: 16px", "font-size: 11px");
+    // The fallback font is wider than merman's deterministic measurement (notably DejaVu on
+    // Linux), and the node shape clips the first and last letters. Compress the label
+    // horizontally around its own anchor so it stays inside the circle or box.
+    if let Some(open) = text.find('>')
+        && let Some(cx) = attr_f32(&text[..open], "x")
+    {
+        text.insert_str(
+            open,
+            &format!(" transform=\"translate({cx} 0) scale(0.85 1) translate(-{cx} 0)\""),
+        );
+    }
+    text
+}
+
 /// Replaces `<use href="#mindmap-foreignobject-label-N">` with the fallback `<text>` that the
 /// readable pipeline put inside the referenced `<defs>` group. resvg does not draw labels through a
 /// `<use>` of a nested `<svg>`; inlining the text at the use site keeps the label group's transform.
@@ -223,23 +354,19 @@ fn inline_label_uses(svg: &str) -> String {
         let Some(text_start) = after.find("<text ") else {
             break;
         };
-        let Some(text_end) = after[text_start..].find("</text>") else {
+        // A wrapped label is several consecutive `<text>` lines; take them all.
+        let mut end = text_start;
+        let mut text = String::new();
+        while after[end..].starts_with("<text ") {
+            let Some(text_end) = after[end..].find("</text>") else {
+                break;
+            };
+            let next = end + text_end + "</text>".len();
+            text.push_str(&fallback_text(&after[end..next]));
+            end = next;
+        }
+        if text.is_empty() {
             break;
-        };
-        let end = text_start + text_end + "</text>".len();
-        // The fallback text keeps Mermaid's default 16 px, but the nodes were measured at our
-        // 11 px init size; at 16 the label overflows the circle and boxes.
-        let mut text = after[text_start..end].replace("font-size: 16px", "font-size: 11px");
-        // The fallback font is wider than merman's deterministic measurement (notably DejaVu on
-        // Linux), and the node shape clips the first and last letters. Compress the label
-        // horizontally around its own anchor so it stays inside the circle or box.
-        if let Some(open) = text.find('>')
-            && let Some(cx) = attr_f32(&text[..open], "x")
-        {
-            text.insert_str(
-                open,
-                &format!(" transform=\"translate({cx} 0) scale(0.85 1) translate(-{cx} 0)\""),
-            );
         }
         labels.push((id.to_string(), text));
         rest = &after[end..];
@@ -260,7 +387,16 @@ fn inline_label_uses(svg: &str) -> String {
         let mut replaced = false;
         for (id, text) in &labels {
             if tag.contains(&format!("href=\"#{id}\"")) {
-                out.push_str(text);
+                // `<use x= y=>` offsets the label; mindmap uses none, journey and kanban do.
+                let (x, y) = (
+                    attr_f32(tag, "x").unwrap_or(0.0),
+                    attr_f32(tag, "y").unwrap_or(0.0),
+                );
+                if x != 0.0 || y != 0.0 {
+                    out.push_str(&format!("<g transform=\"translate({x} {y})\">{text}</g>"));
+                } else {
+                    out.push_str(text);
+                }
                 replaced = true;
                 break;
             }
@@ -463,6 +599,93 @@ mod tests {
             );
             let inked = image.rgba.chunks_exact(4).filter(|p| p[3] > 0).count();
             assert!(inked > 100, "{name}: {inked} inked pixels");
+        }
+    }
+
+    /// The ```mermaid blocks of `fixtures/diagrams-more.md`, as (heading, source).
+    fn more_diagrams() -> Vec<(String, String)> {
+        let text = include_str!("../../../fixtures/diagrams-more.md").replace("\r\n", "\n");
+        let mut found = Vec::new();
+        let mut heading = String::new();
+        let mut source: Option<String> = None;
+        for line in text.lines() {
+            if let Some(title) = line.strip_prefix("## ") {
+                heading = title.to_string();
+            } else if line == "```mermaid" {
+                source = Some(String::new());
+            } else if line == "```" {
+                if let Some(done) = source.take() {
+                    found.push((heading.clone(), done));
+                }
+            } else if let Some(open) = source.as_mut() {
+                open.push_str(line);
+                open.push('\n');
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn every_extra_family_in_the_fixture_renders_in_both_themes() {
+        let options = options();
+        let all = more_diagrams();
+        assert_eq!(all.len(), 24, "23 enabled families plus the disabled one");
+        for (name, source) in &all {
+            if name.starts_with("Not enabled") {
+                continue;
+            }
+            for dark in [false, true] {
+                let started = std::time::Instant::now();
+                let image = render_mermaid(source, 2.0, dark, 24_000_000, &options)
+                    .unwrap_or_else(|e| panic!("{name} (dark {dark}): {e}"));
+                assert!(
+                    image.width > 100 && image.height > 40 && image.width < 6000,
+                    "{name}: {}x{}",
+                    image.width,
+                    image.height
+                );
+                let inked = image.rgba.chunks_exact(4).filter(|p| p[3] > 0).count();
+                assert!(inked > 500, "{name}: {inked} inked pixels");
+                // Loose bound: the target is 300 ms on a quiet machine; a busy test run needs room.
+                assert!(
+                    started.elapsed().as_millis() < 3000,
+                    "{name}: {:?}",
+                    started.elapsed()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_disabled_family_is_an_error_so_the_viewer_shows_its_source() {
+        let options = options();
+        let (_, source) = more_diagrams()
+            .into_iter()
+            .find(|(name, _)| name.starts_with("Not enabled"))
+            .unwrap();
+        assert!(render_mermaid(&source, 1.0, false, 24_000_000, &options).is_err());
+    }
+
+    #[test]
+    fn the_original_eight_families_keep_the_shared_init() {
+        for keyword in [
+            "flowchart",
+            "graph",
+            "sequenceDiagram",
+            "classDiagram",
+            "stateDiagram-v2",
+            "erDiagram",
+            "gantt",
+            "pie",
+            "mindmap",
+        ] {
+            for dark in [false, true] {
+                assert_eq!(super::family_init("{init}", keyword, dark), "{init}");
+                assert_eq!(
+                    super::family_svg_fix("<svg/>".to_string(), keyword, dark),
+                    "<svg/>"
+                );
+            }
         }
     }
 
