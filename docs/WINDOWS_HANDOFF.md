@@ -1,5 +1,11 @@
 # Windows handoff (2026-11-10)
 
+> **Status 2026-11-11:** the first session on the physical PC is done (HANDOFF section 26). Section 1
+> builds and passes there. Of section 2, the menu checks no longer apply (there is no menu bar since
+> layout A), theme, tabs, find, selection, copy, links and the Files pane were exercised; DPI other
+> than 100%, a second monitor, `--measure` and the installer were not. Section 3's bug is moot.
+> Section 4's gaps are closed except where HANDOFF section 11 still lists them.
+
 For whoever picks this up on a physical Windows 11 PC. Everything below was run on the WinApps Windows 11
 VM (Docker, no GPU, 8 cores). Nothing here has run on real hardware, so that is the first job. Longer
 background: `docs/HANDOFF.md` (sections 7, 17, 21, 22, 24).

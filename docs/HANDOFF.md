@@ -19,12 +19,15 @@ no CI, so run the tests yourself; `spikes/` is throwaway; report results plainly
 
 **Where the work happens.** Up to 2026-11-08 the user worked on a Windows PC and tested Qt on a Linux
 VM (section 5). From 2026-11-10 the work moved to the user's Linux desktop (CachyOS, KDE Plasma), with
-Windows checks in a WinApps Windows 11 VM that has no real GPU. **Next step: a session on the physical
-Windows PC**, starting from `docs/WINDOWS_HANDOFF.md`.
+Windows checks in a WinApps Windows 11 VM that has no real GPU. On 2026-11-11 a session ran on the
+**physical Windows PC** (section 26): both shells were redesigned (command bar, tabs in the title
+bar) and brought to parity there. **Next step:** the open items in section 12, then the Qt shell on
+the Linux desktop (it has not run on KDE since section 26).
 
 Sections 3, 4 and 6-10 were written on that Windows PC (Windows 11, RTX 4070 Ti SUPER, 3440x1440 at
 96 DPI), and their numbers come from it unless they say Linux. Sections 13-25 are dated notes from
-the Linux desktop; section 12 is the current to-do list.
+the Linux desktop, section 26 from the Windows PC; section 12 is the current to-do list. Where
+sections 7 and 8 describe menus, the find title or the outline menu, section 26 supersedes them.
 
 ---
 
@@ -37,9 +40,9 @@ the Linux desktop; section 12 is the current to-do list.
 | 0 spikes | closed |
 | 1 core | closed |
 | 2 headless renderer | closed 2026-11-08 (goldens approved) |
-| 3 Qt shell parity | in progress; most checklist features exist (section 12), but `docs/PORT_CHECKLIST.md` has not been ticked row by row, so the exit gate is not met |
+| 3 Qt shell parity | in progress; the checklist features exist and were redesigned on 2026-11-11 (section 26), but `docs/PORT_CHECKLIST.md` has not been ticked row by row and the new layout has not run on KDE, so the exit gate is not met |
 | 4 engine | complete |
-| 5 WinUI parity (W1-W3) | in progress; features built and run only in the WinApps VM; W1-W3 need the physical PC |
+| 5 WinUI parity (W1-W3) | in progress; built, tested and redesigned on the physical PC 2026-11-11 (section 26); W1 text quality, launch/memory numbers and the checklist are not done |
 | 6 polish and packaging | started early: PKGBUILD, AppImage (with self-update, which the user chose to keep), Inno installer compiled in the VM, PGO trial (not adopted) |
 
 Phase 2 detail, kept for reference:
@@ -771,51 +774,51 @@ Qt's event path instead).
   background tabs to drop layout after 60 s idle. Neither is done in either shell.
 - Menus and shortcuts are written out in each shell; only the strings come from core's `commands`
   table, so the two shells can drift.
-- **Qt:** Manage recent is a dock with a toolbar, not a dialog (no `QDialog` binding); Help >
-  Keyboard shortcuts writes to the status bar; no empty-state widget with its Open button; the Files
-  dock is a one-time scan (at most 4000 rows, 8 deep) that does not follow folder changes; the page
-  context menu has never been opened by a test.
-- **WinUI:** see `docs/WINDOWS_HANDOFF.md` section 4. In short: find has no text box (query and
-  count live in the title), the outline is a menu, no link context menu, the title bar follows
-  Windows rather than the in-app theme, the scrollbar is drawn by the shell, and the MenuBar bug
-  (section 24) is open.
+- **Qt:** Manage recent is a dock with a toolbar, not a dialog (no `QDialog` binding); no empty-state
+  widget with its Open button; the Files dock is a one-time scan (at most 4000 rows, 8 deep) that does
+  not follow folder changes. The window is frameless (section 26): it resizes only from the status
+  bar's corner grip, not its edges, and has not run on KDE.
+- **WinUI:** no Manage recent; no status bar; side panes have no title. The scrollbar is still drawn
+  by the shell (now a rounded thumb, section 26). The MenuBar bug (section 24) no longer applies: the
+  menu bar is gone.
 - Scroll frames meet the budgets, but a frame still waits for vsync (3-6 ms in the trace on Windows).
 
 ## 12. What to do next
 
-**State of the parity work** (Phase 3 Qt, Phase 5 WinUI). "VM" means the WinApps Windows 11 VM;
-nothing in the WinUI column has been run on a physical PC.
+**State of the parity work** (Phase 3 Qt, Phase 5 WinUI), after 2026-11-11 (section 26). Both
+columns ran on the physical Windows PC; the Qt column has not run on KDE since.
 
-| Feature | Qt (Linux) | WinUI (VM only) |
+| Feature | Qt | WinUI |
 |---|---|---|
+| layout: command bar, tabs in the title bar | done (frameless window) | done (`ExtendsContentIntoTitleBar`) |
 | tabs: close, close others, cycle, move, labels from core | done, `--tabs-test` | done, `--tabs-test` |
-| tab context menu | done (built and popped, not clicked) | not done |
-| Recent menu, clear, missing entries | done | done (top-level Recent menu) |
-| Manage recent | dock + toolbar | not done |
+| tab context menu | done, clicked | done, clicked |
+| page context menu (open/copy link, copy, find, reload) | done, clicked (was never connected before) | done, clicked |
+| Recent, clear, missing entries | done (bar button) | done (bar button) |
+| Manage recent | dock + toolbar | **not done** |
 | session: tabs, active tab, theme, zoom, folder | done | done |
-| theme System/Light/Dark | done | done (View > System theme saves `theme=0`) |
-| zoom 60-250 step 10, Ctrl+0 | done | done, `--zoom-test`; real key presses not tested |
+| theme System/Light/Dark (cycling button) | done; System reads Windows' setting on Windows | done |
+| zoom 60-250 step 10, Ctrl+0 | done | done, `--zoom-test` |
 | refresh F5 | done | done |
-| auto-refresh, deleted-file handling | OS file watching (section 25) | 800 ms poll (`SetTimer`); to be moved to `mdview_core::watch` |
-| single instance | loopback port, wakes the GUI thread at once | loopback port, drained on the 800 ms tick; checked after the WinUI bootstrap, see below |
-| focus reading mode | done | not done |
-| Files tree, Open folder | one-time scan | lazy `TreeView` |
-| outline, find, selection, copy, links, `<details>` | done | done (find in the title, outline as a menu) |
-| page context menu (links, copy) | done, never opened by a test | not done |
-| shortcuts help | status bar text | not done |
-| installer / package | PKGBUILD, AppImage | Inno Setup, compiled and silently installed in the VM |
+| auto-refresh, deleted-file handling | OS file watching (section 25) | **800 ms poll**; to move to `mdview_core::watch` |
+| single instance | loopback port, wakes the GUI thread | loopback port, drained on the 800 ms tick; **check runs after the bootstrap** |
+| focus reading mode | done | done |
+| Files pane, Open folder | one-time scan, left | lazy `TreeView`, left |
+| outline pane | right | right |
+| find box with count, selection, copy, links, `<details>` | done | done |
+| About and Keyboard shortcuts | dialogs with the logo | WinUI dialogs with the logo |
+| installer / package | PKGBUILD, AppImage | Inno Setup (compiled in the VM only) |
 
-**Next, on the physical Windows PC** (the user's next session):
+**Next, on the Windows PC:**
 
-1. Follow `docs/WINDOWS_HANDOFF.md`: build, the hands-on checks, and the MenuBar bug (section 24).
-   That bug decides whether more WinUI menu work makes sense.
-2. Move the WinUI single-instance check ahead of `bootstrap::bootstrap()` and the D3D device thread
+1. Move the WinUI single-instance check ahead of `bootstrap::bootstrap()` and the D3D device thread
    in `bins/mdv-winui/src/main.rs`. PLAN wants it before any WinUI load (it names a named mutex +
-   `WM_COPYDATA`; the shared loopback port in `mdview_core::single` is what exists). Today a second
-   launch loads the Windows App SDK first, and forwarded files wait for the 800 ms tick. Measure the
+   `WM_COPYDATA`; the shared loopback port in `mdview_core::single` is what exists). Measure the
    handoff against the 20 ms budget.
-3. Replace the WinUI 800 ms poll with `mdview_core::watch::FileWatcher` (section 25). Its waker needs
-   a `DispatcherQueue::TryEnqueue` or a posted window message; the bindings have neither yet.
+2. Replace the WinUI 800 ms poll with `mdview_core::watch::FileWatcher` (section 25). Its waker needs
+   a `DispatcherQueue::TryEnqueue` or a posted window message; `bar_bindings.rs` can now be extended
+   for it (`bins/mdv-winui/gen/filter.txt`).
+3. Manage recent in WinUI.
 4. W1 text quality at 100/125/150/200%, then real launch and memory numbers with `measure.ps1`.
 5. Tick the WinUI column of `docs/PORT_CHECKLIST.md` row by row.
 
@@ -1060,3 +1063,53 @@ offscreen: the tabs, find, select, details, outline and copy checks pass, a save
 and a second launch hands its file over. The tools and the `ubuntu:24.04` image were removed again
 afterwards; a rebuild downloads them (the tools are checked against `tools.sha256`).
 
+## 26. Layout A and side-by-side parity, on the physical Windows PC (2026-11-11)
+
+Commits `0e8ee6d` and `09c4371`. The first session on the physical PC (Windows 11, RTX 4070 Ti
+SUPER, 3440x1440 at 100%). Before any change, the workspace tests passed on it.
+
+**Design.** Mockups were drawn and the user picked **layout A**: no menu bar; the logo and tabs in
+the title bar; one command bar under it (Open, Reload, Recent | Files, Outline | zoom on the left;
+find box with match count, previous/next, Theme, a main menu on the right). The Qt shell uses the
+same layout with the tabs in its own title row. An Outline dropdown was tried and dropped at the
+user's request; the outline is a pane on the right in both shells, Files on the left (as in the
+original app).
+
+**WinUI.**
+- Controls the trimmed `bindings.rs` lacks come from a second generated module,
+  `src/bar_bindings.rs`, written by `bins/mdv-winui/gen` (windows-bindgen 0.100 over the Windows App
+  SDK 2.6.4 NuGet winmds in `%USERPROFILE%\.nuget\packages`; filter in `gen/filter.txt`).
+  `bindings.rs` and its hand-written additions are untouched; objects cross with `cast()`. The
+  generator is excluded from the workspace. Run: `cargo run --manifest-path bins/mdv-winui/gen/Cargo.toml`.
+- `src/bar.rs` builds the bar, the title row (TabView header = logo, footer = drag area via
+  `SetTitleBar`), the outline pane and the dialogs. Theme cycles System, Light, Dark with its icon
+  and label; the title row, command bar and panes are shaded 10% and 6% towards the text colour.
+- Right-click menus: the page (`ContextFlyout`, filled on the right press) and each tab.
+- Find has a real `TextBox`; Ctrl+F focuses it, Enter/F3 step, Escape clears.
+- The scrollbar is a rounded thumb, thin at rest, wider while the pointer is over it.
+- About and Keyboard shortcuts are `ContentDialog`s (the shortcut list comes from core's
+  `shortcut_help`); the logo is drawn to PNG with resvg and shown as a `BitmapIcon`.
+- Focus reading mode (Ctrl+Shift+F, Escape) hides the command bar and both panes.
+- New dependencies: `resvg` 0.47 (logo), `windows-future` 0.100 (`ContentDialog::ShowAsync`).
+
+**Qt.**
+- Frameless window (`Qt::FramelessWindowHint`): a title row toolbar holds the logo, the tabs (auto-hide
+  off: a toolbar does not re-show a widget it saw hidden), a drag area (an event filter on the canvas
+  calls `QWindow::startSystemMove`, a double click maximizes) and its own window buttons.
+- **Two old bugs fixed:** both right-click menus set `ContextMenuPolicy(2)`, which is
+  `ActionsContextMenu`, so neither ever opened (now 3, `CustomContextMenu`); and the canvas treated
+  every mouse button as the left one (a right press started a selection, its release could follow a
+  link). The page menu was also connected before the canvas was stored.
+- The chrome is styled from the page theme with one style sheet (`chrome_style`); menus are parented
+  to the window so they take it. Bar icons are SVG strings rendered to PNG with resvg into
+  `%TEMP%/mdview-icons/<theme>/` and assigned by tooltip selectors, because this Qt install has no
+  SVG module (Linux installs may not either).
+- `system_is_dark` on Windows reads `AppsUseLightTheme`; with no flag and no session the theme is System.
+- The main menu (☰) is a flat list; find has a count beside it and a clear button; About and Keyboard
+  shortcuts are `QMessageBox::about` dialogs with the logo.
+
+**Checked here:** 212 workspace tests, the 7 WinUI and 8 Qt scripted checks, `cargo fmt` in both
+crates, and every bar button, menu, pane, theme mode, right-click menu, find and the dialogs clicked
+in both apps placed side by side (real mouse input, screenshots compared).
+**Not checked:** Qt on KDE (frameless window, icons, style sheet), WinUI at DPI other than 100%, a
+second monitor, the installer.
