@@ -1,0 +1,6 @@
+# Qt links the dynamic CRT, so this crate must not inherit the repo-level +crt-static from
+# ../../.cargo/config.toml. A target-specific rustflags entry takes precedence over (does not join)
+# build.rustflags, so this replaces it. Cargo reads config from the directory it is run in: build
+# from bins/mdv-qt (build-installer-qt.ps1 does).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=-crt-static"]

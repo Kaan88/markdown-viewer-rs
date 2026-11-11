@@ -1,0 +1,7 @@
+# Link the C runtime statically so mdview.exe and mdview-engine.exe need no VC++ redistributable.
+# This is [build], not [target.<triple>], on purpose: a target-specific rustflags entry in a deeper
+# config (bins/mdv-qt/.cargo/config.toml) replaces build.rustflags, whereas two target-specific
+# entries are joined and rustc then still reports crt-static (+crt-static followed by -crt-static
+# does not turn it off).
+[build]
+rustflags = ["-C", "target-feature=+crt-static"]
