@@ -90,11 +90,14 @@ fn key(face: Face, size: f32, color: Rgb, wrap: f32, text: &str) -> u64 {
 }
 
 impl Gfx {
+    /// UI text follows the system's subpixel order (ClearType's on Windows), read once here.
     pub fn new() -> Gfx {
+        let mut engine = TextEngine::new(2 << 20);
+        engine.set_subpixel(crate::platform::subpixel_order());
         Gfx {
             fonts: shared_fonts(),
             layouts: LayoutContext::new(),
-            engine: TextEngine::new(2 << 20),
+            engine,
             cache: HashMap::new(),
         }
     }

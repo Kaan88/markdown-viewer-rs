@@ -1,7 +1,12 @@
 //! CPU text: parley shapes and lays out, swash rasterizes, this module blends. Ported from the
 //! Phase 0 text spike (`spikes/text`), which the user accepted after the subpixel fix. The glyph
-//! cache is byte-capped, and text uses RGB subpixel masks: `Format::CustomSubpixel([0.3, 0.0,
-//! -0.3])` is deliberate, because zeno's `Format::Subpixel` swaps red and blue for RGB stripes.
+//! cache is byte-capped, and text uses subpixel masks in the order [`Subpixel`] names (RGB by
+//! default), or greyscale coverage with `Subpixel::None`.
+//!
+//! `DocumentRenderer` keeps its own `TextEngine` and does not expose the mode yet, so document
+//! text is always RGB. The hook it needs is a setter that calls
+//! [`TextEngine::set_subpixel`] and, when the mode changed, drops the paint cache and the frame,
+//! the way a theme change does.
 
 use crate::bitmap::Bitmap;
 use parley::{FontData, Layout, PositionedLayoutItem};
@@ -13,6 +18,34 @@ use swash::zeno::{Format, Vector};
 use swash::{CacheKey, FontRef};
 
 pub type Brush = [u8; 4];
+
+/// How glyph edges are antialiased: per colour channel for an LCD's subpixel stripes, or one
+/// coverage value for all three.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum Subpixel {
+    /// Red, green, blue stripes from left to right, the common LCD layout (and the default).
+    #[default]
+    Rgb,
+    /// Blue, green, red stripes: the same masks mirrored.
+    Bgr,
+    /// Greyscale antialiasing, for screens without a known stripe order (OLED, rotated panels,
+    /// remote sessions) or when the system turns ClearType off.
+    None,
+}
+
+impl Subpixel {
+    /// zeno shifts each channel's outline by these fractions of a pixel. Channel 0 is red: moving
+    /// the outline right by 0.3 samples it 0.3 px to the left, where an RGB panel's red stripe is.
+    /// `[0.3, 0.0, -0.3]` is deliberate, because zeno's own `Format::Subpixel` was measured to
+    /// swap red and blue against Qt.
+    fn format(self) -> Format {
+        match self {
+            Subpixel::Rgb => Format::CustomSubpixel([0.3, 0.0, -0.3]),
+            Subpixel::Bgr => Format::CustomSubpixel([-0.3, 0.0, 0.3]),
+            Subpixel::None => Format::Alpha,
+        }
+    }
+}
 
 /// Per-channel preblend tables, so glyph coverage becomes colour without a separate gamma pass.
 struct Lut(Box<[[u8; 256]; 8]>);
@@ -141,10 +174,12 @@ pub struct TextEngine {
     cap: usize,
     pub stats: CacheStats,
     lut: Lut,
+    subpixel: Subpixel,
 }
 
 impl TextEngine {
-    /// `cap` bounds the raster cache in bytes. The plan's hard cap is 4 MB.
+    /// `cap` bounds the raster cache in bytes. The plan's hard cap is 4 MB. Text starts with
+    /// [`Subpixel::Rgb`] masks.
     pub fn new(cap: usize) -> Self {
         TextEngine {
             scaler: ScaleContext::new(),
@@ -154,7 +189,25 @@ impl TextEngine {
             cap,
             stats: CacheStats::default(),
             lut: Lut::new(1.4, 0.5),
+            subpixel: Subpixel::default(),
         }
+    }
+
+    pub fn subpixel(&self) -> Subpixel {
+        self.subpixel
+    }
+
+    /// Switches the antialiasing mode for glyphs drawn from now on. A change empties the glyph
+    /// cache, since every cached mask was rasterized for the old mode; pixels already drawn are
+    /// the caller's to repaint.
+    pub fn set_subpixel(&mut self, subpixel: Subpixel) {
+        if subpixel == self.subpixel {
+            return;
+        }
+        self.subpixel = subpixel;
+        self.map.clear();
+        self.stats.bytes = 0;
+        self.stats.entries = 0;
     }
 
     fn raster(
@@ -186,8 +239,7 @@ impl TextEngine {
             Source::ColorBitmap(StrikeWith::BestFit),
             Source::Outline,
         ])
-        // RGB order: zeno's `Format::Subpixel` was measured to swap red and blue against Qt.
-        .format(Format::CustomSubpixel([0.3, 0.0, -0.3]))
+        .format(self.subpixel.format())
         .offset(Vector::new(key.sub as f32 / 4.0, 0.0))
         .render(&mut scaler, key.glyph);
         let tick = self.tick;
@@ -515,6 +567,51 @@ mod tests {
         let misses = tight.stats.misses;
         tight.draw_layout(&mut fb, layouts.last().unwrap(), 3.3, 5.0);
         assert_eq!(tight.stats.misses, misses, "{:?}", tight.stats);
+    }
+
+    #[test]
+    fn bgr_mirrors_the_rgb_masks_and_none_is_grey() {
+        let layout = paragraph(SAMPLE, 15.0, 500.0, [40, 40, 40, 255]);
+        let draw = |mode: Subpixel| {
+            let mut engine = TextEngine::new(4 << 20);
+            engine.set_subpixel(mode);
+            assert_eq!(engine.subpixel(), mode);
+            let mut fb = Bitmap::new(520, layout.height().ceil() as u32 + 10);
+            fb.clear([255, 255, 255]);
+            engine.draw_layout(&mut fb, &layout, 4.4, 3.0);
+            fb
+        };
+        let (rgb, bgr, grey) = (
+            draw(Subpixel::Rgb),
+            draw(Subpixel::Bgr),
+            draw(Subpixel::None),
+        );
+        let mut coloured = 0;
+        for ((a, b), g) in rgb
+            .pixels
+            .chunks_exact(4)
+            .zip(bgr.pixels.chunks_exact(4))
+            .zip(grey.pixels.chunks_exact(4))
+        {
+            // A grey brush on white: BGR's blue is RGB's red and the other way round.
+            assert_eq!([a[2], a[1], a[0]], [b[0], b[1], b[2]]);
+            assert!(g[0] == g[1] && g[1] == g[2], "greyscale pixel {g:?}");
+            coloured += (a[0] != a[2]) as usize;
+        }
+        assert!(coloured > 100, "the RGB masks should have colour fringes");
+        assert_ne!(rgb.pixels, grey.pixels);
+
+        // Switching modes drops the masks cached for the old one.
+        let mut engine = TextEngine::new(4 << 20);
+        let mut fb = Bitmap::new(520, rgb.height);
+        fb.clear([255, 255, 255]);
+        engine.draw_layout(&mut fb, &layout, 4.4, 3.0);
+        assert!(engine.stats.entries > 0);
+        engine.set_subpixel(Subpixel::Bgr);
+        assert_eq!((engine.stats.entries, engine.stats.bytes), (0, 0));
+        fb.clear([255, 255, 255]);
+        engine.draw_layout(&mut fb, &layout, 4.4, 3.0);
+        assert!(fb.pixels == bgr.pixels);
     }
 
     /// Not a correctness test: `cargo test --release -p mdview-render text_draw_speed -- --ignored
