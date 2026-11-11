@@ -1,6 +1,6 @@
 # mdview
 
-A Rust remake of Kaan88/markdown-viewer-cpp, a Markdown viewer with a custom renderer. WinUI 3 on Windows 11, Qt Widgets through CXX-Qt on Linux.
+A Rust remake of Kaan88/markdown-viewer-cpp, a Markdown viewer with a custom renderer. Qt Widgets through CXX-Qt on Windows and Linux. The WinUI 3 shell is retired and archived on the `winui-archive` branch.
 
 Before doing anything, read `docs/HANDOFF.md`: current state, decisions already made, and what to do next. The full plan is `docs/PLAN.md`.
 

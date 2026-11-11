@@ -3,6 +3,11 @@
 `mdview` is a Rust remake of `Kaan88/markdown-viewer-cpp`: a Markdown viewer with its own renderer,
 **WinUI 3 on Windows** and **Qt Widgets (CXX-Qt) on Linux**, no webview, and no authored C++.
 
+> **2026-11-11: WinUI is retired.** Qt 6 is the only shell, on Windows and Linux. The WinUI shell
+> (`bins/mdv-winui`), its installer script and build script live on the `winui-archive` branch;
+> sections about WinUI below are history. The Windows installer is
+> `packaging/windows/mdview-qt.iss`, built by `packaging/windows/build-installer-qt.ps1`.
+
 This document is the current state: what works, how to build and check it, the traps already found,
 and what to do next. `docs/PLAN.md` is the full plan (budgets, phases, gates). Read this file first,
 then the plan.
