@@ -4,6 +4,7 @@ use super::pager::{Pager, Txt};
 use super::paint::Paint;
 use crate::theme::Color;
 use mdview_core::model::Align;
+use parley::{Alignment, AlignmentOptions};
 
 impl<'a, 'b> Pager<'a, 'b> {
     /// A task-list box, drawn rather than typeset so it looks the same with any font stack.
@@ -80,17 +81,21 @@ impl<'a, 'b> Pager<'a, 'b> {
             color,
             max: Some(width - indent),
         };
-        let layout = self.text_layout(&inline, &txt);
-        let height = layout.height().round().max(if task.is_some() {
-            self.theme.body_size * self.theme.body_line_height * self.scale
-        } else {
-            0.0
-        });
+        let mut layout = self.text_layout(&inline, &txt);
         let align = if align == Align::None {
             self.inherited_align(b)
         } else {
             align
         };
+        if align == Align::Justify {
+            // Every line but the last is stretched to the column; carets follow the layout.
+            layout.align(Alignment::Justify, AlignmentOptions::default());
+        }
+        let height = layout.height().round().max(if task.is_some() {
+            self.theme.body_size * self.theme.body_line_height * self.scale
+        } else {
+            0.0
+        });
         let x = self.aligned_x(left + indent, width - indent, &layout, align);
         let baseline = layout
             .lines()

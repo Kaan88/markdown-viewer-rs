@@ -23,6 +23,9 @@ impl<'a, 'b> Pager<'a, 'b> {
         depth: usize,
     ) {
         let _ = color;
+        let (accent, tint) = alert.map_or((self.theme.border, self.theme.tint), |kind| {
+            self.theme.alert(kind)
+        });
         let pad = self.px(if alert.is_some() { 12.0 } else { 2.0 });
         let inset = self.px(18.0);
         let bar = self.px(3.0);
@@ -45,7 +48,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 line_height: 1.3,
                 weight: 600.0,
                 mono: false,
-                color: self.theme.accent,
+                color: accent,
                 max: Some(inner_width),
             };
             let layout = self.text_layout(&title, &txt);
@@ -64,7 +67,6 @@ impl<'a, 'b> Pager<'a, 'b> {
         let bottom = self.px(if alert.is_some() { 12.0 } else { 2.0 });
         let full_height = height + bottom;
         if alert.is_some() {
-            let tint = self.theme.tint;
             self.paints.insert(
                 start,
                 Paint::Rect {
@@ -77,11 +79,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 },
             );
         }
-        let bar_color = if alert.is_some() {
-            self.theme.accent
-        } else {
-            self.theme.border
-        };
+        let bar_color = accent;
         // The bar goes over the alert's tint, not under it; both sit behind the text.
         let bar_at = if alert.is_some() { start + 1 } else { start };
         self.paints.insert(
@@ -108,6 +106,8 @@ impl<'a, 'b> Pager<'a, 'b> {
         start: Option<u32>,
     ) {
         let items: Vec<u32> = self.doc.children(b).collect();
+        // `<ol type="a">` names the marker once, for every item that does not name its own.
+        let list_marker = self.doc.attrs_of(b).and_then(|a| a.marker);
         let indent = self.px(26.0);
         let count = items.len();
         for (index, item) in items.into_iter().enumerate() {
@@ -119,15 +119,16 @@ impl<'a, 'b> Pager<'a, 'b> {
                 BlockKind::ListItem { task: true }
             );
             if !task {
-                let marker =
-                    self.doc
-                        .attrs_of(item)
-                        .and_then(|a| a.marker)
-                        .unwrap_or(if start.is_some() {
-                            ListMarker::Decimal
-                        } else {
-                            ListMarker::Disc
-                        });
+                let marker = self
+                    .doc
+                    .attrs_of(item)
+                    .and_then(|a| a.marker)
+                    .or(list_marker)
+                    .unwrap_or(if start.is_some() {
+                        ListMarker::Decimal
+                    } else {
+                        ListMarker::Disc
+                    });
                 if marker != ListMarker::None {
                     let number = start.unwrap_or(1).saturating_add(index as u32).max(1);
                     self.marker(marker, number, left, self.y);

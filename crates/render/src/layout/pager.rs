@@ -9,7 +9,7 @@ use super::store::{Found, ImageStore};
 use super::{BlockBox, Options, Source, SourceKind};
 use crate::text::Brush;
 use crate::theme::{Color, Theme};
-use mdview_core::model::{Align, BlockKind, Document, NONE};
+use mdview_core::model::{Align, BlockKind, Document, Length, NONE};
 use parley::{
     Alignment, AlignmentOptions, Cluster, FontContext, FontFamily, FontStyle, FontWeight,
     InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
@@ -206,6 +206,20 @@ impl<'a, 'b> Pager<'a, 'b> {
             BlockKind::ThematicBreak => {
                 self.y += self.px(8.0);
                 let h = self.hair();
+                // `<hr width>`: narrower than the column, at the left unless `align` says so.
+                let attrs = self.doc.attrs_of(b);
+                let full = width;
+                let width = match attrs.and_then(|a| a.width) {
+                    Some(Length::Px(px)) => self.px(px as f32).min(full),
+                    Some(Length::Percent(p)) => (full * f32::from(p) / 100.0).min(full),
+                    None => full,
+                }
+                .round();
+                let left = match attrs.map(|a| a.align) {
+                    Some(Align::Center) => left + ((full - width) / 2.0).round(),
+                    Some(Align::Right) => left + full - width,
+                    _ => left,
+                };
                 self.paints.push(Paint::Rect {
                     x: left,
                     y: self.y,
@@ -340,6 +354,23 @@ impl<'a, 'b> Pager<'a, 'b> {
             if let Some(color) = style.color {
                 builder.push(StyleProperty::Brush(brush(color)), range.clone());
             }
+            if style.sub || style.sup {
+                // Last, so it keeps whichever colour the run ended up with.
+                let color = style.color.unwrap_or(if style.link || style.accent {
+                    self.theme.accent
+                } else if style.muted {
+                    self.theme.muted
+                } else {
+                    txt.color
+                });
+                let mut shifted = brush(color);
+                shifted[3] = if style.sup {
+                    crate::text::RAISED
+                } else {
+                    crate::text::LOWERED
+                };
+                builder.push(StyleProperty::Brush(shifted), range.clone());
+            }
             if style.code || style.kbd || style.math {
                 builder.push(
                     StyleProperty::FontFamily(FontFamily::from(self.theme.mono)),
@@ -440,12 +471,15 @@ impl<'a, 'b> Pager<'a, 'b> {
         (id, width, height, baseline)
     }
 
-    /// The `align` of the `<figure>` a block sits in, which its text and images follow.
+    /// The `align` of the nearest `<figure>`, `<div>` or `<center>` a block sits in that sets
+    /// one, which its text and images follow.
     pub(super) fn inherited_align(&self, block: u32) -> Align {
         let mut b = block;
         loop {
             let block = &self.doc.blocks[b as usize];
-            if let BlockKind::Figure { align } = block.kind {
+            if let BlockKind::Figure { align } | BlockKind::Div { align } = block.kind
+                && align != Align::None
+            {
                 return align;
             }
             if block.parent == NONE {
@@ -584,10 +618,14 @@ impl<'a, 'b> Pager<'a, 'b> {
                         color: self.theme.code_bg,
                     });
                 }
-                let color = glyph_run.style().brush;
+                // Decorations come from the glyph run's own style: one shaped run holds several
+                // of them when only a decoration changes, so the run's first cluster cannot say.
+                let run_style = glyph_run.style();
+                let color = run_style.brush;
+                let baseline = baseline + crate::text::baseline_shift(color, dev);
                 let color = [color[0], color[1], color[2]];
                 let thickness = (dev * 0.065).round().max(1.0);
-                if style.underline || style.link {
+                if run_style.underline.is_some() {
                     decos.push(Paint::Rect {
                         x: gx,
                         y: (baseline + dev * 0.13).round(),
@@ -597,7 +635,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                         color,
                     });
                 }
-                if style.strike {
+                if run_style.strikethrough.is_some() {
                     decos.push(Paint::Rect {
                         x: gx,
                         y: (baseline - dev * 0.3).round(),

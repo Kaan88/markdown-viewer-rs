@@ -1046,3 +1046,143 @@ fn a_point_inside_a_formula_or_diagram_reports_its_source() {
         .unwrap();
     assert_eq!(hit.source, None);
 }
+
+/// The page for `markdown` in the light theme, as BGRA rows.
+fn page(markdown: &str) -> mdview_render::Rendered {
+    render(&mdview_core::parse(markdown), &Options::light())
+}
+
+/// Columns holding a pixel darker than the page, as `(first, last)`.
+fn ink_columns(r: &mdview_render::Rendered) -> (usize, usize) {
+    let width = r.bitmap.width as usize;
+    let mut span = (usize::MAX, 0);
+    for (i, p) in r.bitmap.pixels.chunks_exact(4).enumerate() {
+        if p[1] < 0x80 {
+            span = (span.0.min(i % width), span.1.max(i % width));
+        }
+    }
+    span
+}
+
+fn count(r: &mdview_render::Rendered, bgr: [u8; 3]) -> usize {
+    r.bitmap
+        .pixels
+        .chunks_exact(4)
+        .filter(|p| p[..3] == bgr)
+        .count()
+}
+
+#[test]
+fn a_decoration_inside_a_run_is_drawn_where_it_is() {
+    // Strikethrough does not change the font, so the struck words share a shaped run with the
+    // text before them; the line used to be looked up at the run's start and never drawn.
+    let struck = page("plain ~~struck~~ plain\n");
+    let plain = page("plain struck plain\n");
+    assert_ne!(struck.bitmap.pixels, plain.bitmap.pixels);
+    // And a link's underline stops at the link.
+    let link = page("[link](#a) and text that is not a link at all\n");
+    let accent = count(&link, [LIGHT.accent[2], LIGHT.accent[1], LIGHT.accent[0]]);
+    let long = page("[link and text that is not a link at all](#a)\n");
+    let all = count(&long, [LIGHT.accent[2], LIGHT.accent[1], LIGHT.accent[0]]);
+    assert!(accent > 0 && accent * 3 < all, "{accent} of {all}");
+}
+
+#[test]
+fn sub_and_superscript_leave_the_baseline() {
+    let rows = |markdown: &str| {
+        let r = page(markdown);
+        let width = r.bitmap.width as usize;
+        let ink: Vec<usize> = r
+            .bitmap
+            .pixels
+            .chunks_exact(4)
+            .enumerate()
+            .filter(|(_, p)| p[1] < 0x80)
+            .map(|(i, _)| i / width)
+            .collect();
+        (ink[0], ink[ink.len() - 1])
+    };
+    let (top, bottom) = rows("xxx\n");
+    assert!(rows("x<sup>x</sup>x\n").0 < top, "superscript rises");
+    assert!(rows("x<sub>x</sub>x\n").1 > bottom, "subscript drops");
+}
+
+#[test]
+fn each_alert_kind_has_its_own_colour() {
+    let bar = |markdown: &str| {
+        let r = page(markdown);
+        // The bar is the first column of the block, a few rows in.
+        let at = (60 * r.bitmap.width as usize + LIGHT.margin as usize + 1) * 4;
+        [
+            r.bitmap.pixels[at],
+            r.bitmap.pixels[at + 1],
+            r.bitmap.pixels[at + 2],
+        ]
+    };
+    let kinds = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
+    let colours: Vec<[u8; 3]> = kinds
+        .iter()
+        .map(|kind| bar(&format!("> [!{kind}]\n> Body text.\n")))
+        .collect();
+    for (i, a) in colours.iter().enumerate() {
+        assert_ne!(*a, [LIGHT.bg[2], LIGHT.bg[1], LIGHT.bg[0]], "{}", kinds[i]);
+        for b in &colours[i + 1..] {
+            assert_ne!(a, b);
+        }
+    }
+}
+
+#[test]
+fn html_presentation_attributes_are_honoured() {
+    // `<ol type>` sets the marker for the whole list.
+    let lettered = page("<ol type=\"a\"><li>one</li><li>two</li></ol>\n");
+    let numbered = page("<ol><li>one</li><li>two</li></ol>\n");
+    assert_ne!(lettered.bitmap.pixels, numbered.bitmap.pixels);
+
+    // `<div align>` and `<center>` reach the Markdown inside them.
+    let left = ink_columns(&page("Short.\n")).0;
+    for centred in [
+        "<div align=\"center\">\n\nShort.\n\n</div>\n",
+        "<center>Short.</center>\n",
+    ] {
+        let (first, last) = ink_columns(&page(centred));
+        assert!(first > left + 200, "{centred:?} starts at {first}");
+        let middle = (first + last) / 2;
+        assert!(
+            (middle as i32 - 390).abs() < 4,
+            "{centred:?} is centred on {middle}"
+        );
+    }
+
+    // `<hr width>` shortens the rule.
+    let border = [LIGHT.border[2], LIGHT.border[1], LIGHT.border[0]];
+    let full = count(&page("<hr>\n"), border);
+    let half = count(&page("<hr width=\"50%\">\n"), border);
+    assert!(full > 0 && half * 2 == full, "{half} of {full}");
+
+    // `align="justify"` stretches every line but the last to the column.
+    let text = "word ".repeat(60);
+    let ragged = ink_columns(&page(&format!("<p>{text}</p>\n"))).1;
+    let justified = ink_columns(&page(&format!("<p align=\"justify\">{text}</p>\n"))).1;
+    assert!(justified > ragged, "{justified} against {ragged}");
+    assert!(justified + 4 >= 780 - LIGHT.margin as usize, "{justified}");
+}
+
+#[test]
+fn a_code_label_is_not_drawn_through_a_long_first_line() {
+    // The label sits at the right of the first line; code that reaches it stops short of it.
+    let long = format!("```json\n{}\n```\n", "\"key\": 1, ".repeat(12));
+    let wide = page(&long);
+    let short = page("```json\n\"key\": 1,\n```\n");
+    let width = wide.bitmap.width as usize;
+    // The label's own pixels are the same in both: the columns it occupies, on its rows.
+    let label = |r: &mdview_render::Rendered| -> Vec<u8> {
+        (16..40)
+            .flat_map(|row| {
+                let at = (row * width + width - LIGHT.margin as usize - 46) * 4;
+                r.bitmap.pixels[at..at + 34 * 4].to_vec()
+            })
+            .collect()
+    };
+    assert_eq!(label(&wide), label(&short));
+}

@@ -273,6 +273,11 @@ impl<'a, 'b> Pager<'a, 'b> {
         };
         let layout = self.text_layout(&inline, &txt);
         let size = txt.size;
+        let (first_line_end, first_line_height) =
+            layout.lines().next().map_or((0.0, 0.0), |line| {
+                let m = line.metrics();
+                (m.offset + m.advance, m.line_height)
+            });
         let text_height = layout.height().round().max(txt.size * self.scale);
         let height = text_height + 2.0 * pad_y;
         let radius = self.px(6.0);
@@ -317,6 +322,18 @@ impl<'a, 'b> Pager<'a, 'b> {
             let layout = self.text_layout(&tag, &txt);
             let x = left + width - self.px(12.0) - layout.width();
             let size = txt.size;
+            // A first line that runs under the label is cut off behind it rather than read through.
+            let gap = self.px(6.0);
+            if left + pad_x + first_line_end > x - gap {
+                self.paints.push(Paint::Rect {
+                    x: x - gap,
+                    y: y0 + hr,
+                    w: left + width - hr - (x - gap),
+                    h: (pad_y + first_line_height).round().min(height - 2.0 * hr),
+                    radius: (radius - hr).max(0.0),
+                    color: self.theme.code_bg,
+                });
+            }
             self.emit(&tag, layout, x, y0 + self.px(8.0), size);
         }
         self.y = y0 + height + self.px(16.0);

@@ -14,6 +14,21 @@ use swash::{CacheKey, FontRef};
 
 pub type Brush = [u8; 4];
 
+/// The fourth byte of a [`Brush`] is not alpha: it says where the run sits on the line. Anything
+/// but these two is the baseline.
+pub const RAISED: u8 = 254;
+pub const LOWERED: u8 = 253;
+
+/// How far a run with this brush is moved off the baseline, in the run's own font size: up 40%
+/// for superscript, down 20% for subscript.
+pub fn baseline_shift(brush: Brush, size: f32) -> f32 {
+    match brush[3] {
+        RAISED => (-0.4 * size).round(),
+        LOWERED => (0.2 * size).round(),
+        _ => 0.0,
+    }
+}
+
 /// How glyph edges are antialiased: per colour channel for an LCD's subpixel stripes, or one
 /// coverage value for all three.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
@@ -349,8 +364,9 @@ impl TextEngine {
                     (h ^ (c.to_bits() as u16 as u64)).wrapping_mul(0x0000_0100_0000_01b3)
                 });
                 let brush = glyph_run.style().brush;
+                let shift = baseline_shift(brush, size);
                 for glyph in glyph_run.positioned_glyphs() {
-                    let (x, y) = (ox + glyph.x, (oy + glyph.y).round());
+                    let (x, y) = (ox + glyph.x, (oy + glyph.y).round() + shift);
                     let floor_x = x.floor();
                     let sub = (((x - floor_x) * 4.0) as u8).min(3);
                     let key = Key {
