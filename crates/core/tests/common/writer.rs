@@ -120,6 +120,17 @@ fn block(doc: &Document, b: u32, out: &mut String) -> u32 {
             out,
             &mut |o| children(doc, b, o),
         ),
+        BlockKind::DefTerm => wrap("<dt>".into(), "</dt>", out, &mut |o| children(doc, b, o)),
+        BlockKind::DefDesc => wrap("<dd>".into(), "</dd>", out, &mut |o| children(doc, b, o)),
+        BlockKind::Figure { align } => wrap(
+            format!("<figure{}>", align_attr(align)),
+            "</figure>",
+            out,
+            &mut |o| children(doc, b, o),
+        ),
+        BlockKind::FigCaption => wrap("<figcaption>".into(), "</figcaption>", out, &mut |o| {
+            children(doc, b, o)
+        }),
     }
     bl.end
 }
@@ -186,6 +197,8 @@ fn inline_range(
             SpanKind::Kbd => ("<kbd>".into(), "</kbd>"),
             SpanKind::Quote => ("<q>".into(), "</q>"),
             SpanKind::Small => ("<small>".into(), "</small>"),
+            SpanKind::Ruby => ("<ruby>".into(), "</ruby>"),
+            SpanKind::RubyNote => ("<rt>".into(), "</rt>"),
             SpanKind::Sub => ("<sub>".into(), "</sub>"),
             SpanKind::Sup => ("<sup>".into(), "</sup>"),
             SpanKind::Mark => ("<mark>".into(), "</mark>"),

@@ -79,9 +79,11 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 | `<img>` with width and height | Supported in model | Clamped to 2000 on both axes together, keeping the ratio, as GitHub does. A percentage is left alone |
 | `<img>` with no usable `src` | Supported in model | Keeps its alt text, as on GitHub |
 | Raw `<input>` outside a task list | Supported | Ignored, as GitHub's sanitizer removes it; a Markdown task box still draws |
-| `<dl>`, `<figure>`, `<section>` and similar | Supported as plain blocks | No term or caption styling yet |
+| `<dl>`, `<dt>`, `<dd>` | Supported | `<dt>` is a `DefTerm` block drawn bold; `<dd>` a `DefDesc` block indented 16 px with 16 px between groups; either end tag may be omitted. Inline and block Markdown inside both works |
+| `<figure>`, `<figcaption>` | Supported | `Figure { align }` holds its content left-aligned as on GitHub, or centred with `align="center"`; the caption is a `FigCaption` block in muted text at 0.9 size. GitHub's default 40 px side margin on a figure is not drawn |
+| `<section>`, `<article>`, `<aside>`, `<header>`, `<footer>`, `<main>`, `<nav>`, `<address>`, `<caption>` | Supported as plain blocks | |
 | `<small>`, `<q>` | Supported | `<small>` draws at the small size; `<q>` between curly quotes (`SpanKind::Small`/`Quote`) |
-| `<ruby>` with `<rt>`/`<rp>` | Fallback | The annotation reads in parentheses after its base, `漢(kan)`, as a browser without ruby support shows it; no small text above the base |
+| `<ruby>` with `<rt>`/`<rp>` | Supported | `SpanKind::Ruby` and `RubyNote`. Each annotation is drawn at half size, centred above its base, in a band the line is made taller by; `<rp>` text is dropped. The annotation text stays in the document text, so find, selection and copy read `base+annotation`-style (base then annotation). Limits: an annotation wider than its base overhangs its neighbours instead of pushing them apart, a base that wraps is annotated on its first line, and a ruby that starts mid-word may let a line break between the two halves |
 | `<abbr>`, `<bdo>`, `<time>` and similar | Text only | Text is kept without the styling (no tooltip, dotted underline or direction override) |
 | Inline CSS `style=` | Excluded | GitHub strips it too |
 | `hspace` on images; `cellpadding`, `cellspacing` on tables; `nowrap` on cells | Excluded | GitHub keeps these and the model drops them. Spacing only. Worth adding if the Phase 2 corpus shows them |

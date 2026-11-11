@@ -2,6 +2,7 @@
 //! dialogs, plus wakes from other threads and the loop's timers.
 
 use super::*;
+use mdview_render::SourceKind;
 
 impl App {
     // ---- activation and commands ---------------------------------------------------------------
@@ -99,6 +100,14 @@ impl App {
             Act::CopyLink(dest) => {
                 if platform::set_clipboard_text(&dest) {
                     self.ws.set_status("Link address copied");
+                }
+            }
+            Act::CopySource(kind, text) => {
+                if platform::set_clipboard_text(&text) {
+                    self.ws.set_status(match kind {
+                        SourceKind::Formula => "Formula source copied",
+                        SourceKind::Diagram => "Diagram source copied",
+                    });
                 }
             }
             Act::Copy => self.copy(),

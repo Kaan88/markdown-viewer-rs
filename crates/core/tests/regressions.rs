@@ -1363,6 +1363,10 @@ fn tree(d: &Document) -> String {
             BlockKind::Summary => "S",
             BlockKind::FootnoteDefinition { .. } => "F",
             BlockKind::Div { .. } => "V",
+            BlockKind::DefTerm => "Dt",
+            BlockKind::DefDesc => "Dd",
+            BlockKind::Figure { .. } => "Fg",
+            BlockKind::FigCaption => "Fc",
         }
     }
     fn walk(d: &Document, parent: u32, out: &mut Vec<String>) {
@@ -3120,13 +3124,76 @@ fn q_is_drawn_between_curly_quotes() {
     assert_eq!(text.matches('\u{201d}').count(), 1, "{text:?}");
 }
 
+/// The text of each span of one kind, in order.
+fn spans_of(d: &Document, kind: SpanKind) -> Vec<&str> {
+    d.spans
+        .iter()
+        .filter(|s| s.kind == kind)
+        .map(|s| &d.text[s.start as usize..s.end as usize])
+        .collect()
+}
+
 #[test]
-fn ruby_annotation_reads_as_base_with_parentheses() {
+fn ruby_is_a_span_holding_base_and_notes() {
     let d = parse(
         "<ruby>漢<rt>kan</rt>字<rt>ji</rt></ruby> and <ruby>東<rp>(</rp><rt>tou</rt><rp>)</rp></ruby>",
     );
-    let text = d.block_text(0);
-    assert!(text.contains("漢(kan)字(ji)"), "{text:?}");
-    assert!(text.contains("東(tou)"), "{text:?}");
-    assert!(!text.contains("(("), "{text:?}");
+    // One text with the annotations in it, so find and copy read them; no parentheses, since the
+    // `<rp>` text is a fallback for a browser with no ruby and is not shown.
+    assert_eq!(d.block_text(0), "漢kan字ji and 東tou");
+    assert_eq!(
+        spans_of(&d, SpanKind::Ruby),
+        ["漢kan字ji", "東tou"],
+        "{:?}",
+        d.spans
+    );
+    assert_eq!(spans_of(&d, SpanKind::RubyNote), ["kan", "ji", "tou"]);
+}
+
+#[test]
+fn rp_hides_its_text_only_until_it_ends() {
+    // An `<rp>` never closed does not hide the rest of the document.
+    let d = parse("a <rp>hidden\n\nshown <b>bold</b>");
+    assert!(!d.text.contains("hidden"), "{:?}", d.text);
+    assert!(d.text.contains("shown bold"), "{:?}", d.text);
+    // Inside a Markdown paragraph, where the text arrives as Markdown events.
+    let d = parse("*x* <ruby>a<rp>(</rp><rt>b</rt><rp>)</rp></ruby> **y**");
+    assert_eq!(d.block_text(0), "x ab y");
+}
+
+#[test]
+fn description_lists_get_term_and_definition_blocks() {
+    let d = parse(
+        "<dl>\n<dt><b>Term</b> one</dt>\n<dd>Def with <code>code</code></dd>\n<dt>Two\n<dd>Implied end tags\n</dl>\n",
+    );
+    assert_eq!(
+        tree(&d),
+        "V[Dt[T(Term one)] Dd[T(Def with code)] Dt[T(Two)] Dd[T(Implied end tags)]]"
+    );
+    assert_eq!(spans_of(&d, SpanKind::Strong), ["Term"]);
+    assert_eq!(spans_of(&d, SpanKind::Code), ["code"]);
+}
+
+#[test]
+fn markdown_inside_description_list_items_still_parses() {
+    let d = parse("<dl>\n<dt>\n\n**Term** and *more*\n\n</dt>\n<dd>\n\n- a\n- b\n\n</dd>\n</dl>\n");
+    assert_eq!(tree(&d), "V[Dt[P(Term and more)] Dd[L[I[T(a)] I[T(b)]]]]");
+}
+
+#[test]
+fn figure_holds_its_content_and_a_caption() {
+    let d = parse(
+        "<figure>\n<img src=\"a.png\" alt=\"A\">\n<figcaption>The <i>caption</i></figcaption>\n</figure>\n",
+    );
+    assert_eq!(tree(&d), "Fg[T Fc[T(The caption)]]");
+    assert_eq!(d.images.len(), 1);
+    assert_eq!(d.blocks[0].kind, BlockKind::Figure { align: Align::None });
+    assert_eq!(spans_of(&d, SpanKind::Emphasis), ["caption"]);
+    let d = parse("<figure align=\"center\"><img src=\"a.png\"></figure>");
+    assert_eq!(
+        d.blocks[0].kind,
+        BlockKind::Figure {
+            align: Align::Center
+        }
+    );
 }

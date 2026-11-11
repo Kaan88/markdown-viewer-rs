@@ -121,6 +121,25 @@ pub struct Hit {
     pub footnote: Option<u32>,
     /// The `<details>` block whose summary is under the point; clicking toggles it.
     pub details: Option<u32>,
+    /// The formula or diagram drawn at the point, when it is inside the picture itself.
+    pub source: Option<Source>,
+}
+
+/// What a rendered picture was made from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceKind {
+    /// Inline or display math; the text is TeX.
+    Formula,
+    /// A Mermaid block; the text is its source.
+    Diagram,
+}
+
+/// The source of a formula or diagram: the range of `Document::text` it was drawn from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Source {
+    pub kind: SourceKind,
+    pub start: u32,
+    pub end: u32,
 }
 
 pub struct Rendered {

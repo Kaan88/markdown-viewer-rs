@@ -442,10 +442,9 @@ struct Builder<'a> {
     ambient: Vec<Ambient>,
     ambient_spans_left: usize,
     open_html: [u32; Tag::SLOTS],
-    /// Whether the current `<ruby>` has shown `<rp>` fallback parentheses already.
-    ruby_rp: bool,
-    /// For each open `<rt>`: whether it added a `(` and so owes a `)`.
-    rt_parens: Vec<bool>,
+    /// Inside a `<rp>`, whose text only a browser with no ruby support shows. It ends with its
+    /// closer, the next `<rt>` or `</ruby>`, or the block, so a stray `<rp>` cannot hide the rest.
+    in_rp: bool,
     html_depth: usize,
     image_depth: u32,
     image_alt_start: usize,
@@ -518,8 +517,7 @@ impl<'a> Builder<'a> {
             ambient: Vec::new(),
             ambient_spans_left: src.len() / 4 + 64,
             open_html: [0; Tag::SLOTS],
-            ruby_rp: false,
-            rt_parens: Vec::new(),
+            in_rp: false,
             html_depth: 0,
             image_depth: 0,
             image_alt_start: 0,
@@ -1160,6 +1158,7 @@ impl<'a> Builder<'a> {
     }
 
     fn open_block(&mut self, kind: BlockKind, origin: Origin) -> u32 {
+        self.in_rp = false;
         // A block an HTML tag opened is content even when it ends empty, as GitHub keeps the alert.
         if self.open_alert.is_some() && !matches!(origin, Origin::Md) {
             self.alert_content = true;
@@ -1199,6 +1198,7 @@ impl<'a> Builder<'a> {
             self.alert_content = false;
         }
         self.block_depth -= 1;
+        self.in_rp = false;
         if self.in_picture && self.picture_block == b {
             self.leave_picture();
         }
@@ -1668,6 +1668,9 @@ impl<'a> Builder<'a> {
     }
 
     fn md_text(&mut self, t: &str, range: Range<usize>) {
+        if self.in_rp {
+            return;
+        }
         let swapped = crate::emoji::replace(t);
         let t: &str = &swapped;
         let escaped = self.is_escaped(range.start);
@@ -1938,6 +1941,9 @@ impl<'a> Builder<'a> {
     /// Text inside HTML collapses whitespace as a browser would. Whitespace between block tags
     /// produces nothing.
     fn html_text(&mut self, t: &str) {
+        if self.in_rp {
+            return;
+        }
         let decoded = html::decode_entities(t);
         self.collapsed_text(&decoded);
     }
@@ -1993,15 +1999,17 @@ impl<'a> Builder<'a> {
         let anchor = html::attr(attrs, "id").or_else(|| html::attr(attrs, "name"));
         match tag {
             Tag::Unknown => {}
-            Tag::Ruby => self.ruby_rp = false,
-            Tag::Rp => self.ruby_rp = true,
+            Tag::Ruby => {
+                self.in_rp = false;
+                self.open_html_span(tag, SpanKind::Ruby);
+            }
+            Tag::Rp => {
+                self.flush_run();
+                self.in_rp = true;
+            }
             Tag::Rt => {
-                let owes = !self.ruby_rp;
-                self.rt_parens.push(owes);
-                if owes {
-                    self.begin_inline();
-                    self.push_inline_text("(");
-                }
+                self.in_rp = false;
+                self.open_html_span(tag, SpanKind::RubyNote);
             }
             Tag::Strong => self.open_strong(Origin::Html(tag)),
             Tag::Em => self.open_html_span(tag, SpanKind::Emphasis),
@@ -2080,6 +2088,17 @@ impl<'a> Builder<'a> {
                 slug: StrRef::default(),
             },
             Tag::Div | Tag::Section => BlockKind::Div { align },
+            Tag::Dt | Tag::Dd => {
+                // `<dt>a<dd>b<dt>c` is complete HTML: each opener ends the item before it.
+                self.close_implied(&[Tag::Dt, Tag::Dd], &[Tag::Section, Tag::Div]);
+                if tag == Tag::Dt {
+                    BlockKind::DefTerm
+                } else {
+                    BlockKind::DefDesc
+                }
+            }
+            Tag::Figure => BlockKind::Figure { align },
+            Tag::FigCaption => BlockKind::FigCaption,
             Tag::Center => BlockKind::Div {
                 align: Align::Center,
             },
@@ -2186,7 +2205,14 @@ impl<'a> Builder<'a> {
         }
         let own_align = matches!(
             tag,
-            Tag::P | Tag::H(_) | Tag::Div | Tag::Section | Tag::Center | Tag::Td | Tag::Th
+            Tag::P
+                | Tag::H(_)
+                | Tag::Div
+                | Tag::Section
+                | Tag::Center
+                | Tag::Td
+                | Tag::Th
+                | Tag::Figure
         );
         let length = |key: &str| html::attr(attrs, key).and_then(|v| parse_length(&v));
         let a = BlockAttrs {
@@ -2279,13 +2305,10 @@ impl<'a> Builder<'a> {
                 self.leave_picture();
                 return;
             }
-            Tag::Rt => {
-                if self.rt_parens.pop() == Some(true) {
-                    self.push_inline_text(")");
-                }
+            Tag::Rp => {
+                self.in_rp = false;
                 return;
             }
-            Tag::Ruby | Tag::Rp => return,
             Tag::Unknown
             | Tag::TableSection
             | Tag::Hr
@@ -2311,6 +2334,8 @@ impl<'a> Builder<'a> {
                 | Tag::Mark
                 | Tag::Small
                 | Tag::Q
+                | Tag::Ruby
+                | Tag::Rt
         );
         if is_span {
             self.close_html_span(tag);
@@ -2322,6 +2347,9 @@ impl<'a> Builder<'a> {
     fn close_html_span(&mut self, tag: Tag) {
         if tag == Tag::Q && self.open_html[tag.slot()] > 0 {
             self.push_inline_text("\u{201d}");
+        }
+        if tag == Tag::Ruby {
+            self.in_rp = false;
         }
         if self.open_html[tag.slot()] > 0 {
             let mut found = None;

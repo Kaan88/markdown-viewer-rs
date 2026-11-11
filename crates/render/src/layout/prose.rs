@@ -86,6 +86,11 @@ impl<'a, 'b> Pager<'a, 'b> {
         } else {
             0.0
         });
+        let align = if align == Align::None {
+            self.inherited_align(b)
+        } else {
+            align
+        };
         let x = self.aligned_x(left + indent, width - indent, &layout, align);
         let baseline = layout
             .lines()
@@ -135,7 +140,13 @@ impl<'a, 'b> Pager<'a, 'b> {
         }
         let size = txt.size;
         if !inline.text.trim().is_empty() || !inline.boxes.is_empty() {
-            self.emit(&inline, layout, left + indent, self.y, size);
+            let x = self.aligned_x(
+                left + indent,
+                width - indent,
+                &layout,
+                self.inherited_align(b),
+            );
+            self.emit(&inline, layout, x, self.y, size);
         }
         self.y += height + self.px(4.0);
     }

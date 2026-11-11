@@ -29,7 +29,8 @@ use mdview_core::session::{self, RecentEntry, Recents, Session};
 use mdview_core::{Document, parse_bytes};
 use mdview_fetch::{Fetcher, State as Fetched};
 use mdview_render::{
-    DARK, DocumentRenderer, Frame, Hit, Jump, LIGHT, Options, PageLayout, Rect, RemoteState, Theme,
+    DARK, DocumentRenderer, Frame, Hit, Jump, LIGHT, Options, PageLayout, Rect, RemoteState,
+    SourceKind, Theme,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -131,6 +132,8 @@ pub struct PageContext {
     /// The destination of the link under the pointer (for Open link / Copy link address).
     pub link: Option<String>,
     pub has_selection: bool,
+    /// The TeX or Mermaid text of the formula or diagram under the pointer.
+    pub source: Option<(SourceKind, String)>,
 }
 
 /// Find counts for the find box.
@@ -1496,13 +1499,22 @@ impl Workspace {
 
     /// What a right click at `x, y` offers.
     pub fn context_at(&mut self, x: f32, y: f32) -> PageContext {
-        let link = self
-            .hit(x, y)
+        let hit = self.hit(x, y);
+        let link = hit
             .and_then(|hit| hit.link)
             .and_then(|i| self.link_destination(i));
+        // A diagram's source is its block text, which ends in the fence's newline.
+        let source = hit.and_then(|hit| hit.source).and_then(|s| {
+            let text = self
+                .active_document()?
+                .text
+                .get(s.start as usize..s.end as usize)?;
+            Some((s.kind, text.trim().to_string()))
+        });
         PageContext {
             link,
             has_selection: self.has_selection(),
+            source,
         }
     }
 
@@ -2799,6 +2811,65 @@ mod tests {
         assert!(ws.scroll() > scroll + 100.0, "the offset followed");
         assert_eq!(top_of(&mut ws), at, "the text stayed put");
         assert_eq!(ws.current_heading(), heading);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Whether the engine process that draws math and diagrams is built beside the tests.
+    fn engine_available() -> bool {
+        if let Some(path) = std::env::var_os("MDV_ENGINE") {
+            return Path::new(&path).is_file();
+        }
+        let name = if cfg!(windows) {
+            "mdview-engine.exe"
+        } else {
+            "mdview-engine"
+        };
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/release")
+            .join(name)
+            .is_file()
+    }
+
+    #[test]
+    fn a_right_click_on_a_formula_or_diagram_offers_its_source() {
+        if !engine_available() {
+            eprintln!("skipping: no mdview-engine in target/release");
+            return;
+        }
+        let dir = temp_dir("sources");
+        let path = write(
+            &dir,
+            "a.md",
+            "Inline $x^2 + 1$ in a sentence.\n\n$$\nE = mc^2\n$$\n\n```mermaid\ngraph TD\n  A --> B\n```\n",
+        );
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        ws.paint(800, 600, 1.0).unwrap();
+        let mut found: Vec<(SourceKind, String)> = Vec::new();
+        let mut y = 2.0;
+        while y < 600.0 {
+            let mut x = 2.0;
+            while x < 800.0 {
+                if let Some(item) = ws.context_at(x, y).source
+                    && !found.contains(&item)
+                {
+                    found.push(item);
+                }
+                x += 6.0;
+            }
+            y += 3.0;
+        }
+        assert_eq!(
+            found,
+            [
+                (SourceKind::Formula, "x^2 + 1".to_string()),
+                (SourceKind::Formula, "E = mc^2".to_string()),
+                (SourceKind::Diagram, "graph TD\n  A --> B".to_string()),
+            ]
+        );
+        // Plain text offers no source.
+        let (x, y) = point_of(&mut ws, "sentence");
+        assert_eq!(ws.context_at(x, y).source, None);
         _ = std::fs::remove_dir_all(&dir);
     }
 }
