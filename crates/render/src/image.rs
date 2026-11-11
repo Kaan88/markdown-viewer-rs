@@ -187,7 +187,14 @@ fn decode_gif(bytes: &[u8]) -> Option<DecodedImage> {
     decoder.read_into_buffer(&mut pixels).ok()?;
     let mut rgba = vec![0u8; width as usize * height as usize * 4];
     let copy = frame_w.min(width.saturating_sub(left)) as usize * 4;
-    for row in 0..frame_h.min(height.saturating_sub(top)) {
+    // A frame that starts past the screen's right edge has nothing to copy, and its `to` offset
+    // could lie beyond the buffer.
+    let rows = if copy == 0 {
+        0
+    } else {
+        frame_h.min(height.saturating_sub(top))
+    };
+    for row in 0..rows {
         let from = row as usize * frame_w as usize * 4;
         let to = ((top + row) as usize * width as usize + left as usize) * 4;
         rgba[to..to + copy].copy_from_slice(&pixels[from..from + copy]);
