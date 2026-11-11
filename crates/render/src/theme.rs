@@ -30,6 +30,15 @@ pub struct Theme {
 }
 
 impl Theme {
+    /// The highlight behind `<mark>` text, GitHub's attention colour over the page.
+    pub fn mark(&self) -> Color {
+        if self.name == "dark" {
+            [0x5c, 0x48, 0x14]
+        } else {
+            [0xff, 0xf8, 0xc5]
+        }
+    }
+
     /// An alert's title-and-bar colour and its background. A note keeps the theme's accent; the
     /// others take GitHub's colour for the kind, with a background that is the page tinted by it.
     pub fn alert(&self, kind: mdview_core::model::AlertKind) -> (Color, Color) {

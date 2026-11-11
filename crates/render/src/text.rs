@@ -18,6 +18,9 @@ pub type Brush = [u8; 4];
 /// but these two is the baseline.
 pub const RAISED: u8 = 254;
 pub const LOWERED: u8 = 253;
+/// `<mark>`: on the baseline, with a highlight behind it. A distinct brush also makes the marked
+/// text a glyph run of its own, which is what the highlight is measured from.
+pub const MARKED: u8 = 252;
 
 /// How far a run with this brush is moved off the baseline, in the run's own font size: up 40%
 /// for superscript, down 20% for subscript.

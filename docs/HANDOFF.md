@@ -1,163 +1,157 @@
 # Handoff
 
-`mdview` is a Rust remake of `Kaan88/markdown-viewer-cpp`: a Markdown viewer with its own renderer,
-**WinUI 3 on Windows** and **Qt Widgets (CXX-Qt) on Linux**, no webview, and no authored C++.
+`mdview` is a Rust remake of `Kaan88/markdown-viewer-cpp`: a Markdown viewer with its own
+renderer, no webview, and no authored C++. This file is the current state: what ships, what is
+being built, how to build and check it, the traps already found, and what to do next.
+`docs/PLAN.md` is the full plan (budgets, phases, the 2026-11-11 roadmap). Read this file first.
 
-> **2026-11-11: WinUI is retired.** Qt 6 is the only shell, on Windows and Linux. The WinUI shell
-> (`bins/mdv-winui`), its installer script and build script live on the `winui-archive` branch;
-> sections about WinUI below are history. The Windows installer is
-> `packaging/windows/mdview-qt.iss`, built by `packaging/windows/build-installer-qt.ps1`.
->
-> **2026-11-11, later: the next shell is winit + softbuffer, `bins/mdv-app` (binary `mdview`).**
-> Every control is drawn by the crate through the page's own text path. The user approved its look
-> on the Windows PC. Qt stays the shipping shell until the hand checks, the checklist and the
-> installer are done. Read **section 29** first; the roadmap is in `docs/PLAN.md` ("Roadmap from
-> 2026-11-11"). Sections about Qt and WinUI below are history and reference.
-
-This document is the current state: what works, how to build and check it, the traps already found,
-and what to do next. `docs/PLAN.md` is the full plan (budgets, phases, gates). Read this file first,
-then the plan.
-
-**Branch:** `main`, tracking `origin/main`; `phase2-renderer` and `winui-tabs-wip` are merged into it
-and are history only. Check `git log --oneline -5` for where it actually is - this file is updated at
-each milestone, so the commit that last changed it is the state it describes. There is no CI: tests are run by hand before a
-push. Commit and push at milestones.
-
-Working agreements (from `CLAUDE.md`): read this file before touching anything; commit and push as
-phases or milestones complete, not continuously, but do push, because the user checks GitHub; there is
-no CI, so run the tests yourself; `spikes/` is throwaway; report results plainly, including what was
-**not** run; nothing counts as working on Windows until it has run on Windows.
-
-**Where the work happens.** Up to 2026-11-08 the user worked on a Windows PC and tested Qt on a Linux
-VM (section 5). From 2026-11-10 the work moved to the user's Linux desktop (CachyOS, KDE Plasma), with
-Windows checks in a WinApps Windows 11 VM that has no real GPU. On 2026-11-11 a session ran on the
-**physical Windows PC** (section 26): both shells were redesigned (command bar, tabs in the title
-bar) and brought to parity there. **Next step:** the open items in section 12, then the Qt shell on
-the Linux desktop (it has not run on KDE since section 26).
-
-Sections 3, 4 and 6-10 were written on that Windows PC (Windows 11, RTX 4070 Ti SUPER, 3440x1440 at
-96 DPI), and their numbers come from it unless they say Linux. Sections 13-25 are dated notes from
-the Linux desktop, section 26 from the Windows PC; section 12 is the current to-do list. Where
-sections 7 and 8 describe menus, the find title or the outline menu, section 26 supersedes them.
+Rewritten on 2026-11-12 from the dated sections that had accumulated since 2026-11-08. The commit
+that last changed this file is the state it describes; check `git log --oneline -5`.
 
 ---
 
-## 1. Where the project is on the plan
+## 1. Where the project is
 
-`docs/PLAN.md` has six phases (its "Phases" section).
+**What is being built.** The shell is `bins/mdv-app` (package and binary `mdview`): winit 0.30 for
+the window and input, softbuffer 0.4 for the pixels, a frameless window, and every control (title
+row, tabs, command bar, panes, menus, dialogs, tooltips, text field) drawn by the crate through the
+page's own text path. Windows first. The user approved its look by using the running app on
+2026-11-11 (PLAN roadmap step A2). It has never been built or run on Linux.
 
-| Phase | State |
-|---|---|
-| 0 spikes | closed |
-| 1 core | closed |
-| 2 headless renderer | closed 2026-11-08 (goldens approved) |
-| 3 Qt shell parity | in progress; the checklist features exist and were redesigned on 2026-11-11 (section 26), but `docs/PORT_CHECKLIST.md` has not been ticked row by row and the new layout has not run on KDE, so the exit gate is not met |
-| 4 engine | complete |
-| 5 WinUI parity (W1-W3) | in progress; built, tested and redesigned on the physical PC 2026-11-11 (section 26); W1 text quality, launch/memory numbers and the checklist are not done |
-| 6 polish and packaging | started early: PKGBUILD, AppImage (with self-update, which the user chose to keep), Inno installer compiled in the VM, PGO trial (not adopted) |
+**What ships.** The Qt 6 shell, `bins/mdv-qt` (CXX-Qt, Qt Widgets), is still the shipping shell
+until the new one is approved by hand (roadmap A3) and the checklist and numbers are done (A4). Its
+installer is `packaging/windows/mdview-qt.iss` (built by `build-installer-qt.ps1`) and is on the
+v0.1.0 GitHub pre-release. On Linux it is packaged as a PKGBUILD and an AppImage (section 13).
 
-Phase 2 detail, kept for reference:
+**What is retired.** The WinUI 3 shell (`bins/mdv-winui`), its installer and build script are on
+the `winui-archive` branch since 2026-11-11. Why it was dropped: about 383 ms to first frame and
+about 180 MiB private memory for an empty window against PLAN's 50-90 MB, a system-wide Windows App
+Runtime dependency, Windows only, and hand-trimmed generated bindings.
 
-| Phase 2 item | State |
-|---|---|
-| every block type laid out and painted | done |
-| themes, zoom, DPI scaling | done |
-| images (PNG/JPEG, limits, inline) | done; SVG, math and Mermaid draw through `mdview-engine` |
-| virtualized viewport, scroll budget | done: 0.2-2.6 ms per scroll frame (budget 4 ms at 150%, 8 ms at 4K) |
-| selection, link/anchor hit-testing | done in the renderer and both shells; Ctrl+C copies the selection |
-| `<details>` toggling | done: a summary click flips it in both shells; view state lives in the renderer |
-| exit gate: goldens approved by the user | **passed** 2026-11-08: the user approved the four `showcase-*` renders, which `crates/render/tests/golden.rs` now compares on Windows |
+**Decided** (do not reopen without the user):
 
-Phase 4 is complete. Three slices run through `mdview-engine`: SVG through resvg, TeX math through
-RaTeX and Mermaid through merman (flowchart, sequence, class, state, ER, gantt, pie, mindmap). The
-fourth, syntax highlighting, is in-process: syntect colours fenced code in the renderer. The
-showcase's badge, formulas, diagrams and coloured Rust block all draw, as do `fixtures/math.md` and
-`fixtures/diagrams.md`.
+- The shell is winit + softbuffer, chosen over fltk-rs and Slint after mockups on 2026-11-11
+  (Slint's text was rejected as blurry in software and fringed with Skia). PLAN, "Next: a lighter
+  shell than Qt" has the numbers.
+- The user approves the interface by looking at it. Screenshots and tests do not stand in for that.
+- Remote images are off until the reader allows them, per document, with an "always" setting.
+- Update checks are manual only (2026-11-10). The new shell has no update check at all.
+- No bundled fonts (2026-11-08), so the golden compare runs on Windows only.
+- An editor is a second project, not a mode of mdview (PLAN section E).
+- The installer never takes the `.md` default; it registers and offers Windows' Default apps page.
+- Linux is low priority until the Windows shell has replaced Qt.
 
-The shells were built ahead of the plan's order (the user asked for the UIs early), so Phase 3 and 5
-are "make the existing shells match the checklist" rather than "build them".
+**Plan phases.** 0 spikes, 1 core, 2 headless renderer, 4 engine: closed. 3 (Qt parity) and 5
+(WinUI) are superseded by the roadmap in PLAN ("Roadmap from 2026-11-11"): A1-A2 done, A3 (hand
+checks) and A4 (checklist and numbers) open, A5 (installer) built and run, A6 (retire Qt) waiting.
+B1-B5 (GIF/WebP, remote images, Mermaid families, emoji list, ruby/dl/figure and copy-source) and
+C1-C5 (image store, `layout.rs` split, estimated heights, cheap toggles, text and bitmap work) have
+landed in `main`; see section 14 for the commits.
+
+**Where the work happens.** The physical Windows PC (Windows 11, RTX 4070 Ti SUPER, 3440x1440 at
+100%) since 2026-11-11. Before that, the user's Linux desktop (CachyOS, KDE Plasma) with a WinApps
+Windows 11 VM, and before 2026-11-10 a Debian VM (section 12).
 
 ## 2. Repository
 
-- `Kaan88/markdown-viewer-rs`, private, branch `main`.
-- Recent commits: `git log --oneline -5`.
-- Workspace members: `crates/core`, `crates/render`, `crates/engine`, `crates/engine-proto`,
-  `bins/mdv-bench`, `bins/mdv-winui`. `crates/engine` is both a library and the `mdview-engine`
-  binary. `bins/mdv-qt` is **excluded** from the workspace because it needs Qt to build; it has its
-  own `Cargo.lock` and its own `target/`.
-- `spikes/` is throwaway reference code and is excluded from the workspace.
-- `target/` is git-ignored; the helper scripts in it (`vm.py`, `seed-lock.py`, `cap.ps1`) are **not
-  committed**. Section 5 and section 9 describe what they do in case they have to be rewritten.
+`Kaan88/markdown-viewer-rs`, private, branch `main` tracking `origin/main`. There is no CI: run the
+tests yourself before a push. Commit and push as phases complete or when asked.
 
-## 3. Build and test on Windows
+| Path | What it is |
+|---|---|
+| `crates/core` | Parser (pulldown-cmark), HTML allow-list mapping, autolink, slugs, document model, find, command table, session, recents, limits, file watching (notify), single instance, tab labels, update-manifest logic |
+| `crates/render` | Headless renderer: parley layout, swash raster, image store, patchable `PageLayout`, scroll frames, hit testing, selection, syntect highlighting, the engine client |
+| `crates/engine` | Library and the `mdview-engine` binary: SVG (resvg 0.47), TeX math (RaTeX 0.1.15), Mermaid (merman 0.9.3) |
+| `crates/engine-proto` | Job and reply wire format between the renderer and the engine process |
+| `crates/fetch` | `mdview-fetch`: remote image downloads through WinHTTP, disk cache; a failing stub elsewhere |
+| `bins/mdv-app` | The new shell, binary `mdview` |
+| `bins/mdv-bench` | Headless render to PNG, timings, golden generation |
+| `bins/mdv-qt` | Qt shell, **excluded** from the workspace (needs Qt to build); own `Cargo.lock` and `target/` |
+| `packaging/windows` | `mdview.iss` + `build-installer.ps1` (new shell), `mdview-qt.iss` + `build-installer-qt.ps1` (Qt) |
+| `packaging/arch`, `packaging/appimage` | Linux packaging for the Qt shell |
+| `fixtures/` | Test documents; `everything.md` exercises every feature (section 5) |
+| `tests/golden/` | Renderer goldens (`showcase-*`, compared by a test) and review screenshots |
+| `spikes/` | Throwaway reference code, excluded from the workspace; `spikes/parser/data` holds the spec suites and `generated_1mib.md` |
+| `docs/` | This file, `PLAN.md`, `PORT_CHECKLIST.md`, `COVERAGE.md`, `UPDATE.md`, `WINDOWS_HANDOFF.md` (2026-11-10 WinUI checklist, history), `AUDIT_PHASE1.md` |
 
-Toolchain here: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msvc2022_64`.
+`target/` is git-ignored. Helper scripts that once lived there (`vm.py`, `seed-lock.py`,
+`cap.ps1`) are not committed; sections 9 and 12 say what they did.
+
+## 3. Build, test and run on Windows
+
+Toolchain on the PC: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msvc2022_64`,
+Inno Setup 7.
+
+Point `TEMP`/`TMP` at a writable folder when building, or `lib.exe` and `rc.exe` fail with access
+denied:
 
 ```powershell
 cd C:\Users\kaank\Desktop\mv
-cargo test --release --offline --workspace     # 7 core, 11 fuzz, 113 regression, 3 spec,
-                                               # 12 engine, 7 engine-proto, 10 render unit
-                                               # (10 + 2 ignored deadline waits), 19 render integration,
-                                               # 1 golden compare (Windows), 1 engine watchdog (ignored),
-                                               # 2 winui args
+$env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
+cargo build --release --workspace          # includes mdview.exe and mdview-engine.exe
+cargo test --release --workspace           # 2026-11-12: 345 passed, 0 failed, 6 ignored
 cargo fmt --all --check
-cargo build --release --offline --workspace    # includes target/release/mdview-engine.exe
-cargo build --release --offline -p mdview-winui
 ```
 
-The shells look for `mdview-engine` beside themselves or in a `target/release` above them, so build
-the workspace (or set `MDV_ENGINE`) before opening a document with SVG or math.
+The ignored tests wait out real deadlines (engine stall and idle, fetch) or dump files; run them
+with `-- --include-ignored` when touching the engine client or the watchdog.
 
-**crates.io.** It was unreachable from this machine for a while (`schannel:
-AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`) and works again as of 2026-11-08. With the
-crates cached, `--offline` still builds. A stale local index can fail to resolve locked versions
-(it once reported only `bincode` 2.0); the `Cargo.lock` entries are what count, so a build without
-`--offline` refreshes the index.
+**Launch built `.exe` files from Git Bash, not PowerShell.** PowerShell reports an unsigned-binary
+error for them on this PC.
 
-For MSVC builds inside the sandbox, point `TEMP`/`TMP` at a writable directory or `lib.exe` fails
-with access denied:
+The renderer and shells find `mdview-engine` through `MDV_ENGINE`, beside the current executable,
+or in a `target/release` above it. Build the workspace (or set `MDV_ENGINE`) before opening a
+document with SVG, math or Mermaid.
+
+**The new shell** (`target/release/mdview.exe`):
+
+| Flag | Meaning |
+|---|---|
+| `<files>` | Documents to open (a folder sets the Files pane) |
+| `--light` / `--dark` | Override the theme |
+| `--zoom <pct>`, `--folder <dir>`, `--maximize` | Start-up overrides |
+| `--no-session` | Neither reads nor writes the session and skips the single-instance hand-over. Use it for every test |
+| `--load-remote` | Load the first document's remote images without the bar (for checks) |
+| `--shot out.png` | Draw one frame of the state the other flags describe, write it, exit. No window |
+| `--size WxH`, `--scale f` | Shot size and device scale |
+| `--files`/`--no-files`, `--outline`/`--no-outline`, `--focus-mode` | Panes and focus mode |
+| `--find q`, `--scroll px`, `--hover x,y` | Find query, scroll offset, pointer position |
+| `--menu main\|recent\|tab\|page`, `--dialog about\|shortcuts\|recent` | Open a popup or dialog in the shot |
+| `--scroll-steps n` | Open a real window, wait until the page is refined, scroll n wheel steps, log timings, exit |
+
+```sh
+target/release/mdview.exe --no-session --shot out.png --dark --size 1280x800 --menu main fixtures/showcase.md
+target/release/mdview.exe --no-session --shot out.png --light --load-remote fixtures/remote.md
+```
+
+`MDVIEW_STARTUP_TRACE=1` prints the first-frame and page-refined times with image decode and
+engine job counts; `MDVIEW_TRACE=1` prints per-frame timings (layout, paint, compose, copy,
+present, rows).
+
+**The renderer bench** (`target/release/mdv-bench.exe`):
+
+```sh
+mdv-bench.exe --input fixtures/showcase.md --out x.png --theme dark --width 780 --scale 1.0
+mdv-bench.exe --all                      # writes the showcase renders to target/goldens/
+mdv-bench.exe --input spikes/parser/data/generated_1mib.md --out target/tmp/b.png \
+    --width 780 --viewport 900 --scale 1.0 --scroll 40 --repeat 60
+```
+
+`--viewport <height>` reports what a window pays: first layout, first frame, refinement, scrolling.
+`--resize <width>`, `--zoom <factor>`, `--details` and `--error` add phases.
+
+**Goldens.** `crates/render/tests/golden.rs` compares the four `tests/golden/showcase-{light,dark}@{1.0,1.5}.png`
+on Windows only (system fonts). After an intended visual change, re-bless them and look at the
+difference before committing:
 
 ```powershell
-$env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
+$env:MDV_BLESS = 1; cargo test --release -p mdview-render --test golden; Remove-Item Env:MDV_BLESS
 ```
 
-The Qt shell builds separately (section 8).
+A failing compare writes `target/golden-actual-<name>.png`. The engine must be built, or SVG, math
+and diagrams render as placeholders.
 
-## 4. Running the shells on Windows
-
-**WinUI** (`target/release/mdview-winui.exe`):
-
-| flag | meaning |
-|---|---|
-| `<file>` | document to open; without one, a built-in welcome page |
-| `--light` / `--dark` | override the system app theme, for screenshots |
-| `--zoom <x>` | page scale, 0.5-3.0 |
-| `--trace` | write `target/release/mdview.trace.log` (beside the exe), one line per frame |
-| `--measure` | first frame only, then write `measure.log` and exit 0 |
-| `--no-shift` | send every frame whole instead of using the shifted frame |
-| `--scroll <device px>` | start partway down the page |
-| `--scroll-steps <n>` | after the first frame, walk down `n` 40 px steps, one frame each |
-| `--select-test` | after the first frame, select the word "Markdown" and log the range and first rect to the trace |
-| `--find-test` | type "Markdown" through the find path, step to the second match and log the mark counts |
-| `--outline-test` | scroll to the "Diagrams" heading through the outline and log the heading count |
-| `--copy-test` | select "Markdown", copy it and read the clipboard back |
-| `--details-test` | after the first frame, toggle the first `<details>` and log the page height before and after |
-| `--size <w>x<h>` | logical window size (default 1100x900) |
-
-`--no-shift`, `--scroll`, `--scroll-steps` and `--size` exist so a capture or a measurement needs no
-input injection; that matters, see section 9.
-
-The frame trace reads like:
-
-```
-frame 1084x821: paint 0.5 upload 0.1 (band at 773 of 48 rows) present 0.3 total 0.9 ms
-```
-
-`paint` is the renderer, `upload` is everything sent to the GPU plus the back-buffer copy, the band
-is what was sent, and `present` is mostly waiting for vsync.
-
-**Qt** (`bins/mdv-qt/target/release/mdview-qt.exe`): `bins/mdv-qt` is excluded from the workspace, so
-build it from its own directory:
+**The Qt shell** builds from its own directory:
 
 ```powershell
 cd bins\mdv-qt
@@ -165,1145 +159,459 @@ $env:PATH = "C:\Qt\6.9.3\msvc2022_64\bin;$env:PATH"
 $env:QMAKE = "C:\Qt\6.9.3\msvc2022_64\bin\qmake.exe"
 $env:CMAKE_PREFIX_PATH = "C:\Qt\6.9.3\msvc2022_64"
 $env:TEMP = "C:\Users\kaank\Desktop\mv\target\tmp"; $env:TMP = $env:TEMP
-cargo build --release --offline
+cargo build --release
 ```
 
-Run it with Qt's `bin` on `PATH` so the DLLs resolve. Flags: `<file>`, `--light`/`--dark`,
-`--zoom <x>`, `--scroll <px>` (start partway down, for captures), `--drop-test <path>` (sends one
-`QDragEnterEvent` and `QDropEvent` through the window
-and exits 0 when the dropped path was loaded; it exists because Qt uses OLE drag and drop on Windows,
-so a posted `WM_DROPFILES` from another process is ignored), `--select-test` (drags over "Markdown"
-through the real mouse path, prints the selection and rect count, exits), `--select-hold` (the same
-but leaves the window open for a screenshot), `--link-test` (clicks the `#diagrams` link and
-compares the scroll row with what `y_of` says) and `--details-test` (clicks the first summary and
-compares the page height before and after).
+Run `bins/mdv-qt/target/release/mdview-qt.exe` with Qt's `bin` on `PATH`. Its scripted checks print
+one line and exit: `--drop-test <path>`, `--select-test`, `--select-hold`, `--link-test`,
+`--details-test`, `--find-test`, `--outline-test`, `--copy-test`, `--tabs-test`. Not verified in
+this rewrite: that the Qt crate still builds against the renderer API changed on 2026-11-11 and
+2026-11-12 (`7ef3831` adapted it; nothing since was built here).
 
-## 5. Linux: the test VM
+**crates.io** was unreachable from the PC for a while (`SEC_E_NO_CREDENTIALS`) and worked again from
+2026-11-08. With crates cached, `--offline` builds; a stale local index can fail to resolve locked
+versions, and a build without `--offline` refreshes it.
 
-The user gave this box for Qt and Linux testing: `user@vm-host`, password not recorded, Debian 13
-(trixie), 20 cores, 7.8 GB RAM. The user's X server is MobaXterm on the Windows host, which listens on
-`0.0.0.0:6000`, so a VM window can also be shown on the user's own screen:
+## 4. The new shell (`bins/mdv-app`)
 
-```sh
-DISPLAY=windows-host:0.0 /mnt/.../target/release/mdview-qt fixtures/showcase.md
-```
+Pure Rust, no DLLs beyond the system's. `mdview_render::shared_fonts()` gives the chrome a clone of
+the renderer's font context, so system fonts are enumerated once.
 
-`ssh -X` from Windows does not work (no xauth cookie); use that direct TCP display.
+| Module | What is in it |
+|---|---|
+| `workspace.rs` | All tab, document, session, find, selection, link, scroll, outline, remote-image and status logic, headless and unit-tested. Ported from `bins/mdv-qt/src/shell.rs`. One shared `DocumentRenderer`; only the active tab is laid out |
+| `app.rs`, `app/input.rs`, `app/commands.rs` | State, region compose and present, the winit handler, pointer and key handling, every `CommandId`, wakes and timers |
+| `app/tests.rs` | A headless `App` at 1280x800 driven through the real handlers |
+| `chrome.rs`, `panes.rs`, `page.rs`, `overlays.rs` | Title row and command bar; Files and Outline panes and the overlay scrollbar; page blit, find and selection overlays, missing-file banner, remote-image bar, empty state; menus, dialogs, toast, link hint, tooltips |
+| `ui.rs`, `keys.rs`, `args.rs` | Regions, `Hit`, `Act` and window state; shortcuts parsed from core's command strings; command line |
+| `gfx.rs`, `menu.rs`, `textfield.rs`, `tree.rs`, `theme.rs` | Painter (logical px, device snapping, clip, shadows), popup menu, single-line editor, lazy folder tree, chrome palettes |
+| `platform.rs` | The only `unsafe`: clipboard, URLs, file manager, system theme and subpixel order, dialogs (rfd), DWM attributes |
+| `build.rs` | Embeds `assets/mdview.ico` when `rc.exe` is found |
 
-`target/vm.py` (not committed, needs `paramiko`) runs commands and copies files over SSH; it reads
-`MDV_VM_HOST`, `MDV_VM_USER`, `MDV_VM_PASS` (defaults `vm-host`, `user`, none):
+**Frames.** The window is five regions (`Region::Title`, `Bar`, `Files`, `Outline`, `Page`) plus
+overlays (menus, dialogs, toast, link hint, tooltip). Each region has a signature, a hash of
+everything it shows; a frame redraws only regions whose signature changed (the page also when the
+workspace reports it dirty), redraws overlays with every region under them, and keeps the composed
+`screen` bitmap between frames. `present` copies only the damaged rows into softbuffer's buffer and
+calls `present_with_damage` with those rectangles; when the buffer's age is 0 it copies and
+presents the whole frame.
+
+**Hidden first frame.** The window is created with `with_visible(false)`, the first frame is
+composed and presented, then the window is shown and the whole frame is presented again, because
+a present to a hidden window shows nothing. A `RedrawRequested` the app did not ask for (the
+system showed, restored or uncovered the window) sets `expose` and presents the whole frame; before
+`147b805` the title row and command bar stayed white until something changed under the pointer.
+
+**Hit and Act.** Drawing records `(Hit, Rect)` pairs per region and for overlays; `hit_at` asks
+overlays first when a dialog is open, then the regions. `Hit::region()` says which region repaints
+for hover and press; `is_button()` marks hits that act on release over the same hit. Popup menu
+items carry an `Act` (a `CommandId`, a tab command, a recent path, open/copy link, copy formula or
+diagram source, copy, select all, "always load remote images").
+
+**Window.** Frameless (`with_decorations(false)`) with `with_undecorated_shadow(true)` on Windows,
+default 1280x800, minimum 520x360, size and maximized state saved in the session
+(`geometry=WxH [max]`). Resizing is the app's own: a press within 8 logical px of an edge resizes,
+and within 20 px of a corner along an edge resizes diagonally (`EDGE`, `CORNER` in `app.rs`).
+Maximized, the client rectangle equals the monitor work area, so the taskbar stays visible.
+
+**Popup shadows** (`Painter::shadow`): ten expanding translucent boxes, 1.4 px apart and offset
+3 px down, each at alpha 0.024 on the dark theme and 0.010 on the light one. Radii: menus 8, toast
+8, tooltips 5, dialogs 10; dialogs draw the shadow twice on the dark theme.
+
+**Idle.** The loop waits for events and sets a timer only for something pending: caret blink in
+the find box, tooltip delay (500 ms), toast expiry, drag auto-scroll (16 ms), the idle-tab check
+(every 30 s; tabs left 60 s ago drop their document), saving the size 800 ms after a resize, and
+page refinement (4 ms slices while there is more). A refined, idle window costs no CPU.
+
+**Differences from the Qt shell** (all noted in `workspace.rs`): restored tabs load when first
+shown and inactive tabs drop their layout; the reading position survives reload, resize and zoom
+as block plus offset; find re-runs after a reload; double click selects a word and triple click a
+block; status messages are toasts (no status bar); the outline highlights the current heading; the
+empty state lists recent files; the page text and the chrome follow the display's subpixel order.
+
+**Chrome text and icons.** UI text goes through `TextEngine` with the system's ClearType order
+(`platform::subpixel_order`). Icons come from Segoe Fluent Icons or Segoe MDL2 Assets, which Linux
+will not have.
+
+## 5. The renderer (`crates/render`)
+
+Headless: no window system, BGRA bitmaps, parley 0.12 for layout, swash for raster. The layout
+code is split into `crates/render/src/layout/` (`page`, `relayout`, `estimate`, `refine`, `frame`,
+`hit`, `selection`, `store`, `pager`, `inline`, `paint`, `prose`, `containers`, `table`, `media`);
+the module doc in `layout/mod.rs` names each.
+
+**`DocumentRenderer`** holds the font and layout contexts, the glyph cache (4 MB), the per-block
+paint cache, the image store, `<details>` overrides, the kept frame and the current `PageLayout`.
+One per window (the new shell shares one across all tabs).
+
+| Call | Meaning |
+|---|---|
+| `layout(doc, &Options) -> &PageLayout` | First layout: **estimates** every top-level block's height without shaping (kind, text length, an average glyph advance measured once per scale) |
+| `refine(doc, &Options, budget) -> bool` | Measures remaining estimates, nearest the viewport first, within `budget`; true while there is more. The shell gives it 4 ms slices between events |
+| `view_frame(doc, &Options, top, height) -> &Frame` | Draws the viewport into the kept frame |
+| `top()` / `set_top()` | The viewport top in corrected coordinates; the shell adopts it as its scroll position |
+| `jump_to(..., Jump)` | Scroll to a block (`Jump::Block`, which fragments and the outline use), a footnote (`Jump::Footnote`) or a text offset (`Jump::Text`, find matches), measuring what it lands on |
+| `hit_test(doc, &Options, x, y) -> Option<Hit>` | Block, document offset, link, footnote, `<details>` summary and formula/diagram `Source` under a point |
+| `selection_rects(doc, &Options, from, to)` | One page rectangle per selected line |
+| `set_details(doc, block, open)` / `details_open` | `<details>` open state is view state the renderer holds |
+| `set_subpixel(Subpixel::{Rgb, Bgr, None})` | Page text antialiasing for the display's stripe order; a change drops the layout |
+| `take_remote_requests()`, `set_remote(url, RemoteState)`, `remote_arrived(url, bytes, scale)` | Remote images: the URLs passes asked for, pending/blocked marks, delivery |
+| `page(doc, &Options)` | The whole page in one bitmap, for tests, goldens and the bench |
+| `image_stats()` | Decodes and engine jobs so far, for tests and traces |
+
+`layout_exact` (also behind the crate-level `layout()` and `render_slice`) still measures everything
+up front; the Qt shell uses it.
+
+**Patchable layout.** Each top-level block's height is recorded; positions are prefix sums rebuilt
+from the first changed block. Anything that lays a block out (a frame, a hit test, a selection, a
+jump, a `<details>` toggle, an arrived image, a refinement slice) may correct its height in place.
+Corrections keep the viewport's anchor (a block and an offset into it) fixed, so content on screen
+does not jump; a correction above the viewport moves `top()` instead. A block with an image,
+formula or diagram the store lacks is laid out with a typical box and stays provisional until
+shown; refinement never loads anything. A `<details>` toggle or an arrived image re-measures only
+the blocks that use it.
+
+**The frame delta is the contract.** `Frame { bitmap, top, stats, band, shift }`: `band` is the
+rows painted this time (`None` means the whole frame is new: first frame, resize, zoom or theme
+change, a jump of a viewport or more, or a correction that changed the kept rows; an empty range
+means unchanged); row `r` of this frame was row `r + shift` of the previous one. Scrolling moves
+the kept rows with one `copy_within` and paints only the band that came into view, on its own small
+bitmap, then copies it in (a block can reach past the band and would otherwise be blended twice).
+Images are snapped to a page row before the shift. Tests rebuild frames from `band` and `shift`
+alone and compare bytes with a fresh `page()` render.
+
+**Hit testing and selection** live beside the frame. Each laid-out line keeps its geometry and the
+inline origin map; a hit asks parley's `Cluster::from_point` and maps back to `Document::text`;
+selection asks `Cluster::from_byte_index` for the boundaries. Selection and find marks are drawn by
+the shell over the frame, never into it.
+
+**Image store** (`layout/store.rs`, since `1ad57b4`). Every raster (file images, remote images,
+inline and display math, Mermaid) is keyed by what its pixels depend on: a file's resolved path,
+length and mtime; a formula's source, pixel size, colour and display flag; a diagram's source,
+scale and theme. Relayout, a width change, a zoom back to a known scale, a `<details>` toggle, a
+reload or a tab switch re-reads and re-renders nothing. Pixels are capped at 64 MiB
+(`IMAGE_CACHE_BYTES`) with LRU eviction that never drops what the current frame uses. File SVGs are
+rasterized by the engine at the device scale (`KIND_SVG_AT`).
+
+**Images.** PNG, JPEG, GIF (first frame only) and WebP decode in-process; SVG goes to the engine.
+Limits 12 MiB and 24 Mpx. `<picture>` light/dark sources follow the theme; `<img width height>`
+are honoured and reserve the box while loading. Below half size an image is area-averaged
+(`abf7b54`), at half size and up bilinear.
+
+**Math** (RaTeX through the engine): inline `$...$` is one image atom rendered at twice the text
+size and halved, sitting on the baseline the engine reports; `$$...$$` and fenced `math` are
+centred blocks. Failure falls back to source text (inline) or a labelled box (display).
+
+**Syntax highlighting** is in-process: syntect 5.3 (`default-fancy`), `InspiredGitHub` light and
+`base16-ocean.dark` dark, fenced blocks only, one styled run per token at its real offset (find and
+selection work across it). Unknown languages and blocks over 256 KiB stay plain.
+
+**The engine client** (`crates/render/src/engine.rs`) keeps one shared `mdview-engine` process,
+started by the first job, with a 5 s deadline per job. A pipe error (the engine's 10 s idle exit, a
+crash) retries once against a fresh process; a timeout kills and reaps it and leaves a placeholder.
+
+**Fixtures.** `fixtures/everything.md` is the one file that exercises every feature, in the order
+of `docs/COVERAGE.md`; only its last section needs the network. Rendering it on 2026-11-12 exposed
+six renderer bugs, fixed in `f5a8bed`: strikethrough and underline looked up at the shaped run's
+start (missing or spilling onto neighbours, also in the showcase goldens); sub- and superscript on
+the baseline; every alert blue; `<ol type>`, `<div align>`/`<center>` around Markdown, `<hr width>`
+and `align=justify` ignored; a code label drawn through a long first line. Others: `showcase.md`
+(the goldens), `diagrams.md` and `diagrams-more.md` (Mermaid families), `math.md`, `images.md`,
+`formats.md` (GIF/WebP), `html-extras.md` (ruby, dl, figure), `remote.md`, `linked.md`,
+`two-svg.md`.
+
+**Older measurements** (2026-11-08, before estimated heights; `generated_1mib.md`: 1.0 MB, 25,060
+blocks): scroll frames 0.2/0.8 ms mean/worst at 780x900 100%, 0.6/1.1 at 1170x1350 150%, 2.6/3.4
+at 3840x2200 150%, inside PLAN's 4 ms and 8 ms budgets.
+
+## 6. Remote images and `crates/fetch`
+
+**Policy.** A document never contacts a server unasked. The renderer asks for remote URLs only in
+passes that show them; the workspace holds them back (`RemoteState::Blocked`) unless this document
+was allowed or the "always" setting is on.
+
+**The bar.** Over a page that holds remote images back, a bar offers **Load images** (this
+document), **Always load** (every document from now on) and a close button (hides the bar for this
+document). Its count is the number of distinct `http(s)` image URLs in the document, counted when
+the file is read (`a4065b9`), not the number a frame has met. The main menu has a checked item
+"Always load remote images" that turns the setting on or off; it is saved in the session as
+`remote_images=0|1`. Images already shown stay when it is turned off.
+
+**`mdview-fetch`.** Started by the first image that may load; nothing touches the network before.
+GET only, `User-Agent: mdview`, `Accept: image/*`, no cookies, credentials, client certificates,
+`Referer` or decompression. At most 5 redirects, handled by hand, never https to http or to another
+scheme. Only a 200 counts. One overall deadline of 10 s, enforced by a watchdog thread that closes
+the request handle (WinHTTP's own timeouts proved coarse on Windows 11). Body cap 12 MiB. Up to
+four worker threads, each exiting after 10 s idle. A failed URL stays failed for 30 s, then the
+next request retries; Reload clears every failure. Disk cache under
+`%LOCALAPPDATA%\mdview\cache\images` (beside the session file; none with `--no-session`), capped at
+64 MiB with LRU eviction, atomic writes, checksummed entries, 24 h freshness and
+`If-None-Match`/`If-Modified-Since` revalidation. Windows uses WinHTTP, so the exe carries no TLS
+stack; other platforms build a stub whose requests fail. A remote SVG is rasterized by the engine at
+the device scale and re-requested when the scale changes.
+
+This is the shell's only network use besides the loopback single-instance hand-over
+(`docs/UPDATE.md`, top note).
+
+## 7. The engine (`crates/engine`): math and Mermaid
+
+Library and binary. The renderer never links it; it talks through `mdview-engine-proto`, so a
+malformed document cannot take the viewer down, and the memory returns when the process exits.
+Release builds use `opt-level = "s"` for it.
+
+- **Process.** One job at a time over stdin/stdout. Exits after 10 s without a request, on a
+  closed stdin, or (exit code 3) when one job runs past 6 s, so a hung parser cannot outlive a
+  crashed viewer. `MDV_ENGINE_STALL` makes every job hang, for the ignored deadline tests.
+- **SVG:** resvg 0.47. Text falls back through Noto Sans, DejaVu Sans, Cantarell, Liberation Sans
+  and sans-serif when usvg's default serif face is missing.
+- **Math:** RaTeX 0.1.15 with embedded KaTeX fonts. Paint is written as RGB (RaTeX's `rgba()` is
+  not SVG 1.1), and the root's `pt` unit is stripped (its viewBox is in px).
+- **Mermaid:** merman 0.9.3, rasterized at twice the device scale. A prepended init directive asks
+  for native text labels (`htmlLabels: false`), 11 px text (merman measures deterministically and
+  the real fonts are wider), gantt `leftPadding: 150` and `useWidth: 900`, and on the dark theme a
+  contrast palette (`#3d4654` nodes, `#9aa4b2` borders, `#c8d0da` edges). `inline_label_uses` moves
+  fallback label text out of nested `<defs>` SVG, which resvg does not draw. Per-family fixes
+  (`family_init`, `family_svg_fix`): timeline at 16 px, journey at 20 px, dark palettes for
+  treeView, quadrant, treemap, radar, ZenUML, packet, journey, event modeling and C4, centred
+  use-case labels, a wider tree view, a root `Segoe UI, sans-serif` font.
+
+**Families: 31 of merman's 34 enabled** (`crates/engine/Cargo.toml`): flowchart, sequence, class,
+state, ER, gantt, pie, mindmap (the original eight), agentflow, block, C4, cynefin, event modeling,
+gitGraph, ishikawa, journey, kanban, packet, quadrant chart, radar, railroad, requirement, sankey,
+swimlane, timeline, tree view, treemap, use case, venn, xychart, ZenUML. **Excluded**
+(`docs/COVERAGE.md`): `architecture` needs merman's Cytoscape layout, which is left out, so the
+block keeps its source; `wardley` draws text about 5 px tall and its "Business" anchor label stays
+black on the dark page; `info` only prints the merman version. No ELK or Cytoscape crate is
+linked. A disabled family or a diagram merman rejects keeps its labelled source box; so does a
+source over 64 KiB.
+
+Measured 2026-11-08 on the PC: two badge jobs 13.2 ms then 2.4 ms with one engine start; a stalled
+job killed at 5003.9 ms and the next started in 13.4 ms.
+
+## 8. Installer for the new shell
+
+`packaging/windows/build-installer.ps1 [-SkipBuild]`:
+
+1. Sets `TEMP`/`TMP` to `target\tmp`.
+2. Builds `-p mdview -p mdview-engine` with `RUSTFLAGS=-C target-feature=+crt-static` into
+   `target\dist`, so both exes import only system DLLs (no `VCRUNTIME140`, no `api-ms-win-crt-*`).
+   The flag is set in the script, not in `.cargo/config.toml`, because it must not reach the Qt
+   crate (Qt needs the dynamic CRT) or a Linux build. Ordinary `cargo build` output in
+   `target\release` keeps the dynamic CRT. `-SkipBuild` reuses `target\dist\release`.
+3. Runs `ISCC /DAppVersion=<workspace version> mdview.iss` and writes
+   `target\installer\mdview-setup-<version>.exe` and its `.sha256`.
+
+`mdview.iss`: per-user to `%LOCALAPPDATA%\Programs\mdview`, ships `mdview.exe`,
+`mdview-engine.exe` and `mdview.ico`, its own AppId. The "assoc" task (on) registers the ProgId
+`mdview.Markdown`, `OpenWithProgids` for `.md .markdown .mdown .mkd`, `Applications\mdview.exe`,
+and a registered application (`Software\mdview\Capabilities` and `RegisteredApplications`); it never
+writes an extension's default value. The last page offers (unchecked) to open
+`ms-settings:defaultapps?registeredAppUser=mdview`. Optional desktop shortcut.
+
+## 9. Measurements (2026-11-12, the Windows PC, release build)
+
+| | New shell (`mdview`) | Qt shell |
+|---|---|---|
+| Private memory, `fixtures/showcase.md` | 24 MiB | 90 MiB |
+| Private memory, 1 MiB document | 34 MiB | 89 MiB |
+| First frame, showcase | 79-81 ms warm, 160 ms cold | not measured (the `--measure` run hung and was killed) |
+| First frame, 1 MiB document | 76-95 ms; fully refined after about 0.8 s | not measured |
+| Exe | `mdview.exe` 7.3 MB (static `target\dist` build 7.47 MB) | |
+| Engine | `mdview-engine.exe` 26 MB | |
+| Installer | 11 MB | 17 MB |
+
+Tests: `cargo test --release --workspace`: 345 passed, 0 failed, 6 ignored.
+
+Earlier, 2026-11-11, before estimated heights: a scroll frame in a maximized window with both
+panes, 150 frames, median 3.1 ms, p90 3.5, worst 4.2 (paint 1.2, compose 1.0, copy 0.8, OS
+present 0.9). Maximized memory then was 76 MiB for the showcase (three full-window bitmaps: screen,
+renderer frame, softbuffer's).
+
+## 10. What has and has not run
+
+**Ran** (Windows PC):
+
+- The workspace test suite (section 9) and `cargo fmt --all --check`.
+- The measurements in section 9.
+- `--shot` renders of both themes, find, the four menus, the three dialogs, the empty state, a
+  700 px window, scales 1.5 and 2.0, focus mode and nine tabs, looked at on 2026-11-11. The user
+  used the running app and approved its look that day.
+- The installer: built, installed silently, the installed exe rendered `fixtures/diagrams.md` with
+  the engine found beside it, uninstalled cleanly; the user's `.md` default association was left
+  untouched.
+
+**Not run or not done:**
+
+- The user's hand checks of the new shell (PLAN A3). In particular the remote-image bar buttons,
+  the "Copy formula source"/"Copy diagram source" context menu items, the feel of the resize edges
+  and corners, and the popup shadows. The user approves the interface by eye; screenshots do not
+  stand in for that.
+- Also never run by hand as a recorded check: title drag and double-click maximize, caret blink,
+  clipboard, opening links, drag and drop, the single-instance hand-over, live file watching and
+  the missing-file flow, session save and restore (scripted runs use `--no-session`), the native
+  open dialogs, a DPI or system-theme change at runtime, a second monitor.
+- A Qt first-frame comparison: the Qt `--measure` run hung and was killed.
+- A scrolling comparison on the 1 MiB document against Qt.
+- The installer's wizard pages, an upgrade over an older version, the Default apps page link.
+- Anything on Linux or KDE for the new shell; the Linux dependency features in `Cargo.toml` are
+  untested.
+- Retiring Qt (A6).
+
+## 11. Known gaps
+
+**New shell:**
+
+- No snap-layouts flyout on the maximize button. The system accent colour is not used.
+- Pane widths are not saved (which panes are open is).
+- The Files tree refreshes when the window gains focus, on F5 and on a file-watcher wake (the
+  watcher watches the open files' folders), not on every change under its root.
+- Maximized memory is three full-window bitmaps.
+- Icons need Segoe Fluent Icons or Segoe MDL2 Assets (Windows only).
+- No update check (by decision; a manual menu item is future work, `docs/UPDATE.md`).
+- `cargo clippy` style warnings remain.
+
+**Renderer and engine:**
+
+- Ruby annotations sit over the first line of their base only, at half size.
+- `<figure>` has no side margin.
+- GIF shows its first frame only (no animation, so idle CPU stays zero).
+- `architecture-beta` diagrams keep their source; `wardley` and `info` are off too.
+- Text in packet and C4 diagrams is small.
+- Math and diagrams are images: no selection geometry, no equation numbering. Their source can be
+  copied from the page context menu.
+- Table `colspan`/`rowspan` are laid out up to 200 columns. Highlighting covers fenced blocks only.
+- No bundled fonts, so the golden compare runs on Windows only and Linux metrics differ.
+- Any image format other than PNG, JPEG, GIF, WebP and SVG keeps its placeholder.
+
+**Qt shell** (until retired): Manage recent is a dock, not a dialog; no empty-state Open button;
+frameless window that resizes only from the status-bar grip; the AppImage build still checks for
+updates once a day (`spawn_check` in `shell.rs`), against the manual-only decision; not run on KDE
+since the 2026-11-11 redesign.
+
+## 12. Linux: what exists for the KDE run
+
+Nothing of the new shell has been built on Linux. PLAN D lists the work: Wayland file drops,
+portal dialogs (rfd is already configured with `xdg-portal`), an icon font to replace Segoe
+Fluent Icons, and a build of `crates/fetch`'s stub (remote images will fail there until a
+transport is written; `stub.rs` describes the intended approach). PLAN's "Verification" section
+lists the end-to-end Plasma run.
+
+**The user's Linux desktop** (CachyOS, KDE Plasma, Wayland with XWayland) is where the Qt shell was
+last built and run (2026-11-10, Qt 6.12.0, offscreen and briefly on Wayland/X11). Kept there on
+2026-11-10: the build caches (`target/`, `bins/mdv-qt/target/`), `~/.local/rust-win`, and the
+AppImage in `~/mdview-appimage/`.
+
+**The Debian test VM** (used up to 2026-11-08; not verified since): `user@vm-host`,
+password not recorded, Debian 13, 20 cores, 7.8 GB RAM, packages `qt6-base-dev` (Qt 6.8.2),
+`libfontconfig1-dev`, `libxcb-cursor0`, `libxkbcommon-x11-0`, `xvfb`, `imagemagick`,
+`fonts-noto-cjk`. Driven over SSH by `target/vm.py` (not committed; `paramiko`, env
+`MDV_VM_HOST`/`USER`/`PASS`, subcommands `run`, `put`, `get`). A window can be shown on a Windows
+X server listening on TCP (`DISPLAY=windows-host:0.0` was the user's MobaXterm); `ssh -X` did not
+work (no xauth cookie). Upload a snapshot and build:
 
 ```powershell
-python target/vm.py run "uname -a"
-python target/vm.py put C:\...\file.tar.gz /home/user/file.tar.gz
-python target/vm.py get /tmp/shot.png target/shot.png
-```
-
-Installed packages: `qt6-base-dev` (Qt 6.8.2), `libfontconfig1-dev`, `libxcb-cursor0`,
-`libxkbcommon-x11-0`, `xvfb`, `imagemagick`, `fonts-noto-cjk`.
-
-**Upload and build** (the tree is a snapshot; re-run after changes):
-
-```powershell
-cd C:\Users\kaank\Desktop\mv
-tar -czf target/mdv-src.tar.gz --exclude=.git --exclude=spikes --exclude=target --exclude=.dsh -C . .
-tar -czf target/spec-data.tar.gz -C spikes/parser data        # the spec suites read this
+tar -czf target/mdv-src.tar.gz --exclude=.git --exclude=spikes --exclude=target -C . .
+tar -czf target/spec-data.tar.gz -C spikes/parser data
 python target/vm.py put target/mdv-src.tar.gz /home/user/mdview-src.tar.gz
 python target/vm.py put target/spec-data.tar.gz /home/user/spec-data.tar.gz
 ```
 
 ```sh
-python target/vm.py run "rm -rf ~/mdview && mkdir -p ~/mdview && tar -xzf ~/mdview-src.tar.gz -C ~/mdview && mkdir -p ~/mdview/spikes/parser && tar -xzf ~/spec-data.tar.gz -C ~/mdview/spikes/parser"
-```
-
-The VM's default `PATH` is already usable
-(`/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/cargo/bin:/usr/local/bin:/usr/bin:/bin`), so cargo and the
-usual tools are found without doing anything. The trap is adding Qt to it from PowerShell:
-`python target/vm.py run "... export PATH=/usr/lib/qt6/bin:$PATH"` in double quotes lets **PowerShell**
-expand `$PATH` (to nothing), which leaves the remote shell with `/usr/lib/qt6/bin:` and no `cargo` or
-`/usr/bin` at all. Either use single quotes in PowerShell so `$PATH` reaches bash, or spell the whole
-path out:
-
-```sh
+rm -rf ~/mdview && mkdir -p ~/mdview && tar -xzf ~/mdview-src.tar.gz -C ~/mdview \
+  && mkdir -p ~/mdview/spikes/parser && tar -xzf ~/spec-data.tar.gz -C ~/mdview/spikes/parser
 export PATH=/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/cargo/bin:/usr/lib/qt6/bin:/usr/local/bin:/usr/bin:/bin
+cd ~/mdview && cargo build --release --workspace
 ```
 
-Then:
-
-```sh
-cd ~/mdview/bins/mdv-qt && export QMAKE=/usr/lib/qt6/bin/qmake6 && cargo build --release
-cd ~/mdview && cargo build --release -p mdview-engine      # for SVG, math and Mermaid
-cd ~/mdview && cargo test --release -p mdview-core -p mdview-render -p mdview-engine -p mdview-engine-proto
-                                                                      # 7 core, 11 fuzz, 113 regression,
-                                                                      # 3 spec, 12 engine, 7 proto, 10+18 render
-cd ~/mdview && xvfb-run -a /mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt \
-    --drop-test fixtures/linked.md                                   # prints "drop test ok: ..."
-cd ~/mdview && BIN=/mnt/2b4bc8c0-2e4e-4fc1-b330-27648dcbbf49/target/release/mdview-qt
-xvfb-run -a $BIN fixtures/showcase.md --light --select-test          # "select test ok: ..."
-xvfb-run -a $BIN fixtures/showcase.md --light --link-test            # "link test ok: ..."
-xvfb-run -a $BIN fixtures/showcase.md --light --details-test         # "details test ok: ..."
-xvfb-run -a $BIN fixtures/showcase.md --light --find-test            # "find test ok: ..."
-xvfb-run -a $BIN fixtures/showcase.md --light --outline-test         # "outline test ok: ..."
-xvfb-run -a $BIN fixtures/showcase.md --light --copy-test            # "copy test ok: ..."
-```
-
-The scripted checks print one line and exit; on this VM they report selection `7..15` ("Markdown"),
-a link jump to 1266 px (Linux font metrics) and a details height of 3064 -> 3118 px.
-
-Capturing a Linux window (`Xvfb` has no window manager, so the window sits at 0,0):
-
-```sh
-Xvfb :99 -screen 0 1600x1200x24 &
-DISPLAY=:99 /mnt/.../target/release/mdview-qt fixtures/showcase.md & sleep 6
-DISPLAY=:99 import -window root /tmp/shot.png
-```
-
-Linux font metrics differ from Windows (the showcase page is 4095 px tall there, 4071 here), so Linux
-renders are for "does it run and look sane", not for golden comparison. CJK needed
-`fonts-noto-cjk`; the renderer's stack falls back through fontconfig.
-
-## 6. The renderer (`crates/render`)
-
-Headless: no window system, BGRA bitmaps, parley for layout, swash for raster.
-
-| Item | Meaning |
-|---|---|
-| `DocumentRenderer::new()` | font/layout contexts, glyph cache, per-block paint cache, decoded images, the frame; one per window, kept warm |
-| `.layout(doc, &Options) -> PageLayout` | one height pass over every top-level block; also stores each block's `y`/`height` and **clears the frame** |
-| `.view(doc, &Options, &PageLayout, top, height) -> Slice` | fresh viewport bitmap for one view; used by tests |
-| `.view_frame(...)-> &Frame` | draws into the frame kept between calls (this is what the shells use) |
-| `.frame() -> Option<&Frame>` | the frame `view_frame` drew last |
-| `.page(doc, &Options) -> Rendered` | the whole page in one bitmap; for tests and small documents |
-| `.hit_test(doc, &Options, &PageLayout, x, y) -> Option<Hit>` | the document offset under a point, plus the link, footnote or `<details>` summary there; lays out one block on demand |
-| `.selection_rects(doc, &Options, &PageLayout, from, to) -> Vec<Rect>` | one page rectangle per selected line, for the shell to draw |
-| `.set_details(block, open)` / `.details_open(doc, block)` | view state for `<details>`: a shell override, falling back to how the source was written |
-| `render`, `render_slice`, `render_view`, `layout` | one-shot forms |
-
-`Options { width, scale, theme, max_height, base_dir }`; `base_dir` is where relative image paths
-resolve. `Slice { bitmap, top, total_height, stats }`.
-
-**The frame delta is the contract the shells depend on.** `Frame` is `{ bitmap, top, stats, band,
-shift }`:
-
-- `band: Option<(u32, u32)>` - the rows of `bitmap` painted this time. `None` means the whole frame is
-  new (first frame, resize, zoom/theme change, or a jump of a viewport or more) and nothing from the
-  previous frame can be reused; `Some((0, 0))` means nothing changed.
-- `shift: i32` - row `r` of this frame was row `r + shift` of the previous one.
-
-Scrolling keeps the bitmap, moves the surviving rows with one `copy_within`, and paints only the band
-that came into view. The band is painted on its own small bitmap and copied in, because a block can
-reach past the band and would otherwise be blended twice on the overlap.
-
-**Hit testing and selection live beside the frame, not in it.** Every laid-out text layout keeps one
-`LineGeom` per line (top/bottom, its x range, the layout, the page origin and the `Inline` origin
-map), cached per top-level block with the paints. `PageLayout` exposes `blocks()`, `block_at(y)`,
-`index_at(y)`, `y_of(doc, block)` (walks up to the top-level block, so an anchor inside a quote
-works) and `footnote_y(number)`. A hit finds the line under `y`, asks parley's
-`Cluster::from_point` for the cluster and side, and maps the inline offset back to `Document::text`
-through the origins; atoms (a footnote mark, an image placeholder) map every offset in their
-generated text to the atom's single position. A selection asks `Cluster::from_byte_index` for the x
-of the range boundaries, one rectangle per line. The frame bitmap is never modified by selection, so
-`band`/`shift` still describe the document alone; a test checks that a frame after hit testing and
-selection is byte-identical and still reports `Some((0, 0))`.
-
-**`<details>` open state is view state.** `DocumentRenderer` keeps a per-block override map. A hit
-that walks up from the text to a `Summary` whose parent is `Details` reports it in
-`Hit::details`. `set_details(block, open)` clears the paint cache and the frame, because the
-body's height changes; the shell then measures the page again (3-9 ms for the showcase, one height
-pass). `details_open(doc, block)` answers with the override or `Document::details_open_as_written`.
-The paint cache is per top-level block, but a closed details hides its body entirely, so the
-current toggle is a full height pass rather than a one-block relayout.
-
-Tests that pin this down (`crates/render/tests/render.rs`, 17 tests):
-
-- `a_shifted_frame_matches_a_fresh_view` - five scroll offsets, images included, byte-identical.
-- `a_scrolling_frame_reports_the_band_and_shift` - rebuilds each frame from the previous one using only
-  `band` and `shift` and compares bytes; also checks that a viewport jump reports `None`.
-- `a_cached_frame_still_draws_its_images` - fails if decoded images are not shared by the renderer.
-- `a_click_maps_back_to_the_word_under_it` - a click at the word's rectangle returns the word's
-  document offset; a click past the line lands at its last caret position.
-- `a_click_finds_a_link_and_a_footnote_reference` - link index and destination, and a footnote mark
-  swept across the line.
-- `blocks_are_found_by_page_row` - `block_at` clamps at both ends, and a block nested in a list
-  reports its top-level row.
-- `hit_testing_and_selection_do_not_change_the_frame` - hit tests (including one on a block that was
-  never painted) and selection leave the frame delta and bytes untouched.
-- `a_selection_that_wraps_gives_one_rect_per_line` - a narrow page gives several rectangles, all
-  inside the page.
-- `a_details_summary_toggles_and_the_page_remeasures` - a click on the summary names its details,
-  opening grows the page, and closing restores the exact height.
-
-**Measured** (`spikes/parser/data/generated_1mib.md`: 1.0 MB, 25,060 blocks, 583,619 px page):
-
-```powershell
-cargo run --release --offline -p mdv-bench -- --input spikes/parser/data/generated_1mib.md `
-    --out target/tmp/bench.png --width 780 --viewport 900 --scale 1.0 --scroll 40 --repeat 60
-```
-
-`--viewport <height>` switches the bench to the scroll-frame path (the width comes from `--width`);
-`--scroll` is the starting offset and `--repeat` the number of 40 px steps. `--all` writes the four
-`showcase-*` goldens.
-
-| viewport | scroll frame, mean / worst |
-|---|---|
-| 780x900, 100% | 0.2 / 0.8 ms |
-| 1170x1350, 150% | 0.6 / 1.1 ms |
-| 3840x2200, 150% | 2.6 / 3.4 ms |
-
-Height pass 3.7-9.3 ms, glyph cache 92% hit, bitmap is the viewport rather than the page. Both plan
-budgets (4 ms p99 at 150%, 8 ms at 4K) are met with room.
-
-### Phase 4 slices: SVG, math and Mermaid through `mdview-engine`
-
-`crates/engine` is both a library (`mdview_engine`) and the `mdview-engine` binary. The library
-renders SVG with resvg 0.47 (0.49 is not in the offline cache; the API used here is unchanged), loads
-system fonts once per process, and clamps the raster to the renderer's 24 M pixel cap. Text falls
-back through the renderer's sans stack when usvg's default serif fallback is unavailable, which is
-what makes the badge's label appear on a minimal Debian install as well as on Windows.
-
-Math is a second job kind. `KIND_MATH` carries a small header (font size in device pixels per em,
-a display flag, the RGB text colour) and then the TeX source; the reply adds a **baseline** to the
-usual `status/width/height/length` header. RaTeX 0.1.15 parses and lays out the formula, writes an
-SVG display list with **embedded KaTeX fonts** (the `embed-fonts` feature), and resvg rasterizes it
-through the same `render_svg` path. Two details matter: the paint syntax is RGB rather than RaTeX's
-default `rgba()`, which is not valid SVG 1.1, and RaTeX sizes the root in `pt` while its viewBox is
-in pixels, so the engine strips the unit or every formula comes out a third too large. The engine's
-reply baseline is `padding + layout height * font size`, which is what puts inline math on the text
-line instead of hanging below it.
-
-The renderer turns an inline `$...$` span into one image atom, rendered at **twice the surrounding
-text size** so it stays crisp when a heading, table cell, footnote or zoom enlarges it; the box and
-baseline are halved back in `text_layout`. A `$$...$$` (or fenced ```math) block is a centred image
-with normal paragraph spacing. If the engine is missing, RaTeX rejects the source, or the model marked
-the equation oversize, inline math falls back to its styled source text and a display block falls
-back to the old labelled code box.
-Building up a table cell used to drop its inline boxes entirely; `cell_inline` now shifts and keeps
-them, which is also what makes math and images inside tables work.
-
-Mermaid is the third job kind. `KIND_MERMAID` carries a device scale, a dark-theme flag and the
-diagram source. merman 0.9.3 is built with **only the eight families the showcase uses** plus SVG
-(`diagram-flowchart`, sequence, class, state, er, gantt, pie, mindmap), not ELK, Cytoscape or math
-labels; it emits SVG and `render_svg_at` rasterizes it at twice the device scale. Three output fixes
-matter. Mermaid defaults to HTML labels inside `foreignObject`, which resvg cannot draw, so the
-engine prepends an init directive asking for native text labels. Families that still emit HTML labels
-(mindmap) get the `readable` pipeline's `<text>` fallback; that fallback sits in a nested `<defs>`
-SVG behind a `<use>`, which resvg also skips, so `inline_label_uses` inlines the text at the use
-site. Finally, `themeVariables.fontSize` is 11 px: merman measures labels deterministically, and the
-engine's real font (DejaVu on Linux, Arial/Segoe on Windows) is wider, so full size overflowed node
-widths. The fallback text from the readable pipeline still carried Mermaid's default
-`font-size: 16px`, so `inline_label_uses` rewrites that to 11 px; at 16 the mindmap labels spilled out
-of their circles and boxes. Gantt gets `leftPadding: 150`, because at the default 75 a section name
-as long as "Documentation" ran under the first task bar, and `useWidth: 900`, because DejaVu's
-`2026-11-02` ticks collided at the default 800. The inline copy is compressed to 85% around
-its own anchor (`transform` on the `<text>`): DejaVu is wider than merman's deterministic metrics,
-and the nested label SVG's `overflow: hidden` clipped the first and last letters. Label ids differ by
-family (`mindmap-foreignobject-label-N`), so the matcher keys on that common suffix.
-
-The dark job asks for Mermaid's `dark` theme with contrast overrides: `#3d4654` nodes, `#9aa4b2`
-borders, `#c8d0da` edges, light text, and brighter gantt/pie variables. Stock dark drew `#333`
-shapes on the `#202020` page, so outlines and bars nearly disappeared. The renderer turns a Mermaid
-block into a **centred image**, shrunk to the content width; an oversize or unparseable diagram falls
-back to the labelled source box. The image keeps its transparent background and is drawn straight on
-the page in both themes.
-
-### Syntax highlighting (in-process)
-
-Fenced code is highlighted **in the renderer**, not the engine, because it is text: syntect 5.3 with
-its bundled syntax and theme dumps (`default-fancy`, so no Oniguruma C build) turns the block into
-byte ranges and foreground colours. The sets load once per process through `OnceLock`; the light
-theme is `InspiredGitHub` and the dark theme `base16-ocean.dark`. `highlight::tokens` covers every
-source byte, including newlines, so the renderer can push one styled run per token at its real
-document offset: selection, find and hit-testing keep working across the coloured block. Unknown or
-missing languages stay plain, and a block over 256 KiB is not parsed. Inline code keeps the theme
-text colour; only fenced blocks are tokenized.
-
-`Style` grew an optional token colour, applied as a parley brush after the theme's own colours. The
-code box, line height and page geometry are unchanged; only the glyph colours differ.
-
-The renderer never links it: `crates/render/src/engine.rs` keeps **one shared process** in a global
-slot. The first SVG, formula or diagram starts it and a worker thread owns its pipes; later jobs
-reuse it, so the font database is loaded once. Each job has a 5 s deadline. A pipe error (the engine's 10 s idle
-exit, or a crash) invalidates the slot and the same job retries once against a fresh process; a
-timeout also kills and reaps the process and returns a placeholder, so the next job starts clean. A
-missing engine, a bad raster or a malformed job leaves the existing placeholder, so a hostile file
-can slow one image, not the viewer.
-
-`image::load` sends anything whose first tag is `<svg` (after an optional XML declaration) to the
-engine; PNG and JPEG stay in-process. The binary is found through `MDV_ENGINE`, beside the current
-executable, or in `target/release` beside an ancestor, which covers the Qt shell building into its
-own `bins/mdv-qt/target/release`.
-
-**Dependencies.** `bit-set`/`bit-vec` 0.8 (for `ratex-parser`'s `fancy-regex`), `quick-xml` 0.42
-(merman) and `bincode` 1.3.3 (syntect) come from crates.io, pinned in both lock files with checksums
-checked against the index. An earlier `vendor/` copy and its `[patch.crates-io]` pins, which existed
-only to get past a stale offline index, were removed; the vendored sources were identical to the
-published crates.
-
-**Watchdog.** Besides the client's 5 s kill, the engine ends itself (exit code 3) when one job runs
-past 6 s, so a parser that hangs after the viewer itself crashed cannot leave an orphan process.
-Between jobs a closed stdin ends it, and 10 s idle does too. `MDV_ENGINE_STALL` makes every job hang,
-which the client deadline tests and `crates/engine/tests/watchdog.rs` use (both `#[ignore]`d for
-their waits; run them with `-- --include-ignored`).
-
-Measured on this PC: two consecutive 180x28 badge jobs took **13.2 ms then 2.4 ms with one engine
-start**; a deliberately stalled engine was killed at **5003.9 ms** and the next job started in
-13.4 ms; after **11 s idle** the next job took 15.7 ms and started exactly one fresh process.
-`fixtures/two-svg.md` (two badges) draws through `mdv-bench` in 24.8 ms. `fixtures/math.md` (seven
-formulas including a matrix, a table and a heading) draws in **18.7 ms** on Windows and **14.7 ms**
-on the VM, with one engine process for all of them; the shells show the same page. `fixtures/diagrams.md`
-(flowchart, class, ER, mindmap and state) draws in **80.0 ms** on Windows and **59.9 ms** on the VM;
-the full showcase with all eight diagram families takes about **161 ms** here (the first page pays syntect's one-time dump load). On the VM the
-sharing checks report **5.2 ms then 0.8 ms**, a stalled job killed at **5003.0 ms** with a **3.6 ms**
-respawn, and **3.7 ms** after 11 s idle. The idle and stalled cases are `#[ignore]`d tests, because
-they wait out the real deadlines.
-
-## 7. The WinUI shell (`bins/mdv-winui`)
-
-WinUI 3 with hand-generated Windows App SDK bindings, imperative code only, no XAML files, no C# or
-C++. Framework-dependent: it needs the Windows App Runtime 2.6.4 or newer (this PC has 2.6.5).
-Window 1100x900, a `MenuBar` (File > Open..., Reload, Close; View > Light theme, Dark theme) over one
-`SwapChainPanel`.
-
-| File | What is in it |
-|---|---|
-| `main.rs` | COM apartment, `Application::Start`, argument parsing, `App` overrides |
-| `ui.rs` | window, grid, menu, welcome page, input, the `Shell` state |
-| `render.rs` | the GPU page textures, band upload, scrollbar gutter, `Frame` consumption |
-| `bindings.rs` | generated bindings **plus** hand-written helpers (below); do not regenerate blindly |
-| `bootstrap.rs`, `diag.rs` | Windows App SDK bootstrap, trace and `--measure` output |
-
-**Pixels.** The page lives in a **pair of D3D11 textures** (`B8G8R8A8_UNORM`, `DEFAULT` usage, created
-through a hand-written `create_texture_2d`). A scroll frame:
-
-1. copies the rows that stay on screen from the texture holding the previous frame into the other one
-   with `CopySubresourceRegion`, offset by `shift`;
-2. uploads only the new band with `UpdateSubresource` and a `D3D11_BOX`;
-3. copies the page texture into the back buffer, one full-screen GPU copy, because a flip-model swap
-   chain does not keep its contents between frames - partial writes leave the other buffer showing;
-4. uploads the scrollbar strip.
-
-The scrollbar is **the shell's own**, 14 logical px in a gutter, because the checked-in bindings have
-no `ScrollBar` control and cannot be regenerated without the NuGet winmds. It is a 15 px strip (a hair
-line separator plus the bar) that is sent **whole** every frame, for the flip-model reason above. The
-page can be a few px wider than the width it was laid out for, and the strip covers that overhang: the
-bar has to sit at the panel's right edge, so placing the strip at the page's right edge instead clipped
-the bar to 6 px.
-
-**Input** arrives two ways, because WinUI moves it around:
-
-- **Keys** come from XAML's routed events, bound by hand in `src/input.rs` (slot indices and IIDs
-  read from `Microsoft.UI.Xaml.winmd` 2.6.4 with `ildasm`; see the module comment). The page panel
-  is a tab stop and takes focus on `Loaded` and on every press. Its `KeyDown` handles scrolling and
-  the other page keys; the root's `KeyDown` handles only Ctrl shortcuts, F3, and Escape while find is
-  open, and Ctrl+F moves focus back to the page. `CharacterReceived` on the root feeds the find
-  query. A control that uses a key marks it handled, and an open menu's keys never reach the page,
-  so keyboard navigation of the menu bar works. This replaced a `WH_GETMESSAGE` thread hook that
-  swallowed arrows, Space and Escape before XAML saw them. Checked with real keystrokes (SendKeys):
-  Page Down scrolls; Tab, Right and Down open the Edit menu without scrolling; Ctrl+F, typing,
-  Enter and Escape drive find from the menu bar.
-- **The scrollbar** is driven by XAML pointer events (`PointerPressed`/`PointerMoved`/
-  `PointerReleased`). The generator left those, and `IPointerPoint::Position`, as unbound vtable slots,
-  so `bindings.rs` has hand-written `pointer_pressed/moved/released` and `IPointerPoint::position`.
-  XAML reports the position in the panel's own logical px, so no window-coordinate maths is involved.
-
-Keys: Home/End, arrows (48 px), Page Up/Down and Space (90% of the viewport). Mouse: a press in the
-gutter jumps there and starts a drag; the drag follows the pointer.
-
-**Selection and links.** A press on the page starts a selection through the same XAML pointer events;
-moving extends it and release keeps it. If the pointer never moved, release follows the link or
-footnote under the press, or toggles the `<details>` whose summary it is: a `#fragment` scrolls with
-`PageLayout::y_of`, another local Markdown file is loaded and then scrolled to its fragment, and
-`http(s):`/`mailto:` goes to `ShellExecuteW`. Escape clears the selection. The selection is
-`Option<(u32, u32)>` over `Document::text`, and its rectangles are CPU-blended into the **back
-buffer** just before the gutter strip, so the page texture - and with it `band`/`shift` - never
-contains selection pixels. A details toggle drops the page layout, so the next frame measures it
-again.
-
-**Find.** Ctrl+F (or Edit > Find) starts find mode; `CharacterReceived` appends the
-typed characters, Backspace deletes, Enter and F3 step forward and Shift+F3 steps back, and Escape
-closes. The renderer runs core `find_visible` with its own `<details>` state, scrolls the active match
-into view, and paints all marks (yellow) plus the current one (orange) through the same CPU overlay
-as the selection. This shell has no text-field binding in its trimmed `bindings.rs`, so the query and
-its `2 of 4` counter are shown in the **window title** (`mdview - file — Find: query [2 of 4]`)
-rather than in a find box. `--find-test` feeds characters and F3 through the same key handlers and logs
-`find test ok: 4 matches, 4 mark rects, 1 current rects, index 1`.
-
-**Outline.** The trimmed WinUI bindings have no usable `ItemInvoked`/`TextBlock` support for a
-sidebar, so the outline is a top-level **Outline menu**. `refresh_outline` clears and rebuilds it
-from `Document::headings` on every load, indents children with spaces, and each item scrolls to its
-block with `PageLayout::y_of`. `--outline-test` reports `15 headings, scrolled to 1242, expected
-Some(1242.0)`.
-
-**Clipboard.** Ctrl+C and Edit > Copy write the selected bytes through the Win32 clipboard
-(`OpenClipboard`/`GlobalAlloc`/`SetClipboardData`), since the trimmed bindings have no WinRT
-`DataPackage`. `--copy-test` selects "Markdown", copies and reads it back:
-`copy test ok: Some((7, 15)), clipboard Some("Markdown")`.
-
-**Hand-written additions in `bindings.rs`** (regenerating would drop them):
-
-- `FrameworkElement::set_requested_theme` - the root grid is set Light/Dark with the page, otherwise
-  the menu labels stay white on a light page.
-- `ID3D11Device::create_texture_2d`, `ID3D11DeviceContext::copy_subresource_region`,
-  `D3D11_TEXTURE2D_DESC`, `D3D11_USAGE_*`, `D3D11_BIND_SHADER_RESOURCE`.
-- `IUIElement::pointer_pressed/moved/released`, `PointerPosition`, `IPointerPoint::position`.
-
-**Measured** on this PC: first frame 308 ms from process start (`--measure`), height pass 8.4-9.6 ms
-for a 1084 dip panel, parse 0.1 ms. In a 3384x1301 panel: a whole-frame upload is 2.6 ms, a 40-row
-scroll band 0.0-0.2 ms, a scroll frame 1.7-4.1 ms end to end (the 3-6 ms "present" in the trace is
-waiting for vsync).
-
-**Verified by driving the running window** (real keys and clicks, plus posted messages): three Page
-Downs reach the footnotes and the thumb reaches the bottom; a press in the gutter jumps and a drag
-lands mid-document; File > Open... opens `GetOpenFileNameW` (class `#32770`) and typing a path loads
-the file; Reload re-parses; View > Dark theme repaints page and menu bar; Close closes. The scrolled
-view reached by six band frames is byte-identical, below the title bar, to the same offset drawn by a
-fresh layout and sent whole (`--no-shift`), and the un-scrolled window is byte-identical to
-`tests/golden/shell-winui-light.png`.
-
-**Caveat:** after a *programmatic* resize from another process, the app needs one click before keys
-reach it again - WinUI loses the XAML keyboard focus and `SetForegroundWindow` does not restore it. A
-mouse resize keeps focus, and a click fixes it, so it is a focus matter, not a hook one.
-
-## 8. The Qt shell (`bins/mdv-qt`)
-
-Qt Widgets through CXX-Qt 0.10, ported from `spikes/qt-shell`: `src/qt/mod.rs` is the only module with
-`unsafe`, `src/qt/ffi.rs` holds the C++ declarations, `src/shell.rs` is
-`#![forbid(unsafe_code)]`. There is no authored C++. The clipboard is bound in `ffi.rs`:
-`QApplication::clipboard()` through cxx's `#[Self = ...]` static members, and `text`/`setText` with an
-explicit `QClipboard::Mode`, which picks the right overload because cxx names a member through a
-pointer of exactly the declared signature.
-
-**Handles.** `H<T>` is a copyable pointer, so it is only handed out for widgets that live until the
-process exits (the window and its children, which this shell never deletes). Outline items are
-deleted by every rebuild, so `qt::Tree` keeps their pointers to itself: `set_items` takes (level,
-title) pairs, and a click arrives as an index into that list, which `shell.rs` maps to a block.
-Checked by clicking: Mathematics scrolls there, then after hiding and re-showing the outline (a
-clear and rebuild), Pie scrolls to Pie.
-
-Menus File > Open... / Quit, View > Light/Dark theme, Help > About, a status bar with the file name and
-block count. A file comes from the command line, File > Open... (`QFileDialog` built through `new_ptr`,
-because `QFileDialog::getOpenFileName` cannot be bound - cxx takes its address and the C++ signature
-has six parameters) or a drop on the window (`%20` decoded).
-
-Scrolling: the wheel, a vertical `QScrollBar` in a `QHBoxLayout` (14 px), and the keyboard. The shell
-owns the offset, sets the bar's range/page step/value while painting with a `syncing` flag so
-`valueChanged` does not echo back, and a drag or a groove click arrives through `valueChanged`. The
-canvas takes `Qt::StrongFocus`, which is what makes Home/End/arrows/Page Up/Down/Space work.
-
-Painting: `paint` calls `view_frame`, then blits the frame bitmap through `QPainter` with an identity
-transform (`blit_painter`); `blit_direct` can write into the backing store instead. Each paint prints
-its cost:
-
-```
-mdview-qt: painted 1086x846 at scroll 96 in 0.7 ms, band 798+48, shifted 48
-```
-
-**Selection and links.** `mousePressEvent`/`mouseMoveEvent`/`mouseReleaseEvent` go to
-`DocumentRenderer::hit_test`, and the selection is kept as two document offsets in `shell.rs`. It is
-painted with a translucent `QPainter::fillRect` after the page blit, so the frame is still the
-document only. A release without movement follows the link or footnote under the press, or toggles
-the `<details>` whose summary it is: a `#fragment` scrolls with `PageLayout::y_of`, another local
-Markdown file is loaded and scrolled to its fragment after layout, and `http(s)`/`mailto` goes
-through `QDesktopServices::openUrl`. The cursor becomes a pointing hand over a link or footnote
-mark. `--select-test`, `--select-hold`, `--link-test` and `--details-test` drive these through the
-canvas's own mouse handlers for scripted checks. Those checks send events straight to the canvas:
-a synthetic press through the `QWindow` does not establish Qt's implicit grab, so the release never
-arrives that way, while `QApplication::sendEvent` on the canvas does reach `mouseReleaseEvent`.
-
-**Find.** Ctrl+F opens an Edit menu item and a `QToolBar` with a `QLineEdit`, Previous, Next and
-Close. Typing emits `textChanged`; the shell runs core `find_visible` with the renderer's `<details>`
-state, scrolls the first match into view and paints every match yellow and the active one orange
-after the page blit. Enter and Next step forward, Previous and Shift+F3 back, and the status bar
-shows `Find: 2 of 4` (`+` when `FIND_CAP` stopped the count). `--find-test` sets the line edit's text
-so the `textChanged` path runs, checks four marks and one current rectangle, and steps to index 1.
-
-**Outline.** View > Outline toggles a left `QDockWidget` with a `QTreeWidget`. `Document::headings`
-supplies level, title and block; levels nest into parent/child items and the tree is expanded, so the
-showcase shows all 15 headings. `itemClicked` maps the clicked `QTreeWidgetItem` back to its block and
-scrolls with `PageLayout::y_of`. The dock starts hidden, rebuilds on every load, and
-`--outline-test` opens it, checks 15 headings and that scrolling to "Diagrams" lands on 1242 px
-(1266 on Linux).
-
-**Clipboard.** Ctrl+C and Edit > Copy pass the selection's byte range to `QClipboard`, and the status
-bar says `Copied 8 characters`. `--copy-test` selects "Markdown", copies it and reads the clipboard
-back: `copy test ok: "Markdown" at 7..15, clipboard 8 chars`.
-
-**No band path here, on purpose.** The raster backend has no upload to save and `drawImage` only
-touches the pixels the paint event exposes. Measured on Windows: 0.5-0.7 ms per 48 px scroll paint at
-1086x846, and 2.0 ms at 3386x1327 (4.5 Mpx) - inside the 4 ms and 8 ms budgets. Cutting it further
-would mean moving the backing store with `QWidget::scroll` before blitting the band, which is another
-viewport-sized memmove on top of the renderer's own shift, so it keeps one blit.
-
-A resize reflows: dragging the window to 3400x1380 relaid the page out in 0.9 ms and painted at
-3386x1327 (a whole frame, 4.9 ms), then 48 px scroll steps stayed at 2.0 ms.
-
-The crate emits seven `unnecessary unsafe block` warnings from the `pin!` macro; they predate this work
-and are not errors.
-
-## 9. Screenshots, goldens, and how to take them
-
-`tests/golden/`:
-
-| File | What it is |
-|---|---|
-| `showcase-{light,dark}@{1.0,1.5}.png` | the renderer on `fixtures/showcase.md`, from `mdv-bench --all` |
-| `images-light.png` | `fixtures/images.md`: a real PNG drawn as a block and inline, plus placeholders |
-| `shell-winui-{light,dark,images}.png` | the WinUI window at 1100x900, 100% DPI |
-| `shell-winui-scrolled.png` | the same window after six 40 px scroll frames (`--scroll-steps 6`) |
-| `shell-qt-{light,scrolled,open,images}.png` | the Qt window at the top, after a bar click, the Open dialog, images |
-| `shell-qt-linux.png` | the Qt shell built against Qt 6.8.2 on Debian 13 under Xvfb |
-| `shell-qt-1mb.png` | the Qt shell on the 1 MB generated document |
-| `shell-qt-selection.png` | the Qt shell with "Markdown" selected (`--select-hold`) |
-| `shell-winui-selection.png` | the WinUI window after a real press-drag-release over the heading |
-| `shell-winui-anchor.png` | the WinUI window after clicking the `#diagrams` link |
-| `shell-winui-details.png` | the WinUI window after `--details-test` opened the showcase `<details>` |
-| `shell-qt-svg.png` | the Qt shell at scroll 760: the showcase badge is an SVG, drawn by the engine |
-| `shell-winui-svg.png` | the same view in WinUI, with the engine running beside the shell |
-| `shell-winui-two-svg.png` | `fixtures/two-svg.md`: both badges from the one shared engine process |
-| `shell-qt-math.png` | the Qt shell on `fixtures/math.md`: inline, display, matrix, heading and table formulas |
-| `shell-winui-math.png` | the same page in WinUI, one engine process for all seven formulas |
-| `shell-qt-mermaid.png` | the Qt shell at scroll 1100: flowchart, sequence and class diagrams |
-| `shell-winui-mermaid.png` | the same view in WinUI, one engine process for every Mermaid block |
-| `shell-qt-highlight.png` | the Qt shell at scroll 500: the Rust block with syntect token colours |
-| `shell-winui-highlight.png` | the same view in WinUI |
-| `shell-qt-find.png` | the Qt find bar with "Markdown", four marks and `Find: 2 of 4` in the status bar |
-| `shell-winui-find.png` | the same matches in WinUI, with query and counter in the title |
-| `shell-qt-outline.png` | the Qt outline dock with all 15 headings, scrolled to Diagrams |
-| `shell-winui-outline.png` | WinUI after the same outline jump, with the Outline menu in the menu bar |
-
-**These are for review, not a pixel baseline yet.** They use this host's system fonts (Segoe UI,
-Consolas), so another machine or Linux will differ; the plan calls for bundled fonts and a tolerance
-before they become a suite. The four review images still have **not been approved by the user**.
-Math and Mermaid changed the showcase page from 3020 to **4071 px** here (taller inline formulas and
-diagram images instead of code boxes), so the four `showcase-*` files were regenerated with the
-engine built; they are the current review copies. Syntax highlighting changed only the glyph colours
-in the Rust block, so the page height stayed the same and the four images were regenerated again.
-
-Renderer goldens regenerate byte-identically when `mdview-engine` is built beside the bench (SVG and
-math need it):
-
-```powershell
-cargo run --release --offline -p mdv-bench -- --all
-```
-
-Windows window captures go through `target/cap.ps1` (not committed; `Add-Type` + `PrintWindow` with
-flag 2 + `System.Drawing`; it restores and raises the window itself). The app has to be running, in a
-job that outlives the command:
-
-```powershell
-$job = Start-Job { & "C:\Users\kaank\Desktop\mv\target\release\mdview-winui.exe" `
-                    "C:\Users\kaank\Desktop\mv\fixtures\showcase.md" --light --trace }
-Start-Sleep -Seconds 5
-$p = Get-Process mdview-winui | Select-Object -First 1
-powershell -NoProfile -File target/cap.ps1 -Target $p.Id -Out target/shot.png -WaitSeconds 1
-Stop-Job $job; Remove-Job $job -Force; Get-Process mdview-winui -ErrorAction SilentlyContinue | Stop-Process -Force
-```
-
-For a window that has to be on top of other apps (for synthetic clicks), add
-`SetWindowPos($h, [IntPtr](-1), 40, 40, 1100, 900, 0x0040)` first and check the point with
-`WindowFromPoint`.
-
-Traps that cost time here:
-
-- **A GUI app started with `&` in a command that then finishes gets killed with the job.** Start it
-  with `Start-Job { & $exe @args }`, keep the job alive while capturing, then `Stop-Job` and
-  `Stop-Process`.
-- `PrintWindow` returns a black or stale frame if the window is minimised: `ShowWindow(h, 9)` first.
-- The window can be *behind another app* even when `SetForegroundWindow` succeeds, so a synthetic click
-  lands on whatever is on top. `SetWindowPos(h, -1, ...)` (topmost) before clicking, and check with
-  `WindowFromPoint` that the point is really ours.
-- The capture includes the 31 px title bar, which follows Windows and differs between runs. Compare the
-  client area, not the whole image: the page pixels are what the renderer owns.
-- `Get-Process mdview-winui | Select-Object -First 1` can pick a stale instance; stop them first.
-
-## 10. What has and has not run
-
-**Windows:** the whole workspace test suite; the WinUI shell on `fixtures/showcase.md` and
-`fixtures/images.md` with the wheel, real keys, scrollbar clicks and drags, both themes, `--zoom`,
-`--trace`, `--measure`, a live resize (2000x1250, reflowed to 1984x1171 with a whole-frame upload),
-and the shifted-frame path against a whole-frame reference; selection in both shells: Qt through
-`--select-test` (selection 7..15 = "Markdown", one rect) and `--link-test` (scrolled to 1242, the row
-`y_of` reports for the Diagrams heading), plus a captured `--select-hold`; WinUI through a real
-press-drag-release on the running window (a drag from the heading into the next paragraph, two
-selection rows) and a click on the `#diagrams` link, both captured; `<details>` toggling through
-`--details-test` in both shells (4071 -> 4125 px, the body appearing) and a WinUI capture of the
-open body. Find in both shells: Qt `--find-test` sets the line edit's text and reports
-`4 matches, 4 mark rects, 1 current rects, bar true, index 1`; WinUI `--find-test` feeds WM_CHAR and
-F3 through the key handlers and logs `4 matches, 4 mark rects, 1 current rects, index 1`; both
-captured with the marks visible. Outline in both shells: Qt `--outline-test` reports
-`15 headings, dock true, scrolled to 1242`, WinUI `15 headings, scrolled to 1242`, and both
-captured. Clipboard: Qt copies 7..15 ("Markdown") and reads back 8 characters; WinUI logs
-`copy: 8 characters` and `clipboard Some("Markdown")`. The Qt shell on the same files with layout,
-first paint, wheel, scrollbar, keys, File > Open..., themes, `--zoom`, `--scroll`, a live resize to
-3400x1380 and `--drop-test`. The SVG badge renders through `mdview-engine` in `mdv-bench` and both
-shells; with `MDV_ENGINE` pointing at a missing file the same view falls back to
-`[image: Native desktop badge]`. The shared client reuses one process across jobs (13.2 ms then
-2.4 ms), kills a stalled one at 5003.9 ms and respawns in 13.4 ms, and replaces the idle-exited
-process after 11 s in 15.7 ms; `fixtures/two-svg.md` draws both badges in 24.8 ms. In the running
-WinUI shell with `two-svg.md`, `Get-Process mdview-engine` counted 1 process three seconds in and 0
-after 15 s, while the window stayed open and both badges stayed drawn. Math renders in `mdv-bench` at
-light, dark and 150% and in both shells (`fixtures/math.md`: inline, display, matrix, heading and
-table formulas; one engine process for all seven), and falls back to source text or the labelled math
-box with `MDV_ENGINE` missing. The table-cell image path that `cell_inline` used to drop is covered by
-`a_table_cell_draws_its_inline_image`. Mermaid renders all eight showcase families through the same
-engine process; `fixtures/diagrams.md` takes 80.0 ms and the full showcase 161 ms, both shells show
-the flowchart/sequence/class captures above, and with `MDV_ENGINE` missing every diagram keeps its
-source box. The fenced Rust block is tokenized in both themes in `mdv-bench` and both shells
-(`shell-{qt,winui}-highlight.png`); unknown languages and blocks over 256 KiB stay plain.
-
-**Linux:** the Qt shell built with Qt 6.8.2 on the VM, run and captured under Xvfb, `--drop-test`,
-`--select-test` (7..15 = "Markdown"), `--link-test` (scrolled to 1266 px) and `--details-test`
-(4095 -> 4149 px) passing, `--find-test` reporting four matches and four mark rects,
-`--outline-test` reporting 15 headings scrolled to 1266, `--copy-test` reading "Markdown" back from
-the clipboard, and `cargo test --release -p mdview-core -p mdview-render` passing
-(18 render integration tests and the 10 render unit tests included). `mdv-bench fixtures/images.md`
-renders the SVG badge at 780x413 in
-11.4 ms with its text: the engine's font query now falls through Noto Sans, DejaVu Sans and the
-other names in the renderer's stack because fontdb reports no generic `sans-serif` face there.
-`mdv-bench fixtures/math.md` draws all seven formulas at 780x631 in 14.7 ms, `fixtures/diagrams.md`
-draws the five families at 780x1722 in 59.9 ms, the full showcase with highlighted code and all
-eight diagrams renders at 780x4095 in 114.8 ms, and the engine and protocol test binaries pass on
-the VM (12 and 7).
-
-**Not run:** the Qt View/Help menu items; the Qt scrollbar and keys on Linux (Windows only); DPI scales
-other than 100% (zoom is tested, DPI scaling is not); a real OLE drag from Explorer (the drop test drives
-Qt's event path instead).
-
-## 11. Known gaps
-
-- **Images:** PNG and JPEG decode in-process, SVG and math through `mdview-engine`; `<picture>`
-  light/dark sources pick the source for the current theme; `width`/`height` on `<img>` are honoured
-  (pixels or percent of the content width, aspect kept when only one is given, clamped to the content
-  width). Any other format keeps its placeholder. A blocked image is retried on every render.
-- No bundled fonts (the user's decision, 2026-11-08), so the golden compare runs on Windows only.
-- Table `colspan`/`rowspan` are laid out (at most 200 columns). Highlighting covers fenced blocks
-  only; unknown languages and blocks over 256 KiB stay plain.
-- Math and diagram blocks are images: no selection geometry, no copy-as-TeX, no equation numbering.
-- 1 MB documents: the first height pass runs on the UI thread (615 ms cold on Linux, section 15).
-  PLAN gate G7's fallback (estimated heights off screen) is not done.
-- Restored tabs are read and parsed at startup; PLAN wants restored tabs to hold only a path, and
-  background tabs to drop layout after 60 s idle. Neither is done in either shell.
-- Menus and shortcuts are written out in each shell; only the strings come from core's `commands`
-  table, so the two shells can drift.
-- **Qt:** Manage recent is a dock with a toolbar, not a dialog (no `QDialog` binding); no empty-state
-  widget with its Open button; the Files dock is a one-time scan (at most 4000 rows, 8 deep) that does
-  not follow folder changes. The window is frameless (section 26): it resizes only from the status
-  bar's corner grip, not its edges, and has not run on KDE.
-- **WinUI:** no Manage recent; no status bar; side panes have no title. The scrollbar is still drawn
-  by the shell (now a rounded thumb, section 26). The MenuBar bug (section 24) no longer applies: the
-  menu bar is gone.
-- Scroll frames meet the budgets, but a frame still waits for vsync (3-6 ms in the trace on Windows).
-
-## 12. What to do next
-
-**State of the parity work** (Phase 3 Qt, Phase 5 WinUI), after 2026-11-11 (section 26). Both
-columns ran on the physical Windows PC; the Qt column has not run on KDE since.
-
-| Feature | Qt | WinUI |
-|---|---|---|
-| layout: command bar, tabs in the title bar | done (frameless window) | done (`ExtendsContentIntoTitleBar`) |
-| tabs: close, close others, cycle, move, labels from core | done, `--tabs-test` | done, `--tabs-test` |
-| tab context menu | done, clicked | done, clicked |
-| page context menu (open/copy link, copy, find, reload) | done, clicked (was never connected before) | done, clicked |
-| Recent, clear, missing entries | done (bar button) | done (bar button) |
-| Manage recent | dock + toolbar | dialog (section 27) |
-| session: tabs, active tab, theme, zoom, folder | done | done |
-| theme System/Light/Dark (cycling button) | done; System reads Windows' setting on Windows | done |
-| zoom 60-250 step 10, Ctrl+0 | done | done, `--zoom-test` |
-| refresh F5 | done | done |
-| auto-refresh, deleted-file handling | OS file watching (section 25) | OS file watching through the `DispatcherQueue` (section 27) |
-| single instance | loopback port, wakes the GUI thread | loopback port before the bootstrap, about 20 ms (section 27) |
-| focus reading mode | done | done |
-| Files pane, Open folder | one-time scan, left | lazy `TreeView`, left |
-| outline pane | right | right |
-| find box with count, selection, copy, links, `<details>` | done | done |
-| About and Keyboard shortcuts | dialogs with the logo | WinUI dialogs with the logo |
-| drag and drop | done | built, not run by hand |
-| installer / package | PKGBUILD, AppImage | Inno Setup 0.1.0, installed and uninstalled on the PC (section 27) |
-
-**Done on the Windows PC (2026-11-11, section 27):** single instance before the bootstrap, the OS
-file watcher, Manage recent, drag and drop, Ctrl+Shift+1/2, launch and memory numbers, the WinUI
-column of `docs/PORT_CHECKLIST.md`, and a 0.1.0 installer that registers the Markdown extensions.
-
-**Next for WinUI** (the checklist's open items, then budgets):
-
-1. Text quality (W1) at 125/150/200%: needs the display scaling changed by hand.
-2. First frame is about 380 ms and private memory about 180 MiB (section 27), both over PLAN's
-   likely range; the memory was already there before layout A. Profile both.
-3. Status bar texts, window size/minimum and geometry in the session, live folder tree, outline
-   scroll sync, Ctrl+Q.
-4. Try drag and drop by hand (built, not run).
-
-**Update checks must be manual (the user's decision, 2026-11-10).** No check runs on its own: drop
-the once-a-day check at launch in `bins/mdv-qt/src/appimage_update.rs` (`spawn_check` from `run` in
-`shell.rs`) and keep only a Help menu item that checks and then offers to apply. The Windows shell's
-manifest check (`crates/core/src/update.rs`, `docs/UPDATE.md`), when it is wired, follows the same
-rule. Not done yet; the Qt shell still checks once a day inside an AppImage.
-
-**Linux file association.** The PKGBUILD's desktop entry registers `text/markdown` and
-`text/x-markdown` and never sets a default. Checked 2026-11-10 with the entry and binaries in a temp
-`XDG_DATA_DIRS` folder: `gio mime text/markdown` lists `mdview.desktop`, and `gio launch` with two files
-opened both in one window. The package itself has never been installed with `pacman -U`, and Dolphin's
-"Open with" was not looked at. `.mdown` files are `text/plain` in shared-mime-info, so they are not
-offered (`.md`, `.markdown` and `.mkd` are); a small `mime/packages` XML would fix it. The AppImage
-carries the same entry but registers nothing by itself: that needs Gear Lever, AppImageLauncher or a
-hand-written `~/.local/share/applications` entry pointing at the image.
-
-**Afterwards, on Linux:** tick the Qt column of `docs/PORT_CHECKLIST.md` (the Phase 3 exit gate), the
-Qt empty state, a Files tree that follows folder changes, and the end-to-end Plasma run that PLAN's
-"Verification" section lists. Bundled fonts stay deferred until the user decides.
-
-## 13. Packaging (Linux)
-
-`packaging/arch/PKGBUILD` builds from the working tree (no download): `cd packaging/arch &&
-makepkg -f` (about 3.5 minutes) gives `mdview-0.1.0-1-x86_64.pkg.tar.zst` holding `/usr/bin/mdview`
-(the Qt shell), `/usr/bin/mdview-engine` (found beside the viewer) and a desktop entry that lists
-Markdown as an openable type and never sets a default. Built here on 2026-11-10 with its
-`single` unit test as `check()`; makepkg warns that the binary mentions `$srcdir` (build paths in
-panic messages). Not installed or launched from the package yet. Still open for Phase 6: PGO, the
-allocator check, the Inno Setup installer and the all-four-extensions Windows registration.
-
-## 14. Updates and installers (foundation only)
-
-Written 2026-11-10 by two delegated agents and reviewed here; **none of it has been run end to end**.
-
-- `crates/core/src/update.rs`: `Version`, strict line-based `UpdateManifest`, `newer`, SHA-256 verify
-  (own implementation, 10 unit tests pass). No network code; the shells will download.
-- `docs/UPDATE.md`: the design for both platforms and the manifest format.
-- `packaging/windows/mdview.iss` and `build-installer.ps1`: Inno Setup script with a per-user
-  install, an optional file-association task (ProgID `mdview.Markdown` under each extension's
-  `OpenWithProgids`; it never writes an extension's default value), and a Windows App Runtime 2.6.4
-  check that downloads Microsoft's installer and checks its signature. Never compiled: no
-  `ISCC.exe` here, and the Inno 7 syntax is unchecked.
-- `packaging/appimage/`: `build-appimage.sh` (`--appdir-only` works and its `usr/bin/mdview
-  --tabs-test` passes offscreen), `update-check.sh`, desktop file, placeholder icon. linuxdeploy and
-  the Qt plugin are not installed, so no AppImage has been built; `tools.sha256` is all `TODO`.
-- Qt AppImage self-update is wired (`bins/mdv-qt/src/appimage_update.rs`). **To change:** the user
-  wants update checks manual only (section 12); the automatic daily check below is to be removed.
-  Today: when `APPIMAGE` is set
-  and `appimageupdatetool` is on PATH, a launch runs `--check-for-update` on a worker thread at most
-  once per 24 h (stamp in `$XDG_STATE_HOME/mdview`), exit code 1 puts "A new mdview is available" in
-  the status bar, and Help > Update mdview now applies the delta. Opt out with `MDVIEW_NO_UPDATE_CHECK`
-  or `~/.config/mdview/no-update-check` (no settings toggle yet). Checked with a fake tool: it is run
-  once per day, again once the stamp is stale, and never with the opt-out file. Not checked against a
-  real AppImage, release or `appimageupdatetool`.
-- Still to do: the manifest-based update check for the Windows shell (`update.rs` is ready, the
-  shell has no HTTP client and no settings), the installer run on Windows, and an actual AppImage
-  build.
-
-## 15. Linux budget numbers (measured 2026-11-10)
-
-CachyOS, Qt 6.12.0 shell built `--release`, **offscreen** platform (no compositor, so real Wayland
-memory will be higher), AC power, desktop not otherwise idle. The 20 KB document is the first 20,000
-bytes of `generated_1mib.md` (plain prose); the PLAN's "instant" definition is process start to the
-first `painted` line.
-
-| Metric | Measured | Plan (likely / aspiration) |
-|---|---|---|
-| Warm first paint, plain 20 KB | **119 ms** median of 10 after 2 warm-ups (112-179); was 171 ms before the font-sharing fix below | 100-160 / 80 ms: inside the likely band |
-| Same, showcase x5 (diagrams, math, syntect) | 418 ms (was 462) | not a plan row; shows the engine and highlighter cost |
-| Private memory, plain 20 KB, 3 s in | 37.0 MB | 25-40 empty window: inside, with a document |
-| 1 MB document, first paint / private | 661 ms / 40.3 MB (was 747) | +15-25 MB, +30 ms: **not met** on time |
-| Scroll frame, 780x900 @100% | 0.2 mean / 1.6 worst ms | 4 ms p99 |
-| Scroll frame, 1170x1350 @150% | 0.3 / 1.8 ms | 4 ms p99 |
-| Scroll frame, 3840x2200 @150% | 2.0 / 3.7 ms | 8 ms p99 |
-| Idle CPU over 10 s | 0.00 ticks | about 0 (the 800 ms poll was replaced by OS file watching on 2026-11-10, section 25; 0 ticks over 10 s again) |
-
-**What was wrong with launch.** `DocumentRenderer::new()` built a parley `FontContext`, which
-enumerates system fonts (about 35 ms), and the Qt shell made three of them before the first paint:
-one in `Shell`, one per `Page`, and one more through `mem::take`'s `Default`. They now clone one
-per-thread context (`shared_fonts` in `crates/render/src/layout.rs`), so only the first pays. The
-outline tree is also filled only while it is showing. `MDVIEW_STARTUP_TRACE=1` prints the phase
-timings (QApplication, `build`, `open`). What remains of the ~119 ms: Qt start, about 25 ms of
-`build` (docks, toolbars, menus), the one font enumeration, and the first paint.
-
-**The 1 MB number is the first height pass**, 615 ms cold on the UI thread (the bench's 4-9 ms is a
-warm repeat). PLAN gate G7 wanted under 500 ms off-thread; the fallback it names is estimated
-heights for blocks off screen, refined as they are laid out. Not done. Not measured: cold launch,
-10 tabs, second-launch handoff time, a real Wayland or X11 window.
-
-## 16. PGO trial (Qt, Linux, 2026-11-10)
-
-Instrumented build, trained on the 1 MiB doc, showcase, math/diagram/image fixtures and the scripted
-checks, then rebuilt with `-Cprofile-use`. Painted-frame time on the 1 MiB doc: 5.2-8.0 ms normal vs
-5.5-5.9 ms PGO, i.e. no measurable difference in what the offscreen run can see. Cold layout time was
-not compared. Not adopted; the PKGBUILD and normal builds stay as they are.
-
-## 17. WinUI driven on the VM desktop (2026-11-10)
-
-`~/mdview-winchk/ui.ps1` (run through `ui.cmd`) launches the app in the VM's interactive session, opens
-each menu through UI Automation `ExpandCollapse`, sends real keystrokes with `SendKeys`, and saves
-screenshots. Results: every menu (File, Recent, Edit, Outline, View) opens and lists its items, so
-the earlier "menus broken" reports were not reproduced with scripted opens. Ctrl+plus changed the page, Ctrl+0
-restored it exactly, F5 kept the app alive, Ctrl+F put Find in the title. Found and fixed: the Recent
-menu doubled its entries (`Clear` on the collection does not empty it; now removed one by one).
-Mouse clicks on menus were not tried; the windows show on the user's desktop while a script runs.
-
-## 18. Inno Setup 7.1.1 compile and install test (2026-11-10)
-
-The user installed Inno Setup 7.1.1 in the VM (`C:\Program Files\Inno Setup 7`). `ISCC /DAppVersion=0.1.0
-packaging\windows\mdview.iss` compiled cleanly on the first try (no warnings, 9.4 MB
-`target\installer\mdview-setup-0.1.0.exe`). A silent install with `/TASKS=assoc` in the VM
-(`~/mdview-winchk/inst2.cmd`, needs `start /wait` because Setup is a GUI program) put both exes under
-`%LOCALAPPDATA%\Programs\mdview`, created `HKCU\Software\Classes\mdview.Markdown` with the open command,
-added the ProgID under `.md\OpenWithProgids` and left the `.md` default untouched; the silent uninstall removed
-the keys (`unins000.exe` removes itself a moment later). Not run: the interactive wizard, the runtime
-download branch (the runtime is already installed there), upgrade over an older version,
-`build-installer.ps1` end to end, and what Windows' "Open with" list then looks like.
-
-## 19. Qt page context menu (2026-11-10)
-
-Right click on the page (`canvas_menu` in `shell.rs`, `H<QWidget>::on_context_menu_at`): over a link it offers Open
-link and Copy link address; with a selection it adds Copy; elsewhere nothing. The existing scripted checks still
-pass (tabs, select, link, details, find, outline, copy, drop). The menu itself was never opened: the offscreen
-platform cannot show a popup and no check synthesises a right click, so only the build is verified. Not done:
-WinUI has no link context menu.
-
-## 20. AppImage built and run (2026-11-10)
-
-With the user's go-ahead the tools (linuxdeploy, its Qt and AppImage plugins, appimageupdatetool) were
-downloaded into the job temp folder and `packaging/appimage/build-appimage.sh` produced a 58 MB
-`mdview-0.1.0-x86_64.AppImage` plus `.zsync` and `SHA256SUMS`. Fixes the build needed: a qmake wrapper
-that hides KDE's `kimg_*` image plugins (one needs a missing `libjpegxr`), `EXTRA_PLATFORM_PLUGINS`
-(Wayland and offscreen), and a real `AppRun` script (the default symlink made Qt look for plugins in
-the wrong directory when mounted). `tools.sha256` now holds the hashes of those downloads. Run mounted
-under FUSE with the offscreen platform: select, tabs, link, copy and find checks pass, and
-`appimageupdatetool` reads the embedded update information (GitHub releases, `Kaan88/markdown-viewer-rs`).
-Not done: running on a clean machine without the Arch Qt, a real Wayland/X11 window from the image,
-and the update itself (it needs a published GitHub release; today's 404 is expected). The bundle also
-carries Qt Quick/Pdf/VirtualKeyboard libraries it does not need, which is size to trim.
-
-## 21. WinUI Files pane (2026-11-10)
-
-A `TreeView` in a new left column (0 px wide until a folder is open, then 280 px). File > Open folder
-(Ctrl+Shift+O, `SHBrowseForFolderW`), View > Files panel (Ctrl+B), `--folder DIR` for scripts. Folders first, then
-`.md/.markdown/.mdown/.mkd`, hidden names skipped; a folder's children are read when it first expands
-(`Expanding`), a click on a file opens it in a tab (`ItemInvoked`). The folder is saved in the session and
-restored (an explicit `--folder` wins and is not saved). `ItemInvoked` is not in the trimmed bindings, so
-`src/tree.rs` calls it by slot index (ITreeView 7/8, args IID `1a05853c-b101-542c-9a1e-775a044c4652`), read from
-`Microsoft.UI.Xaml.winmd` 2.6.4 downloaded from NuGet; `Grid.SetRowSpan` was un-trimmed in `bindings.rs`.
-Checked on the VM through UI Automation: a folder with a subfolder, two Markdown files, a `.txt` and a hidden
-file showed `sub, a.md, b.markdown`; expanding `sub` added `deep.md`; invoking `a.md` opened it in a tab; a
-screenshot shows the pane beside the tabs and page. The earlier tabs/zoom/session/single-instance checks
-still pass. Not done: keyboard navigation in the tree, dragging the pane wider, a click on a folder row
-(the chevron expands it), real mouse clicks (UIA invoked the row).
-
-### 20a. AppImage follow-up (2026-11-10)
-
-The PDF image plugin and the on-screen keyboard plugin are left out of the bundled plugin tree, which removed Qt
-Pdf/Quick/Qml: 58 MB -> 45 MB; select, tabs, link, copy, find, outline and details checks pass on the slimmer
-image. The image was also launched for 8 seconds each with `QT_QPA_PLATFORM=wayland` and `=xcb` on this
-Wayland (XWayland :0) desktop and painted its first frame both ways (trace lines only; no screenshot was
-taken). Still not done: a clean machine without this Arch Qt, and an update from a published release.
-
-## 22. Real mouse clicks on WinUI (2026-11-10)
-
-`~/mdview-winchk/mouse.ps1` and `flaky.ps1` move the VM's cursor and send real button events (`SetCursorPos` +
-`mouse_event`) at the UI Automation rectangles. Results: View > Dark theme saved `theme=2`; a click on a
-Files-pane row opened the file in a tab; Edit > Find put Find in the title. Popup reliability over five
-clicks each: File, Edit, View, Outline and Recent showed their popup items 5/5 (25/25). One earlier single
-run did not find the View popup right after launch, so the first click after a cold start is the one case
-that has failed once; the user's intermittent "menus don't show" report is therefore not reproduced here
-but not ruled out. These runs are in the Windows 11 VM over RDP; nothing was run on a physical PC.
-
-## 23. AppImage built in Ubuntu 24.04 (2026-11-10)
-
-`packaging/appimage/build-in-container.sh TOOLS OUT` builds the AppImage in `ubuntu:24.04` (Qt 6.4, glibc 2.39)
-so it is not tied to Arch's glibc 2.43. Needed: `QStyleHints::colorScheme` (Qt 6.5+) is no longer bound
-through cxx-qt; `system_is_dark()` finds it with `dlsym` and reports light on older Qt. `build-appimage.sh` falls back to
-`libqwayland-generic.so;libqwayland-egl.so` when `libqwayland.so` is missing. `lld` must be installed in the container:
-`qt-build-utils` picks the linker by looking for `lld`, falls back to `gold`, and `gold` drops cxx-qt's
-`cxx_qt_init_crate_*` symbols (link error). `DOCKER_LIMITS` and `JOBS` env vars limit CPU on a busy machine.
-Result: 35 MB image; the highest glibc symbol is 2.39 (`mdview`), 2.35 for the engine, 2.38 in the bundled libs,
-GLIBCXX 3.4.30. Launched 8 s each with offscreen, wayland and xcb on this Arch desktop: each painted its first frame
-(trace lines only; no screenshot). Wayland logs `Failed to load client buffer integration: wayland-egl` and
-`Creating a fake screen` (software painting works; the EGL integration plugin is not bundled). Not done: a real
-Ubuntu 24.04 machine or container run of the image, dark-scheme behaviour on Qt 6.4 (only the fallback is exercised), an
-update from a published release.
-
-## 24. Windows handoff and the menu bug (2026-11-10)
-
-`docs/WINDOWS_HANDOFF.md` is the checklist for a physical Windows PC. Added View > System theme (WinUI; saved as
-`theme=0`). Full workspace test on the VM passes, including the golden compare; the Qt shell builds and
-`--tabs-test` passes there. Found and bisected (not fixed) a MenuBar problem: after one menu item is used,
-later item clicks and keys do nothing; theme work, session save, redraw and deferral were each ruled out. It
-may be a VM artifact; see section 3 of the Windows handoff. `system_is_dark()` in the Qt shell is Unix-only (dlsym);
-Windows returns light.
-
-## 25. Review of the 2026-11-10 work, and file watching in the Qt shell (2026-11-10)
-
-A review against PLAN found the 38 commits from `0d4d160` to `d25e217` sound but off the plan in a few
-places; sections 1, 2, 11 and 12 were rewritten from it. The user kept the AppImage self-updater,
-which PLAN does not list.
-
-**File watching.** `crates/core/src/watch.rs` (notify 8.2.1, as PLAN pins) watches the parent
-folders of the open files, non-recursively, so an editor's save-by-rename is seen; events for other
-files are ignored and a burst costs one wake. The Qt shell's 800 ms timer is gone: the watcher, the
-single-instance listener (`single::listen_waking`) and the AppImage update thread call a waker that
-queues `CanvasHandler::woken` onto the GUI thread through CXX-Qt `Threading` on `Canvas`. If the OS
-watcher cannot start, a 2 s poll runs instead. The file set is re-aimed in `save_session`, which runs
-after every open, close and move.
-
-Checked on this Linux desktop (offscreen): the `watch` unit test (rename wakes, unrelated files do
-not, delete wakes, nothing after unwatching); an end-to-end run with a real window process: a
-save-by-rename of the showing tab reloaded it, a background tab's change reloaded it, a delete kept
-the text, a re-created file reloaded, an unrelated file in the folder did nothing, a second launch
-handed its file over (that process took 41 ms end to end, over the 20 ms budget, because it loads
-Qt's libraries before checking), and CPU over 10 idle seconds was 0 ticks. The workspace tests and
-the Qt `--tabs/find/outline/select/details/copy-test` checks pass. In the WinApps VM,
-`cargo test --release --workspace` passes as well (the `watch` test included, so notify's Windows
-backend sees the rename, the delete and nothing else; golden compare and WinUI build included). Not done: network shares (PLAN's
-2 s poll for them is not separate from the fallback), the WinUI shell (still polling, section 12),
-a real Plasma window.
-
-**Clean-up.** At the user's request the work leftovers were deleted on 2026-11-10: the WinApps VM's
-`C:\mv` build copy and its test files, `~/mdview-winchk` (the VM scripts sections 17, 18 and 22 name:
-`ui.ps1`, `mouse.ps1`, `flaky.ps1`, `inst2.cmd`; those sections describe what they did if they are
-needed again), the makepkg and AppImage outputs, the Ubuntu images used to build the AppImage, and
-ignored build output under `spikes/`; in the VM also the downloaded installers in `%USERPROFILE%\tools`
-and the loose scripts in the profile folder, and on Linux the test session in `~/.local/share/mdview`.
-Kept on purpose: the build caches (`target/`, `bins/mdv-qt/target/`, about 2.3 GB), `~/.local/rust-win`,
-and the VM's toolchains (Rust, VS Build Tools and Windows SDK, Qt 6.9.3 in `C:\Qt`, Inno Setup 7,
-Windows App Runtime 2.6.5).
-
-**AppImage rebuilt (2026-11-10, after the clean-up).** The clean-up had also deleted the only built
-AppImage, which lived in the job's temp folder. Rebuilt with `build-in-container.sh` (tools
-re-downloaded, all three matched `tools.sha256`) into **`~/mdview-appimage/`**:
-`mdview-0.1.0-x86_64.AppImage` (36.7 MB, includes the file watching above), `.zsync` and
-`SHA256SUMS`. That folder is outside the repo and any temp folder; keep built images there. Checked
-offscreen: the tabs, find, select, details, outline and copy checks pass, a save-by-rename reloads,
-and a second launch hands its file over. The tools and the `ubuntu:24.04` image were removed again
-afterwards; a rebuild downloads them (the tools are checked against `tools.sha256`).
-
-## 26. Layout A and side-by-side parity, on the physical Windows PC (2026-11-11)
-
-Commits `0e8ee6d` and `09c4371`. The first session on the physical PC (Windows 11, RTX 4070 Ti
-SUPER, 3440x1440 at 100%). Before any change, the workspace tests passed on it.
-
-**Design.** Mockups were drawn and the user picked **layout A**: no menu bar; the logo and tabs in
-the title bar; one command bar under it (Open, Reload, Recent | Files, Outline | zoom on the left;
-find box with match count, previous/next, Theme, a main menu on the right). The Qt shell uses the
-same layout with the tabs in its own title row. An Outline dropdown was tried and dropped at the
-user's request; the outline is a pane on the right in both shells, Files on the left (as in the
-original app).
-
-**WinUI.**
-- Controls the trimmed `bindings.rs` lacks come from a second generated module,
-  `src/bar_bindings.rs`, written by `bins/mdv-winui/gen` (windows-bindgen 0.100 over the Windows App
-  SDK 2.6.4 NuGet winmds in `%USERPROFILE%\.nuget\packages`; filter in `gen/filter.txt`).
-  `bindings.rs` and its hand-written additions are untouched; objects cross with `cast()`. The
-  generator is excluded from the workspace. Run: `cargo run --manifest-path bins/mdv-winui/gen/Cargo.toml`.
-- `src/bar.rs` builds the bar, the title row (TabView header = logo, footer = drag area via
-  `SetTitleBar`), the outline pane and the dialogs. Theme cycles System, Light, Dark with its icon
-  and label; the title row, command bar and panes are shaded 10% and 6% towards the text colour.
-- Right-click menus: the page (`ContextFlyout`, filled on the right press) and each tab.
-- Find has a real `TextBox`; Ctrl+F focuses it, Enter/F3 step, Escape clears.
-- The scrollbar is a rounded thumb, thin at rest, wider while the pointer is over it.
-- About and Keyboard shortcuts are `ContentDialog`s (the shortcut list comes from core's
-  `shortcut_help`); the logo is drawn to PNG with resvg and shown as a `BitmapIcon`.
-- Focus reading mode (Ctrl+Shift+F, Escape) hides the command bar and both panes.
-- New dependencies: `resvg` 0.47 (logo), `windows-future` 0.100 (`ContentDialog::ShowAsync`).
-
-**Qt.**
-- Frameless window (`Qt::FramelessWindowHint`): a title row toolbar holds the logo, the tabs (auto-hide
-  off: a toolbar does not re-show a widget it saw hidden), a drag area (an event filter on the canvas
-  calls `QWindow::startSystemMove`, a double click maximizes) and its own window buttons.
-- **Two old bugs fixed:** both right-click menus set `ContextMenuPolicy(2)`, which is
-  `ActionsContextMenu`, so neither ever opened (now 3, `CustomContextMenu`); and the canvas treated
-  every mouse button as the left one (a right press started a selection, its release could follow a
-  link). The page menu was also connected before the canvas was stored.
-- The chrome is styled from the page theme with one style sheet (`chrome_style`); menus are parented
-  to the window so they take it. Bar icons are SVG strings rendered to PNG with resvg into
-  `%TEMP%/mdview-icons/<theme>/` and assigned by tooltip selectors, because this Qt install has no
-  SVG module (Linux installs may not either).
-- `system_is_dark` on Windows reads `AppsUseLightTheme`; with no flag and no session the theme is System.
-- The main menu (☰) is a flat list; find has a count beside it and a clear button; About and Keyboard
-  shortcuts are `QMessageBox::about` dialogs with the logo.
-
-**Checked here:** 212 workspace tests, the 7 WinUI and 8 Qt scripted checks, `cargo fmt` in both
-crates, and every bar button, menu, pane, theme mode, right-click menu, find and the dialogs clicked
-in both apps placed side by side (real mouse input, screenshots compared).
-**Not checked:** Qt on KDE (frameless window, icons, style sheet), WinUI at DPI other than 100%, a
-second monitor, the installer.
-
-## 27. WinUI section-12 work and the 0.1.0 installer (2026-11-11)
-
-On the physical Windows PC, after section 26.
-
-**Single instance.** `main.rs` now parses the arguments and calls `single::forward` before the
-Windows App SDK bootstrap, the GPU thread and COM. A second launch that hands its file over took
-**17-24 ms** process start to exit (52 ms the first time), against PLAN's 20 ms budget, with one
-window left. The listener uses `listen_waking`, so forwarded files open at once.
-
-**File watching.** The 800 ms `SetTimer` poll is gone. `mdview_core::watch::FileWatcher` and the
-single-instance listener call `ui::wake`, which posts to the UI thread's `DispatcherQueue`
-(`TryEnqueueWithPriority`, already in `bindings.rs`). The watched set follows `save_session`. If the
-watcher cannot start, a 2 s poll runs instead. Checked live: a save-by-rename of the showing file
-reloaded it, an unrelated file did nothing, a second launch opened its file as a tab.
-
-**Manage recent** is a `ContentDialog` (Open, Remove, Clear list, Done). The list is rebuilt after
-the click finishes (`later`), because rebuilding inside the click let the row that moved under the
-pointer take the same click. Checked: one click removes one entry.
-
-**Drag and drop:** `AllowDrop`, `DragOver` and `Drop` on the root; `GetStorageItemsAsync` completes
-off the UI thread and posts the paths back. Built only: Windows refused the synthetic drag (and then
-all `SetCursorPos` calls) in this session, so it has not been run.
-
-**Also:** Ctrl+Shift+1 / 2 toggle the Files and Outline panes; the exe icon is embedded again when
-`rc.exe` is on PATH (`C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64`; from Git Bash
-the build script could not run it).
-
-**Measured** (`spikes/winui/measure.ps1` and `Get-Process`, 100%, dark):
-
-| | before layout A (`9dad837`) | now |
-|---|---|---|
-| first frame, median of 8 interleaved runs | 316-343 ms | 383 ms |
-| private memory, empty window | 170 MiB | 180 MiB |
-| private memory, showcase.md | 197 MiB | 210 MiB |
-
-`ExtendsContentIntoTitleBar` costs 70-95 ms wherever it is called (moved after `Activate`, which
-saved some); doing it after the first frame would make the page jump. The memory was over PLAN's
-50-90 MB before this work too. Text quality at other DPIs was not checked: it needs the display
-scaling changed by hand.
-
-**Installer** (`packaging/windows/mdview.iss`, Inno Setup 7.1.1): the association task is now on by
-default. It registers the `mdview.Markdown` ProgID, `OpenWithProgids` for `.md .markdown .mdown .mkd`,
-`Applications\mdview-winui.exe`, and a registered application (`Software\mdview\Capabilities` plus
-`RegisteredApplications`) so mdview appears in Settings > Default apps. Windows does not let an
-installer take the default, so the last page offers "Choose mdview as the default app", which opens
-`ms-settings:defaultapps?registeredAppUser=mdview`. Optional desktop shortcut. Checked on this PC: a
-silent per-user install put both exes in `%LOCALAPPDATA%\Programs\mdview`, wrote all keys, left the
-user's `.md` default and other handlers alone; the installed app opened a file through the
-registered command; the silent uninstall removed every key, the files and the shortcut. Not run:
-the wizard pages, the runtime download branch, an upgrade over an older version.
-
-## 28. Shell after WinUI: lighter candidates compiled (2026-11-11)
-
-On the physical Windows PC, after WinUI was retired and Qt became the only shell.
-
-**Also done that day, before this:** both shells remember which side panes are open
-(`layout=files=1;outline=0`) and the window size and maximized state (`geometry=WxH [max]`) through
-`Session::panes`, `set_panes`, `window_size`, `set_window_size` (core tests added); the Qt Files
-tree reads only expanded folders (click a folder row to expand it); no console window for the Qt
-release build; a Qt installer (`mdview-qt.iss`, `build-installer-qt.ps1`: windeployqt output plus
-the MSVC runtime app-local, its own ProgId `mdview-qt.Markdown` and registered app) is on the
-v0.1.0 pre-release, which no longer carries the WinUI installer. Installed, launched with Qt off
-PATH, uninstalled clean. The newest installer build was not reinstalled.
-
-**Mockups.** `spikes/shell-fltk`, `spikes/shell-slint`, `spikes/shell-soft`, each its own workspace
-with its own `target/`. All three render layout A; results, reasons and the decision are in PLAN
-("Next: a lighter shell than Qt"). Building:
-
-- fltk: from a `vcvars64.bat` shell, `cargo build --release` in `spikes/shell-fltk` (ninja and
-  cmake from Python's Scripts folder were on PATH).
-- softbuffer: `cargo build --release` in `spikes/shell-soft`; it depends on `crates/render` by path.
-- Slint: `cargo build --release` in `spikes/shell-slint` (now set to `renderer-skia`).
-
-Run each exe from its spike folder: they load `../look-shared/content-dark@1.0.png` relative to
-the working directory. `MOCKUP_TRACE=1` prints the first-frame time.
-
-**What the user said:** liked the look of all three once styled; disliked the text of Slint
-(software: blurry; Skia: "horrible, fringed") and of the first softbuffer build (fontdue).
-Softbuffer with the project's text engine was rebuilt for their review; no verdict yet on it versus
-fltk.
-
-**Measured, how:** exe size from the release file; private memory and working set from
-`Get-Process` about 3 s after launch, one run each, 100% scaling, dark; first frame from
-`MOCKUP_TRACE`. The memory figures are from one run each and are not medians.
-
-## 29. The winit + softbuffer shell, `bins/mdv-app` (2026-11-11)
-
-On the physical Windows PC. The user chose winit + softbuffer over fltk-rs, then approved the
-finished interface by using the running app. Nothing below has run on Linux.
-
-**What it is.** A workspace member (package and binary `mdview`), pure Rust, no DLLs. winit 0.30
-gives the window and input, softbuffer the pixels; the window is frameless and the crate draws the
-title row, tabs, command bar, panes, menus, dialogs and tooltips itself with parley and
-`mdview_render::TextEngine`, so chrome text and page text are the same. `mdview_render` now exports
-`shared_fonts()` so the chrome clones the renderer's font context instead of enumerating fonts again.
-
-| Module | What is in it |
-|---|---|
-| `workspace.rs` | All tab, document, session, find, selection, link, scroll, outline and status logic, headless and unit-tested. Ported from `bins/mdv-qt/src/shell.rs`. One shared `DocumentRenderer`; only the active tab is laid out |
-| `app.rs`, `app/input.rs`, `app/commands.rs` | State, dirty-region compose and `present_with_damage`, the winit handler, pointer and key handling, every `CommandId`, wakes and timers |
-| `app/tests.rs` | A headless `App` driven through the real handlers |
-| `chrome.rs`, `panes.rs`, `page.rs`, `overlays.rs` | Title row and command bar; Files and Outline; page blit, find and selection overlays, empty state; menus, dialogs, toast, link hint, tooltips |
-| `ui.rs`, `keys.rs`, `args.rs` | Layout and hit types; shortcuts parsed from core's `COMMANDS` strings; command line |
-| `gfx.rs`, `menu.rs`, `textfield.rs`, `tree.rs`, `theme.rs` | Painter (logical px, device snapping, clip), popup menu, single-line editor, lazy folder tree, chrome palettes |
-| `platform.rs` | The only `unsafe`: clipboard, URLs, system theme, dialogs (rfd), DWM corner and dark-mode attributes |
-| `build.rs` | Embeds `assets/mdview.ico` when `rc.exe` is found |
-
-**Changes from the Qt shell,** all in `workspace.rs`'s module doc: restored tabs load when first
-shown and inactive tabs drop their layout; the reading position survives reload, resize and zoom
-as block plus offset; find re-runs after a reload; double click selects a word and triple click a
-block; status messages are toasts (no status bar); the outline highlights the current heading; the
-empty state lists recent files.
-
-**Build and run.**
-
-```powershell
-cargo build --release -p mdview -p mdview-engine   # target/release/mdview.exe, mdview-engine.exe
-cargo test -p mdview                               # 58 tests
-```
-
-Launch from Git Bash, not PowerShell. Flags: `<files>`, `--light`/`--dark`, `--zoom <pct>`,
-`--folder <dir>`, `--maximize`, `--no-session` (neither reads nor writes the user's session, and
-skips the single-instance hand-over; use it for every test). `MDVIEW_STARTUP_TRACE=1` prints the
-first-frame time, `MDVIEW_TRACE=1` per-frame timings.
-
-**Screenshots without a window.** `--shot out.png` draws one frame of the state the other flags
-describe and exits: `--size WxH`, `--scale f`, `--files`/`--no-files`, `--outline`/`--no-outline`,
-`--find q`, `--scroll px`, `--menu main|recent|tab|page`, `--dialog about|shortcuts|recent`,
-`--hover x,y`, `--focus-mode`. `--scroll-steps n` scrolls a real window n wheel steps, logs the
-timings and exits. `tests/golden/shell-app-{dark,light}.png` are the two the user saw; they are
-review copies, not a pixel baseline.
-
-**Checked.** The whole workspace test suite and `cargo fmt --all --check`. Shots of both themes,
-find, the four menus, the three dialogs, the empty state, a 700 px window, scales 1.5 and 2.0,
-focus mode and nine tabs were looked at. The release exe ran on this PC; maximized, its client
-rectangle equals the monitor work area (3440x1392), so the taskbar is not covered. The user tried
-the running app and approved the look.
-
-**Measured** (release, this PC, 100% scaling, single runs unless noted):
-
-| | Value |
-|---|---|
-| `mdview.exe` | 6.8 MB |
-| First frame, `showcase.md` | 187 ms median of 3 with a cold engine; 67 ms on a later launch. About 140 ms of the cold figure is the renderer and engine laying out the diagrams |
-| First frame, `linked.md` | 48-50 ms |
-| Private memory after 3 s | 16 MiB (`linked.md`), about 36 MiB (showcase, 1280x800), 76 MiB (showcase, maximized 3440x1440) |
-| Scroll frame, maximized, both panes, 150 frames | median 3.1 ms, p90 3.5, worst 4.2 (paint 1.2, compose 1.0, copy 0.8, OS present 0.9) |
-
-Qt release has not been measured beside it.
-
-**Not run by hand as a recorded check:** edge resize, title drag and double-click maximize; caret
-blink; clipboard; opening links; drag and drop; the single-instance hand-over; live file watching
-and the missing-file flow; session save and restore (every scripted run used `--no-session`); the
-native open dialogs; a DPI or system-theme change at runtime.
-
-**Known gaps.** No snap-layouts flyout on the maximize button. Pane widths are not saved (which
-panes are open is). The Files pane does not follow folder changes (`FileTree::refresh` exists and
-is not wired to the watcher). Maximized memory is three full-window bitmaps (screen, renderer
-frame, softbuffer's). The system accent colour is not used. The Linux dependency features in
-`Cargo.toml` are untested, and the icons need Segoe Fluent Icons.
-
-**Next:** `docs/PLAN.md`, "Roadmap from 2026-11-11": A3 (hand checks) to A6 (retire Qt on Windows),
-then README fidelity (GIF and WebP, remote images behind a per-document bar, more Mermaid
-families, the full emoji list) and the renderer work (image re-decode check, the `layout.rs` split,
-estimated heights for large files).
-
-## 30. Installer for the winit shell, static CRT (2026-11-11)
-
-`build-installer.ps1` builds the shipped exes with `RUSTFLAGS=-C target-feature=+crt-static` into
-`target\dist`, so `mdview.exe` and `mdview-engine.exe` import only system DLLs (no `VCRUNTIME140`,
-no `api-ms-win-crt-*`); they grow about 120 KB and 180 KB. The flag is not in a `.cargo/config.toml`
-because it must not reach the Qt crate (Qt needs the dynamic CRT) or a Linux build. Ordinary
-`cargo build` output in `targetelease` still uses the dynamic CRT.
-
-`packaging/windows/mdview.iss` + `build-installer.ps1` (`-SkipBuild` to reuse `target\release`):
-per-user to `%LOCALAPPDATA%\Programs\mdview`, `mdview.exe`, `mdview-engine.exe`, `mdview.ico`, own
-AppId, ProgId `mdview.Markdown`, registered application `Software\mdview`, output
-`target\installer\mdview-setup-<version>.exe` (+ `.sha256`). Silent install, launch (`--no-session
---shot` of showcase.md, diagrams rendered, engine found beside the exe), silent uninstall were run on
-the physical PC; see the commit message. Not run: wizard pages, upgrade over an older version, the
-default-apps page link. Updates are manual only: `docs/UPDATE.md` top note.
+Trap: a `vm.py run "... $PATH ..."` in double quotes lets PowerShell expand `$PATH` to nothing;
+use single quotes or spell the path out as above. Xvfb has no window manager; capture with
+`Xvfb :99 -screen 0 1600x1200x24 &`, run with `DISPLAY=:99`, then `import -window root shot.png`.
+Linux font metrics differ (the showcase was 4095 px tall there, 4071 on Windows), so Linux renders
+are for "runs and looks sane", not golden comparison.
+
+**Linux file association** (Qt packages): the PKGBUILD's desktop entry registers `text/markdown`
+and `text/x-markdown` and never sets a default; `.mdown` is `text/plain` in shared-mime-info, so it
+needs a small `mime/packages` XML. The package itself has never been installed with `pacman -U`.
+
+## 13. What to do next
+
+1. **The user's hand checks of the new shell** (PLAN A3) on the Windows PC: the items in section 10's
+   "not run" list, starting with the remote-image bar, copy-source menu, resize edges and corners,
+   and shadows. Record each result here.
+2. **Finish A4:** tick the new-shell table in `docs/PORT_CHECKLIST.md` by hand-checking its
+   "built, not hand-checked" rows; measure Qt's first frame (find why `--measure` hung) and a
+   1 MiB scroll comparison.
+3. **Retire Qt on Windows** (A6): archive branch, as with WinUI; drop `mdview-qt.iss` and its build
+   script from `main`; replace the v0.1.0 pre-release installer. Only after 1 and 2 and the user's
+   approval.
+4. **The KDE run** (section 12).
+5. The gaps `docs/COVERAGE.md` lists under "In the model, not drawn yet" (`dir`, table and row
+   `align`, table and cell sizes, image `align`, `<caption>`), find seeing text the page does not
+   draw, no reason shown when a math or diagram block falls back, and the clippy warnings.
+6. The editor is a second project (PLAN section E), not started until the reader has shipped.
+
+## 14. History
+
+- **2026-11-08.** Phases 1 and 2 closed: the user approved the four `showcase-*` goldens. Phase 4
+  slices landed: SVG, math and Mermaid (eight families) through `mdview-engine`, syntect in-process.
+  Both shells (WinUI and Qt) built ahead of the plan; the Qt shell ran on the Debian VM under Xvfb.
+  WinUI used a pair of D3D11 textures with band uploads and its own scrollbar, because the trimmed
+  bindings had no `ScrollBar`, text box or `ItemInvoked`.
+- **2026-11-10, Linux desktop.** Linux budget numbers for Qt (offscreen): warm first paint 119 ms
+  for 20 KB, 37.0 MB private; the 1 MB first height pass was 615 ms cold on the UI thread (later
+  solved by estimated heights). Font enumeration shared per thread (`shared_fonts`), which saved
+  about 35 ms per extra renderer. PGO tried and not adopted (no measurable difference). OS file
+  watching (`crates/core/src/watch.rs`, notify 8.2.1, parent folders, 2 s poll fallback) replaced
+  the 800 ms poll. Qt page context menu.
+- **2026-11-10, packaging.** PKGBUILD (`packaging/arch`, `makepkg -f`, about 3.5 min). AppImage
+  built in `ubuntu:24.04` with `build-in-container.sh` (glibc 2.39; needs `lld` in the container,
+  because `gold` drops cxx-qt's init symbols), 36.7 MB, kept in `~/mdview-appimage/`; Qt AppImage
+  self-update wired (the user kept it, PLAN does not list it). `crates/core/src/update.rs` and
+  `docs/UPDATE.md`: manifest and SHA-256 logic, no network code. Inno Setup 7.1.1 compiled the
+  first installer in the WinApps VM.
+- **2026-11-10, WinUI in the WinApps VM.** Files pane (`TreeView` by slot index), menus driven by UI
+  Automation and real clicks; a MenuBar bug (later items stop responding after one is used) was
+  bisected but not fixed and may have been a VM artifact. `docs/WINDOWS_HANDOFF.md` written.
+  Clean-up of VM and temp leftovers at the user's request.
+- **2026-11-11, Windows PC, layout A** (`0e8ee6d`, `09c4371`). No menu bar; tabs in the title row;
+  one command bar (Open, Reload, Recent | Files, Outline | zoom; find box with count,
+  previous/next, Theme, main menu); Files pane left, Outline right. Both shells brought to parity
+  side by side. Two Qt bugs fixed: both right-click menus used `ActionsContextMenu` and never opened,
+  and every mouse button acted as the left one.
+- **2026-11-11, WinUI final work** (`6014a7e`). Single instance before the Windows App SDK bootstrap
+  (17-24 ms hand-over), OS file watching through `DispatcherQueue`, Manage recent dialog, 0.1.0
+  installer that registers the extensions and a registered application. Measured 383 ms first frame
+  and 180-210 MiB private memory; `ExtendsContentIntoTitleBar` alone cost 70-95 ms. Retired the
+  same day (`94cf36f`); the code is on `winui-archive`.
+- **2026-11-11, Qt as the only shell.** Panes and window size saved in the session
+  (`layout=files=1;outline=0`, `geometry=WxH [max]`); Qt Files tree loads folders on expand; no
+  console window; Qt installer (`mdview-qt.iss`, windeployqt output plus the MSVC runtime
+  app-local, ProgId `mdview-qt.Markdown`) on the v0.1.0 pre-release.
+- **2026-11-11, shell mockups** (`ed9fb41`). `spikes/shell-fltk`, `shell-slint`, `shell-soft`, each
+  its own workspace; numbers in PLAN. winit + softbuffer chosen.
+- **2026-11-11, the new shell** (`a82c8c0`). `bins/mdv-app` with every control hand-drawn; the user
+  approved the look. Same day: full GitHub emoji list (`035b78c`), `layout.rs` split into modules
+  (`66c792e`), clipped text draw (`7bee6a3`), GIF and WebP (`bf3ab80`), cheaper glyph cache
+  bookkeeping (`3ffbe64`), subpixel order setting and ClearType-following chrome (`72b8285`),
+  installer with static CRT (`6c66a5c`, moved into `target\dist` by `a2faecb`, `8f441cb`),
+  area-averaged downscaling (`abf7b54`), `mdview-fetch` (`8ba8fa4`), 23 more Mermaid families
+  (`2915f08`, `50a0b85`), the image store (`1ad57b4`), startup trace counts (`3fafe69`), the
+  patchable layout (`7ef3831`), estimated first layout and refinement (`db29742`, `feee929`), the
+  editor noted as a second project (`49d5fbc`).
+- **2026-11-12.** Whole-frame present on a system repaint (`147b805`); remote images off until
+  asked, with the bar and the "always" setting (`6ac87a8`, `a4065b9`); softer popup shadows and
+  wider resize bands with corner zones (`a7d2417`); ruby, `<dl>` and `<figure>` styling (`b0fde23`);
+  copy formula and diagram source (`87d63f1`); page text follows the display's subpixel order
+  (`52814ce`); the six `everything.md` fixes (`f5a8bed`).
+
+**Traps worth remembering from that history:**
+
+- A GUI app started with `&` in a PowerShell command that then finishes is killed with the job;
+  use `Start-Job { & $exe @args }` and stop it afterwards. `PrintWindow` returns black for a
+  minimized window. A window can be behind another app even after `SetForegroundWindow`; make it
+  topmost and check with `WindowFromPoint` before a synthetic click.
+- Synthetic drag and drop and `SetCursorPos` were refused by Windows in one session on the PC, so
+  drag and drop has never been run by hand in any Windows shell.
+- `rc.exe` (for the exe icon) is at
+  `C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64`; from Git Bash the build script
+  could not run it once.

@@ -23,6 +23,7 @@ pub(super) struct Style {
     pub(super) small: bool,
     pub(super) sub: bool,
     pub(super) sup: bool,
+    pub(super) mark: bool,
     /// Text of a `<figcaption>`: a little smaller than the body, in the muted colour.
     pub(super) caption: bool,
     /// A token colour from the syntax highlighter; overrides the theme text colour.
@@ -337,7 +338,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 SpanKind::Kbd => style.kbd = true,
                 SpanKind::Sub => style.sub = true,
                 SpanKind::Sup => style.sup = true,
-                SpanKind::Mark => {}
+                SpanKind::Mark => style.mark = true,
                 SpanKind::Small => style.small = true,
                 SpanKind::Link(_) => style.link = true,
                 SpanKind::Math { display: false, .. } => style.math = true,

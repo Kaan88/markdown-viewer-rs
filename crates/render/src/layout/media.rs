@@ -263,7 +263,27 @@ impl<'a, 'b> Pager<'a, 'b> {
         }
         let pad_x = self.px(16.0);
         let pad_y = self.px(13.0);
-        let txt = Txt {
+        let tag = label.filter(|l| !l.is_empty()).map(|label| {
+            let mut tag = Inline::default();
+            tag.push(
+                &label,
+                Style {
+                    muted: true,
+                    ..Style::default()
+                },
+            );
+            let txt = Txt {
+                size: 12.0,
+                line_height: 1.3,
+                weight: 400.0,
+                mono: false,
+                color: self.theme.muted,
+                max: None,
+            };
+            let layout = self.text_layout(&tag, &txt);
+            (tag, layout)
+        });
+        let mut txt = Txt {
             size: 14.0,
             line_height: 1.5,
             weight: 400.0,
@@ -271,13 +291,21 @@ impl<'a, 'b> Pager<'a, 'b> {
             color: self.theme.text,
             max: Some((width - 2.0 * pad_x).max(1.0)),
         };
-        let layout = self.text_layout(&inline, &txt);
-        let size = txt.size;
-        let (first_line_end, first_line_height) =
-            layout.lines().next().map_or((0.0, 0.0), |line| {
+        let mut layout = self.text_layout(&inline, &txt);
+        if let Some((_, tag)) = &tag {
+            // The label sits at the right of the first line. Code that would run under it wraps
+            // short of it instead.
+            let label_left = width - self.px(12.0) - tag.width() - self.px(8.0);
+            let first_line_end = layout.lines().next().map_or(0.0, |line| {
                 let m = line.metrics();
-                (m.offset + m.advance, m.line_height)
+                m.offset + m.advance
             });
+            if pad_x + first_line_end > label_left {
+                txt.max = Some((label_left - pad_x).max(1.0));
+                layout = self.text_layout(&inline, &txt);
+            }
+        }
+        let size = txt.size;
         let text_height = layout.height().round().max(txt.size * self.scale);
         let height = text_height + 2.0 * pad_y;
         let radius = self.px(6.0);
@@ -302,39 +330,9 @@ impl<'a, 'b> Pager<'a, 'b> {
         if !source.is_empty() {
             self.emit(&inline, layout, left + pad_x, y0 + pad_y, size);
         }
-        if let Some(label) = label.filter(|l| !l.is_empty()) {
-            let mut tag = Inline::default();
-            tag.push(
-                &label,
-                Style {
-                    muted: true,
-                    ..Style::default()
-                },
-            );
-            let txt = Txt {
-                size: 12.0,
-                line_height: 1.3,
-                weight: 400.0,
-                mono: false,
-                color: self.theme.muted,
-                max: None,
-            };
-            let layout = self.text_layout(&tag, &txt);
+        if let Some((tag, layout)) = tag {
             let x = left + width - self.px(12.0) - layout.width();
-            let size = txt.size;
-            // A first line that runs under the label is cut off behind it rather than read through.
-            let gap = self.px(6.0);
-            if left + pad_x + first_line_end > x - gap {
-                self.paints.push(Paint::Rect {
-                    x: x - gap,
-                    y: y0 + hr,
-                    w: left + width - hr - (x - gap),
-                    h: (pad_y + first_line_height).round().min(height - 2.0 * hr),
-                    radius: (radius - hr).max(0.0),
-                    color: self.theme.code_bg,
-                });
-            }
-            self.emit(&tag, layout, x, y0 + self.px(8.0), size);
+            self.emit(&tag, layout, x, y0 + self.px(8.0), 12.0);
         }
         self.y = y0 + height + self.px(16.0);
     }

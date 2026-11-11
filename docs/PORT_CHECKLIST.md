@@ -489,3 +489,57 @@ from the code only. Deliberate differences follow PLAN or the user's design choi
 
 **Open items from this table:** status bar texts, window size and minimum, live folder tree,
 outline scroll sync, Ctrl+Q, window geometry in the session, and a hand-run drop.
+
+The WinUI shell was retired on 2026-11-11 (branch `winui-archive`); the table above is history.
+
+## New shell status (`bins/mdv-app`, 2026-11-12)
+
+Section 1 checked row by row against `bins/mdv-app/src` (the winit + softbuffer shell, binary
+`mdview`), same rows as the WinUI table. "Test" means a unit test in `workspace.rs` or a headless
+`App` test in `app/tests.rs`; "code" means the code was found and read, nothing more. **No row has
+been checked by hand yet** (PLAN A3): every "done" below is built, not hand-checked, until the
+user has used it and this table says "run".
+
+| Behaviour (section 1) | mdview (winit) | How known |
+|---|---|---|
+| Window: default 1220x820, min 720x480 | **differs**: 1280x800, minimum 520x360; size and maximized state saved | code |
+| Window title `<file> — …` | done (core `strings::window_title`; the title row shows tabs) | code |
+| Accepts drops | done: a folder sets the Files pane, a Markdown file opens, anything else says "Only Markdown file links…" | code; built, not hand-checked |
+| Tabs: closable, movable, document mode | done (close button, middle click, drag to reorder) | test (`tab_close_button_and_middle_click_close_tabs`, `dragging_a_tab_reorders_tabs`) |
+| Tab bar auto-hides with one tab | **differs**: always shown, it is the title row | code |
+| Closing the last tab shows the empty state | done (empty state with an Open button and the recent files) | code |
+| Status bar: path, startup and all-closed texts | **differs**: no status bar; the texts show as toasts | test (`STATUS_ALL_CLOSED`) |
+| Tab context menu: close, close others, copy path, show in Explorer | done (plus Close all tabs) | code; built, not hand-checked |
+| Tab labels incl. duplicate names | done (core `tab_labels`) | code |
+| Ctrl+Tab / Ctrl+Shift+Tab | done (`NextTab`/`PreviousTab` from core's command table) | code |
+| Menus | **differs** (layout A): command bar plus the ⋯ main menu; every item reachable | code, test (`menus_take_the_keyboard`) |
+| Open files… Ctrl+O (multi-select, filter) | done (rfd, Markdown and All files filters) | code; built, not hand-checked |
+| Open folder… Ctrl+Shift+O | done (rfd folder picker) | code; built, not hand-checked |
+| Refresh F5 | done; keeps the reading position, also refreshes the Files tree | test (`reload_keeps_the_reading_position`) |
+| Open recent / Clear recent / missing entries | done (Recent menu, missing entries marked) | test (`recents_remove_missing_and_clear`) |
+| Manage recent files… | done (dialog with Open, Remove per row) | code; built, not hand-checked |
+| Close tab Ctrl+W, Ctrl+F4; Close all Ctrl+Shift+W | done | code |
+| Exit | done (⋯ menu, Ctrl+Q) | code |
+| Find Ctrl+F, F3 / Shift+F3, Enter, Escape clears | done (find box, count beside it) | test (`find_box_types_searches_and_escape_clears`, `find_counts_and_wraps`) |
+| Theme System / Light / Dark | done (cycling button; System follows the OS theme change event) | test (`theme_choice_resolves`) |
+| Zoom in/out, 60-250 step 10, Ctrl+0 | done; the percentage shows in the bar; Ctrl+wheel zooms | test (`zoom_is_clamped_and_stepped`, `ctrl_wheel_zooms_and_plain_wheel_scrolls`) |
+| Ctrl+Shift+1 / 2 (Files / Outline) | done | code, test (`toolbar_toggles_panes_and_the_layout_follows`) |
+| Focus reading mode Ctrl+Shift+F, Escape leaves | done (hides the bar and both panes; tabs stay) | test (`focus_mode_hides_chrome_and_escape_leaves`) |
+| Keyboard shortcuts, About | done (hand-drawn dialogs) | test (`shortcuts_open_and_close_dialogs`) |
+| Toolbar: Open, search box with clear button, match label, Previous/Next | done | code |
+| Docks: Files left, outline right | done (panes with splitters; not floatable) | test (`splitter_drag_resizes_within_limits`) |
+| Search: substring, case-insensitive, cap, wrap, re-run on tab change | done (core `find_visible`); also re-runs after a reload | test |
+| Recent: max 15, order, missing marker, persisted on change | done (core) | test |
+| Folder tree: live updates, Markdown filter | lazy tree, Markdown filter, hidden files skipped; refreshes on window focus, F5 and file-watcher wakes, **not live** for every change under the root | code |
+| Outline: nesting, click scrolls | done; the current heading is highlighted as the page scrolls | code |
+| File watching and reload, deleted-file handling | done: OS watcher (`mdview_core::watch`); a deleted file keeps its text and reloads when it returns | test (`a_deleted_file_keeps_its_text_and_reloads_when_it_returns`); live watching built, not hand-checked |
+| Background tabs reload on change | done for loaded tabs (`check_changed`); unloaded tabs read the file when shown | code |
+| Scroll preservation on reload | done (core `remap_scroll`, block plus offset) | test |
+| Link following (fragments, local Markdown, http/mailto, others ignored) | done | test (`links_scroll_open_tabs_hand_out_urls_and_refuse`); opening URLs built, not hand-checked |
+| Details toggle | done (view state, no reload, reading position kept) | test (`a_details_toggle_above_keeps_the_reading_position`) |
+| Images: limits, schemes | done (renderer + engine); **differs**: remote images load only after the reader allows them (per-document bar, "Always load remote images" setting) | test (`remote_images_wait_for_the_reader`); bar buttons built, not hand-checked |
+| Settings: tabs, active, recent, folder, theme, zoom | done, plus window geometry, open panes and `remote_images`; pane widths not saved | test (`session_round_trip`) |
+| Single instance | done (core `single::forward` before the window, `listen_waking`) | code; built, not hand-checked |
+
+**Open items from this table:** every hand check (PLAN A3), a Files tree that follows its root
+live, saved pane widths, and a run on Linux (nothing above has been built there).

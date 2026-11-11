@@ -1186,3 +1186,11 @@ fn a_code_label_is_not_drawn_through_a_long_first_line() {
     };
     assert_eq!(label(&wide), label(&short));
 }
+
+#[test]
+fn mark_is_highlighted() {
+    let marked = page("some <mark>marked</mark> text\n");
+    let yellow = count(&marked, [0xc5, 0xf8, 0xff]);
+    assert!(yellow > 200, "highlight pixels: {yellow}");
+    assert_eq!(count(&page("some marked text\n"), [0xc5, 0xf8, 0xff]), 0);
+}

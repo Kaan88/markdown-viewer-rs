@@ -1,9 +1,9 @@
 # Updates
 
 > **2026-11-11.** The winit + softbuffer shell (`bins/mdv-app`) has no automatic update check and
-> makes no network connection to anywhere but loopback (the single-instance hand-over in
-> `crates/core/src/single.rs` talks to 127.0.0.1 only; checked by grep and `cargo tree`: no HTTP,
-> TLS or socket crate, and it does not call `mdview_core::update`). Updates are manual by decision: a
+> does not call `mdview_core::update`. Its only network use besides loopback (the single-instance
+> hand-over in `crates/core/src/single.rs`, 127.0.0.1 only) is `mdview-fetch`, which downloads a
+> document's remote images through WinHTTP, and only after the reader allows them (2026-11-12). Updates are manual by decision: a
 > "Check for updates" menu item is future work, and the flow below describes it, not shipped
 > behaviour. The Qt AppImage's daily check is legacy and goes away with the Qt shell.
 

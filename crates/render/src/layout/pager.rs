@@ -354,7 +354,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             if let Some(color) = style.color {
                 builder.push(StyleProperty::Brush(brush(color)), range.clone());
             }
-            if style.sub || style.sup {
+            if style.sub || style.sup || style.mark {
                 // Last, so it keeps whichever colour the run ended up with.
                 let color = style.color.unwrap_or(if style.link || style.accent {
                     self.theme.accent
@@ -366,8 +366,10 @@ impl<'a, 'b> Pager<'a, 'b> {
                 let mut shifted = brush(color);
                 shifted[3] = if style.sup {
                     crate::text::RAISED
-                } else {
+                } else if style.sub {
                     crate::text::LOWERED
+                } else {
+                    crate::text::MARKED
                 };
                 builder.push(StyleProperty::Brush(shifted), range.clone());
             }
@@ -622,6 +624,16 @@ impl<'a, 'b> Pager<'a, 'b> {
                 // of them when only a decoration changes, so the run's first cluster cannot say.
                 let run_style = glyph_run.style();
                 let color = run_style.brush;
+                if color[3] == crate::text::MARKED {
+                    chips.push(Paint::Rect {
+                        x: gx - self.px(1.0),
+                        y: (baseline - dev * 0.98).round(),
+                        w: advance + self.px(2.0),
+                        h: (dev * 1.3).round().max(1.0),
+                        radius: self.px(2.0),
+                        color: self.theme.mark(),
+                    });
+                }
                 let baseline = baseline + crate::text::baseline_shift(color, dev);
                 let color = [color[0], color[1], color[2]];
                 let thickness = (dev * 0.065).round().max(1.0);

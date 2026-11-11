@@ -4,10 +4,11 @@ The aim is that anything that renders on GitHub also renders here, and anything 
 
 **See [Not implemented](#not-implemented) for the short list.**
 
-**Status of this list.** It began as my knowledge of GitHub's "Basic writing and formatting syntax", "Working with advanced formatting" and GFM documents. The Phase 1 audit then compared the model with `gh api markdown -f mode=gfm -f context=cli/cli`, and this revision records the fixes on `phase1-audit-fixes`. Everything below has a test in `crates/core/tests/`; the comparisons with GitHub used that API, not github.com itself, so a real repository render may still differ. The WinUI shell and the renderer are still unverified.
+**Status of this list.** It began as my knowledge of GitHub's "Basic writing and formatting syntax", "Working with advanced formatting" and GFM documents. The Phase 1 audit then compared the model with `gh api markdown -f mode=gfm -f context=cli/cli`; the comparisons with GitHub used that API, not github.com itself, so a real repository render may still differ. The parser behaviour below has tests in `crates/core/tests/`. The drawing was checked on 2026-11-12 by rendering `fixtures/everything.md` and small test files with `mdv-bench` on Windows (light theme, 780 px, scale 1.0) and by reading `crates/render`. That is the headless renderer the shell uses, not a look at every row in the app window.
 
-- **Supported:** in the document model today, with a test in `crates/core/tests/`. No renderer exists until Phase 2, so nothing here has been seen on screen.
-- **Planned:** the phase is named.
+- **Supported:** parsed into the model with a test in `crates/core/tests/`, and drawn by the renderer.
+- **Model only:** parsed and kept in the model, but the renderer does not draw it yet. The note says what shows instead.
+- **Partly drawn:** drawn, with the limits the note names.
 - **Excluded:** the user reviewed and accepted these. We don't implement them.
 
 ## Spec suites
@@ -39,24 +40,25 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 | Headings, ATX and setext | Supported | |
 | Heading anchors | Supported | Compared with `gh api markdown` on 44 headings in Latin, Turkish, Greek, Arabic, Persian, Indic, Myanmar, Khmer, CJK and emoji, and all agree. Slugs come from the text before whitespace collapses, keep what `\p{Word}` keeps, and use github-slugger's duplicate suffixes. GitHub gives a heading with an empty slug no anchor; here its slug is empty and nothing links to it |
 | Bold, italic, bold italic | Supported | |
-| Strikethrough `~~x~~`, `~x~` | Supported | |
-| Subscript, superscript with `<sub>`, `<sup>` | Supported | |
+| Strikethrough `~~x~~`, `~x~` | Supported | The line goes through the middle of the lowercase letters |
+| Subscript, superscript with `<sub>`, `<sup>` | Supported | Drawn smaller and shifted below or above the baseline |
 | Underline with `<ins>`, `<u>` | Supported | |
 | Blockquotes | Supported | |
-| Inline code, fenced and indented code | Supported | |
-| Syntax highlighting | Planned, Phase 4 | Blocks are recorded with their language for the engine |
+| Inline code, fenced and indented code | Supported | A fenced block shows its language at the top right. Long lines wrap inside the box. A block whose first line would run under that label wraps short of it instead |
+| Syntax highlighting | Partly drawn | In-process with syntect's bundled syntaxes and themes (`crates/render/src/highlight.rs`): InspiredGitHub in light, base16-ocean.dark in dark. The language is looked up by name, then by file extension. A language syntect does not ship stays plain monospace: TypeScript and TOML are among them. Blocks over 256 KiB stay plain |
 | Links, reference links, relative links | Supported | Following them per the old app's rules. A link or image naming a host through `//host/x`, `\\host\x` or any mix of the two is ignored even in percent-encoded form, because on Windows it would contact that host |
 | Section links, `#fragment` | Supported | Also accepts `user-content-` and percent-encoding, decoded once in `Document::resolve_fragment` |
-| Images, relative and remote | Supported in model | Loading in Phase 2 |
-| `<picture>` with light and dark sources | Supported in model | Picks in Phase 2. A `<source>` counts only as a direct child of a `<picture>`, only for its first `<img>`, and only while that picture's block is open; the first matching source wins. A picture that closes without an image leaves nothing behind |
+| Images, local | Supported | PNG, JPEG, GIF and WebP decode in-process, the format taken from the file's bytes, not its extension; SVG draws through `mdview-engine` (resvg). GIF and animated WebP show their first frame only. A file over 12 MiB or 24 M pixels, an unreadable one or another format keeps its alt text as `[image: alt]` |
+| Images, remote | Supported | Fetched over WinHTTP by `crates/fetch` (GET only, no cookies or credentials, at most 5 redirects, never https to http), with a disk cache. Off until the reader allows them: a bar above the page counts the document's remote images and offers to load them for that document, and the "Always load remote images" setting loads them everywhere. A held-back image with a declared `width` and `height` keeps a grey box of that size; one without keeps its alt text |
+| `<picture>` with light and dark sources | Supported | The source for the current theme is drawn. A `<source>` counts only as a direct child of a `<picture>`, only for its first `<img>`, and only while that picture's block is open; the first matching source wins. A picture that closes without an image leaves nothing behind |
 | Ordered, unordered, nested lists | Supported | |
-| Task lists | Supported | Read-only, drawn in Phase 2 |
+| Task lists | Supported | Read-only check boxes |
 | Backslash escapes, entities | Supported | |
 | Hard and soft line breaks | Supported | |
 | Hidden comments `<!-- -->` | Supported | |
-| Footnotes | Supported in model | Numbering follows first reference, including one inside a duplicate definition, and the first definition of a label wins. The model keeps each definition where it was written, and keeps unreferenced ones with number 0; the Phase 2 renderer draws the end list and skips the definitions in flow. Until then find and the block order see that text. See the known gaps |
-| Alerts: note, tip, important, warning, caution | Supported | Compared with `gh api markdown` (context `cli/cli`). Title text on the marker line, an empty alert, and one inside a quote, list item, footnote, `<div>` or `<details>` stay plain quotes showing the literal marker. A blank quote line between the marker and a heading, rule or `***` makes it an ordinary child, so the alert stays. `-` and `--` under the marker make that line a setext heading, as on GitHub. A `<td>` or `<th>` resets the `<div>`, list and quote ancestors, so an alert inside a cell is kept unless `<details>` is above it. Empty inline HTML (`<i></i>`, `<a href=x></a>`, `<img>`, `<p></p>`, `<span></span>`) counts as content, while a comment, `<foo>`, `<a>` with no href or a raw `<input>` does not |
-| Tables, alignment, inline content | Supported | |
+| Footnotes | Supported | Numbering follows first reference, including one inside a duplicate definition, and the first definition of a label wins. References draw as small `[n]` links. The renderer draws one list after the last block, under a rule, in order of first reference, and draws no definition in flow, wherever it was written. An unreferenced definition (number 0) is not drawn. The model still keeps each definition where it was written, so find sees that text: see the known gaps |
+| Alerts: note, tip, important, warning, caution | Supported | Each kind has its own title, bar and tint colour, in both themes. Compared with `gh api markdown` (context `cli/cli`). Title text on the marker line, an empty alert, and one inside a quote, list item, footnote, `<div>` or `<details>` stay plain quotes showing the literal marker. A blank quote line between the marker and a heading, rule or `***` makes it an ordinary child, so the alert stays. `-` and `--` under the marker make that line a setext heading, as on GitHub. A `<td>` or `<th>` resets the `<div>`, list and quote ancestors, so an alert inside a cell is kept unless `<details>` is above it. Empty inline HTML (`<i></i>`, `<a href=x></a>`, `<img>`, `<p></p>`, `<span></span>`) counts as content, while a comment, `<foo>`, `<a>` with no href or a raw `<input>` does not |
+| Tables, alignment, inline content | Supported | Every table spans the full column width; GitHub sizes a table to its content |
 | Horizontal rules | Supported | |
 | Bare URL and email autolinks | Supported | Including `_`, `*`, `~` inside a URL |
 
@@ -64,34 +66,40 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 
 | Feature | Status | Notes |
 |---|---|---|
-| Collapsed sections, `<details>` and `<summary>` | Supported | Open state is view state in Phase 2 |
-| Math: `$..$`, `$$..$$`, ```` ```math ```` | Supported in model | Drawing in Phase 4. Over 4 KiB keeps source and a reason. What may touch the delimiters follows GitHub, as measured below |
+| Collapsed sections, `<details>` and `<summary>` | Supported | A chevron before the summary; clicking it opens or closes the block. Open state is view state in the renderer, starting from the `open` attribute. Find skips the body of a closed one |
+| Math: `$..$`, `$$..$$`, ```` ```math ```` | Supported | TeX through RaTeX in `mdview-engine`. Inline math sits on the text baseline; display math is centred. Over 4 KiB, or TeX that does not parse, shows its source: inline as code-styled text, a block in a code box labelled `math`. No reason is drawn. Right-click a formula for "Copy formula source". What may touch the delimiters follows GitHub, as measured below |
 | GitHub's `` $`..`$ `` math form | Supported | Rewritten to `$..$` before parsing, outside fenced code, one line, formula without `$` or a backtick (`github_math` in `parse.rs`) |
-| Mermaid | Drawn for 31 of merman's 34 families | Over 64 KiB keeps source and a reason. A family that is not enabled, or a diagram merman rejects, keeps its labelled source box. Per-family table below |
+| Mermaid | Supported for 31 of merman's 34 families | Through merman in `mdview-engine`, centred and shrunk to fit the column. Over 64 KiB, a family that is not enabled, or a diagram merman rejects shows its source in a code box labelled `mermaid`; no reason is drawn. Right-click a diagram for "Copy diagram source". Per-family table below |
 | Front matter as a table | Supported | `crates/core/src/frontmatter.rs`: a leading `---` block whose first line is `key:` becomes a Property/Value table of its top-level `key: value` pairs; nested or list values show the block as a `yaml` code block; anything else stays a rule |
-| Emoji shortcodes `:+1:` | Supported | `crates/core/src/emoji.rs`: all 1913 GitHub (gemoji) shortcodes, generated into `emoji_table.rs` by `crates/core/tools/gen_emoji.py` and looked up by binary search; replaced in running text only, case-sensitive, unknown names and GitHub's image-only ones (`:octocat:`, `:shipit:`) stay as typed |
-| `<kbd>`, `<mark>`, `<code>`, `<tt>`, `<samp>`, `<var>`, `<cite>`, `<dfn>` | Supported | |
+| Emoji shortcodes `:+1:` | Supported | `crates/core/src/emoji.rs`: all 1913 GitHub (gemoji) shortcodes, generated into `emoji_table.rs` by `crates/core/tools/gen_emoji.py` and looked up by binary search; replaced in running text only, case-sensitive, unknown names and GitHub's image-only ones (`:octocat:`, `:shipit:`) stay as typed. Drawn with the system colour emoji font |
+| `<kbd>`, `<code>`, `<tt>`, `<samp>`, `<var>`, `<cite>`, `<dfn>` | Supported | `<kbd>` draws like inline code (monospace on a tinted box), without GitHub's key border |
+| `<mark>` | Supported | A yellow highlight behind the text, GitHub's attention colour in each theme |
 | `<p>`, `<div>`, `<center>`, HTML tables and lists | Supported | Inside a table cell or a paragraph as well: see the known gaps for the differences |
-| `align` on blocks, `<img>`, `<table>`, `<tr>`, `<hr>` | Supported in model | Includes `justify`. On an image: left, right, top, middle, bottom. Drawing in Phase 2 |
-| `dir` on HTML blocks | Supported in model | `ltr`, `rtl`, `auto`. Drawing in Phase 2. GitHub also marks every paragraph `dir="auto"`, which is for the Phase 2 renderer to match |
-| `width`, `height`, `valign` on tables, rows, cells, `<hr>`; `type` on lists and items | Supported in model | Through `Document::attrs_of`. Drawing in Phase 2. A length follows the HTML rule: digits, an optional fraction, and `%` only when it comes immediately, so `10em` is 10 while `+5` and `.5` are no length. Pixels stop at 12000 |
-| `colspan`, `rowspan` | Supported in model | Clamped to 1-1000 and 1-65534 as a browser does, except that `rowspan="0"` means 1 and not the rest of the section. A leading `+` is accepted |
-| `<img>` with width and height | Supported in model | Clamped to 2000 on both axes together, keeping the ratio, as GitHub does. A percentage is left alone |
-| `<img>` with no usable `src` | Supported in model | Keeps its alt text, as on GitHub |
+| `align` on paragraphs, headings, `<div>`, `<center>`, figures and cells | Supported | `left`, `center`, `right` and `justify`; a `<div align>` or `<center>` aligns the Markdown inside it. `justify` stretches every line but the last |
+| `align` on `<hr>` | Supported | With `width`, places the rule at the left (the default, as on GitHub, whose CSS overrides the browser's centring), centre or right |
+| `align` on `<table>` and `<tr>` | Model only | Kept in `Document::attrs_of`, not drawn: the table still fills the column and a row's cells keep their own alignment |
+| `align` on `<img>` | Model only | `left`, `right`, `top`, `middle`, `bottom` are kept in `ImageInfo::align`, not drawn: the image sits inline on the baseline, with no float and no vertical alignment |
+| `dir` on HTML blocks | Model only | `ltr`, `rtl`, `auto` are kept but the renderer does not read them. Each paragraph takes its direction from its own first strong character, which is what GitHub's `dir="auto"` does, so an Arabic paragraph is right-aligned with or without `dir`. An explicit `dir` that disagrees with the text has no effect: `<p dir="rtl">Latin</p>` stays at the left |
+| `width` on `<hr>` | Supported | Pixels or a percentage of the column |
+| `width`, `height`, `valign` on tables, rows, cells | Model only | Through `Document::attrs_of`, not drawn: columns are sized from their content, rows from their tallest cell, and cell text sits at the top. A length follows the HTML rule: digits, an optional fraction, and `%` only when it comes immediately, so `10em` is 10 while `+5` and `.5` are no length. Pixels stop at 12000 |
+| `type` on `<ol>`, `<ul>` and `<li>` | Supported | `a`, `A`, `i`, `I`, `1` on ordered lists and items; `disc`, `circle`, `square` on unordered ones |
+| `colspan`, `rowspan` | Supported | Clamped to 1-1000 and 1-65534 as a browser does, except that `rowspan="0"` means 1 and not the rest of the section. A leading `+` is accepted |
+| `<img>` with width and height | Supported | Clamped to 2000 on both axes together, keeping the ratio, as GitHub does. With one of the two, the other follows the image's ratio. A width wider than the column shrinks to it. A percentage width is of the column; a percentage height is ignored |
+| `<img>` with no usable `src` | Supported | Keeps its alt text, as on GitHub |
 | Raw `<input>` outside a task list | Supported | Ignored, as GitHub's sanitizer removes it; a Markdown task box still draws |
 | `<dl>`, `<dt>`, `<dd>` | Supported | `<dt>` is a `DefTerm` block drawn bold; `<dd>` a `DefDesc` block indented 16 px with 16 px between groups; either end tag may be omitted. Inline and block Markdown inside both works |
 | `<figure>`, `<figcaption>` | Supported | `Figure { align }` holds its content left-aligned as on GitHub, or centred with `align="center"`; the caption is a `FigCaption` block in muted text at 0.9 size. GitHub's default 40 px side margin on a figure is not drawn |
-| `<section>`, `<article>`, `<aside>`, `<header>`, `<footer>`, `<main>`, `<nav>`, `<address>`, `<caption>` | Supported as plain blocks | |
+| `<section>`, `<article>`, `<aside>`, `<header>`, `<footer>`, `<main>`, `<nav>`, `<address>` | Supported as plain blocks | |
+| `<caption>` | Supported as a plain block | Inside a `<table>` it gets an implied cell, so it draws as the table's first row inside the border, at the left, not centred above the table as on GitHub |
 | `<small>`, `<q>` | Supported | `<small>` draws at the small size; `<q>` between curly quotes (`SpanKind::Small`/`Quote`) |
-| `<ruby>` with `<rt>`/`<rp>` | Supported | `SpanKind::Ruby` and `RubyNote`. Each annotation is drawn at half size, centred above its base, in a band the line is made taller by; `<rp>` text is dropped. The annotation text stays in the document text, so find, selection and copy read `base+annotation`-style (base then annotation). Limits: an annotation wider than its base overhangs its neighbours instead of pushing them apart, a base that wraps is annotated on its first line, and a ruby that starts mid-word may let a line break between the two halves |
+| `<ruby>` with `<rt>`/`<rp>` | Partly drawn | `SpanKind::Ruby` and `RubyNote`. Each annotation is drawn at half size, centred above its base, in a band the line is made taller by; `<rp>` text is dropped. The annotation text stays in the document text, so find, selection and copy read `base+annotation`-style (base then annotation). Limits: an annotation wider than its base overhangs its neighbours instead of pushing them apart, a base that wraps has its whole annotation centred over its first line only, half-size text is small to read, and a ruby that starts mid-word may let a line break between the two halves |
 | `<abbr>`, `<bdo>`, `<time>` and similar | Text only | Text is kept without the styling (no tooltip, dotted underline or direction override) |
 | Inline CSS `style=` | Excluded | GitHub strips it too |
-| `hspace` on images; `cellpadding`, `cellspacing` on tables; `nowrap` on cells | Excluded | GitHub keeps these and the model drops them. Spacing only. Worth adding if the Phase 2 corpus shows them |
+| `hspace` on images; `cellpadding`, `cellspacing` on tables; `nowrap` on cells | Excluded | GitHub keeps these and the model drops them. Spacing only. Worth adding if real documents show them |
 | `<li value>` | Excluded | GitHub keeps it; numbering here ignores it |
 | `align`, `valign` on `<thead>`, `<tbody>`, `<tfoot>`; `dir` on `<span>` | Excluded | GitHub keeps these, but those tags leave no node in the model to hold them. Text is kept. `<tr>` and cells do carry them |
 | Script, style, iframe | Never run | Shown as literal text, as GitHub's tag filter does: `<style>.a {}</style>` reads as itself. Nothing here executes or loads either way |
 | `object`, `embed`, `head`, `template` | Supported | The tag is dropped and its children are kept, as on GitHub, so an `<object>` fallback and its link still show |
-| Image `width`, `height` | Supported in model | |
 
 ## Things that only make sense on GitHub
 
@@ -121,7 +129,7 @@ theme, on this Windows host.
 | timeline | Enabled | 69 ms | Fixed-grid layout, so it takes 16 px text; labels forced dark on the pastel light-theme boxes |
 | journey | Enabled | 62 ms | 20 px text (150-unit boxes are scaled to the page); fallback labels inlined at their `<use>` offset; dark title recoloured |
 | gitGraph | Enabled | 36 ms | Dark commit labels are dim grey on dark, readable but low contrast (borderline) |
-| C4 (context, container, component, dynamic, deployment) | Enabled | 63 ms | Dark relationship lines and labels recoloured; the title is small |
+| C4 (context, container, component, dynamic, deployment) | Enabled | 63 ms | Dark relationship lines and labels recoloured; the title and the element descriptions are small |
 | sankey | Enabled | 58 ms | |
 | xychart | Enabled | 47 ms | Light-theme bars are very pale (default palette) |
 | quadrantChart | Enabled | 42 ms | Dark point colour set so dots show |
@@ -129,19 +137,19 @@ theme, on this Windows host.
 | block | Enabled | 32 ms | Small at its natural size |
 | packet | Enabled | 40 ms | Small text at its natural size; dark byte numbers and title recoloured |
 | kanban | Enabled | 38 ms | Needed the multi-line label fix (a wrapped card lost its second line) |
-| radar | Enabled | 68 ms | Dark graticule bands are bright grey, curves are readable |
+| radar | Enabled | 68 ms | Dark graticule rings and axis lines recoloured to a dim grey; the title is small |
 | treemap | Enabled | 62 ms | Section captions are small; white leaf text on a pale fill in light theme (borderline) |
 | ishikawa | Enabled | 41 ms | |
 | treeView | Enabled | 29 ms | No font named, so it takes the sans stack; dark label and line colours set |
 | venn | Enabled | 50 ms | |
-| useCase | Enabled | 35 ms | Labels start at the left edge of the ellipse (borderline) |
-| zenuml | Enabled | 34 ms | Draws as a white card in dark theme; text stays readable |
+| useCase | Enabled | 35 ms | Label groups lose merman's left shift (`centre_label_groups`), so each label is centred in its ellipse |
+| zenuml | Enabled | 34 ms | Its fixed light stylesheet is recoloured for dark theme (dark card, light text and lines); participant labels drawn at 14 px to fit boxes measured for a narrower font |
 | cynefin | Enabled | 81 ms | The dashed boundary crosses the "Confusion" caption (borderline) |
 | eventModeling | Enabled | 41 ms | Dark lane titles recoloured |
 | agentFlow | Enabled | 31 ms | |
 | swimlane | Enabled | 33 ms | |
 | railroad (all four dialects) | Enabled | 47 ms | The IR dialect needs exact `terminal(...)` syntax; a malformed one falls back to source |
-| architecture | **Excluded** | | Needs the Cytoscape layout (`layout-cytoscape`); without it merman fails, the block keeps its source |
+| architecture | **Excluded** | | Needs the Cytoscape layout (`layout-cytoscape`); without it merman fails, so an `architecture-beta` block keeps its source in a code box labelled `mermaid` |
 | wardley | **Excluded** | | Text about 5 px tall at its natural size and the "Business" anchor label stays black on the dark page |
 | info | **Excluded** | | Only prints the merman version; no value in a document |
 | flowchart and class `elk` layouts | **Excluded** | | ELK is EPL-2.0 (`layout-elk` is off) |
@@ -153,18 +161,23 @@ theme, on this Windows host.
 - GitHub-only features: `@mentions`, issue refs, commit SHAs, custom autolinks, issue and PR task state, code permalink snippets, video and asset players, colour chips, GeoJSON and TopoJSON maps, ASCII STL models.
 - Inline CSS `style=`, `hspace`, `cellpadding`, `cellspacing`, `nowrap`, `<li value>`, `align` and `valign` on table sections, `dir` on `<span>`.
 
-**Planned, not built yet:**
+**In the model, not drawn yet** (rows marked Model only above):
 
-- Phase 2: the renderer, so nothing has been seen on screen. Also front matter, emoji shortcodes, and `<ruby>`, `<abbr>`, `<small>`, `<q>`, `<bdo>`, `<time>` styling.
-- Phase 3: the Qt shell and file watcher.
-- Phase 4: math, Mermaid and SVG drawing, syntax highlighting, and the `` $`..`$ `` math form.
-- Phase 5: the WinUI shell. Only a test skeleton exists.
+- `dir` on HTML blocks, beyond the direction each paragraph takes from its own text.
+- `align` on `<table>`, `<tr>` and `<img>` (no float, no vertical alignment in the line).
+- `width`, `height` and `valign` on tables, rows and cells.
 
-**Decided, work left for later phases:**
+**Drawn with limits** (rows marked Partly drawn above, and notes elsewhere):
 
-- Footnote definitions stay where they were written in the model; core does not move them. The Phase 2 renderer draws the end-of-document list in order of first reference and skips `FootnoteDefinition` blocks in flow, and does not draw unreferenced ones (number 0). Until then find and the block order see mid-file and unreferenced definitions.
+- Syntax highlighting covers syntect's bundled languages only; TypeScript and TOML, among others, stay plain.
+- `<ruby>` annotations are half size and sit over the base's first line only.
+- `<figure>` has no 40 px side margin; `<caption>` draws as a table row.
+- GIF and animated WebP show their first frame.
+- An `architecture-beta` Mermaid block keeps its source. Packet and C4 diagram text is small at its natural size.
+- A math or diagram block that cannot be drawn shows its source with a `math` or `mermaid` label, but no reason.
+- `<abbr>`, `<bdo>` and `<time>` keep their text without styling.
 
-**Known defects:** the fixes from [AUDIT_PHASE1.md](AUDIT_PHASE1.md) are in `phase1-audit-fixes`. What remains differs from GitHub in the known gaps below, and each gap says what GitHub does.
+**Known defects:** the fixes from [AUDIT_PHASE1.md](AUDIT_PHASE1.md) are on `main`. What remains differs from GitHub in the known gaps below, and each gap says what GitHub does.
 
 ## Known gaps in what is claimed as supported
 
@@ -177,7 +190,8 @@ theme, on this Windows host.
 - Content where a table or list has no room for it stays in document order, so its text and order are kept but its place is not GitHub's. Stray text or inline HTML in a `<table>` or `<tr>` gets an implied cell, where GitHub moves it before the table; a stray `<br>` or `<img>` there keeps a cell of its own with the break or picture, and a link wrapped around a `<td>` stays on the cell's text. Stray content in a `<ul>` or `<ol>` gets an item with no marker (`ListMarker::None`), where GitHub leaves it bare in the list. A lone `<td>` or `<tr>` drops the tag and keeps the text as on GitHub; a lone `<li>` gets a list around it, which is the model's choice and GitHub does not wrap it.
 - GitHub autolinks the raw source, so inside a bare URL it doesn't decode an entity: `http://a.b/c&amp;d` shows `&amp;` literally and links to that, and `http://a.b/c&#35;` ends the link before the `;`. Here the entity is decoded and stays in the link. A URL ending in a letter-only named entity does trim as on GitHub; `&nbsp;` and `&lt;` end a link here where GitHub keeps going, and a digit-bearing name such as `&frac12;` does not trim because GitHub's rule stops at anything but letters.
 - Alerts still differ from GitHub in these cases. A marker that is not on the quote's first line, as in `> ` (blank) or `> <!-- c -->` followed by `> [!NOTE]`, stays a plain quote here and is an alert there. An alert marker that is also a reference label (`[!NOTE]: /u`) stays an alert here and becomes a plain quote with a link there. A footnote definition directly under a marker rejects the alert on both, but the definition's text stays in the model here (GitHub draws no unreferenced definition).
-- Footnote definitions are not moved. GitHub collects them into one list at the end of the document in order of first reference, lifts them out of quotes, and hides unreferenced ones. Here each stays where it was written, in source order and inside its container, and an unreferenced one keeps its text with number 0. Find and the block order therefore see text a reader will not see in Phase 2. See "Decided, work left for later phases".
+- Footnote definitions are drawn as GitHub does: one list at the end in order of first reference, out of any quote, with unreferenced ones hidden. The model does not move them, though: each stays where it was written, in source order and inside its container, and an unreferenced one keeps its text with number 0. Find works on the model's text, so it counts a match inside an unreferenced definition that is not drawn, and it orders matches in a mid-file definition by where the definition was written rather than where the list draws it.
+- Find hides the source of every math and diagram block whose size is within the limit, on the assumption that a picture is drawn over it. A block the engine cannot draw (an `architecture-beta` diagram, a diagram merman rejects, TeX that does not parse) shows its source, but find still skips that text.
 - Block containers nested over 256 deep add no block, so their content joins the deepest one with its text kept. Tables and lists at that depth lose their structure, keeping cell and item text as separate lines. The real bound is five levels past that for an implied row, its cell and a leaf inside. GitHub keeps going.
 - Find stops at 64 character comparisons per byte of text and marks its count with `+`. A query up to 64 characters can't reach this, and a longer one reaches it when enough of the file nearly matches it: a 300-character query on a file about a quarter made of a run of its first character misses a real hit and reports `capped`. The flag is set, so the result is incomplete rather than silently wrong; the shell must show it that way. A query containing a line break matches wrapped text (a CRLF pair counts as one break), but a selection from inside a code block or across two paragraphs still never matches.
 - HTML nested over 512 elements deep ignores the deeper tags and keeps their text. Repeats of one inline tag left open across blocks count once, so `<i><i>` needs one `</i>`. Past one re-opened span per 4 bytes of input, unclosed tags stop carrying over and the document shows a warning.
