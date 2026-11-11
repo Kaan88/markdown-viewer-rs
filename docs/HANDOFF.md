@@ -7,6 +7,10 @@
 > (`bins/mdv-winui`), its installer script and build script live on the `winui-archive` branch;
 > sections about WinUI below are history. The Windows installer is
 > `packaging/windows/mdview-qt.iss`, built by `packaging/windows/build-installer-qt.ps1`.
+>
+> **Next direction: a lighter shell than Qt.** fltk-rs and winit + softbuffer mockups are compiled
+> and measured; Slint was tried and rejected for its text. Why, the numbers and the next steps are
+> in `docs/PLAN.md` ("Next: a lighter shell than Qt") and section 28 below.
 
 This document is the current state: what works, how to build and check it, the traps already found,
 and what to do next. `docs/PLAN.md` is the full plan (budgets, phases, gates). Read this file first,
@@ -1170,3 +1174,37 @@ silent per-user install put both exes in `%LOCALAPPDATA%\Programs\mdview`, wrote
 user's `.md` default and other handlers alone; the installed app opened a file through the
 registered command; the silent uninstall removed every key, the files and the shortcut. Not run:
 the wizard pages, the runtime download branch, an upgrade over an older version.
+
+## 28. Shell after WinUI: lighter candidates compiled (2026-11-11)
+
+On the physical Windows PC, after WinUI was retired and Qt became the only shell.
+
+**Also done that day, before this:** both shells remember which side panes are open
+(`layout=files=1;outline=0`) and the window size and maximized state (`geometry=WxH [max]`) through
+`Session::panes`, `set_panes`, `window_size`, `set_window_size` (core tests added); the Qt Files
+tree reads only expanded folders (click a folder row to expand it); no console window for the Qt
+release build; a Qt installer (`mdview-qt.iss`, `build-installer-qt.ps1`: windeployqt output plus
+the MSVC runtime app-local, its own ProgId `mdview-qt.Markdown` and registered app) is on the
+v0.1.0 pre-release, which no longer carries the WinUI installer. Installed, launched with Qt off
+PATH, uninstalled clean. The newest installer build was not reinstalled.
+
+**Mockups.** `spikes/shell-fltk`, `spikes/shell-slint`, `spikes/shell-soft`, each its own workspace
+with its own `target/`. All three render layout A; results, reasons and the decision are in PLAN
+("Next: a lighter shell than Qt"). Building:
+
+- fltk: from a `vcvars64.bat` shell, `cargo build --release` in `spikes/shell-fltk` (ninja and
+  cmake from Python's Scripts folder were on PATH).
+- softbuffer: `cargo build --release` in `spikes/shell-soft`; it depends on `crates/render` by path.
+- Slint: `cargo build --release` in `spikes/shell-slint` (now set to `renderer-skia`).
+
+Run each exe from its spike folder: they load `../look-shared/content-dark@1.0.png` relative to
+the working directory. `MOCKUP_TRACE=1` prints the first-frame time.
+
+**What the user said:** liked the look of all three once styled; disliked the text of Slint
+(software: blurry; Skia: "horrible, fringed") and of the first softbuffer build (fontdue).
+Softbuffer with the project's text engine was rebuilt for their review; no verdict yet on it versus
+fltk.
+
+**Measured, how:** exe size from the release file; private memory and working set from
+`Get-Process` about 3 s after launch, one run each, 100% scaling, dark; first frame from
+`MOCKUP_TRACE`. The memory figures are from one run each and are not medians.

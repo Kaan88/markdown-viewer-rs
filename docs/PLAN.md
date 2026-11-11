@@ -185,19 +185,55 @@ Each gate records real numbers in `spikes/RESULTS.md`.
 
 Commits go to the private repo as phases complete. No CI is set up.
 
-### Later: a lighter shell than Qt
+### Next: a lighter shell than Qt (decided direction, 2026-11-11)
 
-WinUI was retired on 2026-11-11 (archived on the `winui-archive` branch), and Qt is now the only
-shell. Qt's runtime is about 37 MB of DLLs on Windows. If the size or memory budgets matter more
-later, these three options are lighter, listed from most widgets to least. The figures are typical
-values from memory, not measured here. A spike in `spikes/` should show `showcase.md` with each one
-and record exe size, private memory and first frame against Qt before anything is chosen.
+**Why.** The user wants the lightest possible native shell. Both shells built so far are heavy
+for a read-only viewer:
 
-| Option | What it is | Rough size / memory | Cost |
-|---|---|---|---|
-| **fltk-rs** (preferred) | FLTK, a small C++ toolkit, statically linked into one exe. Tabs, tree, menus, input, dialogs and drag and drop are built in; the renderer draws into one canvas widget, as it does in Qt. | +1.5-3 MB, ~10-20 MB | Dated look unless styled. It is C++, but none is authored here (the same trade as Qt). |
-| **Slint** (software renderer) | Declarative UI with a modern look. | a few MB | Heavier than fltk; licence (GPL, royalty-free or commercial) needs checking. |
-| **winit + softbuffer** | A window, input and a pixel buffer, all pure Rust with no GPU. The renderer also draws the chrome: tabs, bar, panes, menus and scrollbar. `rfd` for file dialogs, `arboard` for the clipboard. | ~2-4 MB, ~15-30 MB | Every widget is hand-written: find-box editing, menus, tree, focus, keyboard navigation, accessibility. |
+- **WinUI 3** (retired, on `winui-archive`): about 383 ms to first frame and about 180 MiB private
+  memory for an empty window (HANDOFF section 27), against PLAN's 50-90 MB. It needs the Windows App
+  Runtime installed system-wide, Windows only, and hand-generated and hand-trimmed bindings.
+- **Qt 6** (current): about 37 MB of Qt and MSVC runtime DLLs next to the exe on Windows, a CXX-Qt
+  build that needs `QMAKE`, `CMAKE_PREFIX_PATH` and a short `TEMP`, no SVG module in this Qt install
+  (icons are rendered to PNG first), and a large style sheet to make it look modern. Qt release
+  memory and first frame have not been measured side by side with the candidates yet.
+
+**Candidates, compiled and run on the Windows PC** (`spikes/shell-fltk`, `shell-slint`,
+`shell-soft`; screenshots in `spikes/shell-mockups/`). Each is a working layout A mockup: title row
+with tabs, command bar, Files pane, page, Outline pane, dark theme, Segoe UI and Segoe Fluent
+Icons, hover and press fills, pane toggles, tab and row selection, wheel scrolling, an overlay
+scrollbar that widens on hover, a typing find box. The page is the stand-in image from
+`spikes/look-shared`, not the current renderer. Single release runs at 100% scaling:
+
+| | exe | private memory | first frame | UI text |
+|---|---|---|---|---|
+| **fltk-rs** 1.5.23 | 1.16 MB, one file | 9.5 MB | 43 ms | GDI + ClearType (native Windows look) |
+| **winit 0.30 + softbuffer 0.4** | 2.65 MB | 14.7 MB | 51 ms | `mdview_render::TextEngine` through parley: the page's own text path |
+| Slint 1.18, software renderer | 10.5 MB | 13.6 MB | 20 ms | blurry: grey-only, little hinting. Rejected by the user |
+| Slint 1.18, Skia renderer | 18.8 MB | 321 MB (GPU), 80.5 MB (`SLINT_BACKEND=winit-skia-software`) | 17 ms | colour fringes. Rejected by the user ("horrible, fringed") |
+
+The first softbuffer build used fontdue (grey, unhinted, no gamma): 0.71 MB but 62.9 MB private
+and soft text, which the user also disliked. Switching to the project's text engine fixed both.
+
+**Decision so far:** Slint is out (text quality cannot be configured: blurry in software, fringed
+in Skia, and heavy with Skia). Two candidates remain:
+
+- **fltk-rs (preferred if widgets matter):** real text box, menus, tree, dialogs and drag and drop
+  for free; one small exe with no DLLs. FLTK's stock widgets look dated, so the mockup draws its own
+  buttons, tabs and rows in `draw` callbacks and keeps FLTK's `Input` for the find box. Needs the
+  MSVC environment (`vcvars64.bat`) and CMake to build; it is C++ but none is authored here.
+- **winit + softbuffer:** pure Rust and the only option where UI text matches the page exactly.
+  Every widget is hand-written (text editing, menus, tree, focus, keyboard, accessibility). The
+  mockup handles only 100% scaling.
+
+**Not solved in any mockup:** the native caption stayed dark grey; DWM attributes 35/36 (fltk) and
+winit's `with_title_background_color` (softbuffer, Slint) did not colour it on Windows 11 build
+26300. Light theme, DPI above 100%, menus, dialogs, the real renderer and Linux were not tried.
+
+**Next steps:** have the user pick between fltk-rs and winit + softbuffer by running both
+(`spikes/shell-mockups/README.md` has the commands); then put the real `mdview_render` page into
+the chosen mockup, measure it against Qt release (exe, private memory, first frame, 1 MB scroll),
+and only then port the shell. Qt stays the shipping shell until the replacement reaches parity.
 
 Not considered, because they are heavier: egui/eframe (redraws every frame, usually a GPU context),
 iced (wgpu), GTK4 (a large runtime on Windows). Tauri is ruled out because it is a webview.

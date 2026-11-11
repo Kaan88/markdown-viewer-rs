@@ -1,0 +1,24 @@
+[package]
+name = "shell-slint"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "GPL-3.0-only"
+
+[workspace]
+
+[dependencies]
+slint = { version = "=1.18.1", default-features = false, features = [
+  "std",
+  "compat-1-2",
+  "backend-winit",
+  "renderer-skia",
+  "unstable-winit-030",
+] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+panic = "abort"
+strip = "debuginfo"
