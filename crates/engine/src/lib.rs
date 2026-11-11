@@ -114,6 +114,12 @@ pub fn render_mermaid(
     max_pixels: u64,
     options: &resvg::usvg::Options,
 ) -> Result<Image, String> {
+    let svg = mermaid_page_svg(source, dark)?;
+    render_svg_at(svg.as_bytes(), scale, max_pixels, options)
+}
+
+/// The SVG of a Mermaid diagram as the page draws it: themed, with labels resvg can draw.
+fn mermaid_page_svg(source: &str, dark: bool) -> Result<String, String> {
     // Mermaid defaults to HTML labels in `foreignObject`, which resvg cannot draw; its SVG text
     // fallback positions some families inside the node but shifts class, ER and mindmap labels off
     // the left edge. Asking for native text labels avoids both problems. The directive comes
@@ -130,10 +136,9 @@ pub fn render_mermaid(
     let svg = settle_gantt_ticks(&source, mermaid_svg(&source)?)?;
     let svg = inline_label_uses(&svg);
     let svg = family_svg_fix(svg, diagram_keyword(&source), dark);
-    // Families that name no font (tree view) would get usvg's serif default. A root attribute loses to any font the diagram's own CSS names, so styled families are
-    // untouched.
-    let svg = svg.replacen("<svg ", "<svg font-family=\"Segoe UI, sans-serif\" ", 1);
-    render_svg_at(svg.as_bytes(), scale, max_pixels, options)
+    // Families that name no font (tree view) would get usvg's serif default. A root attribute
+    // loses to any font the diagram's own CSS names, so styled families are untouched.
+    Ok(svg.replacen("<svg ", "<svg font-family=\"Segoe UI, sans-serif\" ", 1))
 }
 
 /// The first word of the diagram, after blank lines and `%%` directives or comments.
@@ -155,10 +160,43 @@ fn family_svg_fix(svg: String, keyword: &str, dark: bool) -> String {
     if keyword == "treeView-beta" {
         return widen_viewbox(svg, 30.0);
     }
+    let svg = match keyword {
+        "usecase-beta" | "usecase" | "useCase" => centre_label_groups(svg),
+        // Participant boxes are measured for a narrower font than the one that draws them.
+        "zenuml" => svg.replace(
+            ".participant-label{font-family:Helvetica,Verdana,serif;font-size:16px",
+            ".participant-label{font-family:Helvetica,Verdana,serif;font-size:14px",
+        ),
+        _ => svg,
+    };
     if !dark {
         return svg;
     }
     match keyword {
+        // The rings are a light grey wash, which turns the dark page muddy.
+        "radar-beta" | "radar" => svg
+            .replace(
+                ".radarGraticule{fill:#DEDEDE;fill-opacity:0.3;stroke:#DEDEDE;",
+                ".radarGraticule{fill:#c8d0da;fill-opacity:0.04;stroke:#5b6470;",
+            )
+            .replace(
+                ".radarAxisLine{stroke:lightgrey;stroke-width:2;",
+                ".radarAxisLine{stroke:#5b6470;stroke-width:1;",
+            ),
+        // ZenUML carries one fixed light stylesheet and takes no theme variables.
+        "zenuml" => svg
+            .replace("fill:#fff}", "fill:#2b2b2b}")
+            .replace("fill:#fff;", "fill:#2b2b2b;")
+            .replace("fill:#222", "fill:#e4e4e4")
+            .replace("color:#222", "color:#e4e4e4")
+            .replace("fill:#333", "fill:#e4e4e4")
+            .replace("fill:#000", "fill:#c8d0da")
+            .replace("stroke=\"#000\"", "stroke=\"#c8d0da\"")
+            .replace("stroke:#000", "stroke:#c8d0da")
+            .replace("fill:#666", "fill:#9aa4b2")
+            .replace("stroke:#666", "stroke:#9aa4b2")
+            .replace("fill:#dedede", "fill:#4b5563")
+            .replace("fill:#fff5ad", "fill:#4a4630"),
         "packet-beta" | "packet" => svg
             .replace(
                 ".packetByte.start{fill:black;}",
@@ -181,6 +219,32 @@ fn family_svg_fix(svg: String, keyword: &str, dark: bool) -> String {
             .replace("stroke=\"#444444\"", "stroke=\"#c8d0da\""),
         _ => svg,
     }
+}
+
+/// Use-case labels sit in a group shifted left by half the label box, as for a start-anchored
+/// HTML label, while the text inside is centred as well, which leaves it hanging off the left of
+/// its shape. This drops the group's horizontal shift so the centred text lands on the shape.
+fn centre_label_groups(svg: String) -> String {
+    const OPEN: &str = "<g class=\"label";
+    const SHIFT: &str = "transform=\"translate(";
+    let mut out = String::with_capacity(svg.len());
+    let mut rest = svg.as_str();
+    while let Some(at) = rest.find(OPEN) {
+        let tag_end = at + rest[at..].find('>').unwrap_or(rest.len() - at);
+        let tag = &rest[at..tag_end];
+        match tag.find(SHIFT).map(|i| i + SHIFT.len()) {
+            Some(x) if tag[x..].contains(',') => {
+                let comma = x + tag[x..].find(',').unwrap_or(0);
+                out.push_str(&rest[..at + x]);
+                out.push('0');
+                out.push_str(&rest[at + comma..tag_end]);
+            }
+            _ => out.push_str(&rest[..tag_end]),
+        }
+        rest = &rest[tag_end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Grows the root `viewBox` width by `extra` user units.
@@ -228,6 +292,18 @@ fn family_init(init: &str, keyword: &str, dark: bool) -> String {
             "",
         ),
         ("quadrantChart", true) => ("11px", r##","quadrantPointFill":"#e4e4e4""##, ""),
+        // The stock dark scale starts near black, so sections vanish into the page.
+        ("treemap-beta" | "treemap", true) => (
+            "11px",
+            r##","cScale0":"#4b5d7a","cScale1":"#6b4f8a","cScale2":"#3f7f7f","cScale3":"#8a6d3b","cScale4":"#7a4b4b","cScale5":"#4b7a52","cScale6":"#5b6b82","cScale7":"#7c5c8a","cScale8":"#2f6f6f","cScale9":"#8a6d3b","cScale10":"#7a4b4b","cScale11":"#4b7a52""##,
+            "",
+        ),
+        // Curves are drawn half transparent over each other, so they need bright, distinct hues.
+        ("radar-beta" | "radar", true) => (
+            "11px",
+            r##","cScale0":"#6aa9ff","cScale1":"#f59e6b","cScale2":"#7bd389","cScale3":"#d58cf0","cScale4":"#f2d16b","cScale5":"#6fd3d3","cScale6":"#f28b9b","cScale7":"#a5b4fc","cScale8":"#b7e07a","cScale9":"#e0a36b","cScale10":"#8fd0f0","cScale11":"#e6a8d7""##,
+            "",
+        ),
         _ => return init.to_string(),
     };
     let mut out = init.replacen(
@@ -623,6 +699,25 @@ mod tests {
             }
         }
         found
+    }
+
+    /// Not a test: writes each fixture diagram's final SVG to `target/tmp/mermaid-svg`, for
+    /// working on the per-family fixes. `cargo test -p mdview-engine dump_svgs -- --ignored`
+    #[test]
+    #[ignore]
+    fn dump_svgs() {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/tmp/mermaid-svg");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, source) in more_diagrams() {
+            for dark in [false, true] {
+                if let Ok(svg) = super::mermaid_page_svg(&source, dark) {
+                    let theme = if dark { "dark" } else { "light" };
+                    let name = name.replace([' ', ':', '(', ')'], "");
+                    std::fs::write(dir.join(format!("{name}-{theme}.svg")), svg).unwrap();
+                }
+            }
+        }
     }
 
     #[test]
