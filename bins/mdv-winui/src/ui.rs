@@ -72,7 +72,57 @@ pub fn set_incoming(receiver: std::sync::mpsc::Receiver<PathBuf>) {
     INCOMING.with(|cell| *cell.borrow_mut() = Some(receiver));
 }
 
+/// The UI thread's dispatcher queue, set once the window exists; `wake` posts to it.
+static QUEUE: std::sync::OnceLock<DispatcherQueue> = std::sync::OnceLock::new();
+
+/// The clipboard and drag format id of files and folders (`StandardDataFormats.StorageItems`).
+const STORAGE_ITEMS: &str = "Shell.StorageItems";
+
+/// Opens what was dropped on the window: folders in the Files pane, files in tabs.
+fn open_dropped(paths: &[PathBuf]) {
+    let Some(shell) = SHELL.with(|cell| cell.borrow().clone()) else {
+        return;
+    };
+    diag::trace(&format!("dropped {} item(s)", paths.len()));
+    for path in paths {
+        if path.is_dir() {
+            shell.open_folder(path, true);
+        } else if shell.open(path) {
+            shell.show();
+        }
+    }
+}
+
+/// Runs `f` on the UI thread after the current event has finished.
+fn later(f: impl Fn() + 'static) {
+    let Some(queue) = QUEUE.get() else {
+        f();
+        return;
+    };
+    let handler = DispatcherQueueHandler::new(f);
+    if let Ok(queue) = queue.cast::<IDispatcherQueue>() {
+        _ = queue.TryEnqueueWithPriority(DispatcherQueuePriority::Normal, &handler);
+    }
+}
+
+/// Asks the UI thread to look at incoming files and changed files. Called from the file watcher and
+/// the single-instance listener threads; does nothing before the window exists (the first pass in
+/// `build` picks up anything that arrived earlier).
+pub fn wake() {
+    let Some(queue) = QUEUE.get() else {
+        return;
+    };
+    let handler =
+        DispatcherQueueHandler::new(|| unsafe { poll_timer(std::ptr::null_mut(), 0, 0, 0) });
+    if let Ok(queue) = queue.cast::<IDispatcherQueue>() {
+        _ = queue.TryEnqueueWithPriority(DispatcherQueuePriority::Normal, &handler);
+    }
+}
+
 thread_local! {
+    /// The OS file watcher for the open tabs' files (`mdview_core::watch`); `None` if it could not
+    /// start, and then a 2 s poll runs instead.
+    static WATCHER: RefCell<Option<mdview_core::watch::FileWatcher>> = const { RefCell::new(None) };
     /// A folder to show in the Files pane at start (`--folder`), instead of the saved one.
     static START_FOLDER: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// Paths later launches sent to this window; drained by the poll timer.
@@ -472,6 +522,15 @@ impl Shell {
                 }
                 if ctrl && shift && wparam == 0x46 {
                     self.toggle_focus();
+                    return true;
+                }
+                // Ctrl+Shift+1 / 2: the Files and Outline panes (core's FILES / ON THIS PAGE).
+                if ctrl && shift && wparam == 0x31 {
+                    self.toggle_files();
+                    return true;
+                }
+                if ctrl && shift && wparam == 0x32 {
+                    self.toggle_outline();
                     return true;
                 }
                 if ctrl && wparam == 0x46 {
@@ -1380,6 +1439,13 @@ impl Shell {
     fn save_session(&self) {
         self.sync_order();
         refresh_recent(self);
+        // Called after every open, close and move, so it also re-aims the file watcher.
+        WATCHER.with(|cell| {
+            if let Some(watcher) = cell.borrow_mut().as_mut() {
+                let pages = self.pages.borrow();
+                watcher.set_files(pages.iter().map(|page| page.path.as_path()));
+            }
+        });
         let mut session = self.session.borrow_mut();
         let Some((path, session)) = session.as_mut() else {
             return;
@@ -1746,6 +1812,11 @@ fn read_document(path: &Path) -> std::result::Result<mdview_core::Document, Stri
 /// Every 800 ms: open files later launches sent, and reload the showing file when it changed on
 /// disk (keeping the scroll offset).
 unsafe extern "system" fn poll_timer(_: *mut c_void, _: u32, _: usize, _: u32) {
+    WATCHER.with(|cell| {
+        if let Some(watcher) = cell.borrow().as_ref() {
+            watcher.woken();
+        }
+    });
     if let Some(shell) = SHELL.with(|cell| cell.borrow().clone()) {
         let sent: Vec<PathBuf> = INCOMING.with(|cell| {
             cell.borrow()
@@ -2050,6 +2121,115 @@ fn refresh_outline(shell: &Shell) {
     shell.outline_entries.set(headings.len());
 }
 
+/// Manage recent files: every entry with Open and Remove, and Clear list. The list is rebuilt in
+/// place after each change, and the session is saved, so the Recent menu follows.
+fn show_manage_recent(shell: &Rc<Shell>) {
+    use crate::bar_bindings as b;
+    let build = || -> Result<()> {
+        let dialog = b::ContentDialog::new()?;
+        dialog.SetTitle(&tabs::boxed(strings::MANAGE_RECENT_TITLE))?;
+        dialog.SetCloseButtonText("Done")?;
+        let body = b::StackPanel::new()?;
+        body.SetSpacing(12.0)?;
+        let (area, list) = crate::bar::scrolling_list()?;
+        area.cast::<b::IFrameworkElement>()?.SetHeight(320.0)?;
+        area.cast::<b::IFrameworkElement>()?.SetWidth(470.0)?;
+        crate::bar::append(&body, &area)?;
+        let clear = crate::bar::text_button("Clear list", "Remove every entry")?;
+        {
+            let target = shell.clone();
+            let list = list.clone();
+            crate::bar::on_click(&clear, move || {
+                target.recent.borrow_mut().clear();
+                target.save_session();
+                let (target, list) = (target.clone(), list.clone());
+                later(move || fill_manage_recent(&target, &list));
+            })?;
+        }
+        crate::bar::append(&body, &clear)?;
+        fill_manage_recent(shell, &list);
+        dialog.cast::<ContentControl>()?.SetContent(&body)?;
+        let root: b::IUIElement = shell.root.cast()?;
+        dialog
+            .cast::<b::IUIElement>()?
+            .SetXamlRoot(&root.XamlRoot()?)?;
+        _ = dialog.ShowAsync()?;
+        Ok(())
+    };
+    if let Err(e) = build() {
+        diag::fail("manage recent", &e);
+    }
+}
+
+fn fill_manage_recent(shell: &Rc<Shell>, list: &crate::bar_bindings::StackPanel) {
+    let Ok(children) = list.cast::<IPanel>().and_then(|p| p.Children()) else {
+        return;
+    };
+    _ = children.Clear();
+    let entries = shell.recent.borrow().entries();
+    if entries.is_empty() {
+        if let Ok(empty) = crate::bar::text(strings::RECENT_EMPTY, 13.0) {
+            _ = crate::bar::append(list, &empty);
+        }
+        return;
+    }
+    for entry in entries {
+        let row = || -> Result<Grid> {
+            let row = Grid::new()?;
+            crate::bar::column(&row, GridUnitType::Star, 1.0)?;
+            crate::bar::column(&row, GridUnitType::Auto, 1.0)?;
+            crate::bar::column(&row, GridUnitType::Auto, 1.0)?;
+            row.cast::<crate::bar_bindings::IFrameworkElement>()?
+                .SetMargin(crate::bar_bindings::Thickness {
+                    left: 0.0,
+                    top: 2.0,
+                    right: 8.0,
+                    bottom: 2.0,
+                })?;
+            let label = if entry.missing {
+                format!("{} (missing)", entry.path.display())
+            } else {
+                entry.path.display().to_string()
+            };
+            let text = crate::bar::text(&label, 13.0)?;
+            tabs::set_tooltip(&text, &entry.path.display().to_string())?;
+            place(&row, &text, 0, 0)?;
+            let open = crate::bar::text_button("Open", "Open this file")?;
+            crate::bar::set_margin(&open, 8.0, 4.0)?;
+            tabs::set_enabled(&open, !entry.missing)?;
+            {
+                let target = shell.clone();
+                let path = entry.path.clone();
+                crate::bar::on_click(&open, move || {
+                    if target.open(&path) {
+                        target.show();
+                    }
+                })?;
+            }
+            place(&row, &open, 0, 1)?;
+            let remove = crate::bar::text_button("Remove", "Remove from Recent")?;
+            {
+                let target = shell.clone();
+                let path = entry.path.clone();
+                let list = list.clone();
+                crate::bar::on_click(&remove, move || {
+                    target.recent.borrow_mut().remove(&path);
+                    target.save_session();
+                    // Rebuilt after this click is done, so the row that moves under the pointer
+                    // does not take the same click.
+                    let (target, list) = (target.clone(), list.clone());
+                    later(move || fill_manage_recent(&target, &list));
+                })?;
+            }
+            place(&row, &remove, 0, 2)?;
+            Ok(row)
+        };
+        if let Ok(row) = row() {
+            _ = crate::bar::append(list, &row);
+        }
+    }
+}
+
 /// A WinUI dialog over the window: `title`, an optional paragraph, then `rows` as a two-column
 /// table (keys in the left column, what they do in the right), and a Close button.
 fn show_dialog(shell: &Shell, title: &str, intro: Option<&str>, rows: &[(String, String)]) {
@@ -2292,6 +2472,10 @@ fn build_bar(shell: &Rc<Shell>) -> Result<()> {
         target.open_folder_dialog()
     })?;
     let target = shell.clone();
+    bar::menu_item(&more, "Manage recent files...", move || {
+        show_manage_recent(&target)
+    })?;
+    let target = shell.clone();
     bar::menu_item(&more, "Close tab\tCtrl+W", move || {
         if let Some(current) = target.current.get() {
             target.close_tab(current);
@@ -2486,7 +2670,6 @@ pub fn build(
     crate::bar::set_tab_strip_footer(&tab_view, &drag)?;
     place(&root, &tab_view, 0, 0)?;
     Grid::SetColumnSpan(&tab_view.cast::<FrameworkElement>()?, 3)?;
-    crate::bar::extend_into_title_bar(&window, &drag)?;
 
     let tree = TreeView::new()?;
     tabs::set_visible(&tree.cast::<UIElement>()?, false)?;
@@ -2749,8 +2932,18 @@ pub fn build(
     }
 
     SHELL.with(|cell| *cell.borrow_mut() = Some(shell.clone()));
-    // The poll runs on this thread's message loop; a null window means no HWND is needed.
-    unsafe { SetTimer(std::ptr::null_mut(), 0, 800, poll_timer) };
+    // Changes and later launches arrive as wake-ups posted to this thread's dispatcher queue: the OS
+    // file watcher replaces the old 800 ms poll. If it cannot start, a 2 s poll runs instead.
+    if let Ok(queue) = DispatcherQueue::GetForCurrentThread() {
+        _ = QUEUE.set(queue);
+    }
+    let watcher = mdview_core::watch::FileWatcher::new(wake);
+    if watcher.is_none() {
+        diag::trace("file watching unavailable, polling every 2 s");
+        // A null window means the timer runs on this thread's message loop without an HWND.
+        unsafe { SetTimer(std::ptr::null_mut(), 0, 2000, poll_timer) };
+    }
+    WATCHER.with(|cell| *cell.borrow_mut() = watcher);
     build_bar(&shell)?;
     {
         let target = shell.clone();
@@ -2814,6 +3007,10 @@ pub fn build(
     window.Closed(|_, _| diag::trace("window closed"))?.forget();
     window.Activate()?;
     diag::trace("Window activated");
+    // After Activate: the native window exists by then, so taking over its title bar is cheap here,
+    // while before Activate it created the window itself and cost about 60 ms more to first frame.
+    crate::bar::extend_into_title_bar(&window, &drag)?;
+    diag::trace("title bar extended");
 
     // Keys come from XAML's routed events on the root. KeyDown bubbles from whatever has focus, and
     // a control that used a key marks it handled, so the menu bar keeps arrows, Space and Escape.
@@ -2869,6 +3066,63 @@ pub fn build(
             }
         })?
         .forget();
+    }
+    // Files dropped anywhere on the window open in tabs (a folder opens in the Files pane), as in
+    // the original app and the Qt shell.
+    {
+        use crate::bar_bindings as b;
+        let element: b::IUIElement = root.cast()?;
+        element.SetAllowDrop(true)?;
+        element
+            .DragOver(|_, args| {
+                let Some(args) = args.as_ref() else { return };
+                let files = args
+                    .DataView()
+                    .and_then(|view| view.Contains(STORAGE_ITEMS))
+                    .unwrap_or(false);
+                _ = args.SetAcceptedOperation(if files {
+                    b::DataPackageOperation::Copy
+                } else {
+                    b::DataPackageOperation::None
+                });
+            })?
+            .forget();
+        element
+            .Drop(|_, args| {
+                let Some(args) = args.as_ref() else { return };
+                let Ok(operation) = args.DataView().and_then(|view| view.GetStorageItemsAsync())
+                else {
+                    return;
+                };
+                // The items arrive asynchronously, off the UI thread; the paths are posted back.
+                type Items = windows_collections::IVectorView<b::IStorageItem>;
+                _ = operation.SetCompleted(
+                    &windows_future::AsyncOperationCompletedHandler::<Items>::new(
+                        |operation: windows_core::Ref<windows_future::IAsyncOperation<Items>>,
+                         _| {
+                            let Some(operation) = operation.as_ref() else {
+                                return Ok(());
+                            };
+                            let paths: Vec<PathBuf> = operation
+                                .GetResults()?
+                                .into_iter()
+                                .filter_map(|item| item.Path().ok())
+                                .map(PathBuf::from)
+                                .collect();
+                            let Some(queue) = QUEUE.get() else {
+                                return Ok(());
+                            };
+                            let handler = DispatcherQueueHandler::new(move || open_dropped(&paths));
+                            queue.cast::<IDispatcherQueue>()?.TryEnqueueWithPriority(
+                                DispatcherQueuePriority::Normal,
+                                &handler,
+                            )?;
+                            Ok(())
+                        },
+                    ),
+                );
+            })?
+            .forget();
     }
     let panel_element: UIElement = panel.cast()?;
     crate::input::set_is_tab_stop(&panel_element, true)?;

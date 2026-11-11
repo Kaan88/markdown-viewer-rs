@@ -21,7 +21,6 @@ pub mod glyph {
     pub const RECENT: &str = "\u{E81C}";
     pub const ZOOM_OUT: &str = "\u{E71F}";
     pub const ZOOM_IN: &str = "\u{E8A3}";
-    pub const THEME: &str = "\u{E793}";
     pub const MORE: &str = "\u{E712}";
     pub const SYSTEM: &str = "\u{E7F4}";
     pub const LIGHT: &str = "\u{E706}";
@@ -159,6 +158,17 @@ pub fn list_button(label: &str, indent: f64) -> Result<b::Button> {
     let element: b::IFrameworkElement = button.cast()?;
     element.SetHorizontalAlignment(b::HorizontalAlignment::Stretch)?;
     b::AutomationProperties::SetName(&button.cast::<b::DependencyObject>()?, label)?;
+    Ok(button)
+}
+
+/// A plain text button (standard look), for dialog rows.
+pub fn text_button(label: &str, tip: &str) -> Result<b::Button> {
+    let button = b::Button::new()?;
+    button
+        .cast::<ContentControl>()?
+        .SetContent(&text(label, 13.0)?)?;
+    b::AutomationProperties::SetName(&button.cast::<b::DependencyObject>()?, tip)?;
+    tabs::set_tooltip(&button, tip)?;
     Ok(button)
 }
 

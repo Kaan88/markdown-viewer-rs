@@ -890,15 +890,6 @@ impl Renderer {
         }
     }
 
-    /// Rows of the panel the thumb covers, for deciding which gutter rows to re-send.
-    fn thumb_rows(&self) -> Option<(u32, u32)> {
-        let bar = self.bar()?;
-        let height = self.height;
-        let top = (bar.thumb_y.floor().max(0.0) as usize).min(height as usize) as u32;
-        let bottom = ((bar.thumb_y + bar.thumb_height).ceil() as usize).min(height as usize) as u32;
-        (bottom > top).then_some((top, bottom))
-    }
-
     /// Brings the page texture up to date with the renderer's frame. A scroll moves the rows that
     /// stay on screen to the other texture and sends only the band that came into view.
     unsafe fn upload_page(&mut self) -> Result<Sent> {

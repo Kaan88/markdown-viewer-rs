@@ -33,3 +33,10 @@ Windows::Foundation::Uri::CreateUri
 Microsoft::UI::Xaml::Controls::ContentDialog::CreateInstance
 Microsoft::UI::Xaml::Controls::IContentDialog::{put_Title, put_CloseButtonText, ShowAsync}
 Microsoft::UI::Xaml::IUIElement::{get_XamlRoot, put_XamlRoot}
+Microsoft::UI::Xaml::IUIElement::{put_AllowDrop, add_DragOver, add_Drop}
+Microsoft::UI::Xaml::DragEventHandler
+Microsoft::UI::Xaml::IDragEventArgs::{get_DataView, put_AcceptedOperation}
+Windows::ApplicationModel::DataTransfer::DataPackageOperation::{Copy, None}
+Windows::ApplicationModel::DataTransfer::IDataPackageView::{Contains, GetStorageItemsAsync}
+Windows::ApplicationModel::DataTransfer::IStandardDataFormatsStatics::get_StorageItems
+Windows::Storage::IStorageItem::get_Path

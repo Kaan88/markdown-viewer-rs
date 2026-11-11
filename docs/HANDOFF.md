@@ -795,32 +795,33 @@ columns ran on the physical Windows PC; the Qt column has not run on KDE since.
 | tab context menu | done, clicked | done, clicked |
 | page context menu (open/copy link, copy, find, reload) | done, clicked (was never connected before) | done, clicked |
 | Recent, clear, missing entries | done (bar button) | done (bar button) |
-| Manage recent | dock + toolbar | **not done** |
+| Manage recent | dock + toolbar | dialog (section 27) |
 | session: tabs, active tab, theme, zoom, folder | done | done |
 | theme System/Light/Dark (cycling button) | done; System reads Windows' setting on Windows | done |
 | zoom 60-250 step 10, Ctrl+0 | done | done, `--zoom-test` |
 | refresh F5 | done | done |
-| auto-refresh, deleted-file handling | OS file watching (section 25) | **800 ms poll**; to move to `mdview_core::watch` |
-| single instance | loopback port, wakes the GUI thread | loopback port, drained on the 800 ms tick; **check runs after the bootstrap** |
+| auto-refresh, deleted-file handling | OS file watching (section 25) | OS file watching through the `DispatcherQueue` (section 27) |
+| single instance | loopback port, wakes the GUI thread | loopback port before the bootstrap, about 20 ms (section 27) |
 | focus reading mode | done | done |
 | Files pane, Open folder | one-time scan, left | lazy `TreeView`, left |
 | outline pane | right | right |
 | find box with count, selection, copy, links, `<details>` | done | done |
 | About and Keyboard shortcuts | dialogs with the logo | WinUI dialogs with the logo |
-| installer / package | PKGBUILD, AppImage | Inno Setup (compiled in the VM only) |
+| drag and drop | done | built, not run by hand |
+| installer / package | PKGBUILD, AppImage | Inno Setup 0.1.0, installed and uninstalled on the PC (section 27) |
 
-**Next, on the Windows PC:**
+**Done on the Windows PC (2026-11-11, section 27):** single instance before the bootstrap, the OS
+file watcher, Manage recent, drag and drop, Ctrl+Shift+1/2, launch and memory numbers, the WinUI
+column of `docs/PORT_CHECKLIST.md`, and a 0.1.0 installer that registers the Markdown extensions.
 
-1. Move the WinUI single-instance check ahead of `bootstrap::bootstrap()` and the D3D device thread
-   in `bins/mdv-winui/src/main.rs`. PLAN wants it before any WinUI load (it names a named mutex +
-   `WM_COPYDATA`; the shared loopback port in `mdview_core::single` is what exists). Measure the
-   handoff against the 20 ms budget.
-2. Replace the WinUI 800 ms poll with `mdview_core::watch::FileWatcher` (section 25). Its waker needs
-   a `DispatcherQueue::TryEnqueue` or a posted window message; `bar_bindings.rs` can now be extended
-   for it (`bins/mdv-winui/gen/filter.txt`).
-3. Manage recent in WinUI.
-4. W1 text quality at 100/125/150/200%, then real launch and memory numbers with `measure.ps1`.
-5. Tick the WinUI column of `docs/PORT_CHECKLIST.md` row by row.
+**Next for WinUI** (the checklist's open items, then budgets):
+
+1. Text quality (W1) at 125/150/200%: needs the display scaling changed by hand.
+2. First frame is about 380 ms and private memory about 180 MiB (section 27), both over PLAN's
+   likely range; the memory was already there before layout A. Profile both.
+3. Status bar texts, window size/minimum and geometry in the session, live folder tree, outline
+   scroll sync, Ctrl+Q.
+4. Try drag and drop by hand (built, not run).
 
 **Update checks must be manual (the user's decision, 2026-11-10).** No check runs on its own: drop
 the once-a-day check at launch in `bins/mdv-qt/src/appimage_update.rs` (`spawn_check` from `run` in
@@ -1113,3 +1114,54 @@ crates, and every bar button, menu, pane, theme mode, right-click menu, find and
 in both apps placed side by side (real mouse input, screenshots compared).
 **Not checked:** Qt on KDE (frameless window, icons, style sheet), WinUI at DPI other than 100%, a
 second monitor, the installer.
+
+## 27. WinUI section-12 work and the 0.1.0 installer (2026-11-11)
+
+On the physical Windows PC, after section 26.
+
+**Single instance.** `main.rs` now parses the arguments and calls `single::forward` before the
+Windows App SDK bootstrap, the GPU thread and COM. A second launch that hands its file over took
+**17-24 ms** process start to exit (52 ms the first time), against PLAN's 20 ms budget, with one
+window left. The listener uses `listen_waking`, so forwarded files open at once.
+
+**File watching.** The 800 ms `SetTimer` poll is gone. `mdview_core::watch::FileWatcher` and the
+single-instance listener call `ui::wake`, which posts to the UI thread's `DispatcherQueue`
+(`TryEnqueueWithPriority`, already in `bindings.rs`). The watched set follows `save_session`. If the
+watcher cannot start, a 2 s poll runs instead. Checked live: a save-by-rename of the showing file
+reloaded it, an unrelated file did nothing, a second launch opened its file as a tab.
+
+**Manage recent** is a `ContentDialog` (Open, Remove, Clear list, Done). The list is rebuilt after
+the click finishes (`later`), because rebuilding inside the click let the row that moved under the
+pointer take the same click. Checked: one click removes one entry.
+
+**Drag and drop:** `AllowDrop`, `DragOver` and `Drop` on the root; `GetStorageItemsAsync` completes
+off the UI thread and posts the paths back. Built only: Windows refused the synthetic drag (and then
+all `SetCursorPos` calls) in this session, so it has not been run.
+
+**Also:** Ctrl+Shift+1 / 2 toggle the Files and Outline panes; the exe icon is embedded again when
+`rc.exe` is on PATH (`C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64`; from Git Bash
+the build script could not run it).
+
+**Measured** (`spikes/winui/measure.ps1` and `Get-Process`, 100%, dark):
+
+| | before layout A (`9dad837`) | now |
+|---|---|---|
+| first frame, median of 8 interleaved runs | 316-343 ms | 383 ms |
+| private memory, empty window | 170 MiB | 180 MiB |
+| private memory, showcase.md | 197 MiB | 210 MiB |
+
+`ExtendsContentIntoTitleBar` costs 70-95 ms wherever it is called (moved after `Activate`, which
+saved some); doing it after the first frame would make the page jump. The memory was over PLAN's
+50-90 MB before this work too. Text quality at other DPIs was not checked: it needs the display
+scaling changed by hand.
+
+**Installer** (`packaging/windows/mdview.iss`, Inno Setup 7.1.1): the association task is now on by
+default. It registers the `mdview.Markdown` ProgID, `OpenWithProgids` for `.md .markdown .mdown .mkd`,
+`Applications\mdview-winui.exe`, and a registered application (`Software\mdview\Capabilities` plus
+`RegisteredApplications`) so mdview appears in Settings > Default apps. Windows does not let an
+installer take the default, so the last page offers "Choose mdview as the default app", which opens
+`ms-settings:defaultapps?registeredAppUser=mdview`. Optional desktop shortcut. Checked on this PC: a
+silent per-user install put both exes in `%LOCALAPPDATA%\Programs\mdview`, wrote all keys, left the
+user's `.md` default and other handlers alone; the installed app opened a file through the
+registered command; the silent uninstall removed every key, the files and the shortcut. Not run:
+the wizard pages, the runtime download branch, an upgrade over an older version.

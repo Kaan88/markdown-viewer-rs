@@ -152,17 +152,6 @@ impl Args {
 }
 
 fn run() -> Result<()> {
-    // DPI awareness comes from the embedded manifest, so it is set before any code runs.
-    diag::trace_dpi_awareness();
-    // The device is ready sooner when created while the main thread loads XAML.
-    let gpu = std::thread::spawn(render::create_gpu);
-    bootstrap::bootstrap()?;
-    diag::trace("bootstrap done");
-    unsafe {
-        CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32).ok()?;
-    }
-    diag::trace("STA ready, calling Application::Start");
-
     let args = Args::parse(std::env::args().skip(1));
     let documents = args.documents.clone();
     let theme = args.theme;
@@ -212,13 +201,32 @@ fn run() -> Result<()> {
         if (zoom - 1.0).abs() < 1e-6 {
             zoom = f32::from(saved.zoom) / 100.0;
         }
-        // A window is already open: hand it the files and quit. Otherwise listen for later launches.
-        if mdview_core::single::forward(path, &documents) {
-            return Ok(());
-        }
-        if let Some(receiver) = mdview_core::single::listen(path) {
-            ui::set_incoming(receiver);
-        }
+    }
+    // A window is already open: hand it the files and quit. This runs before the Windows App SDK,
+    // XAML and the GPU are loaded, so a second launch costs only process start and one loopback
+    // round trip (PLAN's 20 ms handoff budget).
+    if let Some(path) = &settings
+        && mdview_core::single::forward(path, &documents)
+    {
+        diag::trace("handed the files to the running window");
+        return Ok(());
+    }
+
+    // DPI awareness comes from the embedded manifest, so it is set before any code runs.
+    diag::trace_dpi_awareness();
+    // The device is ready sooner when created while the main thread loads XAML.
+    let gpu = std::thread::spawn(render::create_gpu);
+    bootstrap::bootstrap()?;
+    diag::trace("bootstrap done");
+    unsafe {
+        CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32).ok()?;
+    }
+    diag::trace("STA ready, calling Application::Start");
+    // Later launches send their files here; the listener wakes the UI thread (see `ui::wake`).
+    if let Some(path) = &settings
+        && let Some(receiver) = mdview_core::single::listen_waking(path, ui::wake)
+    {
+        ui::set_incoming(receiver);
     }
     if let Some(folder) = args.folder.clone() {
         ui::set_start_folder(folder);

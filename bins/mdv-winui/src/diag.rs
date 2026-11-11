@@ -135,20 +135,6 @@ pub fn measure_line(fields: &str) {
     }
 }
 
-/// An information dialog (About, Keyboard shortcuts), owned by the app's window.
-pub fn info_box(title: &str, text: &str) {
-    let text = HSTRING::from(text);
-    let title = HSTRING::from(title);
-    unsafe {
-        MessageBoxW(
-            std::ptr::null_mut(),
-            PCWSTR(text.as_ptr()),
-            PCWSTR(title.as_ptr()),
-            0x40, // MB_ICONINFORMATION
-        );
-    }
-}
-
 fn message_box(text: &str) {
     let text = HSTRING::from(text);
     unsafe {

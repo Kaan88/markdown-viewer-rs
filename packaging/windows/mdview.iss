@@ -1,5 +1,6 @@
 ; Inno Setup script for mdview (WinUI 3 shell + mdview-engine helper).
-; Written for Inno Setup 6.3+/7. NOT RUN: it was authored on Linux without ISCC.exe.
+; Written for Inno Setup 6.3+/7. Compiled with Inno Setup 7.1.1 (2026-11-10 in the VM, 2026-11-11 on
+; the Windows PC).
 ; Build:  ISCC.exe /DAppVersion=0.2.0 mdview.iss   (see build-installer.ps1)
 
 #ifndef AppVersion
@@ -54,7 +55,11 @@ WizardStyle=modern
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "assoc"; Description: "Add mdview to the ""Open with"" list for Markdown files (.md, .markdown, .mdown, .mkd)"; GroupDescription: "File types:"
+; Checked by default. Windows does not let an installer take the default handler for an extension
+; (the per-user choice is protected), so mdview registers as a handler and as an application in
+; Settings > Default apps; the last page offers to open that page so the user can pick it.
+Name: "assoc"; Description: "Register mdview for Markdown files (.md, .markdown, .mdown, .mkd)"; GroupDescription: "File types:"
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Files]
 Source: "..\..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
@@ -62,6 +67,7 @@ Source: "..\..\target\release\{#EngineExe}"; DestDir: "{app}"; Flags: ignorevers
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
 ; mdview is only OFFERED under "Open with". Nothing here writes an extension's default value
@@ -82,8 +88,22 @@ Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; Val
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".mdown"; ValueData: ""; Tasks: assoc
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".mkd"; ValueData: ""; Tasks: assoc
 
+; Registered application: lists mdview in Settings > Apps > Default apps, where the user can make it
+; the default for each Markdown extension.
+Root: HKA; Subkey: "Software\{#AppName}"; Flags: uninsdeletekey; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#AppName}"; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "A native, read-only Markdown reader."; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: "{app}\{#AppExe},0"; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".md"; ValueData: "{#ProgId}"; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".markdown"; ValueData: "{#ProgId}"; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mdown"; ValueData: "{#ProgId}"; Tasks: assoc
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mkd"; ValueData: "{#ProgId}"; Tasks: assoc
+Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#AppName}"; ValueData: "Software\{#AppName}\Capabilities"; Flags: uninsdeletevalue; Tasks: assoc
+
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch mdview"; Flags: nowait postinstall skipifsilent
+; Opens Settings at mdview's Default apps page, where it can be made the default for .md files.
+Filename: "ms-settings:defaultapps?registeredAppUser={#AppName}"; Description: "Choose mdview as the default app for Markdown files"; Flags: shellexec nowait postinstall skipifsilent unchecked; Tasks: assoc
 
 [Code]
 var

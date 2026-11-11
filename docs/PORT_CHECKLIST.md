@@ -439,3 +439,53 @@ Everything above is the old app's inventory, copied unchanged; nothing is checke
 - A long query can stop early when enough of the file nearly matches it, showing a `+`, where the old find would block. A query up to 64 characters is exact; the real condition is in COVERAGE's known gaps.
 
 **Not in core yet:** the file watcher (Phase 3). The old `math` and `families` tests belong to engine integration (Phase 4).
+
+## WinUI shell status (2026-11-11, physical Windows PC)
+
+Section 1 checked row by row against `bins/mdv-winui` after layout A (HANDOFF sections 26-27).
+"Run" means exercised in the running app; "check" means a scripted `--*-test`; "code" means read
+from the code only. Deliberate differences follow PLAN or the user's design choices.
+
+| Behaviour (section 1) | WinUI | How known |
+|---|---|---|
+| Window: default 1220x820, min 720x480 | **differs**: 1100x900, no minimum | code |
+| Window title `<file> — …` | `mdview - <file>` (taskbar only; the title bar shows tabs) | run |
+| Accepts drops | done: files open in tabs, folders in the Files pane | **not run** (synthetic drag was refused by Windows) |
+| Tabs: closable, movable, document mode | done | check (`--tabs-test`), run |
+| Tab bar auto-hides with one tab | **differs**: always shown, it is the title bar | run |
+| Closing the last tab shows the empty state | done (built-in welcome page; no Open button widget) | check |
+| Status bar: path, startup and all-closed texts | **not done**: no status bar (counts sit by the find box) | run |
+| Tab context menu: close, close others, copy path, show in Explorer | done | run |
+| Tab labels incl. duplicate names | done (core `tab_labels`) | check |
+| Ctrl+Tab / Ctrl+Shift+Tab | done | check |
+| Menus | **differs** (layout A): command bar plus the ⋯ menu; every item reachable | run |
+| Open files… Ctrl+O (multi-select, filter) | done | run |
+| Open folder… Ctrl+Shift+O | done | code |
+| Refresh F5 | done | run |
+| Open recent / Clear recent / missing entries | done | run |
+| Manage recent files… | done (dialog: Open, Remove, Clear list, Done) | run |
+| Close tab Ctrl+W, Ctrl+F4; Close all Ctrl+Shift+W | done | check |
+| Exit | done (⋯ menu); Ctrl+Q not bound | code |
+| Find Ctrl+F, F3 / Shift+F3, Enter, Escape clears | done (find box, count beside it) | check, run |
+| Theme System / Light / Dark | done (cycling button; System follows Windows at the click) | run |
+| Zoom in/out, 60-250 step 10, Ctrl+0 | done; the percentage shows in the bar | check |
+| Ctrl+Shift+1 / 2 (Files / Outline) | done | code |
+| Focus reading mode Ctrl+Shift+F, Escape leaves | done (hides the bar and both panes; tabs stay) | run |
+| Keyboard shortcuts, About | done (WinUI dialogs, logo in About) | run |
+| Toolbar: Open, search box with clear button, match label, Previous/Next | done | run |
+| Docks: Files left, outline right | done (panes; not floatable or closable as docks) | run |
+| Search: substring, case-insensitive, cap, wrap, re-run on tab change | done (core `find_visible`) | check |
+| Recent: max 15, order, missing marker, persisted on change | done (core; saved on every change) | check |
+| Folder tree: live updates, Markdown filter | lazy `TreeView`, Markdown filter; **not live** | code |
+| Outline: nesting, click scrolls | done (flat indented list, click scrolls); no scroll sync | check |
+| File watching and reload, deleted-file handling | done: OS watcher (`mdview_core::watch`), deleted file keeps its text | run |
+| Background tabs reload on change | reloaded when shown, not while hidden | code |
+| Scroll preservation on reload | core `remap_scroll` | check (core tests) |
+| Link following (fragments, local Markdown, http/mailto, others ignored) | done | check (`--outline-test`, core tests) |
+| Details toggle | done (view state, no reload) | check (`--details-test`) |
+| Images: limits, schemes | done (renderer + engine) | core and render tests |
+| Settings: tabs, active, recent, folder, theme, zoom | done; `geometry`/`layout` not saved | check |
+| Single instance | done; handoff before the Windows App SDK loads, about 20 ms | run (timed) |
+
+**Open items from this table:** status bar texts, window size and minimum, live folder tree,
+outline scroll sync, Ctrl+Q, window geometry in the session, and a hand-run drop.
