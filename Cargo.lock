@@ -1638,6 +1638,8 @@ version = "0.1.0"
 name = "mdview-render"
 version = "0.1.0"
 dependencies = [
+ "gif",
+ "image-webp",
  "mdview-core",
  "mdview-engine-proto",
  "parley",
