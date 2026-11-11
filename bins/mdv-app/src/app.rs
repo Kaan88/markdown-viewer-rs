@@ -624,9 +624,12 @@ impl App {
                 w.set_visible(true);
             }
             if std::env::var_os("MDVIEW_STARTUP_TRACE").is_some() || self.trace {
+                let images = self.ws.image_stats();
                 eprintln!(
-                    "mdview: first frame after {:.1} ms",
-                    self.started.elapsed().as_secs_f64() * 1000.0
+                    "mdview: first frame after {:.1} ms ({} image decodes, {} engine jobs)",
+                    self.started.elapsed().as_secs_f64() * 1000.0,
+                    images.decodes,
+                    images.engine_jobs
                 );
             }
             #[cfg(windows)]
