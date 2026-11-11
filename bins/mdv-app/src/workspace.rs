@@ -1055,6 +1055,12 @@ impl Workspace {
         })
     }
 
+    /// Draws page text for the display's subpixel order, as the chrome does.
+    pub fn set_subpixel(&mut self, subpixel: mdview_render::Subpixel) {
+        self.renderer.set_subpixel(subpixel);
+        self.dirty = true;
+    }
+
     // ---- remote images --------------------------------------------------------------------------
 
     /// Sets what runs (on a download thread) when a remote image finishes; it must only post a

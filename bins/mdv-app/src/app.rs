@@ -1122,6 +1122,7 @@ pub fn run() -> i32 {
     app.watcher = FileWatcher::new(move || {
         let _ = p.send_event(Wake::Files);
     });
+    app.ws.set_subpixel(crate::platform::subpixel_order());
     let p = proxy.clone();
     app.ws.set_remote_wake(move || {
         let _ = p.send_event(Wake::Images);

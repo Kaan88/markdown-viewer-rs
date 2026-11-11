@@ -2,11 +2,6 @@
 //! Phase 0 text spike (`spikes/text`), which the user accepted after the subpixel fix. The glyph
 //! cache is byte-capped, and text uses subpixel masks in the order [`Subpixel`] names (RGB by
 //! default), or greyscale coverage with `Subpixel::None`.
-//!
-//! `DocumentRenderer` keeps its own `TextEngine` and does not expose the mode yet, so document
-//! text is always RGB. The hook it needs is a setter that calls
-//! [`TextEngine::set_subpixel`] and, when the mode changed, drops the paint cache and the frame,
-//! the way a theme change does.
 
 use crate::bitmap::Bitmap;
 use parley::{FontData, Layout, PositionedLayoutItem};

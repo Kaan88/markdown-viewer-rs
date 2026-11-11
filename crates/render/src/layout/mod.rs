@@ -285,6 +285,15 @@ impl DocumentRenderer {
             .unwrap_or_else(|| doc.details_open_as_written(block))
     }
 
+    /// Draws text for this subpixel stripe order from now on (RGB until told otherwise). A change
+    /// forgets what was drawn, since every cached row holds glyphs antialiased the old way.
+    pub fn set_subpixel(&mut self, subpixel: crate::Subpixel) {
+        if self.engine.subpixel() != subpixel {
+            self.engine.set_subpixel(subpixel);
+            self.drop_layout();
+        }
+    }
+
     /// Forgets every toggle, for a new document whose block numbers no longer mean the same. The
     /// layout goes with them; the next [`layout`](Self::layout) starts clean.
     pub fn clear_details(&mut self) {
