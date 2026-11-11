@@ -3,7 +3,7 @@
 //! footnote reference or a `<details>` summary.
 
 use super::inline::Inline;
-use super::{DocumentRenderer, Hit, Options};
+use super::{DocumentRenderer, Hit, Options, Source};
 use crate::text::Brush;
 use mdview_core::model::{BlockKind, Document, NONE, SpanKind};
 use parley::{Cluster, ClusterSide, Layout};
@@ -38,6 +38,23 @@ impl LineGeom {
     }
 }
 
+/// Where a rendered formula or diagram sits, relative to its block like the lines, so a point
+/// inside the picture can be told from one beside it.
+#[derive(Clone, Copy)]
+pub(super) struct SourceBox {
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) w: f32,
+    pub(super) h: f32,
+    pub(super) source: Source,
+}
+
+impl SourceBox {
+    pub(super) fn shift(&mut self, dy: f32) {
+        self.y += dy;
+    }
+}
+
 impl DocumentRenderer {
     /// What is at page position `x, y`: the document offset, plus a link or footnote reference when
     /// the point is over one. Lays out the one block that was hit if the frame has not painted it
@@ -53,18 +70,29 @@ impl DocumentRenderer {
         let span = self.page.as_ref()?.spans[index];
         let cached = self.cache.get(&span.block)?;
         let local = y - (span.y - cached.phase);
+        let source = cached
+            .sources
+            .iter()
+            .find(|b| x >= b.x && x <= b.x + b.w && local >= b.y && local <= b.y + b.h)
+            .map(|b| b.source);
         let line = cached.lines.iter().min_by(|a, b| {
             distance(a, local)
                 .total_cmp(&distance(b, local))
                 .then_with(|| a.top.total_cmp(&b.top))
-        })?;
-        let offset = offset_at(line, x, local);
+        });
+        // A display formula or a diagram has no text line: the picture itself is the target.
+        let offset = match (line, source) {
+            (Some(line), _) => offset_at(line, x, local),
+            (None, Some(source)) => source.start,
+            (None, None) => return None,
+        };
         let mut hit = Hit {
             block: span.block,
             offset,
             link: None,
             footnote: None,
             details: None,
+            source,
         };
         if let Some(inner) = doc.block_at(offset) {
             let mut block = inner;

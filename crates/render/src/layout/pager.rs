@@ -2,11 +2,11 @@
 //! the block tree, dispatches each block kind, builds parley layouts from [`Inline`] runs and
 //! emits their glyphs, chips, decorations and inline images.
 
-use super::hit::LineGeom;
+use super::hit::{LineGeom, SourceBox};
 use super::inline::{ImageBox, Inline, RubyNote, Style};
 use super::paint::Paint;
 use super::store::{Found, ImageStore};
-use super::{BlockBox, Options};
+use super::{BlockBox, Options, Source, SourceKind};
 use crate::text::Brush;
 use crate::theme::{Color, Theme};
 use mdview_core::model::{Align, BlockKind, Document, NONE};
@@ -41,8 +41,10 @@ pub(super) struct Pager<'a, 'b> {
     /// Caret geometry for the block being laid out, in page coordinates until it moves into the
     /// cache, where it is stored relative to that block's top like the paints.
     pub(super) hits: Vec<LineGeom>,
+    /// The formulas and diagrams of the block being laid out, kept like `hits`.
+    pub(super) sources: Vec<SourceBox>,
     /// Whether to keep hit geometry; a measuring pass does not need it.
-    record: bool,
+    pub(super) record: bool,
     /// The measured y of each footnote entry, built by the height pass.
     pub(super) notes: Vec<(u32, f32)>,
     pub(super) fonts: &'b mut FontContext,
@@ -100,6 +102,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             paints: Vec::new(),
             blocks: Vec::new(),
             hits: Vec::new(),
+            sources: Vec::new(),
             record,
             notes: Vec::new(),
             fonts,
@@ -481,11 +484,33 @@ impl<'a, 'b> Pager<'a, 'b> {
         let track = self.record && !inline.origins.is_empty();
         let source = Rc::new(inline.clone());
         let mut images = Vec::new();
+        // The layout's boxes come in the order of `inline.boxes`, spacers aside.
+        let mut boxes = inline.boxes.iter();
         for line in layout.lines() {
             for item in line.items() {
                 if let PositionedLayoutItem::InlineBox(inline_box) = item {
                     if inline_box.id & SPACER != 0 {
                         continue;
+                    }
+                    let image = boxes.next();
+                    if self.record
+                        && let Some(ImageBox {
+                            math: Some((start, end)),
+                            ..
+                        }) = image
+                        && inline_box.width > 0.0
+                    {
+                        self.sources.push(SourceBox {
+                            x: x + inline_box.x,
+                            y: y + inline_box.y,
+                            w: inline_box.width,
+                            h: inline_box.height,
+                            source: Source {
+                                kind: SourceKind::Formula,
+                                start: *start,
+                                end: *end,
+                            },
+                        });
                     }
                     if inline_box.id & RESERVED != 0 {
                         // A declared size with no pixels yet: the reserved box, tinted.

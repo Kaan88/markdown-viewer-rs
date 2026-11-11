@@ -970,3 +970,79 @@ fn a_figure_with_a_local_image_draws_it_above_its_caption() {
     let image_centre = (left + right) as f32 / 2.0;
     assert!((image_centre - (caption.x + caption.w / 2.0)).abs() < 3.0);
 }
+
+/// Whether the engine process that draws math and diagrams can be found, as the renderer looks.
+fn engine_available() -> bool {
+    if let Some(path) = std::env::var_os("MDV_ENGINE") {
+        return PathBuf::from(path).is_file();
+    }
+    let name = if cfg!(windows) {
+        "mdview-engine.exe"
+    } else {
+        "mdview-engine"
+    };
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/release")
+        .join(name)
+        .is_file()
+}
+
+#[test]
+fn a_point_inside_a_formula_or_diagram_reports_its_source() {
+    if !engine_available() {
+        eprintln!("skipping: no mdview-engine in target/release");
+        return;
+    }
+    use mdview_render::SourceKind;
+    let doc = mdview_core::parse(
+        "Inline $x^2 + 1$ in a sentence.\n\n$$\nE = mc^2\n$$\n\n```mermaid\ngraph TD\n  A --> B\n```\n",
+    );
+    let options = narrow(500.0);
+    let mut renderer = DocumentRenderer::new();
+    renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, 0.0, 600.0);
+    let text = |s: mdview_render::Source| doc.text[s.start as usize..s.end as usize].trim();
+    let mut found: Vec<(SourceKind, String)> = Vec::new();
+    let mut beside = 0;
+    let total = renderer.page_layout().unwrap().total_height();
+    let mut y = 2.0;
+    while y < total {
+        let mut x = 2.0;
+        while x < 500.0 {
+            if let Some(hit) = renderer.hit_test(&doc, &options, x, y) {
+                match hit.source {
+                    Some(s) => {
+                        let item = (s.kind, text(s).to_string());
+                        if !found.contains(&item) {
+                            found.push(item);
+                        }
+                    }
+                    None => beside += 1,
+                }
+            }
+            x += 5.0;
+        }
+        y += 3.0;
+    }
+    assert!(
+        found.contains(&(SourceKind::Formula, "x^2 + 1".to_string())),
+        "{found:?}"
+    );
+    assert!(
+        found.contains(&(SourceKind::Formula, "E = mc^2".to_string())),
+        "{found:?}"
+    );
+    assert!(
+        found.contains(&(SourceKind::Diagram, "graph TD\n  A --> B".to_string())),
+        "{found:?}"
+    );
+    assert_eq!(found.len(), 3, "{found:?}");
+    // The text of the sentence, outside the formula, is not a source.
+    assert!(beside > 0);
+    let word = doc.text.find("sentence").unwrap() as u32;
+    let rect = renderer.selection_rects(&doc, &options, word, word + 8)[0];
+    let hit = renderer
+        .hit_test(&doc, &options, rect.x + 2.0, rect.y + rect.h / 2.0)
+        .unwrap();
+    assert_eq!(hit.source, None);
+}

@@ -10,6 +10,7 @@ use crate::theme::Palette;
 use crate::ui::{Act, Dialog, DialogKind, Hit, Scroller, Ui};
 use crate::workspace::{PageContext, Workspace};
 use mdview_core::commands::{CommandId as C, shortcut_help, strings};
+use mdview_render::SourceKind;
 
 // ---- menus -----------------------------------------------------------------------------------
 
@@ -113,6 +114,17 @@ pub fn page_menu(ctx: &PageContext, x: f32, y: f32) -> Menu<Act> {
     if let Some(link) = &ctx.link {
         items.push(Item::new(Act::OpenLink(link.clone()), "Open link").icon(glyph::OPEN_WITH));
         items.push(Item::new(Act::CopyLink(link.clone()), "Copy link address").icon(glyph::LINK));
+    }
+    if let Some((kind, text)) = &ctx.source {
+        let label = match kind {
+            SourceKind::Formula => "Copy formula source",
+            SourceKind::Diagram => "Copy diagram source",
+        };
+        let mut item = Item::new(Act::CopySource(*kind, text.clone()), label).icon(glyph::COPY);
+        if !items.is_empty() {
+            item = item.sep();
+        }
+        items.push(item);
     }
     let first = items.is_empty();
     let mut copy = Item::new(Act::Copy, "Copy")

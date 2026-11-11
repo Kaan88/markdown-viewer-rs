@@ -1,7 +1,7 @@
 //! The paint list a layout pass produces, the per-block cache entry that keeps it between frames,
 //! and the raster step that draws a paint list into a bitmap.
 
-use super::hit::LineGeom;
+use super::hit::{LineGeom, SourceBox};
 use super::pager::Pager;
 use super::{Rendered, Slice};
 use crate::bitmap::Bitmap;
@@ -65,6 +65,8 @@ impl Paint {
 pub(super) struct CachedBlock {
     pub(super) paints: Vec<Paint>,
     pub(super) lines: Vec<LineGeom>,
+    /// The formulas and diagrams drawn in the block.
+    pub(super) sources: Vec<SourceBox>,
     pub(super) phase: f32,
 }
 

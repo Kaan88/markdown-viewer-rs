@@ -1,10 +1,12 @@
 //! Images and engine-rendered blocks: file image loading and sizing, Mermaid diagram and display
 //! math blocks, and the labelled code box (syntax-highlighted) they fall back to.
 
+use super::hit::SourceBox;
 use super::inline::{Inline, Style};
 use super::pager::{Pager, Txt};
 use super::paint::Paint;
 use super::store::Found;
+use super::{Source, SourceKind};
 use crate::highlight;
 use mdview_core::model::BlockKind;
 use std::path::PathBuf;
@@ -124,6 +126,24 @@ impl<'a, 'b> Pager<'a, 'b> {
 
     /// Draws a Mermaid diagram block as a centred image. `false` hands it back to the source view
     /// when the engine is missing or the source does not parse.
+    /// Remembers where a formula or diagram block's picture is, for [`Hit::source`].
+    fn note_source(&mut self, kind: SourceKind, block: u32, (x, y, w, h): (f32, f32, f32, f32)) {
+        if self.record {
+            let text = self.doc.blocks[block as usize].text;
+            self.sources.push(SourceBox {
+                x,
+                y,
+                w,
+                h,
+                source: Source {
+                    kind,
+                    start: text.start,
+                    end: text.end,
+                },
+            });
+        }
+    }
+
     pub(super) fn diagram_block(&mut self, b: u32, left: f32, width: f32) -> bool {
         let block = self.doc.blocks[b as usize];
         if matches!(
@@ -166,6 +186,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             w,
             h,
         });
+        self.note_source(SourceKind::Diagram, b, (x, y, w, h));
         self.y = y + h + self.px(16.0);
         true
     }
@@ -208,6 +229,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             w,
             h,
         });
+        self.note_source(SourceKind::Formula, b, (x, y, w, h));
         self.y = y + h + self.px(18.0);
         true
     }

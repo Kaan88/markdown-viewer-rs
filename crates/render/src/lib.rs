@@ -13,7 +13,7 @@ pub use bitmap::Bitmap;
 pub use image::{DecodedImage, decode_image};
 pub use layout::{
     BlockBox, DocumentRenderer, Frame, Hit, ImageStats, Jump, Options, PageLayout, Rect,
-    RemoteState, Rendered, Slice, layout, render, render_slice, shared_fonts,
+    RemoteState, Rendered, Slice, Source, SourceKind, layout, render, render_slice, shared_fonts,
 };
 pub use text::{CacheStats, Subpixel, TextEngine};
 pub use theme::{Color, DARK, LIGHT, Theme};

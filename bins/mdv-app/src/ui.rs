@@ -7,6 +7,7 @@ use crate::menu::Menu;
 use crate::textfield::TextField;
 use crate::tree::FileTree;
 use mdview_core::commands::CommandId;
+use mdview_render::SourceKind;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -162,6 +163,8 @@ pub enum Act {
     RecentMenu,
     OpenLink(String),
     CopyLink(String),
+    /// Copy the TeX or Mermaid text a formula or diagram was drawn from.
+    CopySource(SourceKind, String),
     Copy,
     SelectAll,
     /// Toggle loading remote images in every document.

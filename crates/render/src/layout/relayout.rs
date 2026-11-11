@@ -185,17 +185,20 @@ impl DocumentRenderer {
         let notes = std::mem::take(&mut pager.notes);
         let mut paints = std::mem::take(&mut pager.paints);
         let mut lines = std::mem::take(&mut pager.hits);
+        let mut sources = std::mem::take(&mut pager.sources);
         drop(pager);
         match block {
             Some(block) if keep => {
                 paints.iter_mut().for_each(|paint| paint.shift(-base));
                 lines.iter_mut().for_each(|line| line.shift(-base));
+                sources.iter_mut().for_each(|source| source.shift(-base));
                 let phase = top - base;
                 self.cache.insert(
                     block,
                     CachedBlock {
                         paints,
                         lines,
+                        sources,
                         phase,
                     },
                 );
