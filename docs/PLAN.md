@@ -185,6 +185,23 @@ Each gate records real numbers in `spikes/RESULTS.md`.
 
 Commits go to the private repo as phases complete. No CI is set up.
 
+### Later: a lighter shell than Qt
+
+WinUI was retired on 2026-11-11 (archived on the `winui-archive` branch), and Qt is now the only
+shell. Qt's runtime is about 37 MB of DLLs on Windows. If the size or memory budgets matter more
+later, these three options are lighter, listed from most widgets to least. The figures are typical
+values from memory, not measured here. A spike in `spikes/` should show `showcase.md` with each one
+and record exe size, private memory and first frame against Qt before anything is chosen.
+
+| Option | What it is | Rough size / memory | Cost |
+|---|---|---|---|
+| **fltk-rs** (preferred) | FLTK, a small C++ toolkit, statically linked into one exe. Tabs, tree, menus, input, dialogs and drag and drop are built in; the renderer draws into one canvas widget, as it does in Qt. | +1.5-3 MB, ~10-20 MB | Dated look unless styled. It is C++, but none is authored here (the same trade as Qt). |
+| **Slint** (software renderer) | Declarative UI with a modern look. | a few MB | Heavier than fltk; licence (GPL, royalty-free or commercial) needs checking. |
+| **winit + softbuffer** | A window, input and a pixel buffer, all pure Rust with no GPU. The renderer also draws the chrome: tabs, bar, panes, menus and scrollbar. `rfd` for file dialogs, `arboard` for the clipboard. | ~2-4 MB, ~15-30 MB | Every widget is hand-written: find-box editing, menus, tree, focus, keyboard navigation, accessibility. |
+
+Not considered, because they are heavier: egui/eframe (redraws every frame, usually a GPU context),
+iced (wgpu), GTK4 (a large runtime on Windows). Tauri is ruled out because it is a webview.
+
 ### Scope to port
 
 The full inventory is in the research output and gets copied to `docs/PORT_CHECKLIST.md` in Phase 1 as the parity checklist:
