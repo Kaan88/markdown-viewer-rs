@@ -10,9 +10,11 @@
 //! linear rebuild costs about a millisecond per million blocks and runs once per batch, which the
 //! batching (a frame, an idle slice) keeps rare.
 //!
-//! Blocks are laid out at a local origin (their own top at 0), so a block's height does not
-//! depend on where it lands: measuring it now or after the blocks above it change gives the same
-//! number, and a lazily corrected layout converges to exactly the eager one.
+//! A block is measured on its own, at its current top, and its height is recorded apart from
+//! where it sits: measuring it now or after the blocks above it change gives the same number
+//! (only rounding to page rows inside it depends on the fraction of a row it starts at, which is
+//! why cached paints remember that fraction), and a lazily corrected layout converges to exactly
+//! the eager one.
 
 use super::inline::{Inline, Style};
 use super::pager::{Pager, Txt};

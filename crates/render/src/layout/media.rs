@@ -9,34 +9,34 @@ use crate::highlight;
 use mdview_core::model::BlockKind;
 use std::path::PathBuf;
 
+/// The box, in logical px, that stands in for a local image a refinement pass may not load, and
+/// the heights for a formula and a diagram block. Such a block is measured again with everything
+/// loaded before it is drawn, so these only steer the page height until then; they are typical
+/// sizes, not anything the document said.
+pub(super) const GUESS_IMAGE: (f32, f32) = (400.0, 240.0);
+pub(super) const GUESS_MATH: f32 = 44.0;
+pub(super) const GUESS_DIAGRAM: f32 = 300.0;
+
+fn is_remote(src: &str) -> bool {
+    ["http://", "https://"].iter().any(|scheme| {
+        src.get(..scheme.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(scheme))
+    })
+}
+
 impl<'a, 'b> Pager<'a, 'b> {
     /// Finds document image `index` in the store, loading it when this pass may. The id is
     /// `u32::MAX` when there is nothing to draw (an empty src, or a file this pass did not load).
     /// `Failed` covers a missing file, a blocked format or anything over the plan's limits.
     pub(super) fn image(&mut self, index: u32) -> (u32, Found) {
-        let info = self.doc.images[index as usize];
-        // `<picture>` may name a source per colour scheme; the matching one wins when present.
-        let themed = if self.theme.name == "dark" {
-            self.doc.str(info.dark_src)
-        } else {
-            self.doc.str(info.light_src)
-        };
-        let src = if themed.is_empty() {
-            self.doc.str(info.src)
-        } else {
-            themed
-        };
+        let src = self.image_src(index);
         if src.is_empty() {
             return (u32::MAX, Found::Failed);
         }
         let trimmed = src.trim();
-        let remote = ["http://", "https://"].iter().any(|scheme| {
-            trimmed
-                .get(..scheme.len())
-                .is_some_and(|head| head.eq_ignore_ascii_case(scheme))
-        });
+        let remote = is_remote(trimmed);
         let (id, found) = if remote {
-            self.store.remote(trimmed)
+            self.store.remote(trimmed, self.allow)
         } else {
             let path = PathBuf::from(src);
             let path = match &self.base_dir {
@@ -47,6 +47,29 @@ impl<'a, 'b> Pager<'a, 'b> {
         };
         self.note(id, &found, !remote);
         (id, found)
+    }
+
+    /// The source document image `index` shows in this theme: `<picture>` may name one per
+    /// colour scheme, and the matching one wins when present.
+    fn image_src(&self, index: u32) -> &'a str {
+        let doc: &'a mdview_core::Document = self.doc;
+        let info = doc.images[index as usize];
+        let themed = if self.theme.name == "dark" {
+            doc.str(info.dark_src)
+        } else {
+            doc.str(info.light_src)
+        };
+        if themed.is_empty() {
+            doc.str(info.src)
+        } else {
+            themed
+        }
+    }
+
+    /// Whether image `index` is a local file this pass did not load: what a refinement pass lays
+    /// out with a guessed box (see [`GUESS_IMAGE`]).
+    pub(super) fn unloaded_local(&self, index: u32, found: &Found) -> bool {
+        matches!(found, Found::Unknown) && !is_remote(self.image_src(index).trim())
     }
 
     /// Records that the block being laid out uses image `id`, and whether it stands in for a
@@ -123,6 +146,11 @@ impl<'a, 'b> Pager<'a, 'b> {
         let (key, found) = self.store.mermaid(source, scale, dark, self.allow);
         self.note(key, &found, true);
         let Found::Ready(image, _) = found else {
+            if matches!(found, Found::Unknown) {
+                // Not rendered, and this pass may not ask (see `GUESS_DIAGRAM`).
+                self.y += self.px(8.0 + GUESS_DIAGRAM + 16.0);
+                return true;
+            }
             return false;
         };
         let (image_w, image_h) = (image.width as f32 / 2.0, image.height as f32 / 2.0);
@@ -161,6 +189,10 @@ impl<'a, 'b> Pager<'a, 'b> {
             .math(source, size, self.theme.text, true, self.allow);
         self.note(key, &found, true);
         let Found::Ready(image, _) = found else {
+            if matches!(found, Found::Unknown) {
+                self.y += self.px(10.0 + GUESS_MATH + 18.0);
+                return true;
+            }
             return false;
         };
         let (image_w, image_h) = (image.width as f32 / 2.0, image.height as f32 / 2.0);

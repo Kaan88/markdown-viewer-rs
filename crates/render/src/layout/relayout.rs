@@ -42,6 +42,10 @@ pub(super) struct ViewState {
     /// document (a frame, a jump, a hit test, a selection) wherever they are, so a correction is
     /// never left waiting for the block to scroll into view.
     pub(super) pending: Vec<usize>,
+    /// Refinement's two cursors: the next index to look at from the anchor down, and from the
+    /// top of the page. Each only moves forward, so a whole refinement looks at each block once.
+    pub(super) ahead: usize,
+    pub(super) behind: usize,
 }
 
 /// Something to bring into view with [`DocumentRenderer::jump_to`].
@@ -51,6 +55,8 @@ pub enum Jump {
     Block(u32),
     /// A footnote entry, by the number the text shows.
     Footnote(u32),
+    /// An offset into `Document::text`: the line holding it goes to the top (a find match).
+    Text(u32),
 }
 
 /// What the shell decided about a remote image, for [`DocumentRenderer::set_remote`].
@@ -63,15 +69,8 @@ pub enum RemoteState {
 }
 
 impl DocumentRenderer {
-    /// Lays the document out for these options and returns the layout, which the renderer keeps
-    /// and corrects. Do this once per document, width, scale and theme; everything else (a
-    /// frame, a toggle, an arrival) corrects it in place.
-    pub fn layout(&mut self, doc: &Document, options: &Options) -> &PageLayout {
-        self.layout_exact(doc, options)
-    }
-
-    /// Lays out every block now, loading every image, formula and diagram: the eager form, for
-    /// tests and one-shot renders.
+    /// Lays out every block now, loading every image, formula and diagram: the eager form of
+    /// [`layout`](Self::layout), for tests and one-shot renders.
     pub fn layout_exact(&mut self, doc: &Document, options: &Options) -> &PageLayout {
         self.start_layout(doc, options);
         let count = self.page.as_ref().map_or(0, PageLayout::len);
@@ -378,6 +377,7 @@ impl DocumentRenderer {
     ) -> Option<f32> {
         self.ensure_layout(doc, options);
         self.store.begin_frame();
+        self.correct_pending(doc);
         let anchor = match target {
             Jump::Block(block) => {
                 let top = top_level(doc, block)?;
@@ -385,6 +385,28 @@ impl DocumentRenderer {
                 Anchor {
                     index,
                     offset: -margin,
+                }
+            }
+            Jump::Text(offset) => {
+                let top = top_level(doc, doc.block_at(offset)?)?;
+                let index = self.page.as_ref()?.index_of(top)?;
+                if !self.ready(index) {
+                    self.measure(doc, index, true, true);
+                    self.settle();
+                }
+                let span = self.page.as_ref()?.spans[index];
+                let cached = self.cache.get(&span.block)?;
+                // The line holding the offset, or the first one after it.
+                let line = cached
+                    .lines
+                    .iter()
+                    .filter(|line| line.doc_end > offset)
+                    .min_by(|a, b| a.top.total_cmp(&b.top))
+                    .or(cached.lines.first());
+                let line_top = line.map_or(0.0, |line| line.top - cached.phase);
+                Anchor {
+                    index,
+                    offset: line_top - margin,
                 }
             }
             Jump::Footnote(number) => {

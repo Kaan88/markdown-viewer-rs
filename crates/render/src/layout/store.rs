@@ -290,11 +290,12 @@ impl ImageStore {
         (id, self.found(id))
     }
 
-    /// A remote image: never loaded here. One nobody has decided about is queued for the shell.
-    pub(super) fn remote(&mut self, url: &str) -> (u32, Found) {
+    /// A remote image: never loaded here. One nobody has decided about is queued for the shell
+    /// when `ask` (a pass that shows it; estimates and refinement only look).
+    pub(super) fn remote(&mut self, url: &str, ask: bool) -> (u32, Found) {
         let id = self.intern(ImageKey::Remote(url.to_string()));
         let found = self.found(id);
-        if matches!(found, Found::Unknown) && !self.remote_new.iter().any(|u| u == url) {
+        if ask && matches!(found, Found::Unknown) && !self.remote_new.iter().any(|u| u == url) {
             self.remote_new.push(url.to_string());
         }
         (id, found)

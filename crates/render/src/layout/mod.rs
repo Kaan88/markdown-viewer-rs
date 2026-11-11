@@ -12,6 +12,7 @@
 //! [`table`] and [`media`] the block kinds.
 
 mod containers;
+mod estimate;
 mod frame;
 mod hit;
 mod inline;
@@ -20,6 +21,7 @@ mod page;
 mod pager;
 mod paint;
 mod prose;
+mod refine;
 mod relayout;
 mod selection;
 mod store;
@@ -195,6 +197,8 @@ pub struct DocumentRenderer {
     /// Which top-level blocks (by index) used each store id when last laid out, so an arriving
     /// image re-measures only those.
     uses: HashMap<u32, Vec<u32>>,
+    /// The average glyph advances estimates use, for the scale and theme they were taken at.
+    metrics: Option<(u32, &'static str, estimate::Metrics)>,
 }
 
 impl Default for DocumentRenderer {
@@ -234,6 +238,7 @@ impl DocumentRenderer {
             options: None,
             view: relayout::ViewState::default(),
             uses: HashMap::new(),
+            metrics: None,
         }
     }
 

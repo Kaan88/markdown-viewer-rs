@@ -27,7 +27,9 @@ use mdview_core::links::{LinkAction, classify_link};
 use mdview_core::model::{NONE, ScrollPos};
 use mdview_core::session::{self, RecentEntry, Recents, Session};
 use mdview_core::{Document, parse_bytes};
-use mdview_render::{DARK, DocumentRenderer, Frame, Hit, LIGHT, Options, PageLayout, Rect, Theme};
+use mdview_render::{
+    DARK, DocumentRenderer, Frame, Hit, Jump, LIGHT, Options, PageLayout, Rect, Theme,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -1041,6 +1043,27 @@ impl Workspace {
         true
     }
 
+    /// Measures more of the active page's estimated blocks, for about `budget`; true while some
+    /// are left. The window calls this between events until it returns false, then stops (a
+    /// refined page needs no idle work). Corrections above the viewport move the scroll offset
+    /// with the content and mark the page dirty.
+    pub fn refine(&mut self, budget: Duration) -> bool {
+        let Some(tab) = self.active.and_then(|i| self.tabs.get(i)) else {
+            return false;
+        };
+        let (Some(doc), Some(view)) = (tab.doc.as_ref(), tab.view.as_ref()) else {
+            return false;
+        };
+        let more = self.renderer.refine(doc, &view.options, budget);
+        self.adopt();
+        more
+    }
+
+    /// Whether the active page still has estimated heights for [`refine`](Self::refine).
+    pub fn refining(&self) -> bool {
+        self.layout().is_some() && self.renderer.estimating()
+    }
+
     /// The active tab's layout, while it has one.
     fn layout(&self) -> Option<&PageLayout> {
         self.active_tab()?.view.as_ref()?;
@@ -1078,15 +1101,10 @@ impl Workspace {
             };
             let layout = self.renderer.layout(doc, &options);
             tab.view = Some(View {
-                options,
                 heading_ys: heading_ys(doc, layout),
                 generation: layout.generation(),
+                options,
             });
-            if let Some(pos) = tab.keep.take()
-                && let Some(y) = layout.y_of(doc, pos.block)
-            {
-                tab.scroll = y + pos.offset * scale;
-            }
             self.dirty = true;
         }
         let height = viewport.height as f32;
@@ -1097,17 +1115,26 @@ impl Workspace {
             return false;
         };
         let margin = JUMP_MARGIN * view.options.scale;
-        // A new layout or a jump moves the renderer's anchor to the tab's offset; otherwise the
-        // anchor leads, since the renderer may have corrected the layout around it.
+        // A new layout moves the renderer's anchor to the tab's offset, unless a reading position
+        // or a jump puts it on a block; otherwise the anchor leads, since the renderer may have
+        // corrected the layout around it. A jump measures the viewport it lands on first, so it
+        // is exact while the rest of the page is still estimated.
         let mut moved = !fresh;
+        let renderer = &mut self.renderer;
+        let mut jump = |target: Jump, margin: f32, scroll: &mut f32, moved: &mut bool| {
+            if let Some(top) = renderer.jump_to(doc, &view.options, target, margin, height) {
+                *scroll = top.round();
+                *moved = false;
+            }
+        };
+        if !fresh && let Some(pos) = tab.keep.take() {
+            let below = pos.offset * view.options.scale;
+            jump(Jump::Block(pos.block), -below, &mut tab.scroll, &mut moved);
+        }
         match tab.reveal.take() {
             Some(Reveal::Anchor(fragment)) => {
-                if let Some(y) = doc
-                    .resolve_fragment(&fragment)
-                    .and_then(|block| self.renderer.page_layout()?.y_of(doc, block))
-                {
-                    tab.scroll = y - margin;
-                    moved = true;
+                if let Some(block) = doc.resolve_fragment(&fragment) {
+                    jump(Jump::Block(block), margin, &mut tab.scroll, &mut moved);
                 }
             }
             Some(Reveal::Range(from, to)) => {
@@ -1115,9 +1142,18 @@ impl Workspace {
                 if !moved && let Some(top) = self.renderer.top() {
                     tab.scroll = top.round();
                 }
-                if let Some(y) = into_view(&rects, tab.scroll, height, margin) {
-                    tab.scroll = y;
-                    moved = true;
+                if into_view(&rects, tab.scroll, height, margin).is_some() {
+                    let renderer = &mut self.renderer;
+                    if let Some(top) = renderer.jump_to(
+                        doc,
+                        &view.options,
+                        Jump::Text(from.min(to)),
+                        margin,
+                        height,
+                    ) {
+                        tab.scroll = top.round();
+                        moved = false;
+                    }
                 }
             }
             None => {}
@@ -1211,22 +1247,37 @@ impl Workspace {
     /// Scrolls so `block` (nested blocks too) sits just below the top edge, as an outline click or
     /// an anchor does. False if the block is not on the page or there is no layout yet.
     pub fn scroll_to_block(&mut self, block: u32) -> bool {
+        self.jump(Jump::Block(block))
+    }
+
+    /// Brings a block or footnote entry to just below the top edge through the renderer, which
+    /// measures the viewport it lands on first. False if the target is not on the page or there
+    /// is no layout yet.
+    fn jump(&mut self, target: Jump) -> bool {
         if !self.ensure_layout() {
             return false;
         }
-        let y = {
-            let Some(tab) = self.active_tab() else {
-                return false;
-            };
-            let (Some(doc), Some(view)) = (tab.doc.as_ref(), tab.view.as_ref()) else {
-                return false;
-            };
-            let Some(y) = self.renderer.page_layout().and_then(|l| l.y_of(doc, block)) else {
-                return false;
-            };
-            y - JUMP_MARGIN * view.options.scale
+        let Some(viewport) = self.viewport else {
+            return false;
         };
-        self.scroll_to(y);
+        let Some(tab) = self.active.and_then(|i| self.tabs.get_mut(i)) else {
+            return false;
+        };
+        let (Some(doc), Some(view)) = (tab.doc.as_ref(), tab.view.as_ref()) else {
+            return false;
+        };
+        let margin = JUMP_MARGIN * view.options.scale;
+        let height = viewport.height as f32;
+        let Some(top) = self
+            .renderer
+            .jump_to(doc, &view.options, target, margin, height)
+        else {
+            return false;
+        };
+        tab.keep = None;
+        tab.scroll = top.round();
+        self.dirty = true;
+        self.adopt();
         true
     }
 
@@ -1440,30 +1491,11 @@ impl Workspace {
 
     /// Scrolls to footnote `index`'s entry at the end of the page.
     pub fn follow_footnote(&mut self, index: u32) -> bool {
-        if !self.ensure_layout() {
-            return false;
-        }
-        let y = {
-            let Some(tab) = self.active_tab() else {
-                return false;
-            };
-            let (Some(doc), Some(view)) = (tab.doc.as_ref(), tab.view.as_ref()) else {
-                return false;
-            };
-            let Some(number) = doc.footnotes.get(index as usize).map(|n| n.number) else {
-                return false;
-            };
-            let Some(y) = self
-                .renderer
-                .page_layout()
-                .and_then(|l| l.footnote_y(number))
-            else {
-                return false;
-            };
-            y - JUMP_MARGIN * view.options.scale
-        };
-        self.scroll_to(y);
-        true
+        let number = self
+            .active_document()
+            .and_then(|doc| doc.footnotes.get(index as usize))
+            .map(|note| note.number);
+        number.is_some_and(|number| self.jump(Jump::Footnote(number)))
     }
 
     /// Opens or closes a `<details>`; the renderer measures its block again at the next paint
@@ -2451,6 +2483,39 @@ mod tests {
         let later = Instant::now() + Duration::from_secs(10);
         assert_eq!(ws.status(Instant::now()), Some("hello"));
         assert_eq!(ws.status(later), None);
+    }
+
+    /// An outline jump right after opening lands exactly while most of the page is estimated, and
+    /// refining the rest keeps the heading where it is on screen.
+    #[test]
+    fn a_jump_before_refinement_stays_put_through_it() {
+        let dir = temp_dir("jump-refine");
+        let mut text = String::new();
+        for i in 0..60 {
+            text.push_str(&format!(
+                "## Part {i}\n\n{}\n",
+                paragraphs("Words", i % 4 + 1)
+            ));
+        }
+        let path = write(&dir, "doc.md", &text);
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        ws.paint(800, 600, 1.0).unwrap();
+        assert!(ws.refining(), "the first layout is estimated");
+        let block = ws.outline()[45].block;
+        assert!(ws.scroll_to_block(block));
+        let at = |ws: &Workspace| {
+            let doc = ws.active_document().unwrap();
+            ws.layout().unwrap().y_of(doc, block).unwrap() - ws.scroll()
+        };
+        assert_eq!(at(&ws), JUMP_MARGIN);
+        ws.paint(800, 600, 1.0).unwrap();
+        while ws.refine(Duration::from_millis(1)) {}
+        assert!(!ws.refining());
+        ws.paint(800, 600, 1.0).unwrap();
+        assert_eq!(at(&ws), JUMP_MARGIN);
+        assert_eq!(ws.current_heading(), Some(45));
+        _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A `<details>` opened above the viewport (as a click on its summary would, then scrolling

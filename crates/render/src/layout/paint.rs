@@ -136,7 +136,11 @@ impl<'a, 'b> Pager<'a, 'b> {
                 Paint::Text { layout, x, y } => engine.draw_layout(frame, &layout, x, y - shift),
                 Paint::Image { index, x, y, w, h } => {
                     if let Some(image) = self.store.pixels(index) {
-                        frame.image(&image.rgba, image.width, image.height, x, y - shift, w, h);
+                        // Snapped to a page row before the shift: the bitmap rounds half away
+                        // from zero, so an image whose top sits on a half row above a band's
+                        // first row would otherwise land a row off from the whole-page draw.
+                        let y = y.round() - shift;
+                        frame.image(&image.rgba, image.width, image.height, x, y, w, h);
                     }
                 }
             }

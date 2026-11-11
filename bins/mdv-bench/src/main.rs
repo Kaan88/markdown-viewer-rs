@@ -1,8 +1,11 @@
 //! Renders a Markdown file to a PNG with the headless renderer. Phase 2's measurement and golden
-//! harness starts here; `--all` writes the four comparison images, and `--viewport` renders only a
-//! scrolled slice for the 1 MB budget.
+//! harness starts here; `--all` writes the four comparison images, and `--viewport` goes through
+//! the phases a window pays for (see `phases.rs`): `--repeat <n>` scroll steps, `--resize <w>`,
+//! `--zoom <x>`, `--details` and `--error` add phases.
 
-use mdview_render::{DARK, DocumentRenderer, LIGHT, Options, Theme, render};
+mod phases;
+
+use mdview_render::{DARK, LIGHT, Options, Theme, render};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -17,6 +20,15 @@ fn main() {
     let mut viewport: Option<f32> = None;
     let mut repeat: usize = 1;
     let mut all = false;
+    let mut extra = phases::Run {
+        height: 0.0,
+        scroll: 0.0,
+        steps: 0,
+        resize: None,
+        zoom: None,
+        details: false,
+        error: false,
+    };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -69,6 +81,19 @@ fn main() {
                     .unwrap()
             }
             "--all" => all = true,
+            "--resize" => {
+                extra.resize = Some(
+                    args.next()
+                        .expect("--resize needs a width")
+                        .parse()
+                        .unwrap(),
+                )
+            }
+            "--zoom" => {
+                extra.zoom = Some(args.next().expect("--zoom needs a factor").parse().unwrap())
+            }
+            "--details" => extra.details = true,
+            "--error" => extra.error = true,
             other => panic!("unknown argument {other}"),
         }
     }
@@ -103,7 +128,7 @@ fn main() {
                 base_dir.clone(),
                 None,
                 None,
-                1,
+                &extra,
             );
         }
         return;
@@ -111,7 +136,19 @@ fn main() {
     let theme = if theme == "dark" { DARK } else { LIGHT };
     let out = out.unwrap_or_else(|| PathBuf::from("target/goldens/showcase.png"));
     run(
-        &doc, width, scale, theme, max_height, out, base_dir, scroll, viewport, repeat,
+        &doc,
+        width,
+        scale,
+        theme,
+        max_height,
+        out,
+        base_dir,
+        scroll,
+        viewport,
+        &phases::Run {
+            steps: repeat.saturating_sub(1),
+            ..extra
+        },
     );
 }
 
@@ -126,7 +163,7 @@ fn run(
     base_dir: Option<PathBuf>,
     scroll: Option<f32>,
     viewport: Option<f32>,
-    repeat: usize,
+    extra: &phases::Run,
 ) {
     let options = Options {
         width,
@@ -138,35 +175,12 @@ fn run(
     let start = Instant::now();
     let (bitmap, total_height, stats, mode) = match viewport {
         Some(height) => {
-            let mut renderer = DocumentRenderer::new();
-            renderer.layout(doc, &options);
-            let base = scroll.unwrap_or(0.0);
-            let first = Instant::now();
-            renderer.view_frame(doc, &options, base, height);
-            let first_ms = first.elapsed().as_secs_f64() * 1000.0;
-            let mut worst = 0.0f64;
-            let mut sum = 0.0f64;
-            let mut frames = 0usize;
-            for frame in 1..repeat.max(1) {
-                let top = base + frame as f32 * 40.0;
-                let started = Instant::now();
-                renderer.view_frame(doc, &options, top, height);
-                let ms = started.elapsed().as_secs_f64() * 1000.0;
-                worst = worst.max(ms);
-                sum += ms;
-                frames += 1;
-            }
-            println!(
-                "height pass {first_ms:.1} ms; scroll frames worst {worst:.1} ms, mean {:.1} ms over {frames}",
-                sum / frames.max(1) as f64
-            );
-            let images = renderer.image_stats();
-            println!(
-                "images: {} decodes, {} engine jobs, {:.1} MiB held",
-                images.decodes,
-                images.engine_jobs,
-                images.bytes as f64 / (1024.0 * 1024.0)
-            );
+            let run = phases::Run {
+                height,
+                scroll: scroll.unwrap_or(0.0),
+                ..*extra
+            };
+            let renderer = phases::run(doc, &options, &run);
             let frame = renderer.frame().expect("frame");
             (
                 frame.bitmap.clone(),

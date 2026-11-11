@@ -295,6 +295,11 @@ impl<'a, 'b> Pager<'a, 'b> {
                     (Some(w), Some(h @ mdview_core::model::Length::Px(_))) => Some((w, h)),
                     _ => None,
                 };
+                // A refinement pass stands a typical box in for a local file it may not load.
+                let guess = self.unloaded_local(index, &found).then(|| {
+                    let (w, h) = super::media::GUESS_IMAGE;
+                    ((self.px(w).min(self.content_width()), self.px(h)), true)
+                });
                 let sized = match found {
                     Found::Ready(image, density) => {
                         let natural = (
@@ -306,7 +311,8 @@ impl<'a, 'b> Pager<'a, 'b> {
                     // Not here yet (or not allowed): a declared size keeps its box, so the
                     // arrival does not move the text after it.
                     Found::Pending | Found::Blocked | Found::Unknown => declared
-                        .map(|(w, h)| (self.sized_image((1.0, 1.0), Some(w), Some(h)), true)),
+                        .map(|(w, h)| (self.sized_image((1.0, 1.0), Some(w), Some(h)), true))
+                        .or(guess),
                     Found::Failed => None,
                 };
                 if let Some(((width, height), reserved)) = sized {

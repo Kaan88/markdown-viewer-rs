@@ -1353,7 +1353,7 @@ impl Shell {
         };
         if stale {
             if let Some(document) = self.document.borrow().as_ref() {
-                let page = self.renderer.borrow_mut().layout(document, &options).clone();
+                let page = self.renderer.borrow_mut().layout_exact(document, &options).clone();
                 *self.layout.borrow_mut() = Some(page);
             }
         }
@@ -1649,7 +1649,7 @@ impl CanvasHandler for Shell {
                 return;
             };
             let started = std::time::Instant::now();
-            let page = self.renderer.borrow_mut().layout(document, &options).clone();
+            let page = self.renderer.borrow_mut().layout_exact(document, &options).clone();
             eprintln!(
                 "mdview-qt: height pass {width} dip at {scale:.2} scale in {:.1} ms, page {:.0} px",
                 started.elapsed().as_secs_f64() * 1000.0,
