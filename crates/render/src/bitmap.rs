@@ -151,7 +151,9 @@ impl Bitmap {
         }
     }
 
-    /// Draws a straight-alpha RGBA image, bilinearly scaled into the rectangle at `(x, y)`.
+    /// Draws a straight-alpha RGBA image scaled into the rectangle at `(x, y)`: bilinearly, or by
+    /// area averaging when it is shrunk below half size on either axis, where bilinear sampling
+    /// skips source pixels and turns fine detail into moiré.
     pub fn image(
         &mut self,
         rgba: &[u8],
@@ -168,6 +170,123 @@ impl Bitmap {
         if rgba.len() < source_width as usize * source_height as usize * 4 {
             return;
         }
+        let (draw_width, draw_height) = (w.round().max(1.0) as i32, h.round().max(1.0) as i32);
+        if (draw_width as u32) * 2 < source_width || (draw_height as u32) * 2 < source_height {
+            self.image_area(rgba, source_width, source_height, x, y, w, h);
+        } else {
+            self.image_bilinear(rgba, source_width, source_height, x, y, w, h);
+        }
+    }
+
+    /// Box-filtered downscaling: each destination pixel is the coverage-weighted mean of the
+    /// source pixels under it, averaged in premultiplied alpha so transparent pixels add no colour
+    /// (no dark fringes around a cut-out). Only the rows and columns inside the bitmap are
+    /// computed, so a scroll band pays for the source area behind the band alone.
+    #[allow(clippy::too_many_arguments)]
+    fn image_area(
+        &mut self,
+        rgba: &[u8],
+        source_width: u32,
+        source_height: u32,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    ) {
+        let (left, top) = (x.round() as i32, y.round() as i32);
+        let (draw_width, draw_height) = (w.round().max(1.0) as i32, h.round().max(1.0) as i32);
+        let (frame_width, frame_height) = (self.width as i32, self.height as i32);
+        let (c0, c1) = ((-left).max(0), (frame_width - left).min(draw_width));
+        let (r0, r1) = ((-top).max(0), (frame_height - top).min(draw_height));
+        if c0 >= c1 || r0 >= r1 {
+            return;
+        }
+        // The source pixels under destination cell `i` of `n` along an axis `len` long, each
+        // weighted by its overlap with the cell in 1/256 px. Integer weights keep the inner loop
+        // in integer multiply-adds; the result is divided by the summed weights, so the rounding
+        // of a weight cannot brighten or darken a flat area.
+        let footprint = |i: i32, n: i32, len: u32, out: &mut Vec<(usize, u64)>| {
+            out.clear();
+            let ratio = len as f64 / n as f64;
+            let (a, b) = (i as f64 * ratio, ((i + 1) as f64 * ratio).min(len as f64));
+            let mut s = a.floor() as usize;
+            while (s as f64) < b && s < len as usize {
+                let overlap = b.min(s as f64 + 1.0) - a.max(s as f64);
+                let weight = (overlap * 256.0).round() as u64;
+                if weight > 0 {
+                    out.push((s, weight));
+                }
+                s += 1;
+            }
+        };
+        // Per visible column: a range into one flat list of (source byte offset, weight), and
+        // the column's total weight.
+        let mut columns: Vec<(usize, usize, u64)> = Vec::with_capacity((c1 - c0) as usize);
+        let mut taps: Vec<(usize, u64)> = Vec::new();
+        let mut scratch = Vec::new();
+        for c in c0..c1 {
+            footprint(c, draw_width, source_width, &mut scratch);
+            let total = scratch.iter().map(|&(_, w)| w).sum();
+            columns.push((taps.len(), scratch.len(), total));
+            taps.extend(scratch.iter().map(|&(sx, w)| (sx * 4, w)));
+        }
+        // Premultiplied red, green, blue and alpha, weighted, per visible column.
+        let mut sums = vec![[0u64; 4]; (c1 - c0) as usize];
+        let mut rows = Vec::new();
+        let stride = source_width as usize * 4;
+        for r in r0..r1 {
+            footprint(r, draw_height, source_height, &mut rows);
+            let row_total: u64 = rows.iter().map(|&(_, w)| w).sum();
+            sums.fill([0; 4]);
+            for &(sy, wy) in &rows {
+                let line = &rgba[sy * stride..(sy + 1) * stride];
+                for (sum, &(start, len, _)) in sums.iter_mut().zip(&columns) {
+                    let mut h = [0u64; 4];
+                    for &(sx, wx) in &taps[start..start + len] {
+                        let p = &line[sx..sx + 4];
+                        let a = p[3] as u64 * wx;
+                        h[0] += p[0] as u64 * a;
+                        h[1] += p[1] as u64 * a;
+                        h[2] += p[2] as u64 * a;
+                        h[3] += a;
+                    }
+                    for (s, h) in sum.iter_mut().zip(h) {
+                        *s += h * wy;
+                    }
+                }
+            }
+            let py = (top + r) as usize;
+            for (i, (sum, &(_, _, column_total))) in sums.iter().zip(&columns).enumerate() {
+                let total = column_total * row_total;
+                if sum[3] == 0 || total == 0 {
+                    continue;
+                }
+                // Premultiplied colour (0..255) and coverage (0..1) of the cell.
+                let scale = 1.0 / (255.0 * total as f64);
+                let alpha = (sum[3] as f64 * scale).min(1.0);
+                let inverse = 1.0 - alpha;
+                let index = (py * self.width as usize + (left + c0) as usize + i) * 4;
+                for channel in 0..3 {
+                    // RGBA sums, BGRA framebuffer.
+                    let value = sum[2 - channel] as f64 * scale
+                        + self.pixels[index + channel] as f64 * inverse;
+                    self.pixels[index + channel] = (value + 0.5).min(255.0) as u8;
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn image_bilinear(
+        &mut self,
+        rgba: &[u8],
+        source_width: u32,
+        source_height: u32,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    ) {
         let (frame_width, frame_height) = (self.width as i32, self.height as i32);
         let (left, top) = (x.round() as i32, y.round() as i32);
         let (draw_width, draw_height) = (w.round().max(1.0) as i32, h.round().max(1.0) as i32);
@@ -273,6 +392,130 @@ mod tests {
                 let d = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r;
                 bm.blend(px, py, rgb, (0.5 - d).clamp(0.0, 1.0));
             }
+        }
+    }
+
+    /// A straight-alpha RGBA image from a per-pixel function.
+    fn synth(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> Vec<u8> {
+        (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .flat_map(|(x, y)| f(x, y))
+            .collect()
+    }
+
+    /// The spread (max - min) of the green channel inside a region.
+    fn spread(bm: &Bitmap, x0: u32, y0: u32, x1: u32, y1: u32) -> u8 {
+        let (mut lo, mut hi) = (255u8, 0u8);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let v = bm.pixels[(y * bm.width + x) as usize * 4 + 1];
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+        }
+        hi - lo
+    }
+
+    #[test]
+    fn a_fine_pattern_shrunk_a_lot_averages_to_flat_grey() {
+        // One-pixel checks and one-pixel stripes, shrunk by 4 and by 4.3 so the cells do not line
+        // up with the pattern. A 4.3 px cell over stripes holds 2 or 2.3 px of white, so a box
+        // filter itself varies by 0.3 / 4.3 of full scale (18 levels); bilinear sampling swings
+        // over nearly the whole range.
+        let checker = |x: u32, y: u32| {
+            let v = if (x + y) % 2 == 0 { 255 } else { 0 };
+            [v, v, v, 255]
+        };
+        let stripes = |x: u32, _| {
+            let v = if x % 2 == 0 { 255 } else { 0 };
+            [v, v, v, 255]
+        };
+        for (name, size, pattern, most) in [
+            ("checker 4x", 400, synth(400, 400, checker), 1),
+            ("stripes 4x", 400, synth(400, 400, stripes), 1),
+            ("checker 4.3x", 430, synth(430, 430, checker), 6),
+            ("stripes 4.3x", 430, synth(430, 430, stripes), 19),
+        ] {
+            let mut area = Bitmap::new(120, 120);
+            area.clear([255, 0, 0]);
+            area.image(&pattern, size, size, 10.0, 10.0, 100.0, 100.0);
+            let s = spread(&area, 10, 10, 110, 110);
+            assert!(s <= most, "{name}: area-averaged spread {s}");
+            let mid = area.pixels[(60 * 120 + 60) * 4 + 1];
+            assert!((110..=146).contains(&mid), "{name}: grey {mid}");
+            // The border is untouched.
+            assert_eq!(&area.pixels[0..4], &[0, 0, 255, 255]);
+            assert_eq!(
+                &area.pixels[(9 * 120 + 50) * 4..(9 * 120 + 50) * 4 + 4],
+                &[0, 0, 255, 255]
+            );
+
+            // What this replaces: bilinear sampling of the same image is a moiré. (At exactly 4x
+            // it happens to sample halfway between two pixels and come out grey as well.)
+            if size == 430 {
+                let mut bilinear = Bitmap::new(120, 120);
+                bilinear.image_bilinear(&pattern, size, size, 10.0, 10.0, 100.0, 100.0);
+                let s = spread(&bilinear, 10, 10, 110, 110);
+                assert!(s > 100, "{name}: bilinear spread {s}");
+            }
+        }
+    }
+
+    #[test]
+    fn shrinking_a_cut_out_leaves_no_dark_fringe() {
+        // Opaque white on the left, fully transparent black on the right: averaging straight
+        // alpha would pull the edge towards black.
+        let image = synth(400, 64, |x, _| {
+            if x < 203 {
+                [255, 255, 255, 255]
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+        let mut on_white = Bitmap::new(100, 16);
+        on_white.clear([255, 255, 255]);
+        on_white.image(&image, 400, 64, 0.0, 0.0, 100.0, 16.0);
+        assert!(on_white.pixels.iter().all(|&v| v == 255), "a dark fringe");
+
+        let mut on_black = Bitmap::new(100, 16);
+        on_black.clear([0, 0, 0]);
+        on_black.image(&image, 400, 64, 0.0, 0.0, 100.0, 16.0);
+        let row: Vec<u8> = (0..100).map(|x| on_black.pixels[x * 4]).collect();
+        assert_eq!(&row[..50], &[255; 50]);
+        assert_eq!(row[50], 191, "the edge cell is three quarters covered");
+        assert_eq!(&row[51..], &[0; 49]);
+    }
+
+    #[test]
+    fn mild_scaling_keeps_the_bilinear_path_and_clipping_crops() {
+        let image = synth(97, 61, |x, y| {
+            [
+                (x * 5) as u8,
+                (y * 9) as u8,
+                (x * y) as u8,
+                (128 + x + y) as u8,
+            ]
+        });
+        // Half size and up: exactly the bilinear output.
+        for (w, h) in [(49.0, 31.0), (97.0, 61.0), (150.0, 90.0)] {
+            let mut a = Bitmap::new(160, 100);
+            a.clear([30, 60, 90]);
+            let mut b = a.clone();
+            a.image(&image, 97, 61, 3.0, 4.0, w, h);
+            b.image_bilinear(&image, 97, 61, 3.0, 4.0, w, h);
+            assert!(a.pixels == b.pixels, "{w}x{h}");
+        }
+        // A shrunk image cut by the bitmap's edges is the same pixels as the whole draw.
+        let mut whole = Bitmap::new(60, 40);
+        whole.clear([30, 60, 90]);
+        whole.image(&image, 97, 61, 20.0, 15.0, 23.0, 14.0);
+        let mut part = Bitmap::new(30, 20);
+        part.clear([30, 60, 90]);
+        part.image(&image, 97, 61, 20.0 - 30.0, 15.0 - 20.0, 23.0, 14.0);
+        for y in 0..20 {
+            let a = &whole.pixels[((y + 20) * 60 + 30) * 4..((y + 20) * 60 + 60) * 4];
+            let b = &part.pixels[y * 30 * 4..(y + 1) * 30 * 4];
+            assert_eq!(a, b, "row {y}");
         }
     }
 

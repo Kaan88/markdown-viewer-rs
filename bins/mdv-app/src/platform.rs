@@ -1,5 +1,6 @@
 //! OS glue: clipboard, URLs, file manager, system theme/metrics, dialogs.
 
+pub use mdview_render::Subpixel;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -233,6 +234,36 @@ mod imp {
         if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
     }
 
+    /// The system's text antialiasing: greyscale unless font smoothing is on and set to
+    /// ClearType, then the ClearType stripe order. A failed query keeps the RGB default.
+    pub fn subpixel_order() -> Subpixel {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            FE_FONTSMOOTHINGCLEARTYPE, FE_FONTSMOOTHINGORIENTATIONBGR, SPI_GETFONTSMOOTHING,
+            SPI_GETFONTSMOOTHINGORIENTATION, SPI_GETFONTSMOOTHINGTYPE, SystemParametersInfoW,
+        };
+        let get = |action| {
+            let mut value: u32 = 0;
+            // SAFETY: each of these actions writes one BOOL or UINT (4 bytes) to `pvparam`.
+            let ok =
+                unsafe { SystemParametersInfoW(action, 0, (&mut value as *mut u32).cast(), 0) };
+            (ok != 0).then_some(value)
+        };
+        match get(SPI_GETFONTSMOOTHING) {
+            Some(0) => return Subpixel::None,
+            None => return Subpixel::Rgb,
+            Some(_) => {}
+        }
+        match get(SPI_GETFONTSMOOTHINGTYPE) {
+            Some(FE_FONTSMOOTHINGCLEARTYPE) => {}
+            Some(_) => return Subpixel::None,
+            None => return Subpixel::Rgb,
+        }
+        match get(SPI_GETFONTSMOOTHINGORIENTATION) {
+            Some(FE_FONTSMOOTHINGORIENTATIONBGR) => Subpixel::Bgr,
+            _ => Subpixel::Rgb,
+        }
+    }
+
     /// The window rectangle, the client rectangle (screen coordinates) and the monitor's work area,
     /// for checking that a maximized frameless window covers exactly the work area.
     pub fn frame_report(hwnd: isize) -> String {
@@ -334,6 +365,9 @@ mod imp {
     pub fn system_scale() -> f32 {
         1.0
     }
+    pub fn subpixel_order() -> Subpixel {
+        Subpixel::Rgb
+    }
     pub fn frame_report(_hwnd: isize) -> String {
         String::new()
     }
@@ -371,6 +405,12 @@ pub fn caret_blink_time() -> Option<Duration> {
 pub fn system_scale() -> f32 {
     imp::system_scale()
 }
+
+/// The subpixel order to antialias UI text with: the system's ClearType setting on Windows, RGB
+/// elsewhere.
+pub fn subpixel_order() -> Subpixel {
+    imp::subpixel_order()
+}
 /// Window, client and work-area rectangles, for the frameless-window checks under `MDVIEW_TRACE`.
 pub fn frame_report(hwnd: isize) -> String {
     imp::frame_report(hwnd)
@@ -396,5 +436,14 @@ mod tests {
         assert!(!open_url("file:///c:/x"));
         assert!(!open_url("javascript:alert(1)"));
         assert!(!open_url(""));
+    }
+
+    /// The query itself cannot be checked against a known answer (it is the user's setting), but
+    /// it must agree with itself and not fall over.
+    #[test]
+    fn subpixel_order_reads_the_system_setting() {
+        let order = subpixel_order();
+        eprintln!("system subpixel order: {order:?}");
+        assert_eq!(order, subpixel_order());
     }
 }

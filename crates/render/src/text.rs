@@ -1,17 +1,51 @@
 //! CPU text: parley shapes and lays out, swash rasterizes, this module blends. Ported from the
 //! Phase 0 text spike (`spikes/text`), which the user accepted after the subpixel fix. The glyph
-//! cache is byte-capped, and text uses RGB subpixel masks: `Format::CustomSubpixel([0.3, 0.0,
-//! -0.3])` is deliberate, because zeno's `Format::Subpixel` swaps red and blue for RGB stripes.
+//! cache is byte-capped, and text uses subpixel masks in the order [`Subpixel`] names (RGB by
+//! default), or greyscale coverage with `Subpixel::None`.
+//!
+//! `DocumentRenderer` keeps its own `TextEngine` and does not expose the mode yet, so document
+//! text is always RGB. The hook it needs is a setter that calls
+//! [`TextEngine::set_subpixel`] and, when the mode changed, drops the paint cache and the frame,
+//! the way a theme change does.
 
 use crate::bitmap::Bitmap;
 use parley::{FontData, Layout, PositionedLayoutItem};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 use swash::scale::image::Content;
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::{Format, Vector};
 use swash::{CacheKey, FontRef};
 
 pub type Brush = [u8; 4];
+
+/// How glyph edges are antialiased: per colour channel for an LCD's subpixel stripes, or one
+/// coverage value for all three.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum Subpixel {
+    /// Red, green, blue stripes from left to right, the common LCD layout (and the default).
+    #[default]
+    Rgb,
+    /// Blue, green, red stripes: the same masks mirrored.
+    Bgr,
+    /// Greyscale antialiasing, for screens without a known stripe order (OLED, rotated panels,
+    /// remote sessions) or when the system turns ClearType off.
+    None,
+}
+
+impl Subpixel {
+    /// zeno shifts each channel's outline by these fractions of a pixel. Channel 0 is red: moving
+    /// the outline right by 0.3 samples it 0.3 px to the left, where an RGB panel's red stripe is.
+    /// `[0.3, 0.0, -0.3]` is deliberate, because zeno's own `Format::Subpixel` was measured to
+    /// swap red and blue against Qt.
+    fn format(self) -> Format {
+        match self {
+            Subpixel::Rgb => Format::CustomSubpixel([0.3, 0.0, -0.3]),
+            Subpixel::Bgr => Format::CustomSubpixel([-0.3, 0.0, 0.3]),
+            Subpixel::None => Format::Alpha,
+        }
+    }
+}
 
 /// Per-channel preblend tables, so glyph coverage becomes colour without a separate gamma pass.
 struct Lut(Box<[[u8; 256]; 8]>);
@@ -63,11 +97,53 @@ struct Entry {
     h: u32,
     color: bool,
     data: Box<[u8]>,
-    tick: u64,
+    /// The engine's tick when this glyph was last drawn, for least-recently-used eviction.
+    last_used: u64,
 }
 
-/// Map, LRU node and box overhead per cached glyph, so the cap bounds real memory.
+/// Map slot and box overhead per cached glyph, so the cap bounds real memory.
 const ENTRY_OVERHEAD: usize = 96;
+
+/// Multiply-rotate hashing (the FxHash scheme) for the glyph key, which is a handful of integers
+/// built by this module: SipHash's flood resistance buys nothing here and cost a visible share of
+/// every cached glyph draw.
+#[derive(Default)]
+struct KeyHasher(u64);
+
+impl Hasher for KeyHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(b as u64);
+        }
+    }
+    #[inline]
+    fn write_u8(&mut self, n: u8) {
+        self.write_u64(n as u64);
+    }
+    #[inline]
+    fn write_u16(&mut self, n: u16) {
+        self.write_u64(n as u64);
+    }
+    #[inline]
+    fn write_u32(&mut self, n: u32) {
+        self.write_u64(n as u64);
+    }
+    #[inline]
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+    #[inline]
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+type GlyphMap = HashMap<Key, Entry, BuildHasherDefault<KeyHasher>>;
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct CacheStats {
@@ -93,30 +169,54 @@ impl CacheStats {
 pub struct TextEngine {
     scaler: ScaleContext,
     fonts: HashMap<(u64, u32), (FontData, u32, CacheKey)>,
-    map: HashMap<Key, Entry>,
-    lru: BTreeMap<u64, Key>,
+    map: GlyphMap,
     tick: u64,
     cap: usize,
     pub stats: CacheStats,
     lut: Lut,
+    subpixel: Subpixel,
 }
 
 impl TextEngine {
-    /// `cap` bounds the raster cache in bytes. The plan's hard cap is 4 MB.
+    /// `cap` bounds the raster cache in bytes. The plan's hard cap is 4 MB. Text starts with
+    /// [`Subpixel::Rgb`] masks.
     pub fn new(cap: usize) -> Self {
         TextEngine {
             scaler: ScaleContext::new(),
             fonts: HashMap::new(),
-            map: HashMap::new(),
-            lru: BTreeMap::new(),
+            map: GlyphMap::default(),
             tick: 0,
             cap,
             stats: CacheStats::default(),
             lut: Lut::new(1.4, 0.5),
+            subpixel: Subpixel::default(),
         }
     }
 
-    fn raster(&mut self, key: Key, font: &FontData, coords: &[i16], size: f32) -> Entry {
+    pub fn subpixel(&self) -> Subpixel {
+        self.subpixel
+    }
+
+    /// Switches the antialiasing mode for glyphs drawn from now on. A change empties the glyph
+    /// cache, since every cached mask was rasterized for the old mode; pixels already drawn are
+    /// the caller's to repaint.
+    pub fn set_subpixel(&mut self, subpixel: Subpixel) {
+        if subpixel == self.subpixel {
+            return;
+        }
+        self.subpixel = subpixel;
+        self.map.clear();
+        self.stats.bytes = 0;
+        self.stats.entries = 0;
+    }
+
+    fn raster(
+        &mut self,
+        key: Key,
+        font: &FontData,
+        coords: impl Iterator<Item = i16>,
+        size: f32,
+    ) -> Entry {
         let cache_key = (font.data.id(), font.index);
         let (data, offset, font_key) = self.fonts.entry(cache_key).or_insert_with(|| {
             let r = FontRef::from_index(font.data.as_ref(), font.index as usize).expect("font");
@@ -132,15 +232,14 @@ impl TextEngine {
             .builder(font_ref)
             .size(size)
             .hint(false)
-            .normalized_coords(coords.iter().copied())
+            .normalized_coords(coords)
             .build();
         let image = Render::new(&[
             Source::ColorOutline(0),
             Source::ColorBitmap(StrikeWith::BestFit),
             Source::Outline,
         ])
-        // RGB order: zeno's `Format::Subpixel` was measured to swap red and blue against Qt.
-        .format(Format::CustomSubpixel([0.3, 0.0, -0.3]))
+        .format(self.subpixel.format())
         .offset(Vector::new(key.sub as f32 / 4.0, 0.0))
         .render(&mut scaler, key.glyph);
         let tick = self.tick;
@@ -152,7 +251,7 @@ impl TextEngine {
                 h: 0,
                 color: false,
                 data: Box::new([]),
-                tick,
+                last_used: tick,
             };
         };
         let (w, h) = (image.placement.width, image.placement.height);
@@ -180,16 +279,25 @@ impl TextEngine {
             h,
             color,
             data,
-            tick,
+            last_used: tick,
         }
     }
 
+    /// Called when the cache is over `cap`: drops the least recently drawn glyphs until it is at
+    /// three quarters of the cap. Eviction is rare (a warm document fits in a fraction of the cap),
+    /// so this sorts the entries by last use instead of keeping an LRU order on every draw, and the
+    /// quarter of headroom keeps a cache at its cap from paying the sort on every miss.
     fn evict(&mut self) {
-        while self.stats.bytes > self.cap {
-            let Some((&tick, &key)) = self.lru.iter().next() else {
+        if self.stats.bytes <= self.cap {
+            return;
+        }
+        let target = self.cap - self.cap / 4;
+        let mut order: Vec<(u64, Key)> = self.map.iter().map(|(k, e)| (e.last_used, *k)).collect();
+        order.sort_unstable_by_key(|&(tick, _)| tick);
+        for (_, key) in order {
+            if self.stats.bytes <= target {
                 break;
-            };
-            self.lru.remove(&tick);
+            }
             if let Some(entry) = self.map.remove(&key) {
                 self.stats.bytes -= entry.data.len() + ENTRY_OVERHEAD;
                 self.stats.evictions += 1;
@@ -201,10 +309,34 @@ impl TextEngine {
     /// Draws a laid-out block at `(ox, oy)`, in device px. Only glyphs are drawn; the caller draws
     /// chips, underlines and rules.
     pub fn draw_layout(&mut self, fb: &mut Bitmap, layout: &Layout<Brush>, ox: f32, oy: f32) {
+        let clip = (0, 0, fb.width as i32, fb.height as i32);
+        self.draw_layout_clipped(fb, layout, ox, oy, clip);
+    }
+
+    /// [`draw_layout`](Self::draw_layout) that touches only the pixels inside `clip`, given in
+    /// device px as `(x0, y0, x1, y1)` (end-exclusive, intersected with the bitmap). The pixels it
+    /// writes are exactly the ones an unclipped draw writes inside `clip`.
+    pub fn draw_layout_clipped(
+        &mut self,
+        fb: &mut Bitmap,
+        layout: &Layout<Brush>,
+        ox: f32,
+        oy: f32,
+        clip: (i32, i32, i32, i32),
+    ) {
+        let clip = (
+            clip.0.max(0),
+            clip.1.max(0),
+            clip.2.min(fb.width as i32),
+            clip.3.min(fb.height as i32),
+        );
+        if clip.0 >= clip.2 || clip.1 >= clip.3 {
+            return;
+        }
         for line in layout.lines() {
             let metrics = line.metrics();
-            if oy + metrics.baseline + metrics.line_height < 0.0
-                || oy + metrics.baseline - metrics.line_height > fb.height as f32
+            if oy + metrics.baseline + metrics.line_height < clip.1 as f32
+                || oy + metrics.baseline - metrics.line_height > clip.3 as f32
             {
                 continue;
             }
@@ -213,15 +345,13 @@ impl TextEngine {
                     continue;
                 };
                 let run = glyph_run.run();
-                let font = run.font().clone();
+                // Borrowed, not cloned: the font is only needed (and cloned once into `fonts`)
+                // when a glyph misses the cache.
+                let font = run.font();
                 let size = run.font_size();
-                let coords: Vec<i16> = run
-                    .normalized_coords()
-                    .iter()
-                    .map(|c| c.to_bits())
-                    .collect();
+                let coords = run.normalized_coords();
                 let coord_hash = coords.iter().fold(0u64, |h, c| {
-                    (h ^ (*c as u16 as u64)).wrapping_mul(0x0000_0100_0000_01b3)
+                    (h ^ (c.to_bits() as u16 as u64)).wrapping_mul(0x0000_0100_0000_01b3)
                 });
                 let brush = glyph_run.style().brush;
                 for glyph in glyph_run.positioned_glyphs() {
@@ -239,24 +369,22 @@ impl TextEngine {
                     self.tick += 1;
                     let tick = self.tick;
                     if let Some(entry) = self.map.get_mut(&key) {
-                        self.lru.remove(&entry.tick);
-                        entry.tick = tick;
-                        self.lru.insert(tick, key);
+                        entry.last_used = tick;
                         self.stats.hits += 1;
-                    } else {
-                        self.stats.misses += 1;
-                        let entry = self.raster(key, &font, &coords, size);
-                        self.stats.bytes += entry.data.len() + ENTRY_OVERHEAD;
-                        self.stats.entries += 1;
-                        self.stats.peak_bytes = self.stats.peak_bytes.max(self.stats.bytes);
-                        self.map.insert(key, entry);
-                        self.lru.insert(tick, key);
-                        self.evict();
+                        blit(fb, clip, entry, floor_x as i32, y as i32, brush, &self.lut);
+                        continue;
                     }
+                    self.stats.misses += 1;
+                    let entry = self.raster(key, font, coords.iter().map(|c| c.to_bits()), size);
+                    self.stats.bytes += entry.data.len() + ENTRY_OVERHEAD;
+                    self.stats.entries += 1;
+                    self.stats.peak_bytes = self.stats.peak_bytes.max(self.stats.bytes);
+                    self.map.insert(key, entry);
+                    self.evict();
                     let Some(entry) = self.map.get(&key) else {
                         continue;
                     };
-                    blit(fb, entry, floor_x as i32, y as i32, brush, &self.lut);
+                    blit(fb, clip, entry, floor_x as i32, y as i32, brush, &self.lut);
                 }
             }
         }
@@ -264,22 +392,29 @@ impl TextEngine {
 }
 
 #[inline]
-fn blit(fb: &mut Bitmap, entry: &Entry, gx: i32, gy: i32, brush: Brush, lut: &Lut) {
+fn blit(
+    fb: &mut Bitmap,
+    clip: (i32, i32, i32, i32),
+    entry: &Entry,
+    gx: i32,
+    gy: i32,
+    brush: Brush,
+    lut: &Lut,
+) {
     if entry.w == 0 || entry.h == 0 {
         return;
     }
     let (x0, y0) = (gx + entry.left, gy - entry.top);
     let (w, h) = (entry.w as i32, entry.h as i32);
-    let (fw, fh) = (fb.width as i32, fb.height as i32);
     let (lr, lg, lb) = (
         lut.channel(brush[0]),
         lut.channel(brush[1]),
         lut.channel(brush[2]),
     );
     let bpp = if entry.color { 4 } else { 3 };
-    for row in y0.max(0)..(y0 + h).min(fh) {
-        let cs = x0.max(0);
-        let ce = (x0 + w).min(fw);
+    let cs = x0.max(clip.0);
+    let ce = (x0 + w).min(clip.2);
+    for row in y0.max(clip.1)..(y0 + h).min(clip.3) {
         if ce <= cs {
             continue;
         }
@@ -314,6 +449,206 @@ fn blit(fb: &mut Bitmap, entry: &Entry, gx: i32, gy: i32, brush: Brush, lut: &Lu
                 d[1] = ((brush[1] as u32 * ag + d[1] as u32 * (255 - ag) + 127) / 255) as u8;
                 d[2] = ((brush[0] as u32 * ar + d[2] as u32 * (255 - ar) + 127) / 255) as u8;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use parley::{Alignment, AlignmentOptions, FontFamily, LayoutContext, StyleProperty};
+
+    /// A wrapped paragraph in the UI's sans face, `size` device px, `width` device px wide.
+    pub(super) fn paragraph(text: &str, size: f32, width: f32, brush: Brush) -> Layout<Brush> {
+        let mut fonts = crate::layout::shared_fonts();
+        let mut layouts = LayoutContext::<Brush>::new();
+        let mut b = layouts.ranged_builder(&mut fonts, text, 1.0, true);
+        b.push_default(StyleProperty::FontFamily(FontFamily::from(
+            "Segoe UI, Noto Sans, DejaVu Sans, sans-serif",
+        )));
+        b.push_default(StyleProperty::FontSize(size));
+        b.push_default(StyleProperty::Brush(brush));
+        let mut layout = b.build(text);
+        layout.break_all_lines(Some(width));
+        layout.align(Alignment::Start, AlignmentOptions::default());
+        layout
+    }
+
+    const SAMPLE: &str = "The quick brown fox jumps over the lazy dog. Pack my box with five dozen \
+        liquor jugs! 0123456789 (sphinx of black quartz, judge my vow) — Ünïcödé façade, 日本語. ";
+
+    #[test]
+    fn a_clipped_draw_is_the_unclipped_draw_cropped() {
+        let layout = paragraph(&SAMPLE.repeat(3), 17.0, 300.0, [20, 90, 200, 255]);
+        let (w, h) = (360u32, layout.height().ceil() as u32 + 30);
+        let background = |bm: &mut Bitmap| {
+            // A non-uniform background, so a write outside the clip cannot hide.
+            for (i, p) in bm.pixels.chunks_exact_mut(4).enumerate() {
+                p.copy_from_slice(&[(i * 7) as u8, (i / 3) as u8, 200, 255]);
+            }
+        };
+        let mut engine = TextEngine::new(4 << 20);
+        let mut full = Bitmap::new(w, h);
+        background(&mut full);
+        engine.draw_layout(&mut full, &layout, 7.6, 11.0);
+        let clips = [
+            (0, 0, w as i32, h as i32),
+            (13, 9, 141, 47),
+            (-50, -50, 90, 4000),
+            (200, 30, 9999, 60),
+            (50, 50, 50, 80),
+            (100, 100, 40, 40),
+        ];
+        for clip in clips {
+            let mut clipped = Bitmap::new(w, h);
+            background(&mut clipped);
+            let before = clipped.pixels.clone();
+            engine.draw_layout_clipped(&mut clipped, &layout, 7.6, 11.0, clip);
+            for y in 0..h as i32 {
+                for x in 0..w as i32 {
+                    let o = (y as usize * w as usize + x as usize) * 4;
+                    let inside = x >= clip.0 && x < clip.2 && y >= clip.1 && y < clip.3;
+                    let want = if inside { &full.pixels } else { &before };
+                    assert_eq!(
+                        clipped.pixels[o..o + 4],
+                        want[o..o + 4],
+                        "clip {clip:?} at {x},{y}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_small_cache_stays_under_its_cap_and_draws_the_same() {
+        let layouts: Vec<_> = [14.0, 18.0, 23.0, 31.0]
+            .iter()
+            .map(|&size| paragraph(&SAMPLE.repeat(2), size, 600.0, [0, 0, 0, 255]))
+            .collect();
+        let h = layouts
+            .iter()
+            .map(|l| l.height().ceil() as u32)
+            .sum::<u32>()
+            + 40;
+        let draw_all = |engine: &mut TextEngine, check_cap: bool| {
+            let mut fb = Bitmap::new(640, h);
+            fb.clear([255, 255, 255]);
+            let mut y = 5.0;
+            for layout in &layouts {
+                engine.draw_layout(&mut fb, layout, 3.3, y);
+                y += layout.height().ceil() + 8.0;
+                if check_cap {
+                    assert!(engine.stats.bytes <= engine.cap, "{:?}", engine.stats);
+                }
+                assert_eq!(engine.stats.entries, engine.map.len());
+            }
+            fb
+        };
+        let mut roomy = TextEngine::new(16 << 20);
+        let expected = draw_all(&mut roomy, true);
+        assert_eq!(roomy.stats.evictions, 0);
+        let total = roomy.stats.bytes;
+
+        let cap = total * 2 / 3;
+        let mut tight = TextEngine::new(cap);
+        for _ in 0..3 {
+            let got = draw_all(&mut tight, true);
+            assert!(got.pixels == expected.pixels, "eviction changed the output");
+        }
+        assert!(tight.stats.evictions > 0);
+        assert!(
+            tight.stats.peak_bytes <= cap + 64 * 1024,
+            "{:?}",
+            tight.stats
+        );
+
+        // The glyphs drawn last are the ones kept: redrawing only the last layout hits.
+        let mut fb = Bitmap::new(640, h);
+        let misses = tight.stats.misses;
+        tight.draw_layout(&mut fb, layouts.last().unwrap(), 3.3, 5.0);
+        assert_eq!(tight.stats.misses, misses, "{:?}", tight.stats);
+    }
+
+    #[test]
+    fn bgr_mirrors_the_rgb_masks_and_none_is_grey() {
+        let layout = paragraph(SAMPLE, 15.0, 500.0, [40, 40, 40, 255]);
+        let draw = |mode: Subpixel| {
+            let mut engine = TextEngine::new(4 << 20);
+            engine.set_subpixel(mode);
+            assert_eq!(engine.subpixel(), mode);
+            let mut fb = Bitmap::new(520, layout.height().ceil() as u32 + 10);
+            fb.clear([255, 255, 255]);
+            engine.draw_layout(&mut fb, &layout, 4.4, 3.0);
+            fb
+        };
+        let (rgb, bgr, grey) = (
+            draw(Subpixel::Rgb),
+            draw(Subpixel::Bgr),
+            draw(Subpixel::None),
+        );
+        let mut coloured = 0;
+        for ((a, b), g) in rgb
+            .pixels
+            .chunks_exact(4)
+            .zip(bgr.pixels.chunks_exact(4))
+            .zip(grey.pixels.chunks_exact(4))
+        {
+            // A grey brush on white: BGR's blue is RGB's red and the other way round.
+            assert_eq!([a[2], a[1], a[0]], [b[0], b[1], b[2]]);
+            assert!(g[0] == g[1] && g[1] == g[2], "greyscale pixel {g:?}");
+            coloured += (a[0] != a[2]) as usize;
+        }
+        assert!(coloured > 100, "the RGB masks should have colour fringes");
+        assert_ne!(rgb.pixels, grey.pixels);
+
+        // Switching modes drops the masks cached for the old one.
+        let mut engine = TextEngine::new(4 << 20);
+        let mut fb = Bitmap::new(520, rgb.height);
+        fb.clear([255, 255, 255]);
+        engine.draw_layout(&mut fb, &layout, 4.4, 3.0);
+        assert!(engine.stats.entries > 0);
+        engine.set_subpixel(Subpixel::Bgr);
+        assert_eq!((engine.stats.entries, engine.stats.bytes), (0, 0));
+        fb.clear([255, 255, 255]);
+        engine.draw_layout(&mut fb, &layout, 4.4, 3.0);
+        assert!(fb.pixels == bgr.pixels);
+    }
+
+    /// Not a correctness test: `cargo test --release -p mdview-render text_draw_speed -- --ignored
+    /// --nocapture` prints the time per glyph of a warm-cache draw.
+    #[test]
+    #[ignore]
+    fn text_draw_speed() {
+        let text = SAMPLE.repeat(40);
+        let layout = paragraph(&text, 16.0, 1100.0, [30, 30, 30, 255]);
+        let mut fb = Bitmap::new(1200, layout.height().ceil() as u32 + 20);
+        let mut engine = TextEngine::new(4 << 20);
+        engine.draw_layout(&mut fb, &layout, 10.3, 5.0);
+        let glyphs: usize = layout
+            .lines()
+            .flat_map(|l| l.items())
+            .map(|i| match i {
+                PositionedLayoutItem::GlyphRun(r) => r.positioned_glyphs().count(),
+                _ => 0,
+            })
+            .sum();
+        for _ in 0..3 {
+            let n = 300;
+            let t = std::time::Instant::now();
+            for _ in 0..n {
+                fb.clear([255, 255, 255]);
+                engine.draw_layout(&mut fb, &layout, 10.3, 5.0);
+            }
+            let total = t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
+            for _ in 0..n {
+                fb.clear([255, 255, 255]);
+            }
+            let clear = t.elapsed().as_secs_f64();
+            println!(
+                "{glyphs} glyphs: {:.1} ns/glyph (draw only, clear subtracted)",
+                (total - clear) / (n * glyphs) as f64 * 1e9
+            );
         }
     }
 }

@@ -90,11 +90,14 @@ fn key(face: Face, size: f32, color: Rgb, wrap: f32, text: &str) -> u64 {
 }
 
 impl Gfx {
+    /// UI text follows the system's subpixel order (ClearType's on Windows), read once here.
     pub fn new() -> Gfx {
+        let mut engine = TextEngine::new(2 << 20);
+        engine.set_subpixel(crate::platform::subpixel_order());
         Gfx {
             fonts: shared_fonts(),
             layouts: LayoutContext::new(),
-            engine: TextEngine::new(2 << 20),
+            engine,
             cache: HashMap::new(),
         }
     }
@@ -431,28 +434,9 @@ impl<'a> Painter<'a> {
         if xi >= c.2 || yi >= c.3 || xi + w <= c.0 || yi + h <= c.1 {
             return;
         }
-        if xi >= c.0 && yi >= c.1 && xi + w <= c.2 && yi + h <= c.3 {
-            self.gfx.engine.draw_layout(self.bmp, layout, x, y);
-            return;
-        }
-        // Partly clipped: the text engine has no clip, so draw on a copy of the visible part.
-        let (cx0, cy0) = (xi.max(c.0), yi.max(c.1));
-        let (cw, ch) = ((xi + w).min(c.2) - cx0, (yi + h).min(c.3) - cy0);
-        let mut tmp = Bitmap::new(cw as u32, ch as u32);
-        let stride = self.bmp.width as usize * 4;
-        for row in 0..ch as usize {
-            let s = (cy0 as usize + row) * stride + cx0 as usize * 4;
-            tmp.pixels[row * cw as usize * 4..(row + 1) * cw as usize * 4]
-                .copy_from_slice(&self.bmp.pixels[s..s + cw as usize * 4]);
-        }
         self.gfx
             .engine
-            .draw_layout(&mut tmp, layout, x - cx0 as f32, y - cy0 as f32);
-        for row in 0..ch as usize {
-            let d = (cy0 as usize + row) * stride + cx0 as usize * 4;
-            self.bmp.pixels[d..d + cw as usize * 4]
-                .copy_from_slice(&tmp.pixels[row * cw as usize * 4..(row + 1) * cw as usize * 4]);
-        }
+            .draw_layout_clipped(self.bmp, layout, x, y, self.clip);
     }
 
     /// One line of text starting at `x`, vertically centred on `cy`, elided to `max` logical px.
