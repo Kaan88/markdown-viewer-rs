@@ -1,23 +1,19 @@
 //! Images and engine-rendered blocks: file image loading and sizing, Mermaid diagram and display
 //! math blocks, and the labelled code box (syntax-highlighted) they fall back to.
 
-use super::inline::{Inline, Style, diagram_index, math_index};
+use super::inline::{Inline, Style};
 use super::pager::{Pager, Txt};
 use super::paint::Paint;
-use crate::engine;
+use super::store::Found;
 use crate::highlight;
-use crate::image::{self, DecodedImage};
 use mdview_core::model::BlockKind;
 use std::path::PathBuf;
-use std::rc::Rc;
 
 impl<'a, 'b> Pager<'a, 'b> {
-    /// Loads an image once per render. `None` for an empty src, a missing file, a blocked format
-    /// or anything over the plan's limits.
-    pub(super) fn image(&mut self, index: u32) -> Option<Rc<DecodedImage>> {
-        if let Some(cached) = self.images.get(&index) {
-            return cached.clone();
-        }
+    /// Finds document image `index` in the store, loading it when this pass may. The id is
+    /// `u32::MAX` when there is nothing to draw (an empty src, or a file this pass did not load).
+    /// `Failed` covers a missing file, a blocked format or anything over the plan's limits.
+    pub(super) fn image(&mut self, index: u32) -> (u32, Found) {
         let info = self.doc.images[index as usize];
         // `<picture>` may name a source per colour scheme; the matching one wins when present.
         let themed = if self.theme.name == "dark" {
@@ -30,19 +26,39 @@ impl<'a, 'b> Pager<'a, 'b> {
         } else {
             themed
         };
-        let decoded = if src.is_empty() {
-            None
+        if src.is_empty() {
+            return (u32::MAX, Found::Failed);
+        }
+        let trimmed = src.trim();
+        let remote = ["http://", "https://"].iter().any(|scheme| {
+            trimmed
+                .get(..scheme.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(scheme))
+        });
+        let (id, found) = if remote {
+            self.store.remote(trimmed)
         } else {
             let path = PathBuf::from(src);
             let path = match &self.base_dir {
                 Some(dir) if path.is_relative() => dir.join(path),
                 _ => path,
             };
-            let decoded = image::load(&path);
-            decoded.map(Rc::new)
+            self.store.file(&path, self.scale, self.allow)
         };
-        self.images.insert(index, decoded.clone());
-        decoded
+        self.note(id, &found, !remote);
+        (id, found)
+    }
+
+    /// Records that the block being laid out uses image `id`, and whether it stands in for a
+    /// local image, formula or diagram this pass was not allowed to load. (An undecided remote
+    /// image is a final state for layout: its arrival re-measures the blocks that use it.)
+    pub(super) fn note(&mut self, id: u32, found: &Found, local: bool) {
+        if id != u32::MAX && !self.used.contains(&id) {
+            self.used.push(id);
+        }
+        if local && matches!(found, Found::Unknown) {
+            self.provisional = true;
+        }
     }
 
     /// The drawn size of an image whose HTML gave `width` and/or `height`. One of them keeps the
@@ -101,22 +117,15 @@ impl<'a, 'b> Pager<'a, 'b> {
         if source.is_empty() {
             return false;
         }
-        let key = diagram_index(start);
-        if !self.images.contains_key(&key) {
-            // Twice the device scale, so 150% zoom and high DPI stay sharp; the box is halved.
-            let scale = 2.0 * self.scale;
-            let dark = self.theme.name == "dark";
-            let decoded = engine::render_mermaid(source, scale, dark).map(Rc::new);
-            self.images.insert(key, decoded);
-        }
-        let Some((image_w, image_h)) = self
-            .images
-            .get(&key)
-            .and_then(|slot| slot.as_ref())
-            .map(|image| (image.width as f32 / 2.0, image.height as f32 / 2.0))
-        else {
+        // Twice the device scale, so 150% zoom and high DPI stay sharp; the box is halved.
+        let scale = 2.0 * self.scale;
+        let dark = self.theme.name == "dark";
+        let (key, found) = self.store.mermaid(source, scale, dark, self.allow);
+        self.note(key, &found, true);
+        let Found::Ready(image, _) = found else {
             return false;
         };
+        let (image_w, image_h) = (image.width as f32 / 2.0, image.height as f32 / 2.0);
         let avail = (width - 2.0 * self.px(16.0)).max(1.0);
         let shrink = (avail / image_w).min(1.0);
         let (w, h) = (image_w * shrink, image_h * shrink);
@@ -145,21 +154,16 @@ impl<'a, 'b> Pager<'a, 'b> {
         if source.is_empty() {
             return false;
         }
-        let key = math_index(start);
-        if !self.images.contains_key(&key) {
-            // Display style runs a little larger than body text, and twice that keeps it crisp.
-            let size = self.theme.body_size * 1.15 * 2.0 * self.scale;
-            let decoded = engine::render_math(source, true, size, self.theme.text).map(Rc::new);
-            self.images.insert(key, decoded);
-        }
-        let Some((image_w, image_h)) = self
-            .images
-            .get(&key)
-            .and_then(|slot| slot.as_ref())
-            .map(|image| (image.width as f32 / 2.0, image.height as f32 / 2.0))
-        else {
+        // Display style runs a little larger than body text, and twice that keeps it crisp.
+        let size = self.theme.body_size * 1.15 * 2.0 * self.scale;
+        let (key, found) = self
+            .store
+            .math(source, size, self.theme.text, true, self.allow);
+        self.note(key, &found, true);
+        let Found::Ready(image, _) = found else {
             return false;
         };
+        let (image_w, image_h) = (image.width as f32 / 2.0, image.height as f32 / 2.0);
         let avail = (width - 2.0 * self.px(16.0)).max(1.0);
         let shrink = (avail / image_w).min(1.0);
         let (w, h) = (image_w * shrink, image_h * shrink);

@@ -19,6 +19,9 @@ pub const KIND_MATH: u32 = 2;
 pub const KIND_MERMAID: u32 = 3;
 /// Scale (4 bytes) and the dark flag (1 byte) before the source.
 pub const MERMAID_HEADER: usize = 5;
+/// An SVG file rasterized at a device scale (4 bytes, `f32`) given before the file's bytes, so a
+/// vector image stays sharp at 150% DPI or under zoom instead of being stretched.
+pub const KIND_SVG_AT: u32 = 4;
 
 pub const STATUS_OK: u32 = 0;
 /// The request or its kind was not understood.
@@ -151,6 +154,24 @@ pub fn read_mermaid_request(payload: &[u8]) -> Option<MermaidRequest<'_>> {
         dark,
         source,
     })
+}
+
+/// Encodes a scaled SVG payload: the scale factor, then the file's bytes.
+pub fn svg_at_payload(scale: f32, svg: &[u8]) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(4 + svg.len());
+    payload.extend_from_slice(&scale.to_le_bytes());
+    payload.extend_from_slice(svg);
+    payload
+}
+
+/// Decodes a scaled SVG payload into its scale and the SVG bytes. `None` when it is too short or
+/// the scale is unusable.
+pub fn read_svg_at_request(payload: &[u8]) -> Option<(f32, &[u8])> {
+    let scale = f32::from_le_bytes(payload.get(0..4)?.try_into().ok()?);
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    Some((scale, &payload[4..]))
 }
 
 pub fn write_request(w: &mut impl Write, request: &Request) -> io::Result<()> {

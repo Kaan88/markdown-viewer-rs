@@ -3,11 +3,10 @@
 //! checkboxes) into those runs, including the merged text of table cells.
 
 use super::pager::Pager;
-use crate::engine;
+use super::store::Found;
 use crate::theme::Color;
 use mdview_core::model::{BlockKind, SpanKind};
 use std::ops::Range;
-use std::rc::Rc;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct Style {
@@ -56,31 +55,22 @@ pub(super) struct Inline {
     pub(super) origins: Vec<(Range<usize>, u32, bool)>,
 }
 
-/// One inline image: its text offset, the image it draws, its size in device px and, for math, the
-/// distance from its top to the baseline.
+/// One inline image: its text offset, the store id it draws, its size in device px and, for math,
+/// the distance from its top to the baseline.
 #[derive(Clone, Copy)]
 pub(super) struct ImageBox {
     pub(super) at: usize,
-    pub(super) index: u32,
+    /// The image store id; `u32::MAX` for a reserved box with nothing to draw yet.
+    pub(super) id: u32,
     pub(super) width: f32,
     pub(super) height: f32,
     pub(super) baseline: Option<f32>,
-    /// End of the TeX source in the document for a math box; zero for a file image.
-    pub(super) math_end: u32,
-}
-
-/// Math images live above the file-image indices in the shared cache, keyed by the source's
-/// document offset (there is at most one math span per offset).
-const MATH_INDEX: u32 = 0x8000_0000;
-/// Diagrams get their own band, in case a diagram and a math block ever share an offset.
-const DIAGRAM_INDEX: u32 = 0x4000_0000;
-
-pub(super) fn math_index(offset: u32) -> u32 {
-    MATH_INDEX | (offset & 0x7fff_ffff)
-}
-
-pub(super) fn diagram_index(offset: u32) -> u32 {
-    DIAGRAM_INDEX | (offset & 0x3fff_ffff)
+    /// The TeX source's document range for a math box. Its raster depends on the text size and
+    /// colour around it, which only `text_layout` knows, so the id here is the body-size probe.
+    pub(super) math: Option<(u32, u32)>,
+    /// An image whose pixels are not here (a remote one pending or blocked) but whose size the
+    /// document declared: the box is reserved and drawn as a tinted placeholder.
+    pub(super) reserved: bool,
 }
 
 impl Inline {
@@ -264,31 +254,28 @@ impl<'a, 'b> Pager<'a, 'b> {
                 display: false,
                 oversize,
             } => {
-                let key = math_index(at);
-                if oversize.is_none() && !self.images.contains_key(&key) {
+                if oversize.is_none() {
                     let source = self.doc.text.get(at as usize..end as usize).unwrap_or("");
-                    // Twice the body size keeps the raster crisp when a heading or a zoom
-                    // enlarges it; the box and baseline are halved back in `text_layout`.
+                    // The probe at body size in the text colour decides whether the formula
+                    // renders at all; most formulas are drawn at exactly this key. Twice the body
+                    // size keeps the raster crisp; the box and baseline are halved in `text_layout`.
                     let size = self.theme.body_size * 2.0 * self.scale;
-                    let decoded =
-                        engine::render_math(source, false, size, self.theme.text).map(Rc::new);
-                    self.images.insert(key, decoded);
-                }
-                if oversize.is_none()
-                    && let Some(Some(image)) = self.images.get(&key)
-                {
-                    let width = image.width as f32 / 2.0;
-                    let height = image.height as f32 / 2.0;
-                    let baseline = image.baseline as f32 / 2.0;
-                    out.boxes.push(ImageBox {
-                        at: out.text.len(),
-                        index: key,
-                        width,
-                        height,
-                        baseline: Some(baseline),
-                        math_end: end,
-                    });
-                    return;
+                    let (id, found) =
+                        self.store
+                            .math(source, size, self.theme.text, false, self.allow);
+                    self.note(id, &found, true);
+                    if let Found::Ready(image, _) = found {
+                        out.boxes.push(ImageBox {
+                            at: out.text.len(),
+                            id,
+                            width: image.width as f32 / 2.0,
+                            height: image.height as f32 / 2.0,
+                            baseline: Some(image.baseline as f32 / 2.0),
+                            math: Some((at, end)),
+                            reserved: false,
+                        });
+                        return;
+                    }
                 }
                 // No engine, oversize source, or TeX it could not parse: keep it readable.
                 let source = self.doc.text.get(at as usize..end as usize).unwrap_or("");
@@ -302,20 +289,35 @@ impl<'a, 'b> Pager<'a, 'b> {
                 );
             }
             SpanKind::Image(index) => {
-                if let Some(image) = self.image(index) {
-                    let natural = (
-                        image.width as f32 * self.scale,
-                        image.height as f32 * self.scale,
-                    );
-                    let info = self.doc.images[index as usize];
-                    let (width, height) = self.sized_image(natural, info.width, info.height);
+                let info = self.doc.images[index as usize];
+                let (id, found) = self.image(index);
+                let declared = match (info.width, info.height) {
+                    (Some(w), Some(h @ mdview_core::model::Length::Px(_))) => Some((w, h)),
+                    _ => None,
+                };
+                let sized = match found {
+                    Found::Ready(image, density) => {
+                        let natural = (
+                            image.width as f32 / density * self.scale,
+                            image.height as f32 / density * self.scale,
+                        );
+                        Some((self.sized_image(natural, info.width, info.height), false))
+                    }
+                    // Not here yet (or not allowed): a declared size keeps its box, so the
+                    // arrival does not move the text after it.
+                    Found::Pending | Found::Blocked | Found::Unknown => declared
+                        .map(|(w, h)| (self.sized_image((1.0, 1.0), Some(w), Some(h)), true)),
+                    Found::Failed => None,
+                };
+                if let Some(((width, height), reserved)) = sized {
                     out.boxes.push(ImageBox {
                         at: out.text.len(),
-                        index,
+                        id,
                         width,
                         height,
                         baseline: None,
-                        math_end: 0,
+                        math: None,
+                        reserved,
                     });
                     return;
                 }

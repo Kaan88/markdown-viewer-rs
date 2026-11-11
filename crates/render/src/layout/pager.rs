@@ -3,11 +3,10 @@
 //! emits their glyphs, chips, decorations and inline images.
 
 use super::hit::LineGeom;
-use super::inline::Inline;
+use super::inline::{ImageBox, Inline};
 use super::paint::{CachedBlock, Paint};
+use super::store::{Found, ImageStore};
 use super::{BlockBox, Options};
-use crate::engine;
-use crate::image::DecodedImage;
 use crate::text::Brush;
 use crate::theme::{Color, Theme};
 use mdview_core::model::{Align, BlockKind, Document, NONE};
@@ -50,12 +49,21 @@ pub(super) struct Pager<'a, 'b> {
     pub(super) layouts: &'b mut LayoutContext<Brush>,
     pub(super) cache: Option<&'b mut HashMap<u32, CachedBlock>>,
     pub(super) base_dir: Option<PathBuf>,
-    /// Decoded images, owned by the `DocumentRenderer` so cached frames keep theirs. `None`
-    /// remembers a file that will not load.
-    pub(super) images: &'b mut HashMap<u32, Option<Rc<DecodedImage>>>,
+    /// Every raster the document draws, owned by the `DocumentRenderer` so it outlives layouts.
+    pub(super) store: &'b mut ImageStore,
+    /// Whether this pass may decode images and run engine jobs for what the store lacks.
+    pub(super) allow: bool,
+    /// Set when something this pass needed was not loaded (because `allow` was off), so what was
+    /// laid out is a stand-in.
+    pub(super) provisional: bool,
+    /// Store ids the pass looked up, so an arrival can find the blocks that use it.
+    pub(super) used: Vec<u32>,
     /// `<details>` open overrides from the shell; empty means use the document.
     pub(super) details: &'b HashMap<u32, bool>,
 }
+
+/// Marks an inline box that reserves space for an image without pixels.
+const RESERVED: u64 = 1 << 32;
 
 fn brush(c: Color) -> Brush {
     [c[0], c[1], c[2], 255]
@@ -68,7 +76,7 @@ impl<'a, 'b> Pager<'a, 'b> {
         fonts: &'b mut FontContext,
         layouts: &'b mut LayoutContext<Brush>,
         cache: Option<&'b mut HashMap<u32, CachedBlock>>,
-        images: &'b mut HashMap<u32, Option<Rc<DecodedImage>>>,
+        store: &'b mut ImageStore,
         details: &'b HashMap<u32, bool>,
     ) -> Self {
         let scale = options.scale.max(0.1);
@@ -98,7 +106,10 @@ impl<'a, 'b> Pager<'a, 'b> {
             layouts,
             cache,
             base_dir: options.base_dir.clone(),
-            images,
+            store,
+            allow: true,
+            provisional: false,
+            used: Vec::new(),
             details,
         }
     }
@@ -218,6 +229,11 @@ impl<'a, 'b> Pager<'a, 'b> {
     }
 
     pub(super) fn text_layout(&mut self, inline: &Inline, txt: &Txt) -> Layout<Brush> {
+        let boxes: Vec<(u32, f32, f32, Option<f32>)> = inline
+            .boxes
+            .iter()
+            .map(|image| self.box_size(image, txt))
+            .collect();
         let mut builder =
             self.layouts
                 .ranged_builder(&mut self.fonts, &inline.text, self.scale, true);
@@ -275,35 +291,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 );
             }
         }
-        for image in &inline.boxes {
-            let (mut width, mut height, mut baseline) = (image.width, image.height, image.baseline);
-            if image.math_end != 0 {
-                // The probe in `push_atom` used the body size. A heading, table cell or footnote
-                // asks for another size; render at that one so it stays sharp.
-                let target = (txt.size * 2.0 * self.scale).clamp(8.0, 512.0);
-                let probe = self.theme.body_size * 2.0 * self.scale;
-                let start = (image.index & 0x7fff_ffff) as usize;
-                if (target - probe).abs() > 0.01 {
-                    let source = self
-                        .doc
-                        .text
-                        .get(start..image.math_end as usize)
-                        .unwrap_or("")
-                        .to_string();
-                    let decoded =
-                        engine::render_math(&source, false, target, txt.color).map(Rc::new);
-                    self.images.insert(image.index, decoded);
-                }
-                if let Some(Some(math)) = self.images.get(&image.index) {
-                    width = math.width as f32 / 2.0;
-                    height = math.height as f32 / 2.0;
-                    baseline = Some(math.baseline as f32 / 2.0);
-                } else {
-                    width = 0.0;
-                    height = 0.0;
-                    baseline = None;
-                }
-            }
+        for (image, &(id, mut width, mut height, mut baseline)) in inline.boxes.iter().zip(&boxes) {
             if let Some(max) = txt.max
                 && width > max
             {
@@ -313,7 +301,11 @@ impl<'a, 'b> Pager<'a, 'b> {
                 width = max;
             }
             builder.push_inline_box(InlineBox {
-                id: image.index as u64,
+                id: if image.reserved {
+                    RESERVED | u64::from(id)
+                } else {
+                    u64::from(id)
+                },
                 kind: InlineBoxKind::InFlow,
                 index: image.at,
                 width,
@@ -326,6 +318,50 @@ impl<'a, 'b> Pager<'a, 'b> {
         layout.break_all_lines(txt.max);
         layout.align(Alignment::Start, AlignmentOptions::default());
         layout
+    }
+
+    /// An inline box's store id and size. A math box resolves the raster for this text's size
+    /// and colour here.
+    fn box_size(&mut self, image: &ImageBox, txt: &Txt) -> (u32, f32, f32, Option<f32>) {
+        let (mut width, mut height, mut baseline) = (image.width, image.height, image.baseline);
+        let mut id = image.id;
+        if let Some((start, end)) = image.math {
+            // The probe in `push_atom` is body size in the text colour. A heading, table cell,
+            // footnote or muted quote asks for another size or colour, which is another key:
+            // the store renders it once and every later layout finds it.
+            let target = (txt.size * 2.0 * self.scale).clamp(8.0, 512.0);
+            let source = self
+                .doc
+                .text
+                .get(start as usize..end as usize)
+                .unwrap_or("");
+            let (key, found) = self
+                .store
+                .math(source, target, txt.color, false, self.allow);
+            self.note(key, &found, true);
+            id = key;
+            match found {
+                Found::Ready(math, _) => {
+                    width = math.width as f32 / 2.0;
+                    height = math.height as f32 / 2.0;
+                    baseline = Some(math.baseline as f32 / 2.0);
+                }
+                // Not rendered yet in this pass: the probe, scaled, stands in.
+                Found::Unknown => {
+                    let probe = self.theme.body_size * 2.0 * self.scale;
+                    let ratio = target / probe;
+                    width *= ratio;
+                    height *= ratio;
+                    baseline = baseline.map(|b| b * ratio);
+                }
+                _ => {
+                    width = 0.0;
+                    height = 0.0;
+                    baseline = None;
+                }
+            }
+        }
+        (id, width, height, baseline)
     }
 
     pub(super) fn aligned_x(
@@ -360,6 +396,18 @@ impl<'a, 'b> Pager<'a, 'b> {
         for line in layout.lines() {
             for item in line.items() {
                 if let PositionedLayoutItem::InlineBox(inline_box) = item {
+                    if inline_box.id & RESERVED != 0 {
+                        // A declared size with no pixels yet: the reserved box, tinted.
+                        images.push(Paint::Rect {
+                            x: x + inline_box.x,
+                            y: y + inline_box.y,
+                            w: inline_box.width,
+                            h: inline_box.height,
+                            radius: self.px(3.0),
+                            color: self.theme.code_bg,
+                        });
+                        continue;
+                    }
                     images.push(Paint::Image {
                         index: inline_box.id as u32,
                         x: x + inline_box.x,

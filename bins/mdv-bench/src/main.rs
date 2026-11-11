@@ -160,6 +160,13 @@ fn run(
                 "height pass {first_ms:.1} ms; scroll frames worst {worst:.1} ms, mean {:.1} ms over {frames}",
                 sum / frames.max(1) as f64
             );
+            let images = renderer.image_stats();
+            println!(
+                "images: {} decodes, {} engine jobs, {:.1} MiB held",
+                images.decodes,
+                images.engine_jobs,
+                images.bytes as f64 / (1024.0 * 1024.0)
+            );
             let frame = renderer.frame().expect("frame");
             (
                 frame.bitmap.clone(),

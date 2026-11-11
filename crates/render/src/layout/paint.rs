@@ -121,7 +121,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 } => frame.line((a.0, a.1 - shift), (b.0, b.1 - shift), thickness, color),
                 Paint::Text { layout, x, y } => engine.draw_layout(frame, &layout, x, y - shift),
                 Paint::Image { index, x, y, w, h } => {
-                    if let Some(Some(image)) = self.images.get(&index) {
+                    if let Some(image) = self.store.pixels(index) {
                         frame.image(&image.rgba, image.width, image.height, x, y - shift, w, h);
                     }
                 }

@@ -180,6 +180,8 @@ impl<'a, 'b> Pager<'a, 'b> {
         let children: Vec<u32> = self.doc.children(NONE).collect();
         let mut spans = Vec::with_capacity(children.len());
         for block in children {
+            // Only the block being measured is protected from eviction.
+            self.store.begin_frame();
             let y = self.y;
             let mark = self.paints.len();
             self.block(block, self.left, content, self.theme.text, 0);

@@ -25,18 +25,18 @@ impl DocumentRenderer {
         let key = (options.width, options.scale, options.theme.name);
         if self.cache_key != Some(key) {
             self.cache.clear();
-            self.images.clear();
             self.cache_key = Some(key);
             self.frame = None;
         }
         let background = options.theme.bg;
+        self.store.begin_frame();
         let mut pager = Pager::new(
             doc,
             options,
             &mut self.fonts,
             &mut self.layouts,
             Some(&mut self.cache),
-            &mut self.images,
+            &mut self.store,
             &self.details,
         );
         let rows = height.ceil().max(1.0) as u32;

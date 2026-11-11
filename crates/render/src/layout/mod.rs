@@ -18,12 +18,13 @@ mod pager;
 mod paint;
 mod prose;
 mod selection;
+mod store;
 mod table;
 
 pub use page::PageLayout;
+pub use store::ImageStats;
 
 use crate::bitmap::Bitmap;
-use crate::image::DecodedImage;
 use crate::text::{Brush, TextEngine};
 use crate::theme::{DARK, LIGHT, Theme};
 use mdview_core::model::Document;
@@ -32,7 +33,7 @@ use paint::CachedBlock;
 use parley::{FontContext, LayoutContext};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::rc::Rc;
+use store::ImageStore;
 
 #[derive(Clone)]
 pub struct Options {
@@ -170,8 +171,8 @@ pub struct DocumentRenderer {
     /// frames and hit tests.
     cache: HashMap<u32, CachedBlock>,
     cache_key: Option<(f32, f32, &'static str)>,
-    /// Decoded images, shared by every frame so a cached paint can still find its pixels.
-    images: HashMap<u32, Option<Rc<DecodedImage>>>,
+    /// Every raster drawn, kept across layouts, widths, zooms and documents.
+    store: ImageStore,
     /// `<details>` open overrides, by block, so a toggle is view state the document does not carry.
     details: HashMap<u32, bool>,
     /// The frame [`view_frame`](Self::view_frame) keeps between calls.
@@ -209,7 +210,7 @@ impl DocumentRenderer {
             engine: TextEngine::new(4 << 20),
             cache: HashMap::new(),
             cache_key: None,
-            images: HashMap::new(),
+            store: ImageStore::new(mdview_core::limits::IMAGE_CACHE_BYTES),
             details: HashMap::new(),
             frame: None,
         }
@@ -218,7 +219,6 @@ impl DocumentRenderer {
     /// Measures the whole document. Do this once per width, scale and theme.
     pub fn layout(&mut self, doc: &Document, options: &Options) -> PageLayout {
         self.cache.clear();
-        self.images.clear();
         self.frame = None;
         self.cache_key = Some((options.width, options.scale, options.theme.name));
         Pager::new(
@@ -227,7 +227,7 @@ impl DocumentRenderer {
             &mut self.fonts,
             &mut self.layouts,
             None,
-            &mut self.images,
+            &mut self.store,
             &self.details,
         )
         .measure_page()
@@ -248,21 +248,26 @@ impl DocumentRenderer {
         let key = (options.width, options.scale, options.theme.name);
         if self.cache_key != Some(key) {
             self.cache.clear();
-            self.images.clear();
             self.cache_key = Some(key);
             self.frame = None;
         }
+        self.store.begin_frame();
         let mut pager = Pager::new(
             doc,
             options,
             &mut self.fonts,
             &mut self.layouts,
             Some(&mut self.cache),
-            &mut self.images,
+            &mut self.store,
             &self.details,
         );
         pager.slice_page(page, top, height);
         pager.finish_slice(top, height, page.total_height, &mut self.engine)
+    }
+
+    /// Decodes and engine jobs so far, and what the image store holds.
+    pub fn image_stats(&self) -> ImageStats {
+        self.store.stats()
     }
 
     /// The frame [`view_frame`](Self::view_frame) drew last, if any.
@@ -299,13 +304,14 @@ impl DocumentRenderer {
     /// Paints the whole page into one bitmap. For tests and small documents; scrolling uses
     /// [`layout`](Self::layout) and [`view`](Self::view).
     pub fn page(&mut self, doc: &Document, options: &Options) -> Rendered {
+        self.store.begin_frame();
         let mut pager = Pager::new(
             doc,
             options,
             &mut self.fonts,
             &mut self.layouts,
             None,
-            &mut self.images,
+            &mut self.store,
             &self.details,
         );
         pager.page();

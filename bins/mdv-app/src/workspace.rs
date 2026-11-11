@@ -473,6 +473,12 @@ impl Workspace {
     }
 
     /// `strings::window_title` with the active file's name.
+    /// Images decoded and engine jobs sent so far, for traces.
+    #[allow(dead_code)] // Only the windowed startup trace reads it.
+    pub fn image_stats(&self) -> mdview_render::ImageStats {
+        self.renderer.image_stats()
+    }
+
     pub fn title(&self) -> String {
         strings::window_title(self.active_tab().map(|t| file_name(&t.path)).as_deref())
     }

@@ -122,7 +122,7 @@ impl DocumentRenderer {
             &mut self.fonts,
             &mut self.layouts,
             Some(&mut self.cache),
-            &mut self.images,
+            &mut self.store,
             &self.details,
         );
         pager.block_paints(page, index);
