@@ -1369,3 +1369,42 @@ fn a_block_that_cannot_be_drawn_says_why() {
         ink(&other)
     );
 }
+
+#[test]
+fn text_runs_beside_a_floated_image_and_then_under_it() {
+    let dir = temp_dir("image-float");
+    std::fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/assets/badge.png"),
+        dir.join("badge.png"),
+    )
+    .unwrap();
+    let text = "word ".repeat(120);
+    let doc = mdview_core::parse(&format!(
+        "<img src=\"badge.png\" width=\"200\" align=\"right\"> {text}\n"
+    ));
+    let rendered = render(
+        &doc,
+        &Options {
+            base_dir: Some(dir.clone()),
+            ..Options::light()
+        },
+    );
+    let width = rendered.bitmap.width as usize;
+    // The last dark-text column of each row: short beside the image, the full column under it.
+    let reach = |row: usize| {
+        (0..width)
+            .rev()
+            .find(|x| {
+                let p = &rendered.bitmap.pixels[(row * width + x) * 4..][..4];
+                p[0] < 0x60 && p[1] < 0x60 && p[2] < 0x60
+            })
+            .unwrap_or(0)
+    };
+    let first_lines = (44..60).map(reach).max().unwrap();
+    let last_lines = (rendered.bitmap.height as usize - 90..rendered.bitmap.height as usize - 50)
+        .map(reach)
+        .max()
+        .unwrap();
+    assert!(first_lines < 540, "beside the image: {first_lines}");
+    assert!(last_lines > 640, "under the image: {last_lines}");
+}

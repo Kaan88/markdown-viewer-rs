@@ -20,7 +20,22 @@ pub fn find(doc: &Document, query: &str) -> FindResult {
 /// engine draws over, and not in the body of a closed `<details>`, which is what the old app counted
 /// too. `is_open` is the shell's view state, so toggling a details block means running find again.
 pub fn find_visible(doc: &Document, query: &str, is_open: impl Fn(u32) -> bool) -> FindResult {
-    let hidden = doc.hidden_ranges(&is_open);
+    find_shown(doc, query, is_open, &[])
+}
+
+/// [`find_visible`], told which formulas and diagrams turned out not to be drawn: `shown` is
+/// their sorted `(start, end)` ranges in `Document::text`, as the renderer reports them. Their
+/// source is on the page, so it is searched like any other text.
+pub fn find_shown(
+    doc: &Document,
+    query: &str,
+    is_open: impl Fn(u32) -> bool,
+    shown: &[(u32, u32)],
+) -> FindResult {
+    let mut hidden = doc.hidden_ranges(&is_open);
+    if !shown.is_empty() {
+        hidden.retain(|r| shown.binary_search(&(r.start, r.end)).is_err());
+    }
     find_with(&doc.text, query, FIND_CAP, |start| {
         let i = hidden.partition_point(|r| r.end <= start);
         hidden.get(i).is_some_and(|r| r.start <= start)

@@ -28,6 +28,15 @@ pub(super) struct Txt {
     pub(super) max: Option<f32>,
 }
 
+/// Lines that start above `height` are `narrow` wide and start `shift` in from the left, which
+/// is how text runs beside a floated image and then under it. Device px.
+#[derive(Clone, Copy)]
+pub(super) struct Wrap {
+    pub(super) height: f32,
+    pub(super) narrow: f32,
+    pub(super) shift: f32,
+}
+
 pub(super) struct Pager<'a, 'b> {
     pub(super) doc: &'a Document,
     pub(super) theme: Theme,
@@ -59,6 +68,11 @@ pub(super) struct Pager<'a, 'b> {
     pub(super) provisional: bool,
     /// Store ids the pass looked up, so an arrival can find the blocks that use it.
     pub(super) used: Vec<u32>,
+    /// Document ranges of formulas and diagrams the engine could not draw, whose source the page
+    /// shows instead. Find needs them: it skips source that a picture stands for.
+    pub(super) undrawn: Vec<(u32, u32)>,
+    /// Set around one `text_layout` call: the text's first lines run beside an image.
+    pub(super) wrap: Option<Wrap>,
     /// `<details>` open overrides from the shell; empty means use the document.
     pub(super) details: &'b HashMap<u32, bool>,
 }
@@ -112,6 +126,8 @@ impl<'a, 'b> Pager<'a, 'b> {
             allow: true,
             provisional: false,
             used: Vec::new(),
+            undrawn: Vec::new(),
+            wrap: None,
             details,
         }
     }
@@ -436,7 +452,28 @@ impl<'a, 'b> Pager<'a, 'b> {
             });
         }
         let mut layout = builder.build(&inline.text);
-        layout.break_all_lines(txt.max);
+        match (self.wrap, txt.max) {
+            (Some(wrap), Some(full)) => {
+                let mut breaker = layout.break_lines();
+                loop {
+                    let beside = (breaker.committed_y() as f32) < wrap.height;
+                    let (max, x) = if beside {
+                        (wrap.narrow, wrap.shift)
+                    } else {
+                        (full, 0.0)
+                    };
+                    let state = breaker.state_mut();
+                    state.set_layout_max_advance(max);
+                    state.set_line_max_advance(max);
+                    state.set_line_x(x);
+                    if breaker.break_next().is_none() {
+                        break;
+                    }
+                }
+                breaker.finish();
+            }
+            _ => layout.break_all_lines(txt.max),
+        }
         layout.align(Alignment::Start, AlignmentOptions::default());
         layout
     }
@@ -517,6 +554,20 @@ impl<'a, 'b> Pager<'a, 'b> {
                 return None;
             }
             b = parent;
+        }
+    }
+
+    /// Gives text inside a `dir` block that direction as its base, by the Unicode mark that
+    /// states it, so punctuation and mixed runs are ordered as the block says and not as the
+    /// first letter happens to.
+    pub(super) fn mark_dir(&self, inline: &mut Inline, block: u32) {
+        if inline.text.trim().is_empty() {
+            return;
+        }
+        match self.inherited_dir(block) {
+            Some(Dir::Rtl) => inline.prepend("\u{200F}"),
+            Some(Dir::Ltr) => inline.prepend("\u{200E}"),
+            _ => {}
         }
     }
 

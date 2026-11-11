@@ -301,6 +301,9 @@ struct Find {
     hits: Vec<(u32, u32)>,
     current: usize,
     capped: bool,
+    /// The renderer's count of changes to its list of undrawn formulas and diagrams when the
+    /// hits were found; a different count means their source came into or left the search.
+    undrawn: u64,
 }
 
 /// A press in progress: what it started on, and whether the pointer has moved off it.
@@ -1025,6 +1028,7 @@ impl Workspace {
     /// device px at display `scale`. `None` with no tab (draw the empty state) or an empty viewport.
     /// Layout is redone only when the width, scale, theme, zoom, document or `<details>` changed.
     pub fn paint(&mut self, width_px: u32, height_px: u32, scale: f32) -> Option<PageView<'_>> {
+        self.find_again_if_stale();
         self.set_viewport(width_px, height_px, scale);
         if !self.ensure_layout() {
             return None;
@@ -1250,7 +1254,17 @@ impl Workspace {
         };
         let more = self.renderer.refine(doc, &view.options, budget);
         self.adopt();
+        self.find_again_if_stale();
         more
+    }
+
+    /// Searches again when a formula or diagram has turned out not to be drawn since the last
+    /// search (or the layout was dropped): its source is on the page and must be found.
+    fn find_again_if_stale(&mut self) {
+        if !self.find.query.is_empty() && self.renderer.undrawn().1 != self.find.undrawn {
+            self.refind();
+            self.dirty = true;
+        }
     }
 
     /// Whether the active page still has estimated heights for [`refine`](Self::refine).
@@ -1868,9 +1882,14 @@ impl Workspace {
             return;
         };
         let renderer = &self.renderer;
-        let result = mdview_core::find::find_visible(doc, &self.find.query, |block| {
-            renderer.details_open(doc, block)
-        });
+        let (shown, changes) = renderer.undrawn();
+        let result = mdview_core::find::find_shown(
+            doc,
+            &self.find.query,
+            |block| renderer.details_open(doc, block),
+            shown,
+        );
+        self.find.undrawn = changes;
         self.find.hits = result.hits.iter().map(|h| (h.start, h.end)).collect();
         self.find.capped = result.capped;
         self.find.current = current.min(self.find.hits.len().saturating_sub(1));

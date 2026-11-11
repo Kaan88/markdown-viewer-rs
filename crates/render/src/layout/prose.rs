@@ -1,7 +1,7 @@
 //! Text blocks: paragraphs, tight list text (`Plain`), headings, and the drawn task checkbox.
 
 use super::inline::ImageBox;
-use super::pager::{Pager, Txt};
+use super::pager::{Pager, Txt, Wrap};
 use super::paint::Paint;
 use crate::theme::Color;
 use mdview_core::model::{Align, ImageAlign};
@@ -74,8 +74,9 @@ impl<'a, 'b> Pager<'a, 'b> {
         } else {
             0.0
         };
-        // `<img align="left|right">`: the first such image leaves the line and stands at that
-        // side of the paragraph, with the text in the column beside it.
+        self.mark_dir(&mut inline, b);
+        // `<img align="left|right">`: the first such image leaves the line and floats at that
+        // side of the paragraph. The lines beside it are shorter, and the rest run under it.
         let gap = self.px(16.0);
         let side: Option<ImageBox> = inline
             .boxes
@@ -86,11 +87,21 @@ impl<'a, 'b> Pager<'a, 'b> {
                     && image.width + gap + self.px(120.0) <= width - indent
             })
             .map(|at| inline.boxes.remove(at));
-        let beside = side.map_or(0.0, |image| image.width + gap);
-        let (left, width) = match side {
-            Some(image) if image.align == ImageAlign::Left => (left + beside, width - beside),
-            _ => (left, width - beside),
-        };
+        if side.is_some() {
+            inline.trim_start();
+        }
+        self.wrap = side.map(|image| {
+            let beside = image.width + gap;
+            Wrap {
+                height: image.height + self.px(4.0),
+                narrow: width - indent - beside,
+                shift: if image.align == ImageAlign::Left {
+                    beside
+                } else {
+                    0.0
+                },
+            }
+        });
         let txt = Txt {
             size: self.theme.body_size,
             line_height: self.theme.body_line_height,
@@ -100,6 +111,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             max: Some(width - indent),
         };
         let mut layout = self.text_layout(&inline, &txt);
+        self.wrap = None;
         let align = if align == Align::None {
             self.inherited_align(b)
         } else {
@@ -123,9 +135,9 @@ impl<'a, 'b> Pager<'a, 'b> {
         });
         if let Some(image) = side {
             let x = if image.align == ImageAlign::Left {
-                left - beside
+                left + indent
             } else {
-                left + width + gap
+                left + width - image.width
             };
             self.paints.push(if image.reserved {
                 Paint::Rect {
@@ -163,7 +175,8 @@ impl<'a, 'b> Pager<'a, 'b> {
     }
 
     pub(super) fn plain(&mut self, b: u32, left: f32, width: f32, color: Color) {
-        let inline = self.inline_of(b);
+        let mut inline = self.inline_of(b);
+        self.mark_dir(&mut inline, b);
         let task = inline.task;
         if inline.text.trim().is_empty() && inline.boxes.is_empty() && task.is_none() {
             return;
@@ -213,10 +226,11 @@ impl<'a, 'b> Pager<'a, 'b> {
             5 => (16.0, 8.0, 6.0),
             _ => (15.0, 8.0, 6.0),
         };
-        let inline = self.inline_of(b);
+        let mut inline = self.inline_of(b);
         if inline.text.trim().is_empty() && inline.boxes.is_empty() {
             return;
         }
+        self.mark_dir(&mut inline, b);
         self.y += self.px(top);
         let txt = Txt {
             size,

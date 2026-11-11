@@ -218,6 +218,10 @@ pub struct DocumentRenderer {
     uses: HashMap<u32, Vec<u32>>,
     /// The average glyph advances estimates use, for the scale and theme they were taken at.
     metrics: Option<(u32, &'static str, estimate::Metrics)>,
+    /// Sorted document ranges of formulas and diagrams the engine failed to draw in the blocks
+    /// laid out so far, and how many times that list has changed.
+    undrawn: Vec<(u32, u32)>,
+    undrawn_changes: u64,
 }
 
 impl Default for DocumentRenderer {
@@ -258,7 +262,17 @@ impl DocumentRenderer {
             view: relayout::ViewState::default(),
             uses: HashMap::new(),
             metrics: None,
+            undrawn: Vec::new(),
+            undrawn_changes: 0,
         }
+    }
+
+    /// The formulas and diagrams whose source the page shows because the engine could not draw
+    /// them, as sorted ranges of `Document::text`, for
+    /// [`find_shown`](mdview_core::find::find_shown). Only blocks laid out so far are known, so
+    /// the list grows as the page is refined; the count says when to search again.
+    pub fn undrawn(&self) -> (&[(u32, u32)], u64) {
+        (&self.undrawn, self.undrawn_changes)
     }
 
     /// The current layout, once [`layout`](Self::layout) has made one.

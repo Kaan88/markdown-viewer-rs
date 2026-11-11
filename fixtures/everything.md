@@ -293,7 +293,7 @@ A sized HTML image: <img src="assets/badge.png" width="120" alt="A badge at 120 
   <img src="assets/badge.svg" width="200" alt="A centred badge">
 </p>
 
-<img src="assets/badge.png" width="150" align="right" alt="A badge at the right"> An image with `align="right"` stands at the right of its paragraph and the text keeps to the column beside it, for as many lines as the paragraph has. With `align="left"` it stands at the left.
+<img src="assets/badge.png" width="150" align="right" alt="A badge at the right"> An image with `align="right"` floats at the right of its paragraph. The lines beside it are shorter, and once the text is past the bottom of the image the lines run the full width again, under it, which this sentence is long enough to show when the window is not too wide. With `align="left"` it floats at the left.
 
 Against the line: middle <img src="assets/badge.png" width="70" align="middle" alt="middle">, top <img src="assets/badge.png" width="70" align="top" alt="top"> and the default, on the baseline <img src="assets/badge.png" width="70" alt="baseline">.
 

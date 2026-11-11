@@ -3219,3 +3219,13 @@ fn find_sees_what_the_page_shows_for_undrawn_blocks() {
     let d = parse("Text[^a].\n\n[^a]: Listed needle.\n[^b]: Unlisted needle.\n");
     assert_eq!(mdview_core::find::find(&d, "needle").hits.len(), 1);
 }
+
+#[test]
+fn find_searches_a_diagram_the_renderer_could_not_draw() {
+    let d = parse("```mermaid\nflowchart LR\n    needle --> \n```\n\nText.\n");
+    let block = d.blocks[0].text;
+    assert_eq!(mdview_core::find::find(&d, "needle").hits.len(), 0);
+    let shown = [(block.start, block.end)];
+    let found = mdview_core::find::find_shown(&d, "needle", |_| true, &shown);
+    assert_eq!(found.hits.len(), 1);
+}

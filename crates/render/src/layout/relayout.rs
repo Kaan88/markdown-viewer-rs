@@ -121,6 +121,10 @@ impl DocumentRenderer {
         self.cache.clear();
         self.frame = None;
         self.uses.clear();
+        if !self.undrawn.is_empty() {
+            self.undrawn.clear();
+            self.undrawn_changes += 1;
+        }
         self.view = ViewState::default();
     }
 
@@ -182,6 +186,7 @@ impl DocumentRenderer {
             Measure::Exact
         };
         let used = std::mem::take(&mut pager.used);
+        let undrawn = std::mem::take(&mut pager.undrawn);
         let notes = std::mem::take(&mut pager.notes);
         let mut paints = std::mem::take(&mut pager.paints);
         let mut lines = std::mem::take(&mut pager.hits);
@@ -208,6 +213,12 @@ impl DocumentRenderer {
                 if let Some(page) = self.page.as_mut() {
                     page.foot.notes = notes.into_iter().map(|(n, y)| (n, y - top)).collect();
                 }
+            }
+        }
+        for range in undrawn {
+            if let Err(at) = self.undrawn.binary_search(&range) {
+                self.undrawn.insert(at, range);
+                self.undrawn_changes += 1;
             }
         }
         for id in used {

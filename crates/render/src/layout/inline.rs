@@ -93,6 +93,54 @@ pub(super) struct ImageBox {
 }
 
 impl Inline {
+    /// Drops spaces at the very start, as a line does once the image before them has left it.
+    pub(super) fn trim_start(&mut self) {
+        let n = self.text.len() - self.text.trim_start_matches(' ').len();
+        if n == 0 || self.boxes.iter().any(|image| image.at < n) {
+            return;
+        }
+        self.text.drain(..n);
+        let cut = |range: &mut Range<usize>| {
+            *range = range.start.saturating_sub(n)..range.end.saturating_sub(n);
+        };
+        self.runs.iter_mut().for_each(|(range, _)| cut(range));
+        self.runs.retain(|(range, _)| !range.is_empty());
+        for (range, origin, fixed) in &mut self.origins {
+            // What is cut from the front of a range moves the document position it starts at.
+            let lost = n.saturating_sub(range.start).min(range.len());
+            if !*fixed {
+                *origin += lost as u32;
+            }
+            cut(range);
+        }
+        self.origins.retain(|(range, _, _)| !range.is_empty());
+        self.boxes.iter_mut().for_each(|image| image.at -= n);
+        self.notes.iter_mut().for_each(|note| cut(&mut note.base));
+    }
+
+    /// Puts `s` before everything else, as text that belongs to the first document position.
+    pub(super) fn prepend(&mut self, s: &str) {
+        let Some(first) = self.origins.first().map(|(_, origin, _)| *origin) else {
+            return;
+        };
+        let n = s.len();
+        self.text.insert_str(0, s);
+        for (range, _) in &mut self.runs {
+            *range = range.start + n..range.end + n;
+        }
+        self.runs.insert(0, (0..n, Style::default()));
+        for (range, _, _) in &mut self.origins {
+            *range = range.start + n..range.end + n;
+        }
+        self.origins.insert(0, (0..n, first, true));
+        for image in &mut self.boxes {
+            image.at += n;
+        }
+        for note in &mut self.notes {
+            note.base = note.base.start + n..note.base.end + n;
+        }
+    }
+
     pub(super) fn push(&mut self, s: &str, style: Style) {
         if s.is_empty() {
             return;
@@ -366,6 +414,9 @@ impl<'a, 'b> Pager<'a, 'b> {
                         self.store
                             .math(source, size, self.theme.text, false, self.allow);
                     self.note(id, &found, true);
+                    if matches!(found, Found::Failed) {
+                        self.undrawn.push((at, end));
+                    }
                     if let Found::Ready(image, _) = found {
                         out.boxes.push(ImageBox {
                             at: out.text.len(),

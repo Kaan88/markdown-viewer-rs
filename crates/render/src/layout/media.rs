@@ -171,6 +171,9 @@ impl<'a, 'b> Pager<'a, 'b> {
                 self.y += self.px(8.0 + GUESS_DIAGRAM + 16.0);
                 return true;
             }
+            if matches!(found, Found::Failed) {
+                self.undrawn.push((start, end));
+            }
             return false;
         };
         let (image_w, image_h) = (image.width as f32 / 2.0, image.height as f32 / 2.0);
@@ -213,6 +216,9 @@ impl<'a, 'b> Pager<'a, 'b> {
             if matches!(found, Found::Unknown) {
                 self.y += self.px(10.0 + GUESS_MATH + 18.0);
                 return true;
+            }
+            if matches!(found, Found::Failed) {
+                self.undrawn.push((start, end));
             }
             return false;
         };

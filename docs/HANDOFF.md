@@ -89,7 +89,7 @@ denied:
 cd C:\Users\kaank\Desktop\mv
 $env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
 cargo build --release --workspace          # includes mdview.exe and mdview-engine.exe
-cargo test --release --workspace           # 2026-11-12: 351 passed, 0 failed, 6 ignored
+cargo test --release --workspace           # 2026-11-12: 353 passed, 0 failed, 6 ignored
 cargo fmt --all --check
 ```
 
@@ -420,7 +420,7 @@ writes an extension's default value. The last page offers (unchecked) to open
 | Engine | `mdview-engine.exe` 26 MB | |
 | Installer | 11 MB | 17 MB |
 
-Tests: `cargo test --release --workspace`: 351 passed, 0 failed, 6 ignored.
+Tests: `cargo test --release --workspace`: 353 passed, 0 failed, 6 ignored.
 
 Earlier, 2026-11-11, before estimated heights: a scroll frame in a maximized window with both
 panes, 150 frames, median 3.1 ms, p90 3.5, worst 4.2 (paint 1.2, compose 1.0, copy 0.8, OS
@@ -545,9 +545,8 @@ needs a small `mime/packages` XML. The package itself has never been installed w
    script from `main`; replace the v0.1.0 pre-release installer. Only after 1 and 2 and the user's
    approval.
 4. **The KDE run** (section 12).
-5. The limits `docs/COVERAGE.md` lists under "Drawn with limits" (an aligned image is not a real
-   float, `dir` does not reorder runs, find skips a block the engine rejects at run time), and the
-   clippy warnings.
+5. The limits `docs/COVERAGE.md` lists under "Drawn with limits" (a floated image ends with its
+   paragraph, because each top-level block is laid out on its own), and the clippy warnings.
 6. The editor is a second project (PLAN section E), not started until the reader has shipped.
 
 ## 14. History
