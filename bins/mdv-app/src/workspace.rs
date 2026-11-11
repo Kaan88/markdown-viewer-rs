@@ -222,6 +222,9 @@ struct Remote {
     allowed: bool,
     /// The reader closed the bar without loading.
     dismissed: bool,
+    /// How many different remote images the document names, counted when it is read. The bar
+    /// shows from the first frame, so it never pushes the page down while the reader scrolls.
+    count: usize,
 }
 
 impl Tab {
@@ -245,6 +248,7 @@ impl Tab {
 
     fn set_document(&mut self, doc: Document, stamp: FileStamp) {
         self.stats = DocStats::of(&doc);
+        self.remote.count = remote_images(&doc);
         self.doc = Some(doc);
         self.stamp = stamp;
     }
@@ -1068,11 +1072,7 @@ impl Workspace {
     /// load them should show: none allowed yet, and the reader has not closed the bar.
     pub fn remote_blocked(&self) -> usize {
         match self.active_tab() {
-            Some(tab) if !tab.remote.allowed && !tab.remote.dismissed => self
-                .held
-                .iter()
-                .filter(|url| tab.doc.as_ref().is_some_and(|doc| names_image(doc, url)))
-                .count(),
+            Some(tab) if !tab.remote.allowed && !tab.remote.dismissed => tab.remote.count,
             _ => 0,
         }
     }
@@ -2156,6 +2156,24 @@ fn block_bounds(doc: &Document, offset: u32) -> (usize, usize) {
     (lo, hi)
 }
 
+/// How many different `http`/`https` images the document names.
+fn remote_images(doc: &Document) -> usize {
+    let mut urls: Vec<&str> = doc
+        .images
+        .iter()
+        .map(|image| doc.str(image.src).trim())
+        .filter(|src| {
+            ["http://", "https://"].iter().any(|scheme| {
+                src.get(..scheme.len())
+                    .is_some_and(|head| head.eq_ignore_ascii_case(scheme))
+            })
+        })
+        .collect();
+    urls.sort_unstable();
+    urls.dedup();
+    urls.len()
+}
+
 /// Whether one of the document's images is `url`, as the page asks for it (trimmed; any of the
 /// plain, dark and light sources).
 fn names_image(doc: &Document, url: &str) -> bool {
@@ -2219,7 +2237,7 @@ mod tests {
         let b = write(&dir, "b.md", text);
         let mut ws = workspace();
         ws.open(&a).unwrap();
-        assert_eq!(ws.remote_blocked(), 0, "nothing is known before a frame");
+        assert_eq!(ws.remote_blocked(), 2, "counted when the file is read");
         ws.paint(800, 600, 1.0);
         assert_eq!(ws.remote_blocked(), 2);
         assert!(ws.fetcher.is_none(), "a held-back image starts nothing");
