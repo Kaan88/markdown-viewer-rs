@@ -248,6 +248,13 @@ A fence with no language is plain monospaced text, and a very long line scrolls 
   <tr><td>B2</td><td align="center">centre</td></tr>
 </table>
 
+<table width="70%" align="center">
+  <caption>A caption, over a table that is 70% wide and centred</caption>
+  <tr><th width="60%">A column 60% wide</th><th>Lines</th></tr>
+  <tr><td valign="bottom">Bottom of its cell</td><td>one<br>two<br>three</td></tr>
+  <tr align="right" height="60"><td valign="middle">Right, middle, in a row 60 px tall</td><td>end</td></tr>
+</table>
+
 ## Links and footnotes
 
 - An inline link: [the Tables section](#tables)
@@ -285,6 +292,10 @@ A sized HTML image: <img src="assets/badge.png" width="120" alt="A badge at 120 
 <p align="center">
   <img src="assets/badge.svg" width="200" alt="A centred badge">
 </p>
+
+<img src="assets/badge.png" width="150" align="right" alt="A badge at the right"> An image with `align="right"` stands at the right of its paragraph and the text keeps to the column beside it, for as many lines as the paragraph has. With `align="left"` it stands at the left.
+
+Against the line: middle <img src="assets/badge.png" width="70" align="middle" alt="middle">, top <img src="assets/badge.png" width="70" align="top" alt="top"> and the default, on the baseline <img src="assets/badge.png" width="70" alt="baseline">.
 
 A picture that follows the theme:
 
@@ -335,6 +346,8 @@ It can be closed again. Only this block is laid out again when it toggles.
 <p align="justify">A justified paragraph needs enough words to fill more than one line, so that the spacing between the words can stretch and both edges of the text line up with the edges of the column, which is what this sentence is here to show.</p>
 
 <p dir="rtl">فقرة من اليمين إلى اليسار.</p>
+
+<p dir="rtl">A paragraph marked right-to-left starts at the right, whatever script it is in.</p>
 
 <center>The old <code>&lt;center&gt;</code> tag still centres.</center>
 

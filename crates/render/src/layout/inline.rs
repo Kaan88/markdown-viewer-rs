@@ -5,7 +5,7 @@
 use super::pager::Pager;
 use super::store::Found;
 use crate::theme::Color;
-use mdview_core::model::{BlockKind, SpanKind};
+use mdview_core::model::{BlockKind, ImageAlign, SpanKind};
 use std::ops::Range;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -88,6 +88,8 @@ pub(super) struct ImageBox {
     /// An image whose pixels are not here (a remote one pending or blocked) but whose size the
     /// document declared: the box is reserved and drawn as a tinted placeholder.
     pub(super) reserved: bool,
+    /// `<img align>`: where the box sits against its line, or at which side of its paragraph.
+    pub(super) align: ImageAlign,
 }
 
 impl Inline {
@@ -373,6 +375,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                             baseline: Some(image.baseline as f32 / 2.0),
                             math: Some((at, end)),
                             reserved: false,
+                            align: ImageAlign::None,
                         });
                         return;
                     }
@@ -424,6 +427,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                         baseline: None,
                         math: None,
                         reserved,
+                        align: info.align,
                     });
                     return;
                 }

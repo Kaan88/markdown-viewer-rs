@@ -46,6 +46,41 @@ pub const MAX_BLOCK_DEPTH: usize = 256;
 pub enum Oversize {
     Diagram,
     Equation,
+    /// A Mermaid family the engine is built without. Not a size, but the same outcome: the source
+    /// stays on the page, so find sees it and no engine job is made for it.
+    UnsupportedDiagram,
+}
+
+/// Mermaid families the engine does not draw (`crates/engine/Cargo.toml` leaves them out).
+const UNSUPPORTED_DIAGRAMS: [&str; 3] = ["architecture", "wardley", "info"];
+
+/// Whether a Mermaid source opens with a family the engine does not draw. The family is the first
+/// word after any front matter, `%%` comment or directive lines and blank lines; a `-beta` suffix
+/// names the same family.
+pub fn unsupported_diagram(source: &str) -> bool {
+    let mut lines = source.lines().map(str::trim);
+    let mut in_front_matter = false;
+    let mut first = true;
+    let word = loop {
+        let Some(line) = lines.next() else {
+            return false;
+        };
+        if line == "---" && (first || in_front_matter) {
+            in_front_matter = !in_front_matter;
+            first = false;
+            continue;
+        }
+        first = false;
+        if in_front_matter || line.is_empty() || line.starts_with("%%") {
+            continue;
+        }
+        break line
+            .split(|c: char| c.is_whitespace() || c == ':' || c == ';')
+            .next()
+            .unwrap_or("");
+    };
+    let family = word.strip_suffix("-beta").unwrap_or(word);
+    UNSUPPORTED_DIAGRAMS.contains(&family)
 }
 
 impl fmt::Display for Oversize {
@@ -53,6 +88,7 @@ impl fmt::Display for Oversize {
         f.write_str(match self {
             Oversize::Diagram => "Diagram exceeds the 64 KiB limit",
             Oversize::Equation => "Equation exceeds the 4 KiB limit",
+            Oversize::UnsupportedDiagram => "This kind of diagram is not supported",
         })
     }
 }

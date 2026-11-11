@@ -9,7 +9,7 @@ use super::store::{Found, ImageStore};
 use super::{BlockBox, Options, Source, SourceKind};
 use crate::text::Brush;
 use crate::theme::{Color, Theme};
-use mdview_core::model::{Align, BlockKind, Document, Length, NONE};
+use mdview_core::model::{Align, BlockKind, Dir, Document, ImageAlign, Length, NONE};
 use parley::{
     Alignment, AlignmentOptions, Cluster, FontContext, FontFamily, FontStyle, FontWeight,
     InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
@@ -186,7 +186,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 } else {
                     Some(self.doc.str(lang).to_string())
                 };
-                self.code_block(b, left, width, label);
+                self.code_block(b, left, width, label, None);
             }
             BlockKind::Diagram { lang, .. } => {
                 let label = if self.doc.str(lang).is_empty() {
@@ -195,12 +195,14 @@ impl<'a, 'b> Pager<'a, 'b> {
                     self.doc.str(lang).to_string()
                 };
                 if !self.diagram_block(b, left, width) {
-                    self.code_block(b, left, width, Some(label));
+                    let why = self.fallback_reason(b);
+                    self.code_block(b, left, width, Some(label), Some(why));
                 }
             }
             BlockKind::Math { .. } => {
                 if !self.math_block(b, left, width) {
-                    self.code_block(b, left, width, Some("math".to_string()));
+                    let why = self.fallback_reason(b);
+                    self.code_block(b, left, width, Some("math".to_string()), Some(why));
                 }
             }
             BlockKind::ThematicBreak => {
@@ -398,6 +400,16 @@ impl<'a, 'b> Pager<'a, 'b> {
                 baseline = baseline.map(|b| b * shrink);
                 width = max;
             }
+            if baseline.is_none() {
+                // `align` on an image: `middle` centres it on the lowercase letters, `top` hangs
+                // it from the top of the text. Anything else sits on the baseline.
+                let em = txt.size * self.scale;
+                baseline = match image.align {
+                    ImageAlign::Middle => Some(height / 2.0 + em * 0.27),
+                    ImageAlign::Top => Some((em * 0.8).min(height)),
+                    _ => None,
+                };
+            }
             builder.push_inline_box(InlineBox {
                 id: if image.reserved {
                     RESERVED | u64::from(id)
@@ -471,6 +483,54 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
         }
         (id, width, height, baseline)
+    }
+
+    /// Why a formula or diagram block shows its source: the parser's reason, or that drawing it
+    /// failed (TeX or Mermaid the engine rejects, or no engine).
+    fn fallback_reason(&self, b: u32) -> String {
+        match self.doc.blocks[b as usize].kind {
+            BlockKind::Diagram {
+                oversize: Some(why),
+                ..
+            }
+            | BlockKind::Math {
+                oversize: Some(why),
+            } => why.to_string(),
+            _ => "Could not be drawn".to_string(),
+        }
+    }
+
+    /// The `dir` of the nearest HTML block around `block` that states one.
+    pub(super) fn inherited_dir(&self, block: u32) -> Option<Dir> {
+        if self.doc.block_attrs.is_empty() {
+            return None;
+        }
+        let mut b = block;
+        loop {
+            if let Some(dir) = self.doc.attrs_of(b).and_then(|a| a.dir)
+                && dir != Dir::Auto
+            {
+                return Some(dir);
+            }
+            let parent = self.doc.blocks[b as usize].parent;
+            if parent == NONE {
+                return None;
+            }
+            b = parent;
+        }
+    }
+
+    /// Lines of text with no `align` start at the side their `dir` names. Without a `dir` each
+    /// paragraph follows its own first strong character, which is what the layout did already.
+    pub(super) fn apply_dir(&self, layout: &mut Layout<Brush>, block: u32, align: Align) {
+        if align != Align::None {
+            return;
+        }
+        match self.inherited_dir(block) {
+            Some(Dir::Rtl) => layout.align(Alignment::Right, AlignmentOptions::default()),
+            Some(Dir::Ltr) => layout.align(Alignment::Left, AlignmentOptions::default()),
+            _ => {}
+        }
     }
 
     /// The `align` of the nearest `<figure>`, `<div>` or `<center>` a block sits in that sets

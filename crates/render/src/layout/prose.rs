@@ -1,9 +1,10 @@
 //! Text blocks: paragraphs, tight list text (`Plain`), headings, and the drawn task checkbox.
 
+use super::inline::ImageBox;
 use super::pager::{Pager, Txt};
 use super::paint::Paint;
 use crate::theme::Color;
-use mdview_core::model::Align;
+use mdview_core::model::{Align, ImageAlign};
 use parley::{Alignment, AlignmentOptions};
 
 impl<'a, 'b> Pager<'a, 'b> {
@@ -63,7 +64,7 @@ impl<'a, 'b> Pager<'a, 'b> {
     }
 
     pub(super) fn paragraph(&mut self, b: u32, left: f32, width: f32, color: Color, align: Align) {
-        let inline = self.inline_of(b);
+        let mut inline = self.inline_of(b);
         let task = inline.task;
         if inline.text.trim().is_empty() && inline.boxes.is_empty() && task.is_none() {
             return;
@@ -72,6 +73,23 @@ impl<'a, 'b> Pager<'a, 'b> {
             self.task_indent()
         } else {
             0.0
+        };
+        // `<img align="left|right">`: the first such image leaves the line and stands at that
+        // side of the paragraph, with the text in the column beside it.
+        let gap = self.px(16.0);
+        let side: Option<ImageBox> = inline
+            .boxes
+            .iter()
+            .position(|image| {
+                matches!(image.align, ImageAlign::Left | ImageAlign::Right)
+                    && image.math.is_none()
+                    && image.width + gap + self.px(120.0) <= width - indent
+            })
+            .map(|at| inline.boxes.remove(at));
+        let beside = side.map_or(0.0, |image| image.width + gap);
+        let (left, width) = match side {
+            Some(image) if image.align == ImageAlign::Left => (left + beside, width - beside),
+            _ => (left, width - beside),
         };
         let txt = Txt {
             size: self.theme.body_size,
@@ -91,11 +109,44 @@ impl<'a, 'b> Pager<'a, 'b> {
             // Every line but the last is stretched to the column; carets follow the layout.
             layout.align(Alignment::Justify, AlignmentOptions::default());
         }
-        let height = layout.height().round().max(if task.is_some() {
+        self.apply_dir(&mut layout, b, align);
+        let has_text = !inline.text.trim().is_empty() || !inline.boxes.is_empty();
+        let mut height = if has_text || task.is_some() {
+            layout.height().round()
+        } else {
+            0.0
+        }
+        .max(if task.is_some() {
             self.theme.body_size * self.theme.body_line_height * self.scale
         } else {
             0.0
         });
+        if let Some(image) = side {
+            let x = if image.align == ImageAlign::Left {
+                left - beside
+            } else {
+                left + width + gap
+            };
+            self.paints.push(if image.reserved {
+                Paint::Rect {
+                    x,
+                    y: self.y,
+                    w: image.width,
+                    h: image.height,
+                    radius: self.px(3.0),
+                    color: self.theme.code_bg,
+                }
+            } else {
+                Paint::Image {
+                    index: image.id,
+                    x,
+                    y: self.y,
+                    w: image.width,
+                    h: image.height,
+                }
+            });
+            height = height.max(image.height.round());
+        }
         let x = self.aligned_x(left + indent, width - indent, &layout, align);
         let baseline = layout
             .lines()
@@ -130,7 +181,9 @@ impl<'a, 'b> Pager<'a, 'b> {
             color,
             max: Some(width - indent),
         };
-        let layout = self.text_layout(&inline, &txt);
+        let mut layout = self.text_layout(&inline, &txt);
+        let align = self.inherited_align(b);
+        self.apply_dir(&mut layout, b, align);
         let height = layout.height().round().max(if task.is_some() {
             self.theme.body_size * self.theme.body_line_height * self.scale
         } else {
@@ -145,12 +198,7 @@ impl<'a, 'b> Pager<'a, 'b> {
         }
         let size = txt.size;
         if !inline.text.trim().is_empty() || !inline.boxes.is_empty() {
-            let x = self.aligned_x(
-                left + indent,
-                width - indent,
-                &layout,
-                self.inherited_align(b),
-            );
+            let x = self.aligned_x(left + indent, width - indent, &layout, align);
             self.emit(&inline, layout, x, self.y, size);
         }
         self.y += height + self.px(4.0);
@@ -178,7 +226,8 @@ impl<'a, 'b> Pager<'a, 'b> {
             color: self.theme.heading,
             max: Some(width),
         };
-        let layout = self.text_layout(&inline, &txt);
+        let mut layout = self.text_layout(&inline, &txt);
+        self.apply_dir(&mut layout, b, align);
         let x = self.aligned_x(left, width, &layout, align);
         let height = layout.height().round();
         self.emit(&inline, layout, x, self.y, size);

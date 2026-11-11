@@ -502,8 +502,9 @@ impl Document {
     }
 
     /// Text ranges the reader cannot see, in order: source the engine draws over, where oversize
-    /// items stay visible and so searchable, and the body of each `<details>` for which `is_open`
-    /// says no. Open state is view state, which only the shell knows.
+    /// items stay visible and so searchable, the body of each `<details>` for which `is_open`
+    /// says no, and footnote definitions the page does not list (never referenced, or a second
+    /// definition of a label). Open state is view state, which only the shell knows.
     pub fn hidden_ranges(&self, is_open: &impl Fn(u32) -> bool) -> Vec<TextRange> {
         let mut out = Vec::new();
         self.collect_hidden(0, self.blocks.len() as u32, is_open, &mut out);
@@ -532,6 +533,16 @@ impl Document {
                     }
                 }
                 i = b.end;
+                continue;
+            }
+            if let BlockKind::FootnoteDefinition { footnote } = b.kind
+                && self
+                    .footnotes
+                    .get(footnote as usize)
+                    .is_none_or(|f| f.number == 0 || f.block != i)
+            {
+                out.push(b.text);
+                i = b.end.max(i + 1);
                 continue;
             }
             if matches!(

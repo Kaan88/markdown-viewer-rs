@@ -466,11 +466,12 @@ pub(crate) fn classify_tag(name: &str) -> Tag {
         b"div" => Tag::Div,
         b"center" => Tag::Center,
         b"section" | b"article" | b"aside" | b"header" | b"footer" | b"main" | b"nav"
-        | b"address" | b"caption" | b"dl" => Tag::Section,
+        | b"address" | b"dl" => Tag::Section,
         b"dt" => Tag::Dt,
         b"dd" => Tag::Dd,
         b"figure" => Tag::Figure,
-        b"figcaption" => Tag::FigCaption,
+        // A table's `<caption>` is the same kind of block; the table draws it above its grid.
+        b"figcaption" | b"caption" => Tag::FigCaption,
         b"h1" => Tag::H(1),
         b"h2" => Tag::H(2),
         b"h3" => Tag::H(3),

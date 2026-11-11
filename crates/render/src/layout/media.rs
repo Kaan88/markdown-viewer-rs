@@ -234,7 +234,16 @@ impl<'a, 'b> Pager<'a, 'b> {
         true
     }
 
-    pub(super) fn code_block(&mut self, b: u32, left: f32, width: f32, label: Option<String>) {
+    /// A code box. `label` is the language, drawn at the top right and used to highlight; `note`
+    /// follows it there, for a formula or diagram that shows its source and says why.
+    pub(super) fn code_block(
+        &mut self,
+        b: u32,
+        left: f32,
+        width: f32,
+        label: Option<String>,
+        note: Option<String>,
+    ) {
         let source = self.doc.block_text(b).trim_end_matches('\n').to_string();
         let text_start = self.doc.blocks[b as usize].text.start;
         let mut inline = Inline::default();
@@ -263,7 +272,11 @@ impl<'a, 'b> Pager<'a, 'b> {
         }
         let pad_x = self.px(16.0);
         let pad_y = self.px(13.0);
-        let tag = label.filter(|l| !l.is_empty()).map(|label| {
+        let label = match (label.filter(|l| !l.is_empty()), note) {
+            (Some(label), Some(note)) => Some(format!("{label} \u{b7} {note}")),
+            (label, note) => label.or(note),
+        };
+        let tag = label.map(|label| {
             let mut tag = Inline::default();
             tag.push(
                 &label,

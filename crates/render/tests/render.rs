@@ -1194,3 +1194,178 @@ fn mark_is_highlighted() {
     assert!(yellow > 200, "highlight pixels: {yellow}");
     assert_eq!(count(&page("some marked text\n"), [0xc5, 0xf8, 0xff]), 0);
 }
+
+#[test]
+fn dir_moves_a_paragraph_to_its_side() {
+    let (first, last) = ink_columns(&page("<p dir=\"rtl\">Short.</p>\n"));
+    assert!(
+        first > 600 && last + 4 >= 780 - LIGHT.margin as usize,
+        "{first}..{last}"
+    );
+    // Arabic starts at the right by itself, and at the left when its block says `ltr`.
+    let arabic = "\u{645}\u{631}\u{62d}\u{628}\u{627}";
+    assert!(ink_columns(&page(&format!("{arabic}\n"))).0 > 600);
+    let forced = format!("<div dir=\"ltr\">\n\n{arabic}\n\n</div>\n");
+    assert!(ink_columns(&page(&forced)).0 < LIGHT.margin as usize + 4);
+}
+
+#[test]
+fn table_attributes_are_honoured() {
+    let border = [LIGHT.border[2], LIGHT.border[1], LIGHT.border[0]];
+    let columns_of = |r: &mdview_render::Rendered| {
+        let width = r.bitmap.width as usize;
+        let mut span = (usize::MAX, 0);
+        for (i, p) in r.bitmap.pixels.chunks_exact(4).enumerate() {
+            if p[..3] == border {
+                span = (span.0.min(i % width), span.1.max(i % width));
+            }
+        }
+        span
+    };
+    // `width` narrows the table and `align` centres it.
+    let full = columns_of(&page("<table><tr><td>a</td><td>b</td></tr></table>\n"));
+    assert_eq!(full, (40, 739));
+    let half = columns_of(&page(
+        "<table width=\"50%\" align=\"center\"><tr><td>a</td><td>b</td></tr></table>\n",
+    ));
+    assert_eq!(half.1 - half.0 + 1, 350);
+    assert!((half.0 as i32 - 215).abs() <= 1, "{half:?}");
+
+    // A row's `height` makes it taller, and `valign` moves the text down inside it.
+    let plain = page("<table><tr><td>a</td></tr></table>\n");
+    let tall = page("<table><tr height=\"120\"><td>a</td></tr></table>\n");
+    assert!(tall.bitmap.height >= plain.bitmap.height + 80);
+    let ink_rows = |markdown: &str| {
+        let r = page(markdown);
+        let width = r.bitmap.width as usize;
+        r.bitmap
+            .pixels
+            .chunks_exact(4)
+            .position(|p| p[1] < 0x60)
+            .map(|i| i / width)
+            .unwrap()
+    };
+    let top = ink_rows("<table><tr height=\"120\"><td>a</td></tr></table>\n");
+    let middle = ink_rows("<table><tr height=\"120\"><td valign=\"middle\">a</td></tr></table>\n");
+    let bottom = ink_rows("<table><tr height=\"120\" valign=\"bottom\"><td>a</td></tr></table>\n");
+    assert!(
+        top + 30 < middle && middle + 30 < bottom,
+        "{top} {middle} {bottom}"
+    );
+
+    // A row's `align` reaches its cells, and a cell's `width` sets its column.
+    let left = ink_columns(&page("<table><tr><td>a</td></tr></table>\n")).0;
+    let right = ink_columns(&page(
+        "<table><tr align=\"right\"><td>a</td></tr></table>\n",
+    ))
+    .0;
+    assert!(right > left + 500, "{left} {right}");
+    let second = |markdown: &str| {
+        let r = page(markdown);
+        let width = r.bitmap.width as usize;
+        // The x of the `b`, the last ink on the row.
+        r.bitmap
+            .pixels
+            .chunks_exact(4)
+            .enumerate()
+            .filter(|(_, p)| p[1] < 0x60)
+            .map(|(i, _)| i % width)
+            .max()
+            .unwrap()
+    };
+    let even = second("<table><tr><td>a</td><td>b</td></tr></table>\n");
+    let wide = second("<table><tr><td width=\"80%\">a</td><td>b</td></tr></table>\n");
+    assert!(wide > even + 150, "{even} {wide}");
+
+    // A caption is centred above the grid, not a row inside it.
+    let captioned = page("<table><caption>Cap</caption><tr><td>a</td></tr></table>\n");
+    let (first, last) = {
+        let width = captioned.bitmap.width as usize;
+        let mut span = (usize::MAX, 0);
+        // Ink above the table's top border only.
+        let top = captioned
+            .bitmap
+            .pixels
+            .chunks_exact(4)
+            .position(|p| p[..3] == border)
+            .unwrap()
+            / width;
+        for (i, p) in captioned.bitmap.pixels.chunks_exact(4).enumerate() {
+            if i / width < top && p[1] < 0x60 {
+                span = (span.0.min(i % width), span.1.max(i % width));
+            }
+        }
+        span
+    };
+    assert!(
+        ((first + last) as i32 / 2 - 390).abs() < 4,
+        "{first}..{last}"
+    );
+}
+
+#[test]
+fn an_aligned_image_stands_beside_its_text() {
+    let dir = temp_dir("image-align");
+    std::fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/assets/badge.png"),
+        dir.join("badge.png"),
+    )
+    .unwrap();
+    let draw = |markdown: &str| {
+        render(
+            &mdview_core::parse(markdown),
+            &Options {
+                base_dir: Some(dir.clone()),
+                ..Options::light()
+            },
+        )
+    };
+    // The badge is blue; where its pixels are says where the image went.
+    let blue_columns = |r: &mdview_render::Rendered| {
+        let width = r.bitmap.width as usize;
+        // Columns with a run of badge blue; subpixel text leaves the odd blue pixel too.
+        let mut per_column = vec![0u32; width];
+        for (i, p) in r.bitmap.pixels.chunks_exact(4).enumerate() {
+            if p[0] > 140 && p[2] < 40 && p[1] > 80 {
+                per_column[i % width] += 1;
+            }
+        }
+        let solid = |n: &u32| *n >= 8;
+        (
+            per_column.iter().position(solid).unwrap(),
+            per_column.iter().rposition(solid).unwrap(),
+        )
+    };
+    let text = "word ".repeat(40);
+    let right = draw(&format!(
+        "<img src=\"badge.png\" width=\"100\" align=\"right\"> {text}\n"
+    ));
+    let (first, last) = blue_columns(&right);
+    assert!(first >= 640 && last <= 740, "{first}..{last}");
+    let inline = draw(&format!("<img src=\"badge.png\" width=\"100\"> {text}\n"));
+    assert!(blue_columns(&inline).0 < 60);
+    // Beside the image the text is one block, not pushed under it.
+    assert!(right.bitmap.height < inline.bitmap.height + 20);
+}
+
+#[test]
+fn a_block_that_cannot_be_drawn_says_why() {
+    let named = page("```mermaid\narchitecture-beta\n    group api(cloud)[API]\n```\n");
+    let other = page("```text\narchitecture-beta\n    group api(cloud)[API]\n```\n");
+    // The reason is longer than a language name: more muted ink at the top right.
+    let ink = |r: &mdview_render::Rendered| {
+        let width = r.bitmap.width as usize;
+        r.bitmap
+            .pixels
+            .chunks_exact(4)
+            .enumerate()
+            .filter(|(i, p)| i % width > 400 && p[1] < 0xc0)
+            .count()
+    };
+    assert!(
+        ink(&named) > ink(&other) * 3,
+        "{} {}",
+        ink(&named),
+        ink(&other)
+    );
+}

@@ -1222,9 +1222,16 @@ impl<'a> Builder<'a> {
             BlockKind::Paragraph { .. } => self.promote_display_math(b),
             BlockKind::Heading { .. } => self.finish_heading(b),
             BlockKind::Diagram { lang, .. } => {
-                let oversize = (text_end - start > MAX_DIAGRAM_BYTES).then_some(Oversize::Diagram);
+                let oversize = if text_end - start > MAX_DIAGRAM_BYTES {
+                    Some(Oversize::Diagram)
+                } else if crate::limits::unsupported_diagram(&self.doc.text[start..text_end]) {
+                    Some(Oversize::UnsupportedDiagram)
+                } else {
+                    None
+                };
                 self.doc.blocks[b as usize].kind = BlockKind::Diagram { lang, oversize };
-                self.warn_oversize(oversize);
+                // Only a size is worth a warning; an unsupported family says so where it is drawn.
+                self.warn_oversize(oversize.filter(|o| *o == Oversize::Diagram));
             }
             BlockKind::Math { .. } => {
                 let oversize =

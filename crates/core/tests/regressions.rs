@@ -3197,3 +3197,25 @@ fn figure_holds_its_content_and_a_caption() {
         }
     );
 }
+
+#[test]
+fn find_sees_what_the_page_shows_for_undrawn_blocks() {
+    // A Mermaid family the engine is built without keeps its source on the page, so find must
+    // see it; a family it draws is hidden behind the picture.
+    let d = parse("```mermaid\narchitecture-beta\n    group needle(cloud)[API]\n```\n");
+    assert!(matches!(
+        d.blocks[0].kind,
+        BlockKind::Diagram {
+            oversize: Some(mdview_core::limits::Oversize::UnsupportedDiagram),
+            ..
+        }
+    ));
+    assert_eq!(mdview_core::find::find(&d, "needle").hits.len(), 1);
+    assert!(d.engine_jobs().is_empty());
+    let d = parse("```mermaid\n%% a comment\nflowchart LR\n    needle --> b\n```\n");
+    assert_eq!(mdview_core::find::find(&d, "needle").hits.len(), 0);
+
+    // A footnote definition nobody references is not listed, so it is not found either.
+    let d = parse("Text[^a].\n\n[^a]: Listed needle.\n[^b]: Unlisted needle.\n");
+    assert_eq!(mdview_core::find::find(&d, "needle").hits.len(), 1);
+}
