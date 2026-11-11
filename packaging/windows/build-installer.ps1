@@ -38,7 +38,7 @@ if (-not $SkipBuild) {
   if ($LASTEXITCODE -ne 0) { Fail 'cargo build failed.' }
 }
 foreach ($f in 'mdview.exe', 'mdview-engine.exe') {
-  if (-not (Test-Path -LiteralPath (Join-Path $root "target\release\$f"))) { Fail "target\release\$f is missing." }
+  if (-not (Test-Path -LiteralPath (Join-Path $root "target\dist\release\$f"))) { Fail "target\dist\release\$f is missing." }
 }
 
 & $iscc "/DAppVersion=$version" (Join-Path $PSScriptRoot 'mdview.iss')

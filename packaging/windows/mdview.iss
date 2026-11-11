@@ -62,8 +62,8 @@ Name: "assoc"; Description: "Register mdview for Markdown files (.md, .markdown,
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "..\..\target\release\mdview.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\target\release\mdview-engine.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\target\dist\release\mdview.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\target\dist\release\mdview-engine.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\assets\mdview.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
