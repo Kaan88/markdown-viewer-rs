@@ -29,8 +29,12 @@ if (-not $iscc) { Fail 'ISCC.exe not found.' }
 if (-not $SkipBuild) {
   $tmp = Join-Path $root 'target\tmp'; New-Item -ItemType Directory -Force $tmp | Out-Null
   $env:TEMP = $tmp; $env:TMP = $tmp   # lib.exe and rc.exe fail under paths they cannot write
+  # The shipped exes link the C runtime statically, so they need no VC++ redistributable. The flag is
+  # set here and not in .cargo\config.toml because it must not reach the Qt crate (Qt needs the
+  # dynamic CRT) or a Linux build; a separate target directory keeps normal builds from rebuilding.
+  $env:RUSTFLAGS = '-C target-feature=+crt-static'
   Push-Location $root
-  try { cargo build --release -p mdview -p mdview-engine } finally { Pop-Location }
+  try { cargo build --release -p mdview -p mdview-engine --target-dir target\dist } finally { Pop-Location; Remove-Item Env:RUSTFLAGS }
   if ($LASTEXITCODE -ne 0) { Fail 'cargo build failed.' }
 }
 foreach ($f in 'mdview.exe', 'mdview-engine.exe') {

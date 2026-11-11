@@ -1294,13 +1294,11 @@ estimated heights for large files).
 
 ## 30. Installer for the winit shell, static CRT (2026-11-11)
 
-`.cargo/config.toml` sets `[build] rustflags = ["-C", "target-feature=+crt-static"]`, so `mdview.exe`
-and `mdview-engine.exe` import only system DLLs (no `VCRUNTIME140`, no `api-ms-win-crt-*`); the exes
-grew 6.82 -> 6.94 MB and 20.10 -> 20.28 MB. It is `[build]` and not `[target.<triple>]` because
-`bins/mdv-qt/.cargo/config.toml` must turn it off (Qt needs the dynamic CRT) and only a target-specific
-entry replaces `build.rustflags`; two target entries are joined and rustc still reports crt-static.
-Cargo reads config from the working directory, so build the Qt crate from `bins/mdv-qt`
-(`build-installer-qt.ps1` now does). Checked: Qt crate builds and imports `MSVCP140`/`VCRUNTIME140`.
+`build-installer.ps1` builds the shipped exes with `RUSTFLAGS=-C target-feature=+crt-static` into
+`target\dist`, so `mdview.exe` and `mdview-engine.exe` import only system DLLs (no `VCRUNTIME140`,
+no `api-ms-win-crt-*`); they grow about 120 KB and 180 KB. The flag is not in a `.cargo/config.toml`
+because it must not reach the Qt crate (Qt needs the dynamic CRT) or a Linux build. Ordinary
+`cargo build` output in `targetelease` still uses the dynamic CRT.
 
 `packaging/windows/mdview.iss` + `build-installer.ps1` (`-SkipBuild` to reuse `target\release`):
 per-user to `%LOCALAPPDATA%\Programs\mdview`, `mdview.exe`, `mdview-engine.exe`, `mdview.ico`, own
