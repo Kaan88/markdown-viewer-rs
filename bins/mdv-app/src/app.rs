@@ -117,6 +117,11 @@ struct App {
     full: bool,
     /// Something happened that may change what is shown.
     wants_frame: bool,
+    /// A redraw this app asked for is on its way. A `RedrawRequested` that arrives without it
+    /// comes from the system (the window was shown, restored or uncovered), which has dropped
+    /// what the window showed, so the whole frame goes out again even though nothing changed.
+    requested: bool,
+    expose: bool,
     first: bool,
     exit: bool,
     mods: Mods,
@@ -167,6 +172,8 @@ impl App {
             overlay_bounds: Vec::new(),
             full: true,
             wants_frame: true,
+            requested: false,
+            expose: false,
             first: true,
             exit: false,
             mods: Mods::default(),
@@ -613,7 +620,10 @@ impl App {
     }
 
     fn draw(&mut self) {
-        let (damage, mut times) = self.compose();
+        let (mut damage, mut times) = self.compose();
+        if std::mem::take(&mut self.expose) {
+            damage = vec![(0, 0, self.screen.width as i32, self.screen.height as i32)];
+        }
         let t = Instant::now();
         if !damage.is_empty() {
             times.copy = self.present(&damage);
@@ -646,6 +656,10 @@ impl App {
             if let Some(w) = &self.window {
                 w.set_visible(true);
             }
+            // The first frame was presented to a hidden window, which shows nothing: send it
+            // again now that there is a window to draw on.
+            let whole = (0, 0, self.screen.width as i32, self.screen.height as i32);
+            self.present(&[whole]);
             if std::env::var_os("MDVIEW_STARTUP_TRACE").is_some() || self.trace {
                 let images = self.ws.image_stats();
                 eprintln!(
@@ -857,6 +871,9 @@ impl ApplicationHandler<Wake> for App {
             WindowEvent::CloseRequested => self.exit = true,
             WindowEvent::RedrawRequested => {
                 self.wants_frame = false;
+                if !std::mem::take(&mut self.requested) {
+                    self.expose = true;
+                }
                 self.draw();
             }
             WindowEvent::Resized(size) => {
@@ -973,6 +990,7 @@ impl ApplicationHandler<Wake> for App {
             // More to measure: come straight back after any events that are waiting.
             event_loop.set_control_flow(ControlFlow::Poll);
             if let Some(w) = &self.window {
+                self.requested = true;
                 w.request_redraw();
             }
             return;
@@ -980,6 +998,7 @@ impl ApplicationHandler<Wake> for App {
         if self.wants_frame {
             self.wants_frame = false;
             if let Some(w) = &self.window {
+                self.requested = true;
                 w.request_redraw();
             }
         }
