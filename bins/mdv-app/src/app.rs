@@ -47,8 +47,11 @@ mod input;
 #[cfg(test)]
 mod tests;
 
-/// How close to the window edge a press resizes, in logical px.
-const EDGE: f32 = 5.0;
+/// How close to the window edge a press resizes, in logical px, and how far along an edge from a
+/// corner still resizes diagonally. The window has no frame outside its pixels to grab, so the
+/// band has to be wide enough to hit without aiming.
+const EDGE: f32 = 8.0;
+const CORNER: f32 = 20.0;
 const TIP_DELAY: Duration = Duration::from_millis(500);
 const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
@@ -781,7 +784,13 @@ impl App {
             return None;
         }
         let (w, h) = self.logical();
-        let (l, r, t, b) = (x < EDGE, x >= w - EDGE, y < EDGE, y >= h - EDGE);
+        if !(x < EDGE || x >= w - EDGE || y < EDGE || y >= h - EDGE) {
+            return None;
+        }
+        // On an edge: the corner band along it turns the resize diagonal.
+        let (l, r, t, b) = (x < CORNER, x >= w - CORNER, y < CORNER, y >= h - CORNER);
+        let (l, r) = (l && (x < EDGE || t || b), r && (x >= w - EDGE || t || b));
+        let (t, b) = (t && (y < EDGE || l || r), b && (y >= h - EDGE || l || r));
         Some(match (l, r, t, b) {
             (true, _, true, _) => ResizeDirection::NorthWest,
             (_, true, true, _) => ResizeDirection::NorthEast,

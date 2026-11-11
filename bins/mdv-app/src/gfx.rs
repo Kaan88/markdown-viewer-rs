@@ -340,10 +340,10 @@ impl<'a> Painter<'a> {
     /// A soft drop shadow around `r`, for popups: a few expanding translucent boxes.
     pub fn shadow(&mut self, r: Rect, radius: f32, dark: bool) {
         let steps = 10;
-        let strength = if dark { 0.055 } else { 0.022 };
+        let strength = if dark { 0.024 } else { 0.010 };
         for i in (1..=steps).rev() {
-            let d = i as f32 * 1.6;
-            let rr = Rect::new(r.x - d, r.y - d + 4.0, r.w + 2.0 * d, r.h + 2.0 * d);
+            let d = i as f32 * 1.4;
+            let rr = Rect::new(r.x - d, r.y - d + 3.0, r.w + 2.0 * d, r.h + 2.0 * d);
             self.rbox_a(rr, radius + d, [0, 0, 0], strength);
         }
     }
