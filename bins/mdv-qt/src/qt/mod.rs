@@ -628,6 +628,9 @@ impl H<QWidget> {
     pub fn width(&self) -> i32 {
         unsafe { &*self.0 }.width()
     }
+    pub fn height(&self) -> i32 {
+        unsafe { &*self.0 }.height()
+    }
     pub fn dpr(&self) -> f64 {
         unsafe { &*self.0 }.devicePixelRatioF()
     }
@@ -947,6 +950,12 @@ impl H<QWidget> {
     pub fn minimize(&self) {
         pin!(self).show_minimized()
     }
+    pub fn is_maximized(&self) -> bool {
+        unsafe { &*self.0 }.is_maximized()
+    }
+    pub fn maximize(&self) {
+        pin!(self).show_maximized()
+    }
     pub fn toggle_maximized(&self) {
         if unsafe { &*self.0 }.is_maximized() {
             pin!(self).show_normal()
@@ -1186,7 +1195,8 @@ pub fn layout_with_margins(w: H<QWidget>, child: H<QWidget>, left: i32, top: i32
 }
 
 /// Creates QApplication and runs the event loop. Args are leaked since Qt keeps them.
-pub fn run_app(setup: impl FnOnce()) -> i32 {
+/// Runs `setup`, the event loop, then `done` while the widgets still exist.
+pub fn run_app(setup: impl FnOnce(), done: impl FnOnce()) -> i32 {
     let argc = Box::leak(Box::new(1i32));
     let arg0 = Box::leak(Box::new(*b"mdview\0"));
     let argv = Box::leak(Box::new([
@@ -1204,5 +1214,7 @@ pub fn run_app(setup: impl FnOnce()) -> i32 {
             (started.elapsed() - app_ready).as_secs_f64() * 1000.0
         );
     }
-    QApplication::exec()
+    let code = QApplication::exec();
+    done();
+    code
 }

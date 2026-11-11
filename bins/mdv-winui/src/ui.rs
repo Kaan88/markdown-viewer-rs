@@ -50,6 +50,7 @@ windows_core::link!("shell32.dll" "system" fn SHGetPathFromIDListW(pidl: *mut c_
 windows_core::link!("ole32.dll" "system" fn CoTaskMemFree(memory: *mut c_void));
 windows_core::link!("user32.dll" "system" fn SetForegroundWindow(hwnd: *mut c_void) -> i32);
 windows_core::link!("user32.dll" "system" fn ShowWindow(hwnd: *mut c_void, command: i32) -> i32);
+windows_core::link!("user32.dll" "system" fn GetWindowPlacement(hwnd: *mut c_void, placement: *mut WindowPlacement) -> i32);
 windows_core::link!("user32.dll" "system" fn SetTimer(hwnd: *mut c_void, id: usize, ms: u32, callback: unsafe extern "system" fn(*mut c_void, u32, usize, u32)) -> usize);
 windows_core::link!("user32.dll" "system" fn OpenClipboard(owner: *mut c_void) -> i32);
 windows_core::link!("user32.dll" "system" fn CloseClipboard() -> i32);
@@ -209,6 +210,39 @@ fn winui_window() -> isize {
         )
     };
     found
+}
+
+/// `WINDOWPLACEMENT`: the restored (normal) rectangle even while the window is maximized.
+#[repr(C)]
+#[derive(Default)]
+struct WindowPlacement {
+    length: u32,
+    flags: u32,
+    show_cmd: u32,
+    min_position: [i32; 2],
+    max_position: [i32; 2],
+    normal: [i32; 4],
+}
+
+/// The window's restored size in logical pixels and whether it is maximized.
+fn window_state() -> Option<(u32, u32, bool)> {
+    let hwnd = winui_window() as *mut c_void;
+    if hwnd.is_null() {
+        return None;
+    }
+    let mut placement = WindowPlacement {
+        length: std::mem::size_of::<WindowPlacement>() as u32,
+        ..Default::default()
+    };
+    if unsafe { GetWindowPlacement(hwnd, &mut placement) } == 0 {
+        return None;
+    }
+    let dpi = (unsafe { GetDpiForWindow(hwnd) }).max(96) as i32;
+    let [left, top, right, bottom] = placement.normal;
+    let width = ((right - left) * 96 / dpi).max(0) as u32;
+    let height = ((bottom - top) * 96 / dpi).max(0) as u32;
+    // SW_SHOWMAXIMIZED = 3
+    Some((width, height, placement.show_cmd == 3))
 }
 
 fn set_window_size(width: i32, height: i32) {
@@ -990,6 +1024,9 @@ impl Shell {
         if visible {
             refresh_outline(self);
         }
+        if self.focus.get().is_none() {
+            self.save_layout(None);
+        }
         self.focus_page();
     }
 
@@ -1102,6 +1139,7 @@ impl Shell {
             }
         } else {
             self.set_tree_visible(!self.tree_visible.get());
+            self.save_layout(None);
             self.focus_page();
         }
     }
@@ -1453,6 +1491,8 @@ impl Shell {
         session.tabs = self.pages.borrow().iter().map(|p| p.path.clone()).collect();
         session.active = self.current.get().unwrap_or(0);
         session.recent = self.recent.borrow().clone();
+        let (files, outline) = self.panes();
+        session.set_panes(files, outline);
         match session.save(path) {
             Ok(()) => diag::trace(&format!("session saved: {} tabs", session.tabs.len())),
             Err(e) => diag::trace(&format!("could not save {}: {e}", path.display())),
@@ -1461,6 +1501,35 @@ impl Shell {
 
     fn focus_page(&self) {
         _ = crate::input::focus(&self.page, crate::input::FOCUS_PROGRAMMATIC);
+    }
+
+    /// Which panes the user has open; in focus mode, the ones it will bring back.
+    fn panes(&self) -> (bool, bool) {
+        self.focus
+            .get()
+            .unwrap_or((self.tree_visible.get(), self.outline_visible.get()))
+    }
+
+    /// Saves the panes (and the window size, when `window` is set) without the rest of the session.
+    fn save_layout(&self, window: Option<(u32, u32, bool)>) {
+        let (files, outline) = self.panes();
+        let mut session = self.session.borrow_mut();
+        let Some((path, session)) = session.as_mut() else {
+            return;
+        };
+        session.set_panes(files, outline);
+        if let Some((w, h, max)) = window {
+            session.set_window_size(w, h, max);
+        }
+        if let Err(e) = session.save(path) {
+            diag::trace(&format!("could not save {}: {e}", path.display()));
+        }
+    }
+
+    fn save_window(&self) {
+        if let Some(state) = window_state() {
+            self.save_layout(Some(state));
+        }
     }
 
     /// `--tabs-test`: with showcase.md open, opens `linked.md` beside it, switches back by opening
@@ -2601,8 +2670,27 @@ pub fn build(
     ));
     let window = Window::new()?;
     diag::trace("Window created");
+    let session = settings.map(|path| {
+        let saved = Session::load(&path);
+        diag::trace(&format!(
+            "session {}: {} tabs, {} recent",
+            path.display(),
+            saved.tabs.len(),
+            saved.recent.paths().len()
+        ));
+        (path, saved)
+    });
     window.SetTitle("mdview")?;
-    set_window_size(startup.size.0, startup.size.1);
+    // The saved size, unless --size asked for another (1100x900 is the default).
+    let saved_size = session
+        .as_ref()
+        .and_then(|(_, saved)| saved.window_size())
+        .filter(|_| startup.size == (1100, 900));
+    let maximize = saved_size.is_some_and(|(_, _, max)| max);
+    match saved_size {
+        Some((w, h, _)) => set_window_size(w as i32, h as i32),
+        None => set_window_size(startup.size.0, startup.size.1),
+    }
 
     let root = Grid::new()?;
     add_row(&root, GridUnitType::Auto, 1.0)?; // title bar: logo, tabs, drag area
@@ -2683,16 +2771,6 @@ pub fn build(
     renderer.set_zoom(zoom);
     renderer.set_shift(startup.shift);
     renderer.set_pending_scroll(startup.scroll);
-    let session = settings.map(|path| {
-        let saved = Session::load(&path);
-        diag::trace(&format!(
-            "session {}: {} tabs, {} recent",
-            path.display(),
-            saved.tabs.len(),
-            saved.recent.paths().len()
-        ));
-        (path, saved)
-    });
     let shell = Rc::new(Shell {
         window: window.clone(),
         root: root.clone(),
@@ -2971,8 +3049,30 @@ pub fn build(
             shell.switch_to(saved.active.min(count - 1));
         }
         refresh_recent(&shell);
-        if let Some(folder) = saved.folder.filter(|f| f.is_dir()) {
-            shell.open_folder(&folder, false);
+        let folder = saved.folder.clone().filter(|f| f.is_dir());
+        if let Some(folder) = &folder {
+            shell.open_folder(folder, false);
+        }
+        // Panes as they were left; a session from before they were saved keeps the old behaviour
+        // (Files shown when there is a folder, Outline hidden).
+        if !saved.layout.is_empty() {
+            let (files, outline) = saved.panes();
+            if files && folder.is_none() {
+                let dir = shell
+                    .path
+                    .borrow()
+                    .as_ref()
+                    .and_then(|p| p.parent().map(Path::to_path_buf));
+                if let Some(dir) = dir {
+                    shell.open_folder(&dir, false);
+                }
+            } else if !files && folder.is_some() {
+                shell.set_tree_visible(false);
+            }
+            if outline {
+                shell.toggle_outline();
+            }
+            shell.save_layout(None);
         }
     }
     if let Some(folder) = START_FOLDER.with(|cell| cell.borrow().clone()) {
@@ -3004,9 +3104,21 @@ pub fn build(
     }
 
     window.SetContent(&root.cast::<UIElement>()?)?;
-    window.Closed(|_, _| diag::trace("window closed"))?.forget();
+    {
+        let target = shell.clone();
+        window
+            .Closed(move |_, _| {
+                target.save_window();
+                diag::trace("window closed");
+            })?
+            .forget();
+    }
     window.Activate()?;
     diag::trace("Window activated");
+    if maximize {
+        // SW_MAXIMIZE = 3
+        unsafe { ShowWindow(winui_window() as *mut c_void, 3) };
+    }
     // After Activate: the native window exists by then, so taking over its title bar is cheap here,
     // while before Activate it created the window itself and cost about 60 ms more to first frame.
     crate::bar::extend_into_title_bar(&window, &drag)?;

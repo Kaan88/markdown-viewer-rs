@@ -145,6 +145,10 @@ struct Shell {
     files_tree: RefCell<Option<Tree>>,
     folder: RefCell<Option<PathBuf>>,
     folder_rows: RefCell<Vec<Option<PathBuf>>>,
+    /// The folder behind each tree row (None = file), and the folders the user has expanded.
+    /// Only expanded folders are read, so a big folder no longer slows the launch.
+    folder_dirs: RefCell<Vec<Option<PathBuf>>>,
+    folder_open: RefCell<std::collections::HashSet<PathBuf>>,
     /// Watches the open files' folders; `None` before the window is built or when the OS watcher
     /// failed, in which case a 2 s poll timer runs instead.
     watcher: RefCell<Option<mdview_core::watch::FileWatcher>>,
@@ -217,6 +221,8 @@ impl Shell {
             files_tree: RefCell::new(None),
             folder: RefCell::new(None),
             folder_rows: RefCell::new(Vec::new()),
+            folder_dirs: RefCell::new(Vec::new()),
+            folder_open: RefCell::new(std::collections::HashSet::new()),
             watcher: RefCell::new(None),
             wake: Default::default(),
             incoming: RefCell::new(None),
@@ -423,14 +429,9 @@ impl Shell {
 
     /// Shows `dir` in the Files dock: folders and Markdown files, hidden names skipped.
     fn open_folder(&self, dir: &Path) {
-        let mut rows: Vec<(u8, String, Option<PathBuf>)> = Vec::new();
-        scan_folder(dir, 1, &mut rows);
-        let titles: Vec<(u8, &str)> = rows.iter().map(|(l, t, _)| (*l, t.as_str())).collect();
-        if let Some(tree) = self.files_tree.borrow().as_ref() {
-            tree.set_items(&titles);
-        }
-        *self.folder_rows.borrow_mut() = rows.into_iter().map(|(_, _, p)| p).collect();
+        self.folder_open.borrow_mut().clear();
         *self.folder.borrow_mut() = Some(dir.to_path_buf());
+        self.fill_folder();
         if let Some(dock) = self.files_dock.get() {
             dock.widget().set_visible(true);
         }
@@ -508,7 +509,33 @@ impl Shell {
         }
     }
 
+    /// Rebuilds the Files tree: the folder's top level, plus the folders the user expanded.
+    fn fill_folder(&self) {
+        let Some(dir) = self.folder.borrow().clone() else {
+            return;
+        };
+        let mut rows: Vec<FolderRow> = Vec::new();
+        scan_folder(&dir, 1, &self.folder_open.borrow(), &mut rows);
+        let titles: Vec<(u8, &str)> = rows.iter().map(|r| (r.level, r.title.as_str())).collect();
+        if let Some(tree) = self.files_tree.borrow().as_ref() {
+            tree.set_items(&titles);
+        }
+        *self.folder_dirs.borrow_mut() = rows.iter().map(|r| r.dir.clone()).collect();
+        *self.folder_rows.borrow_mut() = rows.into_iter().map(|r| r.file).collect();
+    }
+
+    /// A file row opens the file; a folder row expands or collapses it.
     fn files_click(&self, index: usize) {
+        let dir = self.folder_dirs.borrow().get(index).cloned().flatten();
+        if let Some(dir) = dir {
+            let mut open = self.folder_open.borrow_mut();
+            if !open.remove(&dir) {
+                open.insert(dir);
+            }
+            drop(open);
+            self.fill_folder();
+            return;
+        }
         let path = self.folder_rows.borrow().get(index).cloned().flatten();
         if let Some(path) = path {
             self.open(&path);
@@ -929,6 +956,44 @@ impl Shell {
         session.recent = self.recent.borrow().clone();
         session.theme = self.choice.get();
         session.zoom = (self.zoom.get() * 100.0).round() as u16;
+        let (files, outline) = self.panes();
+        session.set_panes(files, outline);
+        if let Err(e) = session.save(path) {
+            eprintln!("mdview-qt: could not save {}: {e}", path.display());
+        }
+    }
+
+    /// Which panes are open; in focus mode, the outline it will bring back.
+    fn panes(&self) -> (bool, bool) {
+        let seen = |dock: Option<H<QDockWidget>>| dock.is_some_and(|d| d.widget().is_visible());
+        let outline = match self.focus.get() {
+            Some([_, _, outline, _]) => outline,
+            None => seen(self.outline_dock.get()),
+        };
+        (seen(self.files_dock.get()), outline)
+    }
+
+    /// Saves the panes, or, given the window, only its size: by the time the window is closed
+    /// its docks report hidden, so the panes saved on the last toggle stand.
+    fn save_layout(&self, window: Option<H<QWidget>>) {
+        let (files, outline) = self.panes();
+        let mut session = self.session.borrow_mut();
+        let Some((path, session)) = session.as_mut() else {
+            return;
+        };
+        if window.is_none() {
+            session.set_panes(files, outline);
+        }
+        if let Some(w) = window {
+            let maximized = w.is_maximized();
+            // Maximized: keep the last restored size, so un-maximizing next time looks right.
+            let (width, height) = match (maximized, session.window_size()) {
+                (true, Some((sw, sh, _))) => (sw, sh),
+                (true, None) => (1100, 900),
+                _ => (w.width().max(0) as u32, w.height().max(0) as u32),
+            };
+            session.set_window_size(width, height, maximized);
+        }
         if let Err(e) = session.save(path) {
             eprintln!("mdview-qt: could not save {}: {e}", path.display());
         }
@@ -1790,8 +1855,22 @@ fn is_markdown(path: &Path) -> bool {
     })
 }
 
-/// Collects `dir`'s folders (first) and Markdown files, depth first, at most 4000 rows and 8 deep.
-fn scan_folder(dir: &Path, level: u8, rows: &mut Vec<(u8, String, Option<PathBuf>)>) {
+/// One row of the Files tree: a folder (`dir`) or a Markdown file (`file`).
+struct FolderRow {
+    level: u8,
+    title: String,
+    file: Option<PathBuf>,
+    dir: Option<PathBuf>,
+}
+
+/// Collects `dir`'s folders (first) and Markdown files; only folders in `open` are read further.
+/// At most 4000 rows and 8 deep.
+fn scan_folder(
+    dir: &Path,
+    level: u8,
+    open: &std::collections::HashSet<PathBuf>,
+    rows: &mut Vec<FolderRow>,
+) {
     if rows.len() >= 4000 || level > 8 {
         return;
     }
@@ -1812,10 +1891,23 @@ fn scan_folder(dir: &Path, level: u8, rows: &mut Vec<(u8, String, Option<PathBuf
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
         if path.is_dir() {
-            rows.push((level, name, None));
-            scan_folder(&path, level + 1, rows);
+            let expanded = open.contains(&path);
+            rows.push(FolderRow {
+                level,
+                title: format!("{} {name}", if expanded { "\u{25be}" } else { "\u{25b8}" }),
+                file: None,
+                dir: Some(path.clone()),
+            });
+            if expanded {
+                scan_folder(&path, level + 1, open, rows);
+            }
         } else if is_markdown(&path) {
-            rows.push((level, name, Some(path)));
+            rows.push(FolderRow {
+                level,
+                title: name,
+                file: Some(path),
+                dir: None,
+            });
         }
     }
 }
@@ -1974,12 +2066,21 @@ fn run_tabs_check(shell: &Rc<Shell>) -> ! {
     std::fs::write(root.join("sub").join("c.markdown"), "# C\n").unwrap();
     std::fs::write(root.join(".hidden").join("h.md"), "# H\n").unwrap();
     shell.open_folder(&root);
-    let names: Vec<Option<String>> = shell
-        .folder_rows
-        .borrow()
-        .iter()
-        .map(|p| p.as_ref().map(|p| file_name(p)))
-        .collect();
+    let names = |shell: &Shell| -> Vec<Option<String>> {
+        shell
+            .folder_rows
+            .borrow()
+            .iter()
+            .map(|p| p.as_ref().map(|p| file_name(p)))
+            .collect()
+    };
+    let collapsed = names(shell);
+    expect(
+        collapsed == vec![None, Some("b.md".to_string())],
+        format!("folder rows collapsed {collapsed:?}"),
+    );
+    shell.files_click(0);
+    let names = names(shell);
     expect(
         names
             == vec![
@@ -2594,6 +2695,7 @@ fn build(
         if let Some(dock) = s.files_dock.get() {
             dock.widget().set_visible(!dock.widget().is_visible());
         }
+        s.save_layout(None);
     });
     let outline = view_menu.add_action("&Outline");
     let s = shell.clone();
@@ -2603,6 +2705,7 @@ fn build(
             .get()
             .is_some_and(|dock| dock.widget().is_visible());
         s.show_outline(!visible);
+        s.save_layout(None);
     });
     files_button.on_triggered(move |_| files_toggle.trigger());
     outline_button.on_triggered(move |_| outline.trigger());
@@ -2785,7 +2888,19 @@ fn build(
     shell.status.set(Some(window.status_bar()));
     window.menu_bar().widget().set_visible(false);
     shell.menu_bar.set(Some(window.menu_bar()));
-    window.widget().show();
+    let saved_size = shell
+        .session
+        .borrow()
+        .as_ref()
+        .and_then(|(_, saved)| saved.window_size());
+    if let Some((w, h, _)) = saved_size {
+        window.widget().resize(w as i32, h as i32);
+    }
+    if saved_size.is_some_and(|(_, _, max)| max) {
+        window.widget().maximize();
+    } else {
+        window.widget().show();
+    }
     mark("window shown");
     if let Some(canvas) = shell.canvas.get() {
         canvas.widget().set_focus();
@@ -2802,8 +2917,31 @@ fn build(
             let last = shell.pages.borrow().len() - 1;
             shell.switch_to(saved.active.min(last));
         }
-        if let Some(dir) = saved.folder.filter(|d| d.is_dir()) {
-            shell.open_folder(&dir);
+        let folder = saved.folder.clone().filter(|d| d.is_dir());
+        if let Some(dir) = &folder {
+            shell.open_folder(dir);
+        }
+        // Panes as they were left; a session from before they were saved keeps the old behaviour.
+        if !saved.layout.is_empty() {
+            let (files, outline) = saved.panes();
+            if files && folder.is_none() {
+                let dir = shell
+                    .path
+                    .borrow()
+                    .as_ref()
+                    .and_then(|p| p.parent().map(Path::to_path_buf));
+                if let Some(dir) = dir {
+                    shell.open_folder(&dir);
+                }
+            } else if !files {
+                if let Some(dock) = shell.files_dock.get() {
+                    dock.widget().set_visible(false);
+                }
+            }
+            if outline {
+                shell.show_outline(true);
+            }
+            shell.save_layout(None);
         }
     }
     mark("session restored");
@@ -3201,5 +3339,13 @@ pub fn run() -> i32 {
         }
         *shell.session.borrow_mut() = Some((path, saved));
     }
-    run_app(move || build(&shell, files, drop_test, check, scroll))
+    let closing = shell.clone();
+    run_app(
+        move || build(&shell, files, drop_test, check, scroll),
+        move || {
+            if let Some(window) = closing.window.get() {
+                closing.save_layout(Some(window.widget()));
+            }
+        },
+    )
 }

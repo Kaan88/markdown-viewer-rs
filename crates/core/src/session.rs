@@ -214,6 +214,42 @@ impl Session {
         std::fs::write(&tmp, self.serialize())?;
         std::fs::rename(&tmp, path)
     }
+
+    /// Which side panes were showing: `(files, outline)`. Both shells write the `layout` line as
+    /// `files=1;outline=0`; an empty or foreign value gives both hidden.
+    pub fn panes(&self) -> (bool, bool) {
+        let mut files = false;
+        let mut outline = false;
+        for part in self.layout.split(';') {
+            match part.trim() {
+                "files=1" => files = true,
+                "outline=1" => outline = true,
+                _ => {}
+            }
+        }
+        (files, outline)
+    }
+
+    pub fn set_panes(&mut self, files: bool, outline: bool) {
+        self.layout = format!("files={};outline={}", u8::from(files), u8::from(outline));
+    }
+
+    /// The saved window size in device-independent pixels and whether it was maximized, written
+    /// as `1100x900` or `1100x900 max`. Sizes outside 320..=16384 are ignored.
+    pub fn window_size(&self) -> Option<(u32, u32, bool)> {
+        let mut words = self.geometry.split_whitespace();
+        let (w, h) = words.next()?.split_once('x')?;
+        let (w, h): (u32, u32) = (w.parse().ok()?, h.parse().ok()?);
+        let ok = |v: u32| (320..=16384).contains(&v);
+        if !ok(w) || !ok(h) {
+            return None;
+        }
+        Some((w, h, words.next() == Some("max")))
+    }
+
+    pub fn set_window_size(&mut self, width: u32, height: u32, maximized: bool) {
+        self.geometry = format!("{width}x{height}{}", if maximized { " max" } else { "" });
+    }
 }
 
 /// `settings.ini` in the per-user application data directory.
@@ -310,4 +346,35 @@ fn encode_path(p: &Path) -> String {
 #[cfg(not(unix))]
 fn decode_path(s: &str) -> PathBuf {
     PathBuf::from(unescape(s))
+}
+
+#[cfg(test)]
+mod window_state_tests {
+    use super::Session;
+
+    #[test]
+    fn panes_round_trip() {
+        let mut s = Session::default();
+        assert_eq!(s.panes(), (false, false));
+        s.set_panes(true, false);
+        assert_eq!(s.panes(), (true, false));
+        s.set_panes(false, true);
+        assert_eq!(s.panes(), (false, true));
+        s.layout = "AAAAqt-state".into();
+        assert_eq!(s.panes(), (false, false));
+    }
+
+    #[test]
+    fn window_size_round_trip() {
+        let mut s = Session::default();
+        assert_eq!(s.window_size(), None);
+        s.set_window_size(1280, 800, false);
+        assert_eq!(s.window_size(), Some((1280, 800, false)));
+        s.set_window_size(1280, 800, true);
+        assert_eq!(s.window_size(), Some((1280, 800, true)));
+        s.geometry = "10x10".into();
+        assert_eq!(s.window_size(), None);
+        s.geometry = "junk".into();
+        assert_eq!(s.window_size(), None);
+    }
 }

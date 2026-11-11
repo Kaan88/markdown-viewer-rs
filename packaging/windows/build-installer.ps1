@@ -22,7 +22,7 @@ $version = $m.Groups[1].Value
 if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { Fail "Unexpected version '$version'." }
 
 # Locate ISCC.exe: PATH, then the usual install locations (Inno Setup 7, then 6).
-$iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+$iscc = $null; $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue; if ($cmd) { $iscc = $cmd.Source }
 if (-not $iscc) {
   $dirs = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, "$env:LOCALAPPDATA\Programs") | Where-Object { $_ }
   foreach ($d in $dirs) {
