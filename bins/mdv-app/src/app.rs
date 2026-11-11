@@ -69,6 +69,8 @@ pub enum Wake {
     Instance,
     /// The file watcher saw a change.
     Files,
+    /// A remote image finished downloading.
+    Images,
 }
 
 fn sig<T: Hash>(t: T) -> u64 {
@@ -222,6 +224,9 @@ impl App {
             self.ws.find_set(q);
         }
         self.ui.focus_mode = a.focus_mode;
+        if a.load_remote {
+            self.ws.allow_remote(false);
+        }
         self.ws.clear_status();
         self.sync_theme();
     }
@@ -1107,6 +1112,10 @@ pub fn run() -> i32 {
     let p = proxy.clone();
     app.watcher = FileWatcher::new(move || {
         let _ = p.send_event(Wake::Files);
+    });
+    let p = proxy.clone();
+    app.ws.set_remote_wake(move || {
+        let _ = p.send_event(Wake::Images);
     });
     app.proxy = Some(proxy);
     let _ = event_loop.run_app(&mut app);

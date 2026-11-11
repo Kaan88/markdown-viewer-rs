@@ -27,11 +27,13 @@ use mdview_core::links::{LinkAction, classify_link};
 use mdview_core::model::{NONE, ScrollPos};
 use mdview_core::session::{self, RecentEntry, Recents, Session};
 use mdview_core::{Document, parse_bytes};
+use mdview_fetch::{Fetcher, State as Fetched};
 use mdview_render::{
-    DARK, DocumentRenderer, Frame, Hit, Jump, LIGHT, Options, PageLayout, Rect, Theme,
+    DARK, DocumentRenderer, Frame, Hit, Jump, LIGHT, Options, PageLayout, Rect, RemoteState, Theme,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// The View menu's theme choice; `System` follows the desktop.
@@ -207,6 +209,16 @@ pub struct Tab {
     view: Option<View>,
     /// When the tab was last left, for [`Workspace::drop_idle`].
     left_at: Option<Instant>,
+    remote: Remote,
+}
+
+/// What a tab decided about its document's remote images.
+#[derive(Default)]
+struct Remote {
+    /// The reader chose "Load remote images" for this document.
+    allowed: bool,
+    /// The reader closed the bar without loading.
+    dismissed: bool,
 }
 
 impl Tab {
@@ -224,6 +236,7 @@ impl Tab {
             details: HashMap::new(),
             view: None,
             left_at: None,
+            remote: Remote::default(),
         }
     }
 
@@ -313,6 +326,17 @@ pub struct Workspace {
     status: Option<StatusLine>,
     dirty: bool,
     watch_dirty: bool,
+    /// Started by the first remote image that may load; nothing touches the network before.
+    fetcher: Option<Fetcher>,
+    /// Posts a message to the event loop when a download finishes (set by the window).
+    remote_wake: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Remote SVGs delivered so far and the scale they were rasterized at, to deliver them again
+    /// when the scale changes.
+    remote_svgs: Vec<String>,
+    remote_scale: f32,
+    /// Remote URLs a page asked for and did not get, each once. The image store is shared by
+    /// every tab, so this is too: a document's share is the URLs its own images name.
+    held: Vec<String>,
 }
 
 impl Workspace {
@@ -342,6 +366,11 @@ impl Workspace {
             status: None,
             dirty: true,
             watch_dirty: true,
+            fetcher: None,
+            remote_wake: None,
+            remote_svgs: Vec::new(),
+            remote_scale: 0.0,
+            held: Vec::new(),
         };
         for path in ws.session.tabs.clone() {
             let path = canonical_or_absolute(&path);
@@ -1006,6 +1035,7 @@ impl Workspace {
             .top;
         tab.scroll = top;
         self.adopt();
+        self.pump_remote();
         let frame = self.renderer.frame()?;
         let total = self.renderer.page_layout()?.total_height();
         let x = ((width_px as i32 - frame.bitmap.width as i32) / 2).max(0);
@@ -1016,6 +1046,161 @@ impl Workspace {
             total_height: total,
             background,
         })
+    }
+
+    // ---- remote images --------------------------------------------------------------------------
+
+    /// Sets what runs (on a download thread) when a remote image finishes; it must only post a
+    /// message that makes the window call [`remote_completed`](Self::remote_completed).
+    pub fn set_remote_wake(&mut self, wake: impl Fn() + Send + Sync + 'static) {
+        self.remote_wake = Some(Arc::new(wake));
+    }
+
+    /// Whether remote images load in every document without asking.
+    pub fn remote_always(&self) -> bool {
+        self.session.remote_images
+    }
+
+    /// How many remote images the active document is holding back, when the bar offering to
+    /// load them should show: none allowed yet, and the reader has not closed the bar.
+    pub fn remote_blocked(&self) -> usize {
+        match self.active_tab() {
+            Some(tab) if !tab.remote.allowed && !tab.remote.dismissed => self
+                .held
+                .iter()
+                .filter(|url| tab.doc.as_ref().is_some_and(|doc| names_image(doc, url)))
+                .count(),
+            _ => 0,
+        }
+    }
+
+    /// Loads the active document's remote images; with `always`, every document's from now on.
+    pub fn allow_remote(&mut self, always: bool) {
+        if always && !self.session.remote_images {
+            self.session.remote_images = true;
+            self.persist();
+        }
+        let urls: Vec<String> = if always {
+            self.tabs.iter_mut().for_each(|t| t.remote.allowed = true);
+            std::mem::take(&mut self.held)
+        } else {
+            let Some(tab) = self.active.and_then(|i| self.tabs.get_mut(i)) else {
+                return;
+            };
+            tab.remote.allowed = true;
+            let doc = tab.doc.as_ref();
+            let (mine, rest) = std::mem::take(&mut self.held)
+                .into_iter()
+                .partition(|url| doc.is_some_and(|doc| names_image(doc, url)));
+            self.held = rest;
+            mine
+        };
+        for url in urls {
+            self.fetch_remote(&url);
+        }
+        self.dirty = true;
+    }
+
+    /// Turns "always load remote images" on or off. Images already shown stay.
+    pub fn set_remote_always(&mut self, always: bool) {
+        if always {
+            self.allow_remote(true);
+        } else if self.session.remote_images {
+            self.session.remote_images = false;
+            self.persist();
+        }
+    }
+
+    /// Closes the bar for the active document without loading anything.
+    pub fn dismiss_remote(&mut self) {
+        if let Some(tab) = self.active.and_then(|i| self.tabs.get_mut(i)) {
+            tab.remote.dismissed = true;
+            self.dirty = true;
+        }
+    }
+
+    /// After the wake: hands every finished download to the page. True when something finished.
+    pub fn remote_completed(&mut self) -> bool {
+        let done = match &self.fetcher {
+            Some(fetcher) => fetcher.take_completed(),
+            None => return false,
+        };
+        for url in &done {
+            self.fetch_remote(url);
+        }
+        !done.is_empty()
+    }
+
+    /// Decides about the remote images the last frame met: fetch them when this document may,
+    /// otherwise hold them back and count them for the bar.
+    fn pump_remote(&mut self) {
+        let scale = self.scale();
+        if scale != self.remote_scale {
+            // SVGs were rasterized for the old scale; the bytes are still in the fetcher.
+            self.remote_scale = scale;
+            for url in std::mem::take(&mut self.remote_svgs) {
+                self.fetch_remote(&url);
+            }
+        }
+        let asked = self.renderer.take_remote_requests();
+        if asked.is_empty() {
+            return;
+        }
+        let always = self.session.remote_images;
+        let allowed = always || self.active_tab().is_some_and(|t| t.remote.allowed);
+        if allowed {
+            for url in asked {
+                self.fetch_remote(&url);
+            }
+            return;
+        }
+        for url in asked {
+            self.renderer.set_remote(&url, RemoteState::Blocked);
+            if !self.held.contains(&url) {
+                self.held.push(url);
+            }
+        }
+        self.dirty = true;
+    }
+
+    /// Asks the fetcher for one URL and tells the page where it stands.
+    fn fetch_remote(&mut self, url: &str) {
+        if self.fetcher.is_none() {
+            let cache = self
+                .session_path
+                .as_deref()
+                .and_then(Path::parent)
+                .map(|dir| dir.join("cache").join("images"));
+            let wake = self.remote_wake.clone();
+            self.fetcher = Some(Fetcher::new(cache, move || {
+                if let Some(wake) = &wake {
+                    wake();
+                }
+            }));
+        }
+        let Some(fetcher) = &self.fetcher else {
+            return;
+        };
+        let scale = self.remote_scale.max(0.25);
+        let changed = match fetcher.request(url) {
+            Fetched::Ready(bytes) => {
+                let svg = bytes.starts_with(b"<") || bytes.starts_with(b"\xEF\xBB\xBF<");
+                if svg && !self.remote_svgs.iter().any(|u| u == url) {
+                    self.remote_svgs.push(url.to_string());
+                }
+                self.renderer.remote_arrived(url, Some(&bytes), scale)
+            }
+            Fetched::Pending => self.renderer.set_remote(url, RemoteState::Pending),
+            Fetched::Failed => self.renderer.remote_arrived(url, None, 1.0),
+        };
+        self.dirty |= changed;
+    }
+
+    /// The device scale pages are drawn at: the display's times the zoom.
+    fn scale(&self) -> f32 {
+        self.active_tab()
+            .and_then(|t| t.view.as_ref())
+            .map_or(1.0, |v| v.options.scale)
     }
 
     /// Takes the renderer's corrections to the active layout since the last call: the scroll
@@ -1959,6 +2144,16 @@ fn block_bounds(doc: &Document, offset: u32) -> (usize, usize) {
     (lo, hi)
 }
 
+/// Whether one of the document's images is `url`, as the page asks for it (trimmed; any of the
+/// plain, dark and light sources).
+fn names_image(doc: &Document, url: &str) -> bool {
+    doc.images.iter().any(|image| {
+        [image.src, image.dark_src, image.light_src]
+            .into_iter()
+            .any(|src| doc.str(src).trim() == url)
+    })
+}
+
 /// Whether two paths name the same file (case-insensitive on Windows).
 pub fn same_file(a: &Path, b: &Path) -> bool {
     if cfg!(windows) {
@@ -2000,6 +2195,45 @@ mod tests {
         let mut ws = Workspace::new(None);
         ws.set_viewport(800, 600, 1.0);
         ws
+    }
+
+    /// Remote images are held back and counted until the reader allows them, per document. The
+    /// URLs carry userinfo, which the fetcher refuses without starting a thread or a connection.
+    #[test]
+    fn remote_images_wait_for_the_reader() {
+        let dir = temp_dir("remote");
+        let text = "![a](https://u@example.invalid/a.png) ![b](https://u@example.invalid/b.png)\n";
+        let a = write(&dir, "a.md", text);
+        let b = write(&dir, "b.md", text);
+        let mut ws = workspace();
+        ws.open(&a).unwrap();
+        assert_eq!(ws.remote_blocked(), 0, "nothing is known before a frame");
+        ws.paint(800, 600, 1.0);
+        assert_eq!(ws.remote_blocked(), 2);
+        assert!(ws.fetcher.is_none(), "a held-back image starts nothing");
+        ws.paint(800, 600, 1.0);
+        assert_eq!(ws.remote_blocked(), 2, "each URL is counted once");
+
+        // Closing the bar keeps the images back for this document only.
+        ws.dismiss_remote();
+        assert_eq!(ws.remote_blocked(), 0);
+        assert!(ws.fetcher.is_none());
+
+        // A second document naming the same images gets its own bar, and allowing them there
+        // asks the fetcher and clears it.
+        ws.open(&b).unwrap();
+        ws.paint(800, 600, 1.0);
+        assert_eq!(ws.remote_blocked(), 2);
+        ws.allow_remote(false);
+        assert_eq!(ws.remote_blocked(), 0);
+        assert!(ws.fetcher.is_some());
+        assert!(!ws.remote_always());
+
+        // "Always" is a saved setting and can be turned off again.
+        ws.set_remote_always(true);
+        assert!(ws.remote_always());
+        ws.set_remote_always(false);
+        assert!(!ws.remote_always());
     }
 
     fn paragraphs(prefix: &str, n: usize) -> String {

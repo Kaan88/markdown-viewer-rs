@@ -337,6 +337,10 @@ pub mod strings {
     pub const REFRESHING: &str = "Refreshing document…";
     pub const REFRESHED: &str = "Document refreshed from disk";
     pub const RENDER_TIMEOUT: &str = "Rendering exceeded 15 seconds. Try a smaller document.";
+    pub const REMOTE_ONE: &str = "This document has 1 remote image that was not loaded.";
+    pub const REMOTE_MANY: &str = "This document has {} remote images that were not loaded.";
+    pub const REMOTE_LOAD: &str = "Load images";
+    pub const REMOTE_ALWAYS: &str = "Always load";
     pub const FILE_DELETED: &str =
         "File was deleted or is unavailable. Showing the last loaded content.";
     pub const FILE_NOT_FOUND: &str =

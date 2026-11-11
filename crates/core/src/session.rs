@@ -128,6 +128,9 @@ pub struct Session {
     /// Shell-owned window state. Core stores it and never reads it.
     pub geometry: String,
     pub layout: String,
+    /// Load remote (`http`/`https`) images in every document without asking. Off by default: a
+    /// document then shows a bar offering to load its own.
+    pub remote_images: bool,
 }
 
 impl Default for Session {
@@ -141,6 +144,7 @@ impl Default for Session {
             zoom: ZOOM_DEFAULT,
             geometry: String::new(),
             layout: String::new(),
+            remote_images: false,
         }
     }
 }
@@ -169,6 +173,7 @@ impl Session {
                 "zoom" => s.zoom = clamp_zoom(value.trim().parse().unwrap_or(ZOOM_DEFAULT)),
                 "geometry" => s.geometry = unescape(value),
                 "layout" => s.layout = unescape(value),
+                "remote_images" => s.remote_images = value.trim() == "1",
                 _ => {}
             }
         }
@@ -202,6 +207,7 @@ impl Session {
         }
         line("geometry", &escape(&self.geometry));
         line("layout", &escape(&self.layout));
+        line("remote_images", if self.remote_images { "1" } else { "0" });
         out
     }
 

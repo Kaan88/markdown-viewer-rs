@@ -97,6 +97,10 @@ pub enum Hit {
     Page,
     EmptyOpen,
     EmptyRecent(usize),
+    /// The bar over a page that holds remote images back.
+    RemoteLoad,
+    RemoteAlways,
+    RemoteClose,
     DlgButton(usize),
     DlgOpen(usize),
     DlgRemove(usize),
@@ -121,9 +125,13 @@ impl Hit {
             Hit::Splitter(Side::Outline) | Hit::ScrollBar(Scroller::Pane(Side::Outline)) => {
                 Region::Outline
             }
-            Hit::ScrollBar(Scroller::Page) | Hit::Page | Hit::EmptyOpen | Hit::EmptyRecent(_) => {
-                Region::Page
-            }
+            Hit::ScrollBar(Scroller::Page)
+            | Hit::Page
+            | Hit::EmptyOpen
+            | Hit::EmptyRecent(_)
+            | Hit::RemoteLoad
+            | Hit::RemoteAlways
+            | Hit::RemoteClose => Region::Page,
             _ => return None,
         })
     }
@@ -156,6 +164,8 @@ pub enum Act {
     CopyLink(String),
     Copy,
     SelectAll,
+    /// Toggle loading remote images in every document.
+    RemoteAlways,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

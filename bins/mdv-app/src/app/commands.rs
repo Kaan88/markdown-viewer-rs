@@ -57,6 +57,9 @@ impl App {
                 }
             }
             Hit::EmptyOpen => self.command(C::OpenFiles),
+            Hit::RemoteLoad => self.ws.allow_remote(false),
+            Hit::RemoteAlways => self.ws.allow_remote(true),
+            Hit::RemoteClose => self.ws.dismiss_remote(),
             Hit::EmptyRecent(i) => {
                 if let Some(p) = self.ws.recents().get(i).cloned() {
                     let _ = self.ws.open_recent(&p);
@@ -101,6 +104,10 @@ impl App {
             Act::Copy => self.copy(),
             Act::SelectAll => {
                 self.ws.select_all();
+            }
+            Act::RemoteAlways => {
+                let on = !self.ws.remote_always();
+                self.ws.set_remote_always(on);
             }
         }
         self.redraw();
@@ -392,6 +399,9 @@ impl App {
                 }
                 self.ws.check_changed();
                 self.ui.tree.refresh();
+            }
+            Wake::Images => {
+                self.ws.remote_completed();
             }
         }
         self.redraw();

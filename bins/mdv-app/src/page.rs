@@ -9,13 +9,84 @@ use crate::workspace::Workspace;
 use mdview_core::commands::strings;
 use std::time::{Duration, Instant};
 
-/// The page viewport inside the region: below the banner when the file is missing.
+/// The page viewport inside the region: below the banner when the file is missing, and below
+/// the bar that offers to load remote images when the document holds some back.
 pub fn viewport(ws: &Workspace, r: Rect) -> Rect {
+    let mut top = 0.0;
     if ws.active_tab().is_some_and(|t| t.is_missing()) {
-        Rect::new(r.x, r.y + BANNER_H, r.w, (r.h - BANNER_H).max(0.0))
-    } else {
-        r
+        top += BANNER_H;
     }
+    if ws.remote_blocked() > 0 {
+        top += BANNER_H;
+    }
+    Rect::new(r.x, r.y + top, r.w, (r.h - top).max(0.0))
+}
+
+/// A text button on a bar: quiet until hovered, or filled with the accent when `primary`.
+fn bar_button(c: &mut Ctx, hit: Hit, x: f32, cy: f32, label: &str, primary: bool) -> f32 {
+    let pal = *c.pal;
+    let w = (c.p.measure(Face::Ui, 12.5, label) + 22.0).round();
+    let b = Rect::new(x, cy - 12.0, w, 24.0);
+    let (hover, pressed) = (c.hover == Some(hit), c.pressed == Some(hit));
+    let (fill, text) = if primary {
+        let fill = match (hover, pressed) {
+            (true, true) => mix(pal.accent, pal.page, 0.2),
+            (true, false) => mix(pal.accent, pal.page, 0.1),
+            _ => pal.accent,
+        };
+        (fill, pal.on_accent)
+    } else {
+        let lift = match (hover, pressed) {
+            (true, true) => 0.16,
+            (true, false) => 0.10,
+            _ => 0.05,
+        };
+        (mix(pal.bar, pal.text, lift), pal.text)
+    };
+    c.p.rbox(b, 5.0, fill);
+    c.p.text_center(Face::Ui, 12.5, b, label, text);
+    c.hit(hit, b);
+    w
+}
+
+/// The bar over a document whose remote images are held back.
+fn draw_remote_bar(c: &mut Ctx, bar: Rect, count: usize) {
+    let pal = *c.pal;
+    c.p.fill(bar, pal.bar);
+    c.p.fill(
+        Rect::new(bar.x, bar.bottom() - c.p.px(), bar.w, c.p.px()),
+        pal.line,
+    );
+    // Right to left: close, then the two choices; the text takes what is left.
+    let close = Rect::new(bar.right() - 34.0, bar.cy() - 12.0, 24.0, 24.0);
+    if c.hover == Some(Hit::RemoteClose) {
+        c.p.rbox(close, 5.0, mix(pal.bar, pal.text, 0.10));
+    }
+    c.p.icon(glyph::CLOSE, 10.0, close.cx(), close.cy(), pal.muted);
+    c.hit(Hit::RemoteClose, close);
+    let always = strings::REMOTE_ALWAYS;
+    let load = strings::REMOTE_LOAD;
+    let wa = (c.p.measure(Face::Ui, 12.5, always) + 22.0).round();
+    let wl = (c.p.measure(Face::Ui, 12.5, load) + 22.0).round();
+    let xa = close.x - 10.0 - wa;
+    let xl = xa - 8.0 - wl;
+    bar_button(c, Hit::RemoteAlways, xa, bar.cy(), always, false);
+    bar_button(c, Hit::RemoteLoad, xl, bar.cy(), load, true);
+    let label = if count == 1 {
+        strings::REMOTE_ONE.to_string()
+    } else {
+        strings::REMOTE_MANY.replace("{}", &count.to_string())
+    };
+    c.p.icon(glyph::IMAGE, 13.0, bar.x + 22.0, bar.cy(), pal.muted);
+    c.p.text(
+        Face::Ui,
+        12.5,
+        bar.x + 38.0,
+        bar.cy(),
+        &label,
+        pal.text,
+        (xl - 12.0 - (bar.x + 38.0)).max(0.0),
+    );
 }
 
 /// How many Recent entries the empty state lists.
@@ -30,7 +101,11 @@ pub fn draw_page(c: &mut Ctx, ws: &mut Workspace, ui: &Ui, r: Rect) -> Duration 
         return Duration::ZERO;
     }
     let vr = viewport(ws, r);
-    if vr.y > r.y {
+    let blocked = ws.remote_blocked();
+    if blocked > 0 {
+        draw_remote_bar(c, Rect::new(r.x, vr.y - BANNER_H, r.w, BANNER_H), blocked);
+    }
+    if ws.active_tab().is_some_and(|t| t.is_missing()) {
         let banner = Rect::new(r.x, r.y, r.w, BANNER_H);
         c.p.fill(banner, pal.warn_bg);
         c.p.fill(

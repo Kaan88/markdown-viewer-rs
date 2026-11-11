@@ -41,6 +41,8 @@ pub struct Args {
     /// Logical pointer position.
     pub hover: Option<(f32, f32)>,
     pub focus_mode: bool,
+    /// Load the first document's remote images without showing the bar (for checks).
+    pub load_remote: bool,
     /// Scroll this many wheel steps after the first frame, log timings, and exit.
     pub scroll_steps: Option<u32>,
     /// Start maximized (for checking the frameless maximized geometry).
@@ -75,6 +77,7 @@ impl Args {
                 "--outline" => out.outline_pane = Some(true),
                 "--no-outline" => out.outline_pane = Some(false),
                 "--focus-mode" => out.focus_mode = true,
+                "--load-remote" => out.load_remote = true,
                 "--maximize" => out.maximize = true,
                 "--zoom" => out.zoom = value(&a).and_then(|v| v.trim_end_matches('%').parse().ok()),
                 "--folder" => out.folder = value(&a).map(PathBuf::from),

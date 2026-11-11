@@ -341,7 +341,7 @@ impl ImageStore {
 
     /// Records what the shell decided or delivered for a remote URL. Returns the entry's id and
     /// whether anything changed.
-    pub(super) fn set_remote(&mut self, url: &str, slot: Slot) -> (u32, bool) {
+    pub(super) fn set_remote(&mut self, url: &str, slot: Slot, density: f32) -> (u32, bool) {
         let id = self.intern(ImageKey::Remote(url.to_string()));
         self.remote_new.retain(|u| u != url);
         let same = matches!(
@@ -353,8 +353,12 @@ impl ImageStore {
         if same {
             return (id, false);
         }
-        self.replace(id, slot, 1.0);
+        self.replace(id, slot, density);
         (id, true)
+    }
+
+    pub(super) fn count_engine_job(&mut self) {
+        self.stats.engine_jobs += 1;
     }
 
     /// Remote URLs met since the last call that nobody has decided about.

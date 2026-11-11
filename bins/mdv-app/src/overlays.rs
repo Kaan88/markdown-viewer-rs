@@ -48,6 +48,7 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
             .checked(ui.panes.files && !ui.focus_mode),
         cmd(C::ToggleOutline, "Outline pane", "").checked(ui.panes.outline && !ui.focus_mode),
         cmd(C::FocusMode, "Focus reading mode", glyph::FULLSCREEN).checked(ui.focus_mode),
+        Item::new(Act::RemoteAlways, "Always load remote images").checked(ws.remote_always()),
         cmd(C::ShowShortcuts, "Keyboard shortcuts", glyph::KEYBOARD).sep(),
         cmd(C::About, "About mdview", glyph::INFO),
         cmd(C::Exit, "Exit", glyph::POWER).sep(),

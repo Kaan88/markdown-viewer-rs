@@ -42,6 +42,7 @@ pub mod glyph {
     pub const MOON: &str = "\u{E708}";
     pub const SYSTEM: &str = "\u{E7F4}";
     pub const WARN: &str = "\u{E7BA}";
+    pub const IMAGE: &str = "\u{E8B9}";
     pub const COPY: &str = "\u{E8C8}";
     pub const LINK: &str = "\u{E71B}";
     pub const SELECT_ALL: &str = "\u{E8B3}";

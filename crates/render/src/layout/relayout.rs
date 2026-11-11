@@ -450,7 +450,28 @@ impl DocumentRenderer {
             Some(image) => Slot::Ready(Rc::new(image)),
             None => Slot::Failed,
         };
-        let (id, changed) = self.store.set_remote(url.trim(), slot);
+        let (id, changed) = self.store.set_remote(url.trim(), slot, 1.0);
+        changed && self.reflow_users(id)
+    }
+
+    /// Delivers the bytes a shell fetched for a remote image (`None`: the fetch failed). Raster
+    /// formats are decoded as they are; an SVG is rasterized at the device `scale`, so a badge is
+    /// as sharp as the text around it. A shell that changes scale delivers its SVGs again. True
+    /// when the current layout uses the image.
+    pub fn remote_arrived(&mut self, url: &str, bytes: Option<&[u8]>, scale: f32) -> bool {
+        let (image, density) = match bytes {
+            Some(bytes) if crate::image::looks_like_svg(bytes) => {
+                self.store.count_engine_job();
+                (crate::engine::render_svg_at(bytes, scale), scale)
+            }
+            Some(bytes) => (crate::image::decode(bytes), 1.0),
+            None => (None, 1.0),
+        };
+        let slot = match image {
+            Some(image) => Slot::Ready(Rc::new(image)),
+            None => Slot::Failed,
+        };
+        let (id, changed) = self.store.set_remote(url.trim(), slot, density);
         changed && self.reflow_users(id)
     }
 
@@ -461,7 +482,7 @@ impl DocumentRenderer {
             RemoteState::Pending => Slot::Pending,
             RemoteState::Blocked => Slot::Blocked,
         };
-        let (id, changed) = self.store.set_remote(url.trim(), slot);
+        let (id, changed) = self.store.set_remote(url.trim(), slot, 1.0);
         changed && self.reflow_users(id)
     }
 
