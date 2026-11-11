@@ -49,7 +49,6 @@ pub(super) enum ImageKey {
 }
 
 /// Where an entry stands.
-#[allow(dead_code)] // Pending and Blocked come from the shell's remote-image API.
 pub(super) enum Slot {
     Ready(Rc<DecodedImage>),
     /// Could not be loaded or rendered; draws the placeholder until its key changes.
@@ -339,7 +338,6 @@ impl ImageStore {
         })
     }
 
-    #[allow(dead_code)] // The shell's remote-image API.
     /// Records what the shell decided or delivered for a remote URL. Returns the entry's id and
     /// whether anything changed.
     pub(super) fn set_remote(&mut self, url: &str, slot: Slot) -> (u32, bool) {
@@ -358,16 +356,9 @@ impl ImageStore {
         (id, true)
     }
 
-    #[allow(dead_code)] // The shell's remote-image API.
     /// Remote URLs met since the last call that nobody has decided about.
     pub(super) fn take_remote(&mut self) -> Vec<String> {
         std::mem::take(&mut self.remote_new)
-    }
-
-    #[allow(dead_code)] // The shell's remote-image API.
-    /// The id a remote URL has, if it was ever looked up.
-    pub(super) fn remote_id(&self, url: &str) -> Option<u32> {
-        self.ids.get(&ImageKey::Remote(url.to_string())).copied()
     }
 }
 

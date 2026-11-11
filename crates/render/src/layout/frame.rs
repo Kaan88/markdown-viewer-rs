@@ -1,68 +1,68 @@
 //! The frame kept between scroll calls: [`DocumentRenderer::view_frame`] shifts the rows that stay
 //! on screen and paints only the band that came into view, reporting `band`/`shift` to the shell.
+//! [`DocumentRenderer::view`] draws a fresh viewport bitmap the same way, for tests.
 
 use super::pager::Pager;
-use super::{DocumentRenderer, Frame, Options, PageLayout};
+use super::paint::CachedBlock;
+use super::{DocumentRenderer, Frame, Options, PageLayout, Slice};
 use crate::bitmap::Bitmap;
 use mdview_core::model::Document;
+use std::collections::HashMap;
 
 impl DocumentRenderer {
     /// Draws the viewport into a frame kept between calls. When the new view still overlaps the last
     /// one, those rows are shifted in place and only the band that came into view is painted.
+    ///
+    /// `top` is in the current coordinates (see [`top`](Self::top)). Blocks the viewport shows are
+    /// measured first if they were estimated, which keeps the block at `top` where it is; the
+    /// frame's `top` is the row actually drawn (clamped to the page).
     pub fn view_frame(
         &mut self,
         doc: &Document,
         options: &Options,
-        page: &PageLayout,
         top: f32,
         height: f32,
     ) -> &Frame {
-        debug_assert!(page.matches(options), "page layout for different options");
+        self.ensure_layout(doc, options);
         let height = height.max(1.0);
-        let top = top
-            .clamp(0.0, (page.total_height - height).max(0.0))
-            .round();
-        let key = (options.width, options.scale, options.theme.name);
-        if self.cache_key != Some(key) {
-            self.cache.clear();
-            self.cache_key = Some(key);
-            self.frame = None;
-        }
-        let background = options.theme.bg;
         self.store.begin_frame();
+        self.set_top(top);
+        self.view.height = height;
+        let top = self.settle_view(doc, height).round();
+        self.set_top(top);
+        let stale = std::mem::take(&mut self.view.stale);
+        let background = options.theme.bg;
+        let rows = height.ceil().max(1.0) as u32;
+        let page = self.page.as_ref().expect("laid out");
         let mut pager = Pager::new(
             doc,
             options,
             &mut self.fonts,
             &mut self.layouts,
-            Some(&mut self.cache),
+            false,
             &mut self.store,
             &self.details,
         );
-        let rows = height.ceil().max(1.0) as u32;
         let width = pager.width.round().max(1.0) as u32;
-        if let Some(frame) = self.frame.as_ref()
-            && frame.bitmap.width == width
-            && frame.bitmap.height == rows
-            && frame.top == top
-        {
+        let same_size = self
+            .frame
+            .as_ref()
+            .is_some_and(|frame| frame.bitmap.width == width && frame.bitmap.height == rows);
+        if same_size && !stale && self.frame.as_ref().is_some_and(|f| f.top == top) {
             // Nothing changed, so there is nothing for the caller to send again.
             let frame = self.frame.as_mut().expect("frame");
             frame.band = Some((0, 0));
             frame.shift = 0;
+            self.view.span = Some(frame_span(page, top, rows as f32));
             return self.frame.as_ref().expect("frame");
         }
         let mut band = (top, rows as f32);
         let mut shift = 0i32;
         let mut whole = true;
-        let same_size = self
-            .frame
-            .as_ref()
-            .is_some_and(|frame| frame.bitmap.width == width && frame.bitmap.height == rows);
         if same_size {
             let frame = self.frame.as_mut().expect("frame");
             let dy = frame.top as i64 - top as i64;
-            if dy.unsigned_abs() < rows as u64 {
+            if !stale && dy.unsigned_abs() < rows as u64 {
                 shift_rows(&mut frame.bitmap, dy as i32);
                 // `dy` is old top minus new top: positive when the view scrolled up and the newly
                 // exposed rows are at the top, negative when it scrolled down and they are at the
@@ -91,17 +91,16 @@ impl DocumentRenderer {
             });
             band = (top, rows as f32);
         }
-        let frame_top = self.frame.as_ref().expect("frame").top;
+        let frame_top = top;
         // Blocks can reach past the band, so draw the band on its own bitmap and copy it in;
         // otherwise the overlap would be blended twice.
+        collect(page, &self.cache, &mut pager, band.0, band.1);
         let stats = if band.1 + 0.5 >= rows as f32 && (band.0 - frame_top).abs() < 0.5 {
-            pager.slice_page(page, band.0, band.1);
             let frame = self.frame.as_mut().expect("frame");
             pager.draw(&mut frame.bitmap, frame_top, &mut self.engine)
         } else {
             let mut band_bitmap = Bitmap::new(width, band.1.ceil().max(1.0) as u32);
             band_bitmap.clear(background);
-            pager.slice_page(page, band.0, band.1);
             let stats = pager.draw(&mut band_bitmap, band.0, &mut self.engine);
             let frame = self.frame.as_mut().expect("frame");
             copy_rows(
@@ -113,11 +112,77 @@ impl DocumentRenderer {
         };
         let first = (band.0 - frame_top).round().max(0.0) as u32;
         let band_rows = (first, band.1.ceil().max(0.0) as u32);
+        self.view.span = Some(frame_span(page, top, rows as f32));
         let frame = self.frame.as_mut().expect("frame");
         frame.stats = stats;
         frame.band = (!whole).then_some(band_rows);
         frame.shift = shift;
         self.frame.as_ref().expect("frame")
+    }
+
+    /// Renders one viewport slice into a fresh bitmap, reusing the contexts and glyph cache. Like
+    /// a frame, it measures what it shows and moves the anchor to `top`.
+    pub fn view(&mut self, doc: &Document, options: &Options, top: f32, height: f32) -> Slice {
+        self.ensure_layout(doc, options);
+        let height = height.max(1.0);
+        self.store.begin_frame();
+        self.set_top(top);
+        self.view.height = height;
+        let top = self.settle_view(doc, height);
+        let page = self.page.as_ref().expect("laid out");
+        let total_height = page.total_height;
+        let mut pager = Pager::new(
+            doc,
+            options,
+            &mut self.fonts,
+            &mut self.layouts,
+            false,
+            &mut self.store,
+            &self.details,
+        );
+        collect(page, &self.cache, &mut pager, top, height);
+        pager.finish_slice(top, height, total_height, &mut self.engine)
+    }
+}
+
+/// The first and last block index a frame at `top` with `rows` rows shows.
+fn frame_span(page: &PageLayout, top: f32, rows: f32) -> (usize, usize) {
+    let first = page.first_below(top).min(page.len());
+    let mut last = first;
+    while last < page.len() && page.y_at(last + 1) < top + rows {
+        last += 1;
+    }
+    (first, last)
+}
+
+/// Queues the paints of every block that reaches `top..top + height`, from the paint cache
+/// (every such block is measured and cached by then), and lays out the footnote list if it shows.
+fn collect(
+    page: &PageLayout,
+    cache: &HashMap<u32, CachedBlock>,
+    pager: &mut Pager,
+    top: f32,
+    height: f32,
+) {
+    let bottom = top + height;
+    let mut index = page.first_below(top);
+    while index < page.len() && page.spans[index].y < bottom {
+        let span = page.spans[index];
+        if let Some(cached) = cache.get(&span.block) {
+            let origin = span.y - cached.phase;
+            pager.paints.extend(cached.paints.iter().map(|paint| {
+                let mut paint = paint.clone();
+                paint.shift(origin);
+                paint
+            }));
+        }
+        index += 1;
+    }
+    let foot = &page.foot;
+    if foot.height > 0.0 && foot.y + foot.height > top && foot.y < bottom {
+        pager.y = foot.y;
+        pager.notes.clear();
+        pager.footnotes();
     }
 }
 

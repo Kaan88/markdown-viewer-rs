@@ -54,11 +54,25 @@ impl Paint {
     }
 }
 
-/// Everything a top-level block keeps for later frames: what to paint and where its text is.
+/// Everything a top-level block keeps for later frames: what to paint and where its text is,
+/// relative to the whole row above the block's top.
+///
+/// Layout rounds rules, chips and underlines to whole rows of the page, so paints made for a top
+/// at one fraction of a row are only right at that fraction: shifted by a fractional amount they
+/// would straddle two rows and blur. `phase` is that fraction; the paints are reused while the
+/// block's top keeps it, and the block is measured again when a correction above changes it.
 #[derive(Clone, Default)]
 pub(super) struct CachedBlock {
     pub(super) paints: Vec<Paint>,
     pub(super) lines: Vec<LineGeom>,
+    pub(super) phase: f32,
+}
+
+impl CachedBlock {
+    /// Whether the paints fit a block whose top is at `y`.
+    pub(super) fn fits(&self, y: f32) -> bool {
+        (y - y.floor()).to_bits() == self.phase.to_bits()
+    }
 }
 
 impl<'a, 'b> Pager<'a, 'b> {

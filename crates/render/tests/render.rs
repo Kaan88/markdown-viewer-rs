@@ -1,7 +1,7 @@
 //! Pixel-level smoke tests for the headless renderer: a crash, a blank page, a lost theme, a lost
 //! clamp, and the subpixel channel order. `golden.rs` compares whole pages against `tests/golden/`.
 
-use mdview_render::{DARK, DocumentRenderer, LIGHT, Options, render, render_slice, render_view};
+use mdview_render::{DARK, DocumentRenderer, LIGHT, Options, render, render_slice};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> mdview_core::Document {
@@ -164,8 +164,8 @@ fn an_html_image_honours_its_width_and_height() {
             base_dir: Some(dir.clone()),
         };
         let mut renderer = DocumentRenderer::new();
-        let page = renderer.layout(&doc, &options);
-        let view = renderer.view(&doc, &options, &page, 0.0, 400.0);
+        renderer.layout(&doc, &options);
+        let view = renderer.view(&doc, &options, 0.0, 400.0);
         view.bitmap
             .pixels
             .chunks_exact(4)
@@ -204,8 +204,8 @@ fn a_picture_uses_the_source_for_the_colour_scheme() {
             base_dir: Some(dir.clone()),
         };
         let mut renderer = DocumentRenderer::new();
-        let page = renderer.layout(&doc, &options);
-        let view = renderer.view(&doc, &options, &page, 0.0, 300.0);
+        renderer.layout(&doc, &options);
+        let view = renderer.view(&doc, &options, 0.0, 300.0);
         view.bitmap
             .pixels
             .chunks_exact(4)
@@ -235,8 +235,8 @@ fn table_spans_lay_out_and_hostile_spans_are_clamped() {
             base_dir: None,
         };
         let mut renderer = DocumentRenderer::new();
-        let page = renderer.layout(&doc, &options);
-        let slice = renderer.view(&doc, &options, &page, 0.0, 600.0);
+        renderer.layout(&doc, &options);
+        let slice = renderer.view(&doc, &options, 0.0, 600.0);
         slice.total_height
     };
     let plain = height("<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>");
@@ -304,10 +304,10 @@ fn a_cached_frame_still_draws_its_images() {
         base_dir: Some(dir),
     };
     let mut renderer = DocumentRenderer::new();
-    let page = renderer.layout(&doc, &options);
-    let first = renderer.view(&doc, &options, &page, 0.0, 300.0);
+    renderer.layout(&doc, &options);
+    let first = renderer.view(&doc, &options, 0.0, 300.0);
     // The second frame reuses the cached block paints, which must still find the decoded image.
-    let second = renderer.view(&doc, &options, &page, 0.0, 300.0);
+    let second = renderer.view(&doc, &options, 0.0, 300.0);
     let red = |pixels: &[u8]| {
         pixels
             .chunks_exact(4)
@@ -338,13 +338,13 @@ fn a_shifted_frame_matches_a_fresh_view() {
         base_dir: Some(dir),
     };
     let mut renderer = DocumentRenderer::new();
-    let page = renderer.layout(&doc, &options);
-    renderer.view_frame(&doc, &options, &page, 0.0, 200.0);
+    renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, 0.0, 200.0);
     // Small steps reuse the shifted frame; the long jumps force a full repaint.
     for top in [37.0, 5.0, 300.0, 120.0, 0.0] {
-        renderer.view_frame(&doc, &options, &page, top, 200.0);
+        renderer.view_frame(&doc, &options, top, 200.0);
         let frame = renderer.frame().expect("frame");
-        let fresh = render_view(&doc, &options, &page, frame.top, 200.0);
+        let fresh = render_slice(&doc, &options, frame.top, 200.0);
         assert_eq!(frame.bitmap.pixels, fresh.bitmap.pixels, "top {top}");
     }
 }
@@ -361,16 +361,16 @@ fn a_scrolling_frame_reports_the_band_and_shift() {
     };
     let rows = 200.0;
     let mut renderer = DocumentRenderer::new();
-    let page = renderer.layout(&doc, &options);
+    renderer.layout(&doc, &options);
     // The first frame is whole: a caller with no previous frame has nothing to reuse.
-    let frame = renderer.view_frame(&doc, &options, &page, 0.0, rows);
+    let frame = renderer.view_frame(&doc, &options, 0.0, rows);
     assert_eq!(frame.band, None);
     assert_eq!(frame.shift, 0);
     let mut last = frame.bitmap.pixels.clone();
     let stride = frame.bitmap.width as usize * 4;
     let count = frame.bitmap.height as usize;
     for top in [40.0, 75.0, 30.0, 0.0, 120.0] {
-        let frame = renderer.view_frame(&doc, &options, &page, top, rows);
+        let frame = renderer.view_frame(&doc, &options, top, rows);
         let (shift, band) = (
             frame.shift,
             frame.band.expect("a small step keeps the frame"),
@@ -396,12 +396,12 @@ fn a_scrolling_frame_reports_the_band_and_shift() {
         last = frame.bitmap.pixels.clone();
     }
     // A jump of a whole viewport cannot be shifted, so it is reported as a whole frame.
-    let frame = renderer.view_frame(&doc, &options, &page, 900.0, rows);
+    let frame = renderer.view_frame(&doc, &options, 900.0, rows);
     assert_eq!(frame.band, None);
     assert_eq!(frame.shift, 0);
     // The same view twice changed nothing, which an empty band says.
     let top = frame.top;
-    let frame = renderer.view_frame(&doc, &options, &page, top, rows);
+    let frame = renderer.view_frame(&doc, &options, top, rows);
     assert_eq!(frame.band, Some((0, 0)));
     assert_eq!(frame.shift, 0);
 }
@@ -451,9 +451,9 @@ fn cached_scroll_frames_match_a_fresh_slice() {
         base_dir: None,
     };
     let mut renderer = DocumentRenderer::new();
-    let page = renderer.layout(&doc, &options);
-    renderer.view(&doc, &options, &page, 100.0, 300.0);
-    let second = renderer.view(&doc, &options, &page, 400.0, 300.0);
+    renderer.layout(&doc, &options);
+    renderer.view(&doc, &options, 100.0, 300.0);
+    let second = renderer.view(&doc, &options, 400.0, 300.0);
     let fresh = render_slice(&doc, &options, 400.0, 300.0);
     assert_eq!(second.bitmap.pixels, fresh.bitmap.pixels);
 }
@@ -469,15 +469,15 @@ fn a_click_maps_back_to_the_word_under_it() {
         base_dir: None,
     };
     let mut renderer = DocumentRenderer::new();
-    let page = renderer.layout(&doc, &options);
-    renderer.view_frame(&doc, &options, &page, 0.0, 400.0);
+    renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, 0.0, 400.0);
     let world = doc.text.find("world").expect("the word is in the document") as u32;
-    let rects = renderer.selection_rects(&doc, &options, &page, world, world + 5);
+    let rects = renderer.selection_rects(&doc, &options, world, world + 5);
     assert_eq!(rects.len(), 1, "one line, one rect");
     let rect = rects[0];
     assert!(rect.w > 10.0, "{rect:?}");
     let hit = renderer
-        .hit_test(&doc, &options, &page, rect.x + 1.0, rect.y + rect.h / 2.0)
+        .hit_test(&doc, &options, rect.x + 1.0, rect.y + rect.h / 2.0)
         .expect("a click in the text");
     assert_eq!(hit.offset, world, "the click is on the first letter");
     assert_eq!(
@@ -487,9 +487,9 @@ fn a_click_maps_back_to_the_word_under_it() {
     assert_eq!(hit.link, None);
     // A click past the end of the line still lands on it, at the last caret stop.
     let hit = renderer
-        .hit_test(&doc, &options, &page, rect.x + 400.0, rect.y + rect.h / 2.0)
+        .hit_test(&doc, &options, rect.x + 400.0, rect.y + rect.h / 2.0)
         .expect("a click to the right");
-    assert_eq!(hit.block, page.blocks()[1].block);
+    assert_eq!(hit.block, renderer.page_layout().unwrap().blocks()[1].block);
     let after = doc.text.find("after").unwrap() as u32;
     assert!(hit.offset >= after, "offset {}", hit.offset);
 }
@@ -507,18 +507,12 @@ fn a_click_finds_a_link_and_a_footnote_reference() {
         base_dir: None,
     };
     let mut renderer = DocumentRenderer::new();
-    let page = renderer.layout(&doc, &options);
-    renderer.view_frame(&doc, &options, &page, 0.0, 400.0);
+    renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, 0.0, 400.0);
     let link = doc.text.find("link").expect("link text") as u32;
-    let rect = renderer.selection_rects(&doc, &options, &page, link, link + 4)[0];
+    let rect = renderer.selection_rects(&doc, &options, link, link + 4)[0];
     let hit = renderer
-        .hit_test(
-            &doc,
-            &options,
-            &page,
-            rect.x + rect.w / 2.0,
-            rect.y + rect.h / 2.0,
-        )
+        .hit_test(&doc, &options, rect.x + rect.w / 2.0, rect.y + rect.h / 2.0)
         .expect("a click on the link");
     let index = hit.link.expect("a link under the pointer");
     assert_eq!(
@@ -526,12 +520,12 @@ fn a_click_finds_a_link_and_a_footnote_reference() {
         "https://example.com"
     );
     // The footnote mark has no text of its own in the document, so sweep the line for it.
-    let text = &doc.blocks[page.blocks()[0].block as usize].text;
-    let row = renderer.selection_rects(&doc, &options, &page, text.start, text.end)[0];
+    let text = &doc.blocks[renderer.page_layout().unwrap().blocks()[0].block as usize].text;
+    let row = renderer.selection_rects(&doc, &options, text.start, text.end)[0];
     let mut found = None;
     let mut x = row.x;
     while x < row.x + row.w {
-        if let Some(hit) = renderer.hit_test(&doc, &options, &page, x, row.y + row.h / 2.0)
+        if let Some(hit) = renderer.hit_test(&doc, &options, x, row.y + row.h / 2.0)
             && let Some(note) = hit.footnote
         {
             found = Some((note, hit.offset));
@@ -550,7 +544,7 @@ fn a_click_finds_a_link_and_a_footnote_reference() {
             .start
     );
     assert!(
-        page.footnote_y(1).is_some(),
+        renderer.page_layout().unwrap().footnote_y(1).is_some(),
         "the footnote list has a position"
     );
 }
@@ -595,27 +589,29 @@ fn hit_testing_and_selection_do_not_change_the_frame() {
         base_dir: None,
     };
     let mut renderer = DocumentRenderer::new();
-    let page = renderer.layout(&doc, &options);
-    renderer.view_frame(&doc, &options, &page, 0.0, 400.0);
+    renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, 0.0, 400.0);
     // Ask for the same view once more so the delta is explicitly empty, then use hit testing.
     let before = renderer
-        .view_frame(&doc, &options, &page, 0.0, 400.0)
+        .view_frame(&doc, &options, 0.0, 400.0)
         .bitmap
         .pixels
         .clone();
-    let text = &doc.blocks[page.blocks()[0].block as usize].text;
-    let _ = renderer.selection_rects(&doc, &options, &page, text.start, text.end);
+    let text = &doc.blocks[renderer.page_layout().unwrap().blocks()[0].block as usize].text;
+    let _ = renderer.selection_rects(&doc, &options, text.start, text.end);
     let heading = doc.headings.last().expect("a heading").block;
-    let last = *page
+    let last = *renderer
+        .page_layout()
+        .unwrap()
         .blocks()
         .iter()
         .find(|block| block.block == heading)
         .expect("the heading is a top-level block");
     let hit = renderer
-        .hit_test(&doc, &options, &page, 30.0, last.y + 5.0)
+        .hit_test(&doc, &options, 30.0, last.y + 5.0)
         .expect("a click on a block far below the viewport");
     assert_eq!(hit.block, last.block, "the block was laid out on demand");
-    let frame = renderer.view_frame(&doc, &options, &page, 0.0, 400.0);
+    let frame = renderer.view_frame(&doc, &options, 0.0, 400.0);
     assert_eq!(
         frame.band,
         Some((0, 0)),
@@ -638,14 +634,14 @@ fn a_selection_that_wraps_gives_one_rect_per_line() {
         base_dir: None,
     };
     let mut renderer = DocumentRenderer::new();
-    let page = renderer.layout(&doc, &options);
-    let text = &doc.blocks[page.blocks()[0].block as usize].text;
-    let rects = renderer.selection_rects(&doc, &options, &page, text.start, text.end);
+    renderer.layout(&doc, &options);
+    let text = &doc.blocks[renderer.page_layout().unwrap().blocks()[0].block as usize].text;
+    let rects = renderer.selection_rects(&doc, &options, text.start, text.end);
     assert!(rects.len() > 1, "{rects:?}");
     // Every rect is on its own row band and inside the page.
     for rect in &rects {
         assert!(rect.x >= 0.0 && rect.w > 0.0 && rect.h > 0.0);
-        assert!(rect.y >= 0.0 && rect.y + rect.h <= page.total_height());
+        assert!(rect.y >= 0.0 && rect.y + rect.h <= renderer.page_layout().unwrap().total_height());
     }
 }
 
@@ -676,26 +672,30 @@ fn a_details_summary_toggles_and_the_page_remeasures() {
         base_dir: None,
     };
     let mut renderer = DocumentRenderer::new();
-    let closed = renderer.layout(&doc, &options);
-    renderer.view_frame(&doc, &options, &closed, 0.0, 400.0);
+    renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, 0.0, 400.0);
+    let closed = renderer.page_layout().unwrap().clone();
     let text = doc.blocks[summary as usize].text;
-    let rect = renderer.selection_rects(&doc, &options, &closed, text.start, text.end)[0];
+    let rect = renderer.selection_rects(&doc, &options, text.start, text.end)[0];
     let hit = renderer
-        .hit_test(&doc, &options, &closed, rect.x + 2.0, rect.y + rect.h / 2.0)
+        .hit_test(&doc, &options, rect.x + 2.0, rect.y + rect.h / 2.0)
         .expect("a click on the summary");
     assert_eq!(hit.details, Some(details), "the summary names its details");
     assert!(!renderer.details_open(&doc, details), "closed as written");
-    renderer.set_details(details, true);
+    renderer.set_details(&doc, details, true);
     assert!(renderer.details_open(&doc, details));
-    let open = renderer.layout(&doc, &options);
+    // The toggled block is measured again by the next frame; nothing else is.
+    renderer.view_frame(&doc, &options, 0.0, 400.0);
+    let open = renderer.page_layout().unwrap().clone();
     assert!(
         open.total_height() > closed.total_height() + 20.0,
         "opening shows the body: {} vs {}",
         open.total_height(),
         closed.total_height()
     );
-    renderer.set_details(details, false);
-    let again = renderer.layout(&doc, &options);
+    renderer.set_details(&doc, details, false);
+    renderer.view_frame(&doc, &options, 0.0, 400.0);
+    let again = renderer.page_layout().unwrap().clone();
     assert!(
         (again.total_height() - closed.total_height()).abs() < 0.5,
         "closing restores the height: {} vs {}",

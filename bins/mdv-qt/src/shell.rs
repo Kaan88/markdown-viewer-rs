@@ -1353,7 +1353,7 @@ impl Shell {
         };
         if stale {
             if let Some(document) = self.document.borrow().as_ref() {
-                let page = self.renderer.borrow_mut().layout(document, &options);
+                let page = self.renderer.borrow_mut().layout(document, &options).clone();
                 *self.layout.borrow_mut() = Some(page);
             }
         }
@@ -1365,12 +1365,10 @@ impl Shell {
         let scale = self.scale.get();
         let document = self.document.borrow();
         let document = document.as_ref()?;
-        let layout = self.layout.borrow();
-        let layout = layout.as_ref()?;
+        self.layout.borrow().as_ref()?;
         self.renderer.borrow_mut().hit_test(
             document,
             &options,
-            layout,
             (x * scale) as f32,
             (y * scale + self.scroll.get()) as f32,
         )
@@ -1418,13 +1416,12 @@ impl Shell {
         let Some(document) = document.as_ref() else {
             return Vec::new();
         };
-        let layout = self.layout.borrow();
-        let Some(layout) = layout.as_ref() else {
+        if self.layout.borrow().is_none() {
             return Vec::new();
-        };
+        }
         self.renderer
             .borrow_mut()
-            .selection_rects(document, &options, layout, from, to)
+            .selection_rects(document, &options, from, to)
     }
 
     fn press(&self, x: f64, y: f64) {
@@ -1493,7 +1490,9 @@ impl Shell {
             };
             self.renderer.borrow().details_open(document, block)
         };
-        self.renderer.borrow_mut().set_details(block, !open);
+        if let Some(document) = self.document.borrow().as_ref() {
+            self.renderer.borrow_mut().set_details(document, block, !open);
+        }
         *self.layout.borrow_mut() = None;
         self.redraw();
     }
@@ -1650,7 +1649,7 @@ impl CanvasHandler for Shell {
                 return;
             };
             let started = std::time::Instant::now();
-            let page = self.renderer.borrow_mut().layout(document, &options);
+            let page = self.renderer.borrow_mut().layout(document, &options).clone();
             eprintln!(
                 "mdview-qt: height pass {width} dip at {scale:.2} scale in {:.1} ms, page {:.0} px",
                 started.elapsed().as_secs_f64() * 1000.0,
@@ -1664,9 +1663,9 @@ impl CanvasHandler for Shell {
         let scroll = self.scroll.get().clamp(0.0, self.scroll_max(device_height));
         self.scroll.set(scroll);
         self.sync_scrollbar_range(device_height);
-        let Some(layout) = &*self.layout.borrow() else {
+        if self.layout.borrow().is_none() {
             return;
-        };
+        }
         let Some(document) = &*self.document.borrow() else {
             return;
         };
@@ -1674,10 +1673,17 @@ impl CanvasHandler for Shell {
         self.renderer.borrow_mut().view_frame(
             document,
             &options,
-            layout,
             scroll as f32,
             device_height as f32,
         );
+        // The frame may have corrected the layout (measured what it shows): keep the copy the
+        // scroll bar, anchors and footnotes read in step with it.
+        let generation = |page: Option<&PageLayout>| page.map(PageLayout::generation);
+        let corrected = generation(self.renderer.borrow().page_layout())
+            != generation(self.layout.borrow().as_ref());
+        if corrected {
+            *self.layout.borrow_mut() = self.renderer.borrow().page_layout().cloned();
+        }
         {
             let renderer = self.renderer.borrow();
             let frame = renderer.frame().expect("frame");

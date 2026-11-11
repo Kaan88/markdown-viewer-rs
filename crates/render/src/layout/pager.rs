@@ -4,7 +4,7 @@
 
 use super::hit::LineGeom;
 use super::inline::{ImageBox, Inline};
-use super::paint::{CachedBlock, Paint};
+use super::paint::Paint;
 use super::store::{Found, ImageStore};
 use super::{BlockBox, Options};
 use crate::text::Brush;
@@ -41,13 +41,12 @@ pub(super) struct Pager<'a, 'b> {
     /// Caret geometry for the block being laid out, in page coordinates until it moves into the
     /// cache, where it is stored relative to that block's top like the paints.
     pub(super) hits: Vec<LineGeom>,
-    /// Whether to keep hit geometry; the height pass does not need it.
+    /// Whether to keep hit geometry; a measuring pass does not need it.
     record: bool,
     /// The measured y of each footnote entry, built by the height pass.
     pub(super) notes: Vec<(u32, f32)>,
     pub(super) fonts: &'b mut FontContext,
     pub(super) layouts: &'b mut LayoutContext<Brush>,
-    pub(super) cache: Option<&'b mut HashMap<u32, CachedBlock>>,
     pub(super) base_dir: Option<PathBuf>,
     /// Every raster the document draws, owned by the `DocumentRenderer` so it outlives layouts.
     pub(super) store: &'b mut ImageStore,
@@ -75,7 +74,7 @@ impl<'a, 'b> Pager<'a, 'b> {
         options: &Options,
         fonts: &'b mut FontContext,
         layouts: &'b mut LayoutContext<Brush>,
-        cache: Option<&'b mut HashMap<u32, CachedBlock>>,
+        record: bool,
         store: &'b mut ImageStore,
         details: &'b HashMap<u32, bool>,
     ) -> Self {
@@ -88,7 +87,6 @@ impl<'a, 'b> Pager<'a, 'b> {
         let max_y = options
             .max_height
             .map_or(f32::MAX, |h| (h * scale).max(1.0));
-        let record = cache.is_some();
         Pager {
             doc,
             theme: options.theme,
@@ -104,7 +102,6 @@ impl<'a, 'b> Pager<'a, 'b> {
             notes: Vec::new(),
             fonts,
             layouts,
-            cache,
             base_dir: options.base_dir.clone(),
             store,
             allow: true,

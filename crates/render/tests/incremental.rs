@@ -55,8 +55,8 @@ fn options(dir: &Path, width: f32, scale: f32) -> Options {
 
 /// Lays out and draws one viewport, the way a shell does after any change.
 fn show(renderer: &mut DocumentRenderer, doc: &mdview_core::Document, options: &Options) {
-    let page = renderer.layout(doc, options);
-    renderer.view_frame(doc, options, &page, 0.0, 2000.0);
+    renderer.layout(doc, options);
+    renderer.view_frame(doc, options, 0.0, 2000.0);
 }
 
 fn delta(before: ImageStats, after: ImageStats) -> (u64, u64) {
@@ -79,7 +79,7 @@ fn stored_images_survive_width_scale_and_details_changes() {
         })
         .unwrap();
     let mut renderer = DocumentRenderer::new();
-    renderer.set_details(details, true);
+    renderer.set_details(&doc, details, true);
     let base = options(&dir, 600.0, 1.0);
     show(&mut renderer, &doc, &base);
     let first = renderer.image_stats();
@@ -107,9 +107,9 @@ fn stored_images_survive_width_scale_and_details_changes() {
 
     // A details toggle neither.
     let before = renderer.image_stats();
-    renderer.set_details(details, false);
+    renderer.set_details(&doc, details, false);
     show(&mut renderer, &doc, &base);
-    renderer.set_details(details, true);
+    renderer.set_details(&doc, details, true);
     show(&mut renderer, &doc, &base);
     assert_eq!(
         delta(before, renderer.image_stats()),

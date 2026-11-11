@@ -139,10 +139,10 @@ fn run(
     let (bitmap, total_height, stats, mode) = match viewport {
         Some(height) => {
             let mut renderer = DocumentRenderer::new();
-            let page = renderer.layout(doc, &options);
+            renderer.layout(doc, &options);
             let base = scroll.unwrap_or(0.0);
             let first = Instant::now();
-            renderer.view_frame(doc, &options, &page, base, height);
+            renderer.view_frame(doc, &options, base, height);
             let first_ms = first.elapsed().as_secs_f64() * 1000.0;
             let mut worst = 0.0f64;
             let mut sum = 0.0f64;
@@ -150,7 +150,7 @@ fn run(
             for frame in 1..repeat.max(1) {
                 let top = base + frame as f32 * 40.0;
                 let started = Instant::now();
-                renderer.view_frame(doc, &options, &page, top, height);
+                renderer.view_frame(doc, &options, top, height);
                 let ms = started.elapsed().as_secs_f64() * 1000.0;
                 worst = worst.max(ms);
                 sum += ms;
@@ -170,7 +170,7 @@ fn run(
             let frame = renderer.frame().expect("frame");
             (
                 frame.bitmap.clone(),
-                page.total_height(),
+                renderer.page_layout().expect("laid out").total_height(),
                 frame.stats,
                 format!(" scroll {:.0}..{:.0}", frame.top, frame.top + height),
             )

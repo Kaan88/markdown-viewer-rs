@@ -1,7 +1,7 @@
 //! Selection geometry: one page rectangle per selected line, from the cached caret geometry.
 
 use super::hit::LineGeom;
-use super::{DocumentRenderer, Options, PageLayout, Rect};
+use super::{DocumentRenderer, Options, Rect};
 use mdview_core::model::Document;
 use parley::Cluster;
 
@@ -13,7 +13,6 @@ impl DocumentRenderer {
         &mut self,
         doc: &Document,
         options: &Options,
-        page: &PageLayout,
         from: u32,
         to: u32,
     ) -> Vec<Rect> {
@@ -21,13 +20,36 @@ impl DocumentRenderer {
         if start == end {
             return Vec::new();
         }
+        self.ensure_layout(doc, options);
+        self.correct_pending(doc);
+        let Some(page) = self.page.as_ref() else {
+            return Vec::new();
+        };
+        // Top-level blocks are in text order, so the ones the range touches are a run.
+        let text = |index: usize| doc.blocks[page.spans[index].block as usize].text;
+        let first = page
+            .spans
+            .partition_point(|span| doc.blocks[span.block as usize].text.end <= start);
+        let mut last = first;
+        while last < page.len() && text(last).start < end {
+            last += 1;
+        }
+        let touched: Vec<usize> = (first..last).filter(|&i| text(i).end > start).collect();
+        for index in touched {
+            if !self.ready(index) {
+                self.measure(doc, index, true, true);
+            }
+        }
+        self.settle();
+        let Some(page) = self.page.as_ref() else {
+            return Vec::new();
+        };
         let mut rects = Vec::new();
-        for (index, span) in page.spans.iter().enumerate() {
+        for span in &page.spans[first..last] {
             let text = doc.blocks[span.block as usize].text;
             if text.end <= start || text.start >= end {
                 continue;
             }
-            self.ensure_block(doc, options, page, index);
             let Some(cached) = self.cache.get(&span.block) else {
                 continue;
             };
@@ -42,7 +64,7 @@ impl DocumentRenderer {
                 if x1 - x0 > 0.25 {
                     rects.push(Rect {
                         x: x0,
-                        y: span.y + line.top,
+                        y: span.y - cached.phase + line.top,
                         w: x1 - x0,
                         h: line.bottom - line.top,
                     });
