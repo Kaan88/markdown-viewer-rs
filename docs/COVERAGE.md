@@ -67,7 +67,7 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 | Collapsed sections, `<details>` and `<summary>` | Supported | Open state is view state in Phase 2 |
 | Math: `$..$`, `$$..$$`, ```` ```math ```` | Supported in model | Drawing in Phase 4. Over 4 KiB keeps source and a reason. What may touch the delimiters follows GitHub, as measured below |
 | GitHub's `` $`..`$ `` math form | Supported | Rewritten to `$..$` before parsing, outside fenced code, one line, formula without `$` or a backtick (`github_math` in `parse.rs`) |
-| Mermaid | Supported in model | Drawing in Phase 4. Over 64 KiB keeps source and a reason. Family coverage is per the plan |
+| Mermaid | Drawn for 31 of merman's 34 families | Over 64 KiB keeps source and a reason. A family that is not enabled, or a diagram merman rejects, keeps its labelled source box. Per-family table below |
 | Front matter as a table | Supported | `crates/core/src/frontmatter.rs`: a leading `---` block whose first line is `key:` becomes a Property/Value table of its top-level `key: value` pairs; nested or list values show the block as a `yaml` code block; anything else stays a rule |
 | Emoji shortcodes `:+1:` | Supported (common set) | `crates/core/src/emoji.rs`: 186 common GitHub names in a sorted static table, replaced in running text only; unknown names stay as typed. Not the full GitHub list |
 | `<kbd>`, `<mark>`, `<code>`, `<tt>`, `<samp>`, `<var>`, `<cite>`, `<dfn>` | Supported | |
@@ -102,6 +102,47 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 | Colour chips for `#ffffff` in code | Excluded | GitHub shows these only in issues and PRs |
 | GeoJSON and TopoJSON maps | Excluded | Needs map tiles from the network. Shown as a code block |
 | ASCII STL 3D models | Excluded | Needs a 3D renderer. Shown as a code block |
+
+## Mermaid families
+
+merman 0.9.3 has 34 diagram families as cargo features. `crates/engine` enables every one that renders
+cleanly without ELK (EPL-2.0) or the Cytoscape layout; `cargo tree -p mdview-engine` shows neither
+crate. "Cleanly" means: every label visible and inside its shape, no overlapping or clipped text,
+readable in both themes, no panic, well under 300 ms. Samples of the 23 added families are in
+`fixtures/diagrams-more.md` and are rendered by a test in `crates/engine/src/lib.rs`. Times are the
+renderer's whole layout pass for a page holding one diagram (engine process already warm), light
+theme, on this Windows host.
+
+| Family | Status | Time | Notes |
+|---|---|---|---|
+| flowchart, sequence, class, state, ER, gantt, pie, mindmap | Enabled | | The original eight; their output is unchanged |
+| timeline | Enabled | 69 ms | Fixed-grid layout, so it takes 16 px text; labels forced dark on the pastel light-theme boxes |
+| journey | Enabled | 62 ms | 20 px text (150-unit boxes are scaled to the page); fallback labels inlined at their `<use>` offset; dark title recoloured |
+| gitGraph | Enabled | 36 ms | Dark commit labels are dim grey on dark, readable but low contrast (borderline) |
+| C4 (context, container, component, dynamic, deployment) | Enabled | 63 ms | Dark relationship lines and labels recoloured; the title is small |
+| sankey | Enabled | 58 ms | |
+| xychart | Enabled | 47 ms | Light-theme bars are very pale (default palette) |
+| quadrantChart | Enabled | 42 ms | Dark point colour set so dots show |
+| requirement | Enabled | 46 ms | |
+| block | Enabled | 32 ms | Small at its natural size |
+| packet | Enabled | 40 ms | Small text at its natural size; dark byte numbers and title recoloured |
+| kanban | Enabled | 38 ms | Needed the multi-line label fix (a wrapped card lost its second line) |
+| radar | Enabled | 68 ms | Dark graticule bands are bright grey, curves are readable |
+| treemap | Enabled | 62 ms | Section captions are small; white leaf text on a pale fill in light theme (borderline) |
+| ishikawa | Enabled | 41 ms | |
+| treeView | Enabled | 29 ms | No font named, so it takes the sans stack; dark label and line colours set |
+| venn | Enabled | 50 ms | |
+| useCase | Enabled | 35 ms | Labels start at the left edge of the ellipse (borderline) |
+| zenuml | Enabled | 34 ms | Draws as a white card in dark theme; text stays readable |
+| cynefin | Enabled | 81 ms | The dashed boundary crosses the "Confusion" caption (borderline) |
+| eventModeling | Enabled | 41 ms | Dark lane titles recoloured |
+| agentFlow | Enabled | 31 ms | |
+| swimlane | Enabled | 33 ms | |
+| railroad (all four dialects) | Enabled | 47 ms | The IR dialect needs exact `terminal(...)` syntax; a malformed one falls back to source |
+| architecture | **Excluded** | | Needs the Cytoscape layout (`layout-cytoscape`); without it merman fails, the block keeps its source |
+| wardley | **Excluded** | | Text about 5 px tall at its natural size and the "Business" anchor label stays black on the dark page |
+| info | **Excluded** | | Only prints the merman version; no value in a document |
+| flowchart and class `elk` layouts | **Excluded** | | ELK is EPL-2.0 (`layout-elk` is off) |
 
 ## Not implemented
 
