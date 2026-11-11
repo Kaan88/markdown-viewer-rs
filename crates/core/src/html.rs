@@ -347,17 +347,22 @@ pub(crate) enum Tag {
     Small,
     /// `<q>`: a short quotation, drawn between curly quotes as browsers do.
     Q,
-    /// `<ruby>`, `<rp>` and `<rt>`: no element of their own; an annotation reads as `base(note)`.
+    /// `<ruby>` and `<rt>` are spans; `<rp>` is the fallback for a browser with no ruby and is
+    /// dropped along with its text.
     Ruby,
     Rp,
     Rt,
+    Dt,
+    Dd,
+    Figure,
+    FigCaption,
     /// GFM tagfilter names that show as literal text.
     Literal,
     Unknown,
 }
 
 impl Tag {
-    pub(crate) const SLOTS: usize = 45;
+    pub(crate) const SLOTS: usize = 49;
 
     /// A distinct small index per element the builder keeps open.
     pub(crate) fn slot(self) -> usize {
@@ -402,6 +407,10 @@ impl Tag {
             Tag::Ruby => 42,
             Tag::Rp => 43,
             Tag::Rt => 44,
+            Tag::Dt => 45,
+            Tag::Dd => 46,
+            Tag::Figure => 47,
+            Tag::FigCaption => 48,
         }
     }
 
@@ -417,9 +426,7 @@ impl Tag {
                 | Tag::Source
                 | Tag::TableSection
                 | Tag::Unknown
-                | Tag::Ruby
                 | Tag::Rp
-                | Tag::Rt
         )
     }
 }
@@ -459,9 +466,11 @@ pub(crate) fn classify_tag(name: &str) -> Tag {
         b"div" => Tag::Div,
         b"center" => Tag::Center,
         b"section" | b"article" | b"aside" | b"header" | b"footer" | b"main" | b"nav"
-        | b"address" | b"figure" | b"figcaption" | b"caption" | b"dl" | b"dt" | b"dd" => {
-            Tag::Section
-        }
+        | b"address" | b"caption" | b"dl" => Tag::Section,
+        b"dt" => Tag::Dt,
+        b"dd" => Tag::Dd,
+        b"figure" => Tag::Figure,
+        b"figcaption" => Tag::FigCaption,
         b"h1" => Tag::H(1),
         b"h2" => Tag::H(2),
         b"h3" => Tag::H(3),

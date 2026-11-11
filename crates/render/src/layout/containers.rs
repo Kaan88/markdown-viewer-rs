@@ -7,6 +7,11 @@ use super::paint::Paint;
 use crate::theme::Color;
 use mdview_core::model::{AlertKind, BlockKind, ListMarker};
 
+/// Logical px a `<dd>` is indented, and the extra gap after tight text in one, which with the 4 px
+/// tight text already leaves makes the 16 px between groups.
+pub(super) const DEFINITION_INDENT: f32 = 16.0;
+pub(super) const DEFINITION_GAP: f32 = 12.0;
+
 impl<'a, 'b> Pager<'a, 'b> {
     pub(super) fn quote(
         &mut self,
@@ -180,6 +185,23 @@ impl<'a, 'b> Pager<'a, 'b> {
                 self.emit(&inline, layout, left, y + self.px(1.0), size);
             }
         }
+    }
+
+    /// A `<dd>`: indented under its term, with a gap after it before the next group.
+    pub(super) fn definition(&mut self, b: u32, left: f32, width: f32, color: Color, depth: usize) {
+        let indent = self.px(DEFINITION_INDENT);
+        self.blocks(b, left + indent, width - indent, color, depth + 1);
+        if self.ends_in_plain(b) {
+            self.y += self.px(DEFINITION_GAP);
+        }
+    }
+
+    /// Whether the last child of `b` is tight text, which leaves 4 px where a paragraph leaves 16.
+    pub(super) fn ends_in_plain(&self, b: u32) -> bool {
+        self.doc
+            .children(b)
+            .last()
+            .is_some_and(|c| matches!(self.doc.blocks[c as usize].kind, BlockKind::Plain))
     }
 
     pub(super) fn details(&mut self, b: u32, left: f32, width: f32, color: Color, depth: usize) {

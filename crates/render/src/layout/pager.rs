@@ -3,7 +3,7 @@
 //! emits their glyphs, chips, decorations and inline images.
 
 use super::hit::LineGeom;
-use super::inline::{ImageBox, Inline};
+use super::inline::{ImageBox, Inline, RubyNote, Style};
 use super::paint::Paint;
 use super::store::{Found, ImageStore};
 use super::{BlockBox, Options};
@@ -11,9 +11,9 @@ use crate::text::Brush;
 use crate::theme::{Color, Theme};
 use mdview_core::model::{Align, BlockKind, Document, NONE};
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontFamily, FontStyle, FontWeight, InlineBox,
-    InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
-    VerticalAlign,
+    Alignment, AlignmentOptions, Cluster, FontContext, FontFamily, FontStyle, FontWeight,
+    InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
+    StyleProperty, VerticalAlign,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -63,6 +63,8 @@ pub(super) struct Pager<'a, 'b> {
 
 /// Marks an inline box that reserves space for an image without pixels.
 const RESERVED: u64 = 1 << 32;
+/// Marks a zero-width box that only makes its line taller, to leave room for a ruby annotation.
+const SPACER: u64 = 1 << 33;
 
 fn brush(c: Color) -> Brush {
     [c[0], c[1], c[2], 255]
@@ -221,11 +223,74 @@ impl<'a, 'b> Pager<'a, 'b> {
             BlockKind::FootnoteDefinition { .. } => {
                 // Moved to the end list; never drawn in flow.
             }
-            BlockKind::Div { .. } => self.blocks(b, left, width, color, depth + 1),
+            BlockKind::Div { .. } | BlockKind::DefTerm => {
+                self.blocks(b, left, width, color, depth + 1);
+            }
+            BlockKind::DefDesc => self.definition(b, left, width, color, depth),
+            BlockKind::Figure { .. } => {
+                self.blocks(b, left, width, color, depth + 1);
+                self.y += self.px(12.0);
+            }
+            BlockKind::FigCaption => {
+                let muted = self.theme.muted;
+                self.blocks(b, left, width, muted, depth + 1);
+            }
         }
     }
 
     pub(super) fn text_layout(&mut self, inline: &Inline, txt: &Txt) -> Layout<Brush> {
+        if inline.notes.is_empty() {
+            return self.build_layout(inline, txt, &[]);
+        }
+        // Ruby: lay the text out as it would be, then give each base a zero-width box above its
+        // baseline that is tall enough for the annotation, so the line grows upward by exactly that.
+        let plain = self.build_layout(inline, txt, &[]);
+        let mut spacers = Vec::new();
+        for note in &inline.notes {
+            let Some(line) = plain
+                .lines()
+                .find(|line| line.text_range().contains(&note.base.start))
+            else {
+                continue;
+            };
+            let metrics = line.metrics();
+            let band = self
+                .note_layout(note, txt.size, txt.color)
+                .1
+                .height()
+                .round()
+                + self.px(1.0);
+            spacers.push((
+                note.base.start,
+                metrics.baseline - metrics.block_min_coord + band,
+            ));
+        }
+        self.build_layout(inline, txt, &spacers)
+    }
+
+    /// A ruby annotation as its own small layout, half the size of the text it annotates.
+    fn note_layout(&mut self, note: &RubyNote, size: f32, color: Color) -> (Inline, Layout<Brush>) {
+        let mut inline = Inline::default();
+        inline.push_doc(&note.text, Style::default(), note.doc);
+        let txt = Txt {
+            size: size * 0.5,
+            line_height: 1.2,
+            weight: 400.0,
+            mono: false,
+            color,
+            max: None,
+        };
+        let layout = self.build_layout(&inline, &txt, &[]);
+        (inline, layout)
+    }
+
+    /// `spacers` are (text offset, height above the baseline) for boxes that draw nothing.
+    fn build_layout(
+        &mut self,
+        inline: &Inline,
+        txt: &Txt,
+        spacers: &[(usize, f32)],
+    ) -> Layout<Brush> {
         let boxes: Vec<(u32, f32, f32, Option<f32>)> = inline
             .boxes
             .iter()
@@ -281,7 +346,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                     StyleProperty::FontSize(txt.size * style.size_factor()),
                     range.clone(),
                 );
-            } else if style.small || style.sub || style.sup {
+            } else if style.small || style.sub || style.sup || style.caption {
                 builder.push(
                     StyleProperty::FontSize(txt.size * style.size_factor()),
                     range.clone(),
@@ -308,6 +373,17 @@ impl<'a, 'b> Pager<'a, 'b> {
                 width,
                 height,
                 baseline,
+                vertical_align: VerticalAlign::BASELINE,
+            });
+        }
+        for &(index, height) in spacers {
+            builder.push_inline_box(InlineBox {
+                id: SPACER,
+                kind: InlineBoxKind::InFlow,
+                index,
+                width: 0.0,
+                height,
+                baseline: None,
                 vertical_align: VerticalAlign::BASELINE,
             });
         }
@@ -361,6 +437,21 @@ impl<'a, 'b> Pager<'a, 'b> {
         (id, width, height, baseline)
     }
 
+    /// The `align` of the `<figure>` a block sits in, which its text and images follow.
+    pub(super) fn inherited_align(&self, block: u32) -> Align {
+        let mut b = block;
+        loop {
+            let block = &self.doc.blocks[b as usize];
+            if let BlockKind::Figure { align } = block.kind {
+                return align;
+            }
+            if block.parent == NONE {
+                return Align::None;
+            }
+            b = block.parent;
+        }
+    }
+
     pub(super) fn aligned_x(
         &self,
         left: f32,
@@ -393,6 +484,9 @@ impl<'a, 'b> Pager<'a, 'b> {
         for line in layout.lines() {
             for item in line.items() {
                 if let PositionedLayoutItem::InlineBox(inline_box) = item {
+                    if inline_box.id & SPACER != 0 {
+                        continue;
+                    }
                     if inline_box.id & RESERVED != 0 {
                         // A declared size with no pixels yet: the reserved box, tinted.
                         images.push(Paint::Rect {
@@ -495,7 +589,39 @@ impl<'a, 'b> Pager<'a, 'b> {
         }
         self.paints.extend(images);
         self.paints.extend(chips);
+        // Each annotation sits centred over its base, in the band the line was made taller by. It
+        // keeps the colour of the text it annotates.
+        let mut notes = Vec::new();
+        for note in &inline.notes {
+            let Some(first) = Cluster::from_byte_index(&layout, note.base.start) else {
+                continue;
+            };
+            let metrics = *first.line().metrics();
+            let start = first.visual_offset().unwrap_or(0.0);
+            let last = inline.text[..note.base.end]
+                .char_indices()
+                .next_back()
+                .and_then(|(at, _)| Cluster::from_byte_index(&layout, at))
+                .filter(|c| c.path().line_index() == first.path().line_index());
+            // A base that wraps is centred over its part on the first line.
+            let end = last.map_or(metrics.offset + metrics.advance, |c| {
+                c.visual_offset().unwrap_or(start) + c.advance()
+            });
+            let brush = first.style().brush;
+            notes.push((
+                note.clone(),
+                (start + end) / 2.0,
+                metrics.block_min_coord,
+                [brush[0], brush[1], brush[2]],
+            ));
+        }
         self.paints.push(Paint::Text { layout, x, y });
         self.paints.extend(decos);
+        for (note, centre, top, color) in notes {
+            let (note_inline, note_layout) = self.note_layout(&note, base_size, color);
+            let width = note_layout.width();
+            let nx = (x + centre - width / 2.0).min(self.width - width).max(x);
+            self.emit(&note_inline, note_layout, nx, y + top, base_size * 0.5);
+        }
     }
 }

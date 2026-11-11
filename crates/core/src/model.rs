@@ -170,6 +170,16 @@ pub enum BlockKind {
     Div {
         align: Align,
     },
+    /// `<dt>`: a term in a description list, drawn bold. Holds blocks like a `<div>`.
+    DefTerm,
+    /// `<dd>`: a definition, drawn indented under its term.
+    DefDesc,
+    /// `<figure>`; `align` is its `align` attribute, and left otherwise as on GitHub.
+    Figure {
+        align: Align,
+    },
+    /// `<figcaption>`: drawn small and muted under the figure's content.
+    FigCaption,
 }
 
 /// One node of the block tree, stored in preorder. Children of block `i` start at `i + 1`, the next
@@ -213,6 +223,12 @@ pub enum SpanKind {
     Checkbox {
         checked: bool,
     },
+    /// `<ruby>`: a base text and the annotations after it, each of which is a `RubyNote`. The range
+    /// holds the base text and the annotation text together, in document order.
+    Ruby,
+    /// `<rt>` inside a `Ruby`: the annotation for the base text before it, back to the previous
+    /// note or the start of the `Ruby`. The renderer draws it small above that base.
+    RubyNote,
 }
 
 /// An inline span. Spans are in preorder within their block and nest through `parent`, so empty

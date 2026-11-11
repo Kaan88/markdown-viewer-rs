@@ -13,6 +13,7 @@
 //! or zoom finds every image it drew), their declared size, or a typical box. Nothing here
 //! decodes, runs an engine job or asks for a remote image.
 
+use super::containers::{DEFINITION_GAP, DEFINITION_INDENT};
 use super::inline::{Inline, Style};
 use super::media::{GUESS_DIAGRAM, GUESS_IMAGE, GUESS_MATH};
 use super::pager::{Pager, Txt};
@@ -108,8 +109,20 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
             BlockKind::ListItem { .. }
             | BlockKind::Div { .. }
+            | BlockKind::DefTerm
+            | BlockKind::FigCaption
             | BlockKind::TableRow { .. }
             | BlockKind::TableCell { .. } => self.estimate_children(m, b, width),
+            BlockKind::DefDesc => {
+                let indent = self.px(DEFINITION_INDENT);
+                let gap = if self.ends_in_plain(b) {
+                    self.px(DEFINITION_GAP)
+                } else {
+                    0.0
+                };
+                self.estimate_children(m, b, width - indent) + gap
+            }
+            BlockKind::Figure { .. } => self.estimate_children(m, b, width) + self.px(12.0),
             BlockKind::CodeBlock { .. } => self.estimate_code(m, b, width),
             BlockKind::Diagram { oversize, .. } => self
                 .estimate_diagram(b, width, oversize.is_some())

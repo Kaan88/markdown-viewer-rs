@@ -23,6 +23,8 @@ pub(super) struct Style {
     pub(super) small: bool,
     pub(super) sub: bool,
     pub(super) sup: bool,
+    /// Text of a `<figcaption>`: a little smaller than the body, in the muted colour.
+    pub(super) caption: bool,
     /// A token colour from the syntax highlighter; overrides the theme text colour.
     pub(super) color: Option<Color>,
 }
@@ -35,6 +37,8 @@ impl Style {
             0.78
         } else if self.sub || self.sup {
             0.8
+        } else if self.caption {
+            0.9
         } else {
             1.0
         }
@@ -53,6 +57,18 @@ pub(super) struct Inline {
     /// a document position. `fixed` ranges stand for an atom (an image placeholder, a footnote
     /// mark): every offset in them maps to the atom's one position.
     pub(super) origins: Vec<(Range<usize>, u32, bool)>,
+    /// Ruby annotations. Their text is in `Document::text` but not in `text` above: the line is
+    /// laid out without it and the annotation is drawn small above its base.
+    pub(super) notes: Vec<RubyNote>,
+}
+
+/// One `<rt>`: `text` is drawn above the inline byte range `base`, and `doc` is where it starts in
+/// `Document::text`, so find, selection and a click on it still map to the document.
+#[derive(Clone)]
+pub(super) struct RubyNote {
+    pub(super) base: Range<usize>,
+    pub(super) text: String,
+    pub(super) doc: u32,
 }
 
 /// One inline image: its text offset, the store id it draws, its size in device px and, for math,
@@ -149,7 +165,13 @@ impl Inline {
                 return Some(range.start + (doc - *origin) as usize);
             }
         }
-        None
+        // An offset inside text this inline leaves out (a ruby annotation) sits at the start of the
+        // next text that is drawn.
+        self.origins
+            .iter()
+            .filter(|(_, origin, _)| *origin > doc)
+            .min_by_key(|(_, origin, _)| *origin)
+            .map(|(range, _, _)| range.start)
     }
 
     pub(super) fn style_at(&self, at: usize) -> Style {
@@ -164,14 +186,18 @@ impl<'a, 'b> Pager<'a, 'b> {
     /// The model's inline content of a leaf block as styled runs, with atoms replaced by the text
     /// the page shows for them.
     pub(super) fn inline_of(&mut self, block: u32) -> Inline {
+        let block_index = block;
         let block = self.doc.blocks[block as usize];
         let base = block.text.start as usize;
         let end = block.text.end as usize;
         let src = &self.doc.text[base..end];
+        let (term, caption) = self.lineage(block_index);
         let mut cuts = vec![base, end];
         let mut spans: Vec<(usize, usize, SpanKind)> = Vec::new();
         let mut atoms: Vec<(usize, usize, SpanKind)> = Vec::new();
         let mut math_ranges: Vec<(usize, usize)> = Vec::new();
+        let mut rubies: Vec<(usize, usize)> = Vec::new();
+        let mut notes: Vec<(usize, usize)> = Vec::new();
         for span in &self.doc.spans[block.spans.usize()] {
             let (start, stop) = (span.start as usize, span.end as usize);
             if start == stop {
@@ -189,16 +215,51 @@ impl<'a, 'b> Pager<'a, 'b> {
                     // Inline math becomes one image atom: no source text reaches the line.
                     atoms.push((start, stop, span.kind));
                     math_ranges.push((start, stop));
+                } else if span.kind == SpanKind::Ruby {
+                    rubies.push((start, stop));
+                } else if span.kind == SpanKind::RubyNote {
+                    notes.push((start, stop));
                 } else {
                     spans.push((start, stop, span.kind));
                 }
             }
         }
+        // A note's base is the text between the previous note (or the start of its `<ruby>`) and
+        // the note. A note with no base to sit over is ordinary small text.
+        let mut bases: Vec<(usize, usize, usize)> = Vec::new();
+        for &(start, stop) in &notes {
+            let ruby = rubies
+                .iter()
+                .filter(|&&(from, to)| from <= start && stop <= to)
+                .min_by_key(|&&(from, to)| to - from);
+            let from = ruby.map(|&(from, _)| {
+                notes
+                    .iter()
+                    .map(|&(_, previous)| previous)
+                    .filter(|&previous| previous <= start && previous > from)
+                    .max()
+                    .unwrap_or(from)
+            });
+            match from {
+                Some(from) if from < start => {
+                    bases.push((from, start, stop));
+                    cuts.push(from);
+                }
+                _ => spans.push((start, stop, SpanKind::Small)),
+            }
+        }
+        let hidden: Vec<(usize, usize)> = bases
+            .iter()
+            .map(|&(_, start, stop)| (start, stop))
+            .collect();
         cuts.sort_unstable();
         cuts.dedup();
+        // The inline text length at each cut, to turn a note's document range into a byte range.
+        let mut at_inline: Vec<(usize, usize)> = Vec::with_capacity(cuts.len());
         let mut out = Inline::default();
         for i in 0..cuts.len() {
             let at = cuts[i];
+            at_inline.push((at, out.text.len()));
             for (position, end, kind) in &atoms {
                 if *position == at {
                     self.push_atom(&mut out, *kind, *position as u32, *end as u32);
@@ -213,14 +274,52 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
             if math_ranges
                 .iter()
+                .chain(&hidden)
                 .any(|(start, end)| at >= *start && at < *end)
             {
                 continue;
             }
-            let style = self.style_at(&spans, at);
+            let mut style = self.style_at(&spans, at);
+            style.bold |= term;
+            style.caption = caption;
             out.push_doc(&src[at - base..to - base], style, at as u32);
         }
+        for (from, start, stop) in bases {
+            let inline_at = |doc: usize| {
+                at_inline
+                    .iter()
+                    .find(|&&(at, _)| at >= doc)
+                    .map_or(out.text.len(), |&(_, inline)| inline)
+            };
+            let range = inline_at(from)..inline_at(start);
+            if range.is_empty() {
+                continue;
+            }
+            out.notes.push(RubyNote {
+                base: range,
+                text: src[start - base..stop - base].to_string(),
+                doc: start as u32,
+            });
+        }
         out
+    }
+
+    /// Whether a block sits inside a `<dt>` (its text is bold) or a `<figcaption>` (small).
+    fn lineage(&self, block: u32) -> (bool, bool) {
+        let (mut term, mut caption) = (false, false);
+        let mut b = block;
+        loop {
+            let current = &self.doc.blocks[b as usize];
+            match current.kind {
+                BlockKind::DefTerm => term = true,
+                BlockKind::FigCaption => caption = true,
+                _ => {}
+            }
+            if current.parent == mdview_core::model::NONE {
+                return (term, caption);
+            }
+            b = current.parent;
+        }
     }
 
     pub(super) fn style_at(&self, spans: &[(usize, usize, SpanKind)], at: usize) -> Style {
@@ -402,6 +501,10 @@ impl<'a, 'b> Pager<'a, 'b> {
             for mut image in inline.boxes {
                 image.at += start;
                 merged.boxes.push(image);
+            }
+            for mut note in inline.notes {
+                note.base = note.base.start + start..note.base.end + start;
+                merged.notes.push(note);
             }
             first = false;
         }
