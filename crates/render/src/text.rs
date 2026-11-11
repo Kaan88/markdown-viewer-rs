@@ -5,7 +5,8 @@
 
 use crate::bitmap::Bitmap;
 use parley::{FontData, Layout, PositionedLayoutItem};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 use swash::scale::image::Content;
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::{Format, Vector};
@@ -63,11 +64,53 @@ struct Entry {
     h: u32,
     color: bool,
     data: Box<[u8]>,
-    tick: u64,
+    /// The engine's tick when this glyph was last drawn, for least-recently-used eviction.
+    last_used: u64,
 }
 
-/// Map, LRU node and box overhead per cached glyph, so the cap bounds real memory.
+/// Map slot and box overhead per cached glyph, so the cap bounds real memory.
 const ENTRY_OVERHEAD: usize = 96;
+
+/// Multiply-rotate hashing (the FxHash scheme) for the glyph key, which is a handful of integers
+/// built by this module: SipHash's flood resistance buys nothing here and cost a visible share of
+/// every cached glyph draw.
+#[derive(Default)]
+struct KeyHasher(u64);
+
+impl Hasher for KeyHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(b as u64);
+        }
+    }
+    #[inline]
+    fn write_u8(&mut self, n: u8) {
+        self.write_u64(n as u64);
+    }
+    #[inline]
+    fn write_u16(&mut self, n: u16) {
+        self.write_u64(n as u64);
+    }
+    #[inline]
+    fn write_u32(&mut self, n: u32) {
+        self.write_u64(n as u64);
+    }
+    #[inline]
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+    #[inline]
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+type GlyphMap = HashMap<Key, Entry, BuildHasherDefault<KeyHasher>>;
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct CacheStats {
@@ -93,8 +136,7 @@ impl CacheStats {
 pub struct TextEngine {
     scaler: ScaleContext,
     fonts: HashMap<(u64, u32), (FontData, u32, CacheKey)>,
-    map: HashMap<Key, Entry>,
-    lru: BTreeMap<u64, Key>,
+    map: GlyphMap,
     tick: u64,
     cap: usize,
     pub stats: CacheStats,
@@ -107,8 +149,7 @@ impl TextEngine {
         TextEngine {
             scaler: ScaleContext::new(),
             fonts: HashMap::new(),
-            map: HashMap::new(),
-            lru: BTreeMap::new(),
+            map: GlyphMap::default(),
             tick: 0,
             cap,
             stats: CacheStats::default(),
@@ -116,7 +157,13 @@ impl TextEngine {
         }
     }
 
-    fn raster(&mut self, key: Key, font: &FontData, coords: &[i16], size: f32) -> Entry {
+    fn raster(
+        &mut self,
+        key: Key,
+        font: &FontData,
+        coords: impl Iterator<Item = i16>,
+        size: f32,
+    ) -> Entry {
         let cache_key = (font.data.id(), font.index);
         let (data, offset, font_key) = self.fonts.entry(cache_key).or_insert_with(|| {
             let r = FontRef::from_index(font.data.as_ref(), font.index as usize).expect("font");
@@ -132,7 +179,7 @@ impl TextEngine {
             .builder(font_ref)
             .size(size)
             .hint(false)
-            .normalized_coords(coords.iter().copied())
+            .normalized_coords(coords)
             .build();
         let image = Render::new(&[
             Source::ColorOutline(0),
@@ -152,7 +199,7 @@ impl TextEngine {
                 h: 0,
                 color: false,
                 data: Box::new([]),
-                tick,
+                last_used: tick,
             };
         };
         let (w, h) = (image.placement.width, image.placement.height);
@@ -180,16 +227,25 @@ impl TextEngine {
             h,
             color,
             data,
-            tick,
+            last_used: tick,
         }
     }
 
+    /// Called when the cache is over `cap`: drops the least recently drawn glyphs until it is at
+    /// three quarters of the cap. Eviction is rare (a warm document fits in a fraction of the cap),
+    /// so this sorts the entries by last use instead of keeping an LRU order on every draw, and the
+    /// quarter of headroom keeps a cache at its cap from paying the sort on every miss.
     fn evict(&mut self) {
-        while self.stats.bytes > self.cap {
-            let Some((&tick, &key)) = self.lru.iter().next() else {
+        if self.stats.bytes <= self.cap {
+            return;
+        }
+        let target = self.cap - self.cap / 4;
+        let mut order: Vec<(u64, Key)> = self.map.iter().map(|(k, e)| (e.last_used, *k)).collect();
+        order.sort_unstable_by_key(|&(tick, _)| tick);
+        for (_, key) in order {
+            if self.stats.bytes <= target {
                 break;
-            };
-            self.lru.remove(&tick);
+            }
             if let Some(entry) = self.map.remove(&key) {
                 self.stats.bytes -= entry.data.len() + ENTRY_OVERHEAD;
                 self.stats.evictions += 1;
@@ -237,15 +293,13 @@ impl TextEngine {
                     continue;
                 };
                 let run = glyph_run.run();
-                let font = run.font().clone();
+                // Borrowed, not cloned: the font is only needed (and cloned once into `fonts`)
+                // when a glyph misses the cache.
+                let font = run.font();
                 let size = run.font_size();
-                let coords: Vec<i16> = run
-                    .normalized_coords()
-                    .iter()
-                    .map(|c| c.to_bits())
-                    .collect();
+                let coords = run.normalized_coords();
                 let coord_hash = coords.iter().fold(0u64, |h, c| {
-                    (h ^ (*c as u16 as u64)).wrapping_mul(0x0000_0100_0000_01b3)
+                    (h ^ (c.to_bits() as u16 as u64)).wrapping_mul(0x0000_0100_0000_01b3)
                 });
                 let brush = glyph_run.style().brush;
                 for glyph in glyph_run.positioned_glyphs() {
@@ -263,20 +317,18 @@ impl TextEngine {
                     self.tick += 1;
                     let tick = self.tick;
                     if let Some(entry) = self.map.get_mut(&key) {
-                        self.lru.remove(&entry.tick);
-                        entry.tick = tick;
-                        self.lru.insert(tick, key);
+                        entry.last_used = tick;
                         self.stats.hits += 1;
-                    } else {
-                        self.stats.misses += 1;
-                        let entry = self.raster(key, &font, &coords, size);
-                        self.stats.bytes += entry.data.len() + ENTRY_OVERHEAD;
-                        self.stats.entries += 1;
-                        self.stats.peak_bytes = self.stats.peak_bytes.max(self.stats.bytes);
-                        self.map.insert(key, entry);
-                        self.lru.insert(tick, key);
-                        self.evict();
+                        blit(fb, clip, entry, floor_x as i32, y as i32, brush, &self.lut);
+                        continue;
                     }
+                    self.stats.misses += 1;
+                    let entry = self.raster(key, font, coords.iter().map(|c| c.to_bits()), size);
+                    self.stats.bytes += entry.data.len() + ENTRY_OVERHEAD;
+                    self.stats.entries += 1;
+                    self.stats.peak_bytes = self.stats.peak_bytes.max(self.stats.bytes);
+                    self.map.insert(key, entry);
+                    self.evict();
                     let Some(entry) = self.map.get(&key) else {
                         continue;
                     };
@@ -413,6 +465,56 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_small_cache_stays_under_its_cap_and_draws_the_same() {
+        let layouts: Vec<_> = [14.0, 18.0, 23.0, 31.0]
+            .iter()
+            .map(|&size| paragraph(&SAMPLE.repeat(2), size, 600.0, [0, 0, 0, 255]))
+            .collect();
+        let h = layouts
+            .iter()
+            .map(|l| l.height().ceil() as u32)
+            .sum::<u32>()
+            + 40;
+        let draw_all = |engine: &mut TextEngine, check_cap: bool| {
+            let mut fb = Bitmap::new(640, h);
+            fb.clear([255, 255, 255]);
+            let mut y = 5.0;
+            for layout in &layouts {
+                engine.draw_layout(&mut fb, layout, 3.3, y);
+                y += layout.height().ceil() + 8.0;
+                if check_cap {
+                    assert!(engine.stats.bytes <= engine.cap, "{:?}", engine.stats);
+                }
+                assert_eq!(engine.stats.entries, engine.map.len());
+            }
+            fb
+        };
+        let mut roomy = TextEngine::new(16 << 20);
+        let expected = draw_all(&mut roomy, true);
+        assert_eq!(roomy.stats.evictions, 0);
+        let total = roomy.stats.bytes;
+
+        let cap = total * 2 / 3;
+        let mut tight = TextEngine::new(cap);
+        for _ in 0..3 {
+            let got = draw_all(&mut tight, true);
+            assert!(got.pixels == expected.pixels, "eviction changed the output");
+        }
+        assert!(tight.stats.evictions > 0);
+        assert!(
+            tight.stats.peak_bytes <= cap + 64 * 1024,
+            "{:?}",
+            tight.stats
+        );
+
+        // The glyphs drawn last are the ones kept: redrawing only the last layout hits.
+        let mut fb = Bitmap::new(640, h);
+        let misses = tight.stats.misses;
+        tight.draw_layout(&mut fb, layouts.last().unwrap(), 3.3, 5.0);
+        assert_eq!(tight.stats.misses, misses, "{:?}", tight.stats);
     }
 
     /// Not a correctness test: `cargo test --release -p mdview-render text_draw_speed -- --ignored
