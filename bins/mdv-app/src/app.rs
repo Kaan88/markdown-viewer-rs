@@ -631,7 +631,7 @@ impl App {
                 times.rows
             );
         }
-        if self.steps.is_some() && !self.first {
+        if self.steps.is_some() && !self.first && !self.ws.refining() {
             self.step_times.push(times);
         }
         let title = self.ws.title();
@@ -949,6 +949,12 @@ impl ApplicationHandler<Wake> for App {
             return;
         }
         if self.steps.is_some() && !self.first {
+            // The steps measure scrolling a refined page, as a reader who scrolls after the
+            // first second sees it; refinement itself runs first, in its usual slices.
+            if self.refine_slice() {
+                event_loop.set_control_flow(ControlFlow::Poll);
+                return;
+            }
             self.step();
             if self.exit {
                 return;

@@ -236,3 +236,26 @@ fn refinement_keeps_the_content_on_screen_still() {
     let exact = eager(&doc, &options);
     assert_eq!(after, exact.y_of(&doc, headings[25]).unwrap() - 10.0);
 }
+
+/// Scrolling into blocks that are still estimated measures them as they come into view; the
+/// correction is below the kept rows, so every frame after the first only paints its band.
+#[test]
+fn scrolling_into_estimates_keeps_reusing_the_frame() {
+    let doc = long_text();
+    for (width, scale) in [(780.0, 1.0), (600.0, 1.5)] {
+        let options = options(width, scale);
+        let mut renderer = DocumentRenderer::new();
+        renderer.layout(&doc, &options);
+        let mut top = renderer.view_frame(&doc, &options, 0.0, 500.0).top;
+        for step in 0..120 {
+            renderer.view_frame(&doc, &options, top + 40.0, 500.0);
+            let total = renderer.page_layout().unwrap().total_height();
+            let frame = renderer.frame().unwrap();
+            if frame.top + 500.0 >= total {
+                break;
+            }
+            assert!(frame.band.is_some(), "{width}@{scale} step {step}");
+            top = frame.top;
+        }
+    }
+}
