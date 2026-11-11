@@ -1635,6 +1635,14 @@ name = "mdview-engine-proto"
 version = "0.1.0"
 
 [[package]]
+name = "mdview-fetch"
+version = "0.1.0"
+dependencies = [
+ "mdview-core",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "mdview-render"
 version = "0.1.0"
 dependencies = [
