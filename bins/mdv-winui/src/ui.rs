@@ -417,6 +417,18 @@ struct Shell {
     find_status: RefCell<Option<crate::bar_bindings::TextBlock>>,
     /// The find box has the keyboard, so typed characters are its own, not the page's.
     find_box_focused: Cell<bool>,
+    /// The Outline pane on the right: its column, its list of heading buttons, and whether it shows.
+    outline_column: ColumnDefinition,
+    outline_list: RefCell<Option<crate::bar_bindings::StackPanel>>,
+    outline_visible: Cell<bool>,
+    /// The page's right-click menu, refilled on each right press.
+    page_menu: MenuFlyout,
+    theme_start: u8,
+    /// The command bar row and the outline pane's scrolling area, shaded apart from the page.
+    command_strip: RefCell<Option<Grid>>,
+    /// Focus reading mode: what was showing before it (Files pane, Outline pane), to put back.
+    focus: Cell<Option<(bool, bool)>>,
+    outline_area: RefCell<Option<crate::bar_bindings::ScrollViewer>>,
 }
 
 impl Shell {
@@ -458,6 +470,10 @@ impl Shell {
                     self.cycle(if shift { -1 } else { 1 });
                     return true;
                 }
+                if ctrl && shift && wparam == 0x46 {
+                    self.toggle_focus();
+                    return true;
+                }
                 if ctrl && wparam == 0x46 {
                     self.find_open();
                     return true;
@@ -486,6 +502,10 @@ impl Shell {
                     return true;
                 }
                 if wparam == VK_ESCAPE {
+                    if self.focus.get().is_some() {
+                        self.toggle_focus();
+                        return true;
+                    }
                     if self.find_active.get() {
                         self.find_close();
                         return true;
@@ -680,9 +700,9 @@ impl Shell {
         let (hits, current, capped) = self.renderer.borrow().find_summary();
         let query = self.renderer.borrow().find_query().to_string();
         let status = if query.is_empty() {
-            "type to search".to_string()
+            "Type to search".to_string()
         } else if hits == 0 {
-            "no matches".to_string()
+            "No matches".to_string()
         } else {
             format!(
                 "{} of {}{}",
@@ -693,7 +713,7 @@ impl Shell {
         };
         _ = self
             .window
-            .SetTitle(&format!("mdview - {name} — Find: {query} [{status}]"));
+            .SetTitle(&format!("mdview - {name} â€” Find: {query} [{status}]"));
         if let Some(label) = self.find_status.borrow().as_ref() {
             _ = label.SetText(if query.is_empty() { "" } else { &status });
         }
@@ -863,10 +883,164 @@ impl Shell {
         self.focus_page();
     }
 
+    /// Focus reading mode (Ctrl+Shift+F, Escape leaves): hides the command bar and both panes so
+    /// only the tabs and the page are left, and restores exactly what was showing, as in Qt.
+    fn toggle_focus(&self) {
+        let strip = self
+            .command_strip
+            .borrow()
+            .as_ref()
+            .and_then(|strip| strip.cast::<UIElement>().ok());
+        match self.focus.take() {
+            None => {
+                self.focus
+                    .set(Some((self.tree_visible.get(), self.outline_visible.get())));
+                if let Some(strip) = strip.as_ref() {
+                    _ = tabs::set_visible(strip, false);
+                }
+                if self.tree_visible.get() {
+                    self.set_tree_visible(false);
+                }
+                if self.outline_visible.get() {
+                    self.toggle_outline();
+                }
+            }
+            Some((files, outline)) => {
+                if let Some(strip) = strip.as_ref() {
+                    _ = tabs::set_visible(strip, true);
+                }
+                if files {
+                    self.set_tree_visible(true);
+                }
+                if outline && !self.outline_visible.get() {
+                    self.toggle_outline();
+                }
+            }
+        }
+        self.focus_page();
+    }
+
+    /// The Outline button: shows or hides the pane on the right.
+    fn toggle_outline(&self) {
+        let visible = !self.outline_visible.get();
+        self.outline_visible.set(visible);
+        _ = self.outline_column.SetWidth(GridLength {
+            value: if visible { 260.0 } else { 0.0 },
+            grid_unit_type: GridUnitType::Pixel,
+        });
+        if visible {
+            refresh_outline(self);
+        }
+        self.focus_page();
+    }
+
+    /// Right press on the page: fills the page menu for what is under the pointer (a link, the
+    /// selection), which XAML then opens there as the page's context menu.
+    fn fill_page_menu(&self, x: f32, y: f32) {
+        let Some(target) = SHELL.with(|cell| cell.borrow().clone()) else {
+            return;
+        };
+        let Ok(items) = self.page_menu.Items() else {
+            return;
+        };
+        while items.Size().unwrap_or(0) > 0 {
+            if items.RemoveAt(0).is_err() {
+                break;
+            }
+        }
+        let hit = self.renderer.borrow_mut().hit_test(x, y);
+        let link = hit.as_ref().and_then(|hit| hit.link);
+        if let Some(index) = link {
+            let t = target.clone();
+            _ = crate::bar::menu_item(&self.page_menu, "Open link", move || {
+                t.follow(Some(index), None)
+            });
+            if let Some(destination) = self.renderer.borrow().link_destination(index) {
+                _ = crate::bar::menu_item(&self.page_menu, "Copy link address", move || {
+                    set_clipboard_text(&destination);
+                });
+            }
+        }
+        let has_selection = self
+            .renderer
+            .borrow()
+            .selection_text()
+            .is_some_and(|text| !text.is_empty());
+        let t = target.clone();
+        if let Ok(copy) =
+            crate::bar::menu_item(&self.page_menu, "Copy\tCtrl+C", move || t.copy_selection())
+        {
+            _ = tabs::set_enabled(&copy, has_selection);
+        }
+        let t = target.clone();
+        _ = crate::bar::menu_item(&self.page_menu, "Find...\tCtrl+F", move || t.find_open());
+        let t = target.clone();
+        _ = crate::bar::menu_item(&self.page_menu, "Reload\tF5", move || reload(&t));
+    }
+
+    /// Right click on a tab: Close, Close others, Copy file path, Show in Explorer.
+    fn tab_menu(&self, item: &TabViewItem) -> Option<MenuFlyout> {
+        let target = SHELL.with(|cell| cell.borrow().clone())?;
+        let menu = MenuFlyout::new().ok()?;
+        let find = {
+            let item = item.clone();
+            move |shell: &Shell| {
+                shell
+                    .pages
+                    .borrow()
+                    .iter()
+                    .position(|page| tabs::same_object(&page.item, &item))
+            }
+        };
+        let (t, f) = (target.clone(), find.clone());
+        _ = crate::bar::menu_item(&menu, "Close tab", move || {
+            if let Some(index) = f(&t) {
+                t.close_tab(index);
+            }
+        });
+        let (t, f) = (target.clone(), find.clone());
+        _ = crate::bar::menu_item(&menu, "Close other tabs", move || {
+            if let Some(keep) = f(&t) {
+                let count = t.pages.borrow().len();
+                for index in (0..count).rev() {
+                    if index != keep {
+                        t.close_tab(index);
+                    }
+                }
+            }
+        });
+        let (t, f) = (target.clone(), find.clone());
+        _ = crate::bar::menu_item(&menu, "Copy file path", move || {
+            if let Some(index) = f(&t) {
+                let path = t.pages.borrow()[index].path.display().to_string();
+                set_clipboard_text(&path);
+            }
+        });
+        let (t, f) = (target.clone(), find);
+        _ = crate::bar::menu_item(&menu, "Show in Explorer", move || {
+            if let Some(index) = f(&t) {
+                let path = t.pages.borrow()[index].path.clone();
+                _ = std::process::Command::new("explorer")
+                    .arg(format!("/select,{}", path.display()))
+                    .spawn();
+            }
+        });
+        Some(menu)
+    }
+
     /// View > Files and Ctrl+B: shows or hides the pane; with no folder yet, asks for one.
     fn toggle_files(&self) {
         if self.folder.borrow().is_none() {
-            self.open_folder_dialog();
+            // No folder yet: show the one the current file is in; ask only with no file open.
+            let dir = self
+                .path
+                .borrow()
+                .as_ref()
+                .and_then(|path| path.parent().map(Path::to_path_buf));
+            match dir {
+                Some(dir) => self.open_folder(&dir, true),
+                None => self.open_folder_dialog(),
+            }
         } else {
             self.set_tree_visible(!self.tree_visible.get());
             self.focus_page();
@@ -945,6 +1119,12 @@ impl Shell {
             _ = items.Append(&item);
         }
         self.tabs_busy.set(false);
+        if let Some(menu) = self.tab_menu(&item)
+            && let Ok(element) = item.cast::<UIElement>()
+            && let Ok(flyout) = menu.cast::<FlyoutBase>()
+        {
+            _ = element.SetContextFlyout(&flyout);
+        }
         self.relabel();
         self.update_strip();
         index
@@ -1192,7 +1372,7 @@ impl Shell {
             .as_deref()
             .map(file_name)
             .map_or_else(|| "mdview".to_string(), |name| format!("mdview - {name}"));
-        _ = self.window.SetTitle(&format!("{name} — {text}"));
+        _ = self.window.SetTitle(&format!("{name} â€” {text}"));
     }
 
     /// Writes tabs, the current tab and Recent at once, so a crash loses nothing. Also rebuilds
@@ -1749,6 +1929,53 @@ fn set_chrome_theme(root: &Grid, theme: mdview_render::Theme) -> Result<()> {
     Ok(())
 }
 
+/// `theme`'s page colour moved `amount` (0-1) towards its text colour: the chrome shades, the same
+/// mix the Qt shell uses, so the title row, command bar and panes read as separate from the page.
+fn shade(theme: mdview_render::Theme, amount: f32) -> Option<Brush> {
+    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * amount).round() as u8;
+    let [r, g, b] = theme.bg;
+    let [tr, tg, tb] = theme.text;
+    let brush = SolidColorBrush::new().ok()?;
+    brush
+        .SetColor(Color {
+            a: 255,
+            r: mix(r, tr),
+            g: mix(g, tg),
+            b: mix(b, tb),
+        })
+        .ok()?;
+    brush.cast().ok()
+}
+
+/// Paints the title row (10% towards the text colour), and the command bar and side panes (6%).
+fn set_chrome_shades(shell: &Shell, theme: mdview_render::Theme) {
+    use crate::bar_bindings::IControl;
+    if let (Some(title), Ok(control)) = (shade(theme, 0.10), shell.tab_view.cast::<IControl>())
+        && let Ok(title) = title.cast::<crate::bar_bindings::Brush>()
+    {
+        _ = control.SetBackground(&title);
+    }
+    let Some(bar) = shade(theme, 0.06) else {
+        return;
+    };
+    if let Some(strip) = shell.command_strip.borrow().as_ref()
+        && let Ok(panel) = strip.cast::<IPanel>()
+    {
+        _ = panel.SetBackground(&bar);
+    }
+    let Ok(bar) = bar.cast::<crate::bar_bindings::Brush>() else {
+        return;
+    };
+    if let Ok(control) = shell.tree.cast::<IControl>() {
+        _ = control.SetBackground(&bar);
+    }
+    if let Some(area) = shell.outline_area.borrow().as_ref()
+        && let Ok(control) = area.cast::<IControl>()
+    {
+        _ = control.SetBackground(&bar);
+    }
+}
+
 /// The menu row sits on the window background, so paint it the page's colour.
 fn set_root_background(root: &Grid, theme: mdview_render::Theme) -> Result<()> {
     let brush = SolidColorBrush::new()?;
@@ -1762,10 +1989,30 @@ fn set_root_background(root: &Grid, theme: mdview_render::Theme) -> Result<()> {
 /// Rebuilds the Outline menu from the renderer's headings. Called after a document loads, because
 /// the menu is created once but its items depend on the document.
 fn refresh_outline(shell: &Shell) {
-    // The headings are counted even with no outline UI, so `--outline-test` checks the document.
-    shell
-        .outline_entries
-        .set(shell.renderer.borrow().headings().len());
+    let headings = shell.renderer.borrow().headings();
+    shell.outline_entries.set(headings.len());
+    if let Some(list) = shell.outline_list.borrow().as_ref()
+        && let Ok(children) = list.cast::<IPanel>().and_then(|p| p.Children())
+        && let Some(target) = SHELL.with(|cell| cell.borrow().clone())
+    {
+        _ = children.Clear();
+        for (level, title, block) in &headings {
+            let indent = 14.0 * level.saturating_sub(1) as f64;
+            let Ok(button) = crate::bar::list_button(title, indent) else {
+                continue;
+            };
+            let target = target.clone();
+            let block = *block;
+            _ = crate::bar::on_click(&button, move || {
+                target.renderer.borrow_mut().scroll_to_block(block);
+                target.show();
+                target.focus_page();
+            });
+            if let Ok(element) = button.cast::<UIElement>() {
+                _ = children.Append(&element);
+            }
+        }
+    }
     let Some(menu) = shell.outline_menu.borrow().clone() else {
         return;
     };
@@ -1803,6 +2050,64 @@ fn refresh_outline(shell: &Shell) {
     shell.outline_entries.set(headings.len());
 }
 
+/// A WinUI dialog over the window: `title`, an optional paragraph, then `rows` as a two-column
+/// table (keys in the left column, what they do in the right), and a Close button.
+fn show_dialog(shell: &Shell, title: &str, intro: Option<&str>, rows: &[(String, String)]) {
+    use crate::bar_bindings as b;
+    let build = || -> Result<()> {
+        let dialog = b::ContentDialog::new()?;
+        dialog.SetTitle(&tabs::boxed(title))?;
+        dialog.SetCloseButtonText("Close")?;
+        let body = b::StackPanel::new()?;
+        body.SetSpacing(12.0)?;
+        if let Some(intro) = intro {
+            // About: the logo beside the text.
+            let row = crate::bar::row()?;
+            row.SetSpacing(20.0)?;
+            if let Some(mark) = crate::bar::logo_sized(64.0) {
+                mark.cast::<b::IFrameworkElement>()?
+                    .SetVerticalAlignment(b::VerticalAlignment::Top)?;
+                crate::bar::append(&row, &mark)?;
+            }
+            crate::bar::append(&row, &crate::bar::text(intro, 14.0)?)?;
+            crate::bar::append(&body, &row)?;
+        }
+        if !rows.is_empty() {
+            let table = Grid::new()?;
+            crate::bar::column(&table, GridUnitType::Auto, 1.0)?;
+            crate::bar::column(&table, GridUnitType::Star, 1.0)?;
+            for (index, (keys, label)) in rows.iter().enumerate() {
+                add_row(&table, GridUnitType::Auto, 1.0)?;
+                let key = crate::bar::text(keys, 13.0)?;
+                key.SetFontWeight(b::FontWeight { weight: 600 })?;
+                crate::bar::set_margin(&key, 0.0, 24.0)?;
+                key.cast::<b::IFrameworkElement>()?
+                    .SetMargin(b::Thickness {
+                        left: 0.0,
+                        top: 3.0,
+                        right: 24.0,
+                        bottom: 3.0,
+                    })?;
+                place(&table, &key, index as i32, 0)?;
+                let what = crate::bar::text(label, 13.0)?;
+                place(&table, &what, index as i32, 1)?;
+            }
+            crate::bar::append(&body, &table)?;
+        }
+        dialog.cast::<ContentControl>()?.SetContent(&body)?;
+        let root: b::IUIElement = shell.root.cast()?;
+        dialog
+            .cast::<b::IUIElement>()?
+            .SetXamlRoot(&root.XamlRoot()?)?;
+        // Shown without waiting: the dialog closes itself, and nothing reads its result.
+        _ = dialog.ShowAsync()?;
+        Ok(())
+    };
+    if let Err(e) = build() {
+        diag::fail("dialog", &e);
+    }
+}
+
 /// Applies a theme choice from the Theme menu. `None` is the System choice: the page and chrome
 /// take the Windows app theme as read now, and the session records System so the next launch
 /// follows Windows again.
@@ -1811,6 +2116,7 @@ fn choose_theme(shell: &Shell, choice: Option<mdview_render::Theme>) {
     shell.renderer.borrow_mut().set_theme(theme);
     _ = set_root_background(&shell.root, theme);
     _ = set_chrome_theme(&shell.root, theme);
+    set_chrome_shades(shell, theme);
     if let Some((_, session)) = shell.session.borrow_mut().as_mut() {
         session.theme = match choice {
             None => mdview_core::session::Theme::System,
@@ -1830,7 +2136,7 @@ fn build_bar(shell: &Rc<Shell>) -> Result<()> {
     let strip = Grid::new()?;
     bar::column(&strip, GridUnitType::Star, 1.0)?;
     bar::column(&strip, GridUnitType::Auto, 1.0)?;
-    bar::set_margin(&strip, 8.0, 8.0)?;
+    // No margin on the row itself, so its shade reaches both window edges.
     strip
         .cast::<crate::bar_bindings::IFrameworkElement>()?
         .SetHeight(48.0)?;
@@ -1848,9 +2154,9 @@ fn build_bar(shell: &Rc<Shell>) -> Result<()> {
     bar::on_click(&refresh, move || reload(&target))?;
     bar::append(&left, &refresh)?;
 
-    let recent_button = bar::button(glyph::RECENT, None, "Recent files")?;
+    let recent_button = bar::button(glyph::RECENT, Some("Recent"), "Recent files")?;
     let recent = MenuFlyout::new()?;
-    bar::set_menu(&recent_button, &recent)?;
+    bar::set_menu(&recent_button, &recent, false)?;
     bar::append(&left, &recent_button)?;
     *shell.recent_menu.borrow_mut() = Some(recent);
 
@@ -1860,6 +2166,11 @@ fn build_bar(shell: &Rc<Shell>) -> Result<()> {
     let target = shell.clone();
     bar::on_click(&files, move || target.toggle_files())?;
     bar::append(&left, &files)?;
+
+    let outline_button = bar::button(glyph::OUTLINE, None, "Outline pane")?;
+    let target = shell.clone();
+    bar::on_click(&outline_button, move || target.toggle_outline())?;
+    bar::append(&left, &outline_button)?;
 
     bar::append(&left, &bar::separator()?)?;
 
@@ -1943,52 +2254,100 @@ fn build_bar(shell: &Rc<Shell>) -> Result<()> {
 
     bar::append(&right, &bar::separator()?)?;
 
-    let theme_button = bar::button(glyph::THEME, None, "Theme")?;
-    let theme_menu = MenuFlyout::new()?;
-    for (title, choice) in [
-        ("System theme", None),
-        ("Light theme", Some(LIGHT)),
-        ("Dark theme", Some(DARK)),
-    ] {
-        let target = shell.clone();
-        bar::menu_item(&theme_menu, title, move || choose_theme(&target, choice))?;
-    }
-    bar::set_menu(&theme_button, &theme_menu)?;
+    // Theme cycles System -> Light -> Dark -> System; the tooltip names the current one.
+    let start = shell.theme_start;
+    let theme_tip = |mode: u8| {
+        format!(
+            "Theme: {} (click for {})",
+            ["System", "Light", "Dark"][mode as usize],
+            ["Light", "Dark", "System"][mode as usize]
+        )
+    };
+    const MODE_GLYPHS: [&str; 3] = [glyph::SYSTEM, glyph::LIGHT, glyph::DARK];
+    const MODE_NAMES: [&str; 3] = ["System", "Light", "Dark"];
+    let (theme_button, theme_icon, theme_text) = bar::button_parts(
+        MODE_GLYPHS[start as usize],
+        Some(MODE_NAMES[start as usize]),
+        &theme_tip(start),
+    )?;
+    let mode = Rc::new(Cell::new(start));
+    let target = shell.clone();
+    let button = theme_button.clone();
+    bar::on_click(&theme_button, move || {
+        let next = (mode.get() + 1) % 3;
+        mode.set(next);
+        choose_theme(&target, [None, Some(LIGHT), Some(DARK)][next as usize]);
+        _ = theme_icon.SetGlyph(MODE_GLYPHS[next as usize]);
+        if let Some(text) = theme_text.as_ref() {
+            _ = text.SetText(MODE_NAMES[next as usize]);
+        }
+        _ = tabs::set_tooltip(&button, &theme_tip(next));
+    })?;
     bar::append(&right, &theme_button)?;
 
     let more_button = bar::button(glyph::MORE, None, "More options")?;
     let more = MenuFlyout::new()?;
     let target = shell.clone();
-    bar::menu_item(&more, "Open folder...	Ctrl+Shift+O", move || {
+    bar::menu_item(&more, "Open folder...\tCtrl+Shift+O", move || {
         target.open_folder_dialog()
     })?;
     let target = shell.clone();
-    bar::menu_item(&more, "Close tab	Ctrl+W", move || {
+    bar::menu_item(&more, "Close tab\tCtrl+W", move || {
         if let Some(current) = target.current.get() {
             target.close_tab(current);
         }
     })?;
     let target = shell.clone();
-    bar::menu_item(&more, "Close all tabs	Ctrl+Shift+W", move || {
+    bar::menu_item(&more, "Close all tabs\tCtrl+Shift+W", move || {
         target.close_all()
     })?;
     let target = shell.clone();
-    bar::menu_item(&more, "Copy	Ctrl+C", move || target.copy_selection())?;
+    bar::menu_item(&more, "Copy\tCtrl+C", move || target.copy_selection())?;
     let target = shell.clone();
-    bar::menu_item(&more, "Actual size	Ctrl+0", move || {
+    bar::menu_item(&more, "Actual size\tCtrl+0", move || {
         target.zoom_step(0);
+    })?;
+    let target = shell.clone();
+    bar::menu_item(&more, "Focus reading mode\tCtrl+Shift+F", move || {
+        target.toggle_focus()
+    })?;
+    let target = shell.clone();
+    bar::menu_item(&more, strings::SHORTCUTS_TITLE, move || {
+        let rows: Vec<(String, String)> = mdview_core::commands::shortcut_help()
+            .into_iter()
+            .map(|(keys, label)| (keys, label.to_string()))
+            .collect();
+        show_dialog(&target, strings::SHORTCUTS_TITLE, None, &rows);
+    })?;
+    let target = shell.clone();
+    bar::menu_item(&more, "About mdview", move || {
+        let intro = format!(
+            "mdview {}\n\n{}\n\nWinUI 3 on Windows, Qt on Linux; one renderer, no webview.",
+            env!("CARGO_PKG_VERSION"),
+            strings::ABOUT
+        );
+        show_dialog(&target, strings::ABOUT_TITLE, Some(&intro), &[]);
     })?;
     let window = shell.window.clone();
     bar::menu_item(&more, "Exit", move || {
         _ = window.Close();
     })?;
-    bar::set_menu(&more_button, &more)?;
+    bar::set_menu(&more_button, &more, true)?;
     bar::append(&right, &more_button)?;
 
+    bar::set_margin(&left, 8.0, 0.0)?;
+    bar::set_margin(&right, 0.0, 8.0)?;
     place(&strip, &left, 0, 0)?;
     place(&strip, &right, 0, 1)?;
     place(&shell.root, &strip, 1, 0)?;
-    Grid::SetColumnSpan(&strip.cast::<FrameworkElement>()?, 2)?;
+    Grid::SetColumnSpan(&strip.cast::<FrameworkElement>()?, 3)?;
+
+    let (area, list) = bar::scrolling_list()?;
+    place(&shell.root, &area, 2, 2)?;
+    *shell.outline_list.borrow_mut() = Some(list);
+    *shell.outline_area.borrow_mut() = Some(area);
+    *shell.command_strip.borrow_mut() = Some(strip.clone());
+    set_chrome_shades(shell, shell.renderer.borrow().theme());
     refresh_outline(shell);
     refresh_recent(shell);
     Ok(())
@@ -2043,6 +2402,13 @@ pub fn build(
     zoom: f32,
     startup: Startup,
 ) -> Result<()> {
+    // The Theme button's starting mode: 0 System, 1 Light, 2 Dark. A theme given at launch
+    // (--light, --dark, or the saved session's) is that mode; none means System.
+    let theme_start = match theme {
+        Some(t) if t.name == DARK.name => 2,
+        Some(_) => 1,
+        None => 0,
+    };
     let theme = theme.unwrap_or_else(system_theme);
     diag::trace(&format!("theme: {}", theme.name));
     diag::trace(&format!(
@@ -2071,6 +2437,13 @@ pub fn build(
         grid_unit_type: GridUnitType::Star,
     })?;
     root.ColumnDefinitions()?.Append(&page_column)?;
+    // Column 2 holds the Outline pane, 0 wide until the Outline button shows it.
+    let outline_column = ColumnDefinition::new()?;
+    outline_column.SetWidth(GridLength {
+        value: 0.0,
+        grid_unit_type: GridUnitType::Pixel,
+    })?;
+    root.ColumnDefinitions()?.Append(&outline_column)?;
     set_root_background(&root, theme)?;
     set_chrome_theme(&root, theme)?;
 
@@ -2093,6 +2466,10 @@ pub fn build(
         .Children()?
         .Append(&hit_target.cast::<UIElement>()?)?;
     place(&root, &panel, 2, 1)?;
+    let page_menu = MenuFlyout::new()?;
+    panel
+        .cast::<UIElement>()?
+        .SetContextFlyout(&page_menu.cast::<FlyoutBase>()?)?;
 
     // Headers only: no tab content, so the one panel below draws whichever page is current.
     let tab_view = TabView::new()?;
@@ -2108,7 +2485,7 @@ pub fn build(
         .SetMinWidth(160.0)?;
     crate::bar::set_tab_strip_footer(&tab_view, &drag)?;
     place(&root, &tab_view, 0, 0)?;
-    Grid::SetColumnSpan(&tab_view.cast::<FrameworkElement>()?, 2)?;
+    Grid::SetColumnSpan(&tab_view.cast::<FrameworkElement>()?, 3)?;
     crate::bar::extend_into_title_bar(&window, &drag)?;
 
     let tree = TreeView::new()?;
@@ -2175,6 +2552,14 @@ pub fn build(
         find_box: RefCell::new(None),
         find_status: RefCell::new(None),
         find_box_focused: Cell::new(false),
+        outline_column: outline_column.clone(),
+        outline_list: RefCell::new(None),
+        outline_visible: Cell::new(false),
+        page_menu: page_menu.clone(),
+        theme_start,
+        command_strip: RefCell::new(None),
+        focus: Cell::new(None),
+        outline_area: RefCell::new(None),
     });
     let framework: FrameworkElement = panel.cast()?;
     {
@@ -2227,6 +2612,17 @@ pub fn build(
                 let Some(bar) = shell.renderer.borrow().bar() else {
                     return;
                 };
+                let (right, _) = args
+                    .GetCurrentPoint(&source)
+                    .map(|point| crate::bar::buttons(&point))
+                    .unwrap_or((false, false));
+                if right {
+                    // Left unhandled, so XAML goes on to open the page's context menu.
+                    if x < bar.x {
+                        shell.fill_page_menu(x, y);
+                    }
+                    return;
+                }
                 if x < bar.x {
                     // The page: a press starts a selection, and a link or footnote is followed on
                     // release if the pointer never moved.
@@ -2259,6 +2655,20 @@ pub fn build(
             .forget();
     }
     {
+        // The pointer left the page: the scrollbar thumb goes back to thin (unless dragging).
+        let shell = shell.clone();
+        panel
+            .cast::<crate::bar_bindings::IUIElement>()?
+            .PointerExited(move |_, _| {
+                if shell.dragging.get().is_none()
+                    && shell.renderer.borrow_mut().set_bar_hover(false)
+                {
+                    shell.show();
+                }
+            })?
+            .forget();
+    }
+    {
         let shell = shell.clone();
         let element: UIElement = panel.cast()?;
         let source = element.clone();
@@ -2284,10 +2694,15 @@ pub fn build(
                     shell.show();
                     return;
                 }
-                let Some(grab) = shell.dragging.get() else {
+                let Some(bar) = shell.renderer.borrow().bar() else {
                     return;
                 };
-                let Some(bar) = shell.renderer.borrow().bar() else {
+                let Some(grab) = shell.dragging.get() else {
+                    // The thumb widens while the pointer is over the bar.
+                    let over = x >= bar.x;
+                    if shell.renderer.borrow_mut().set_bar_hover(over) {
+                        shell.show();
+                    }
                     return;
                 };
                 _ = args.SetHandled(true);
@@ -2413,7 +2828,8 @@ pub fn build(
             let Some(args) = args.as_ref() else { return };
             let ctrl = unsafe { GetKeyState(0x11) } < 0;
             let Ok(key) = args.key() else { return };
-            let find_escape = key == 0x1b && shell.find_active.get();
+            let find_escape =
+                key == 0x1b && (shell.find_active.get() || shell.focus.get().is_some());
             if key == 0x0d && shell.find_box_focused.get() {
                 shell.find_step(1);
                 _ = args.set_handled(true);

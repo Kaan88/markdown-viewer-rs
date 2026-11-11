@@ -63,6 +63,8 @@ pub mod ffi {
         include!("cxx-qt-lib/qpointf.h");
         include!("cxx-qt-lib/qrectf.h");
         include!("cxx-qt-lib/qcolor.h");
+        include!("cxx-qt-lib/qsize.h");
+        type QSize = cxx_qt_lib::QSize;
         type QString = cxx_qt_lib::QString;
         type QStringList = cxx_qt_lib::QStringList;
         type qsizetype = crate::qt::QSizeType;
@@ -124,6 +126,7 @@ pub mod ffi {
         include!(<QtWidgets/QVBoxLayout>);
         include!(<QtWidgets/QHBoxLayout>);
         include!(<QtWidgets/QScrollBar>);
+        include!(<QtWidgets/QMessageBox>);
         include!(<QtGui/QAction>);
         include!(<QtGui/QClipboard>);
         include!(<QtGui/QWindow>);
@@ -131,6 +134,8 @@ pub mod ffi {
 
         #[qobject]
         type QApplication;
+        #[qobject]
+        type QMessageBox;
         #[qobject]
         type QWindow;
         #[qobject]
@@ -293,6 +298,9 @@ pub mod ffi {
         #[rust_name = "set_placeholder"]
         #[cxx_name = "setPlaceholderText"]
         fn setPlaceholderText(self: Pin<&mut QLineEdit>, text: &QString);
+        #[rust_name = "set_clear_button_enabled"]
+        #[cxx_name = "setClearButtonEnabled"]
+        fn setClearButtonEnabled(self: Pin<&mut QLineEdit>, on: bool);
         #[rust_name = "select_all"]
         #[cxx_name = "selectAll"]
         fn selectAll(self: Pin<&mut QLineEdit>);
@@ -348,6 +356,12 @@ pub mod ffi {
         #[rust_name = "add_tool_bar_break"]
         #[cxx_name = "addToolBarBreak"]
         fn addToolBarBreakMain(self: Pin<&mut QMainWindow>, area: ToolBarArea);
+        #[rust_name = "set_style_sheet"]
+        #[cxx_name = "setStyleSheet"]
+        fn setStyleSheetWidget(self: Pin<&mut QWidget>, sheet: &QString);
+        #[rust_name = "size_hint"]
+        #[cxx_name = "sizeHint"]
+        fn sizeHintWidget(self: &QWidget) -> QSize;
         #[rust_name = "set_fixed_width"]
         #[cxx_name = "setFixedWidth"]
         fn setFixedWidthWidget(self: Pin<&mut QWidget>, w: i32);
@@ -362,6 +376,9 @@ pub mod ffi {
         type QStyleHints;
         #[Self = "QApplication"]
         fn styleHints() -> *mut QStyleHints;
+        /// A modal information dialog with the app's icon (About, Keyboard shortcuts).
+        #[Self = "QMessageBox"]
+        unsafe fn about(parent: *mut QWidget, title: &QString, text: &QString);
         #[qobject]
         type QClipboard;
         #[Self = "QApplication"]
@@ -438,6 +455,8 @@ pub mod ffi {
         fn new_ptr() -> *mut QTabBar;
         #[rust_name = "new_menu"]
         fn new_ptr() -> *mut QMenu;
+        #[rust_name = "new_menu_in"]
+        unsafe fn new_ptr(parent: *mut QWidget) -> *mut QMenu;
         #[rust_name = "new_line_edit"]
         fn new_ptr() -> *mut QLineEdit;
         #[rust_name = "new_tree"]
@@ -636,6 +655,9 @@ pub mod ffi {
         // Events
         #[cxx_name = "type"]
         fn event_type(self: &QEvent) -> EventType;
+        #[rust_name = "mouse_button"]
+        #[cxx_name = "button"]
+        fn buttonMouse(self: &QMouseEvent) -> MouseButton;
         #[rust_name = "mouse_pos"]
         fn position(self: &QMouseEvent) -> QPointF;
         fn angleDelta(self: &QWheelEvent) -> QPoint;

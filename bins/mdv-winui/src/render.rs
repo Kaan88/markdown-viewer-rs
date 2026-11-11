@@ -138,6 +138,8 @@ pub struct Renderer {
     pending_scroll: Option<f32>,
     /// Device px per logical px of the last frame, for the scrollbar gutter.
     scale: f32,
+    /// The pointer is over the scrollbar (or dragging it): the thumb is drawn wide.
+    bar_hover: bool,
 }
 
 impl Renderer {
@@ -168,6 +170,7 @@ impl Renderer {
             shift: true,
             pending_scroll: None,
             scale: 1.0,
+            bar_hover: false,
         }
     }
 
@@ -243,6 +246,10 @@ impl Renderer {
         self.options = None;
         self.selection = None;
         self.find = Find::default();
+    }
+
+    pub fn theme(&self) -> Theme {
+        self.theme
     }
 
     pub fn set_theme(&mut self, theme: Theme) {
@@ -807,7 +814,7 @@ impl Renderer {
     /// as far as the page is copied. The page can be a few px wider than the width it was laid out
     /// for, and the bar has to cover that overhang rather than be clipped by it.
     fn layout_gutter(&mut self) {
-        // One px of the page's overhang becomes the hairline separator beside the bar.
+        // The strip starts one px left of the bar, so the page's overhang is covered.
         let bar_x = self
             .bar()
             .map_or(self.width, |bar| (bar.x.max(0.0) as u32).saturating_sub(1))
@@ -824,7 +831,17 @@ impl Renderer {
         self.draw_gutter();
     }
 
-    /// Paints the gutter strip: the page's background, a hairline separator and the thumb.
+    /// Shows the thumb wide (pointer over the bar or dragging) or thin. Returns true if it changed.
+    pub fn set_bar_hover(&mut self, on: bool) -> bool {
+        if self.bar_hover == on {
+            return false;
+        }
+        self.bar_hover = on;
+        true
+    }
+
+    /// Paints the gutter strip: the page's background and a rounded thumb, thin at rest and wider
+    /// and darker while the pointer is over the bar, anti-aliased at its rounded ends and sides.
     fn draw_gutter(&mut self) {
         let height = self.height as usize;
         let width = self.gutter_width as usize;
@@ -842,28 +859,33 @@ impl Renderer {
             let blend = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * amount) as u32;
             0xFF00_0000 | blend(br, tr) << 16 | blend(bg, tg) << 8 | blend(bb, tb)
         };
-        let separator = mix(0.10);
-        let thumb = mix(0.30);
-        let left = self.gutter_x as usize;
-        if let Some(column) = (bar.x.max(0.0) as usize).checked_sub(1)
-            && column >= left
-            && column - left < width
-        {
-            for y in 0..height {
-                self.gutter[y * width + column - left] = separator;
-            }
-        }
-        let Some((top, bottom)) = self.thumb_rows() else {
-            return;
-        };
-        let first = (bar.x + bar.pad) as usize;
-        let last = (bar.x + bar.width - bar.pad) as usize;
-        let first = first.saturating_sub(left).min(width);
-        let last = last.saturating_sub(left).min(width);
-        for y in top as usize..bottom as usize {
-            let row = y * width;
-            for x in first..last {
-                self.gutter[row + x] = thumb;
+        let amount = if self.bar_hover { 0.45 } else { 0.28 };
+        let left = self.gutter_x as f32;
+        let thumb_width = if self.bar_hover { 8.0 } else { 4.0 } * self.scale;
+        let radius = thumb_width / 2.0;
+        let centre = bar.x + bar.width / 2.0 - left;
+        let top = bar.thumb_y + radius;
+        let bottom = (bar.thumb_y + bar.thumb_height - radius).max(top);
+        let first_row = (bar.thumb_y.floor().max(0.0) as usize).min(height);
+        let last_row = ((bar.thumb_y + bar.thumb_height).ceil().max(0.0) as usize).min(height);
+        let first_col = ((centre - radius - 1.0).floor().max(0.0) as usize).min(width);
+        let last_col = ((centre + radius + 1.0).ceil().max(0.0) as usize).min(width);
+        for y in first_row..last_row {
+            let py = y as f32 + 0.5;
+            let dy = if py < top {
+                top - py
+            } else if py > bottom {
+                py - bottom
+            } else {
+                0.0
+            };
+            for x in first_col..last_col {
+                let dx = x as f32 + 0.5 - centre;
+                let distance = (dx * dx + dy * dy).sqrt();
+                let coverage = (radius - distance + 0.5).clamp(0.0, 1.0);
+                if coverage > 0.0 {
+                    self.gutter[y * width + x] = mix(amount * coverage);
+                }
             }
         }
     }
@@ -872,9 +894,8 @@ impl Renderer {
     fn thumb_rows(&self) -> Option<(u32, u32)> {
         let bar = self.bar()?;
         let height = self.height;
-        let top = ((bar.thumb_y + bar.pad) as usize).min(height as usize) as u32;
-        let bottom =
-            ((bar.thumb_y + bar.thumb_height - bar.pad) as usize).min(height as usize) as u32;
+        let top = (bar.thumb_y.floor().max(0.0) as usize).min(height as usize) as u32;
+        let bottom = ((bar.thumb_y + bar.thumb_height).ceil() as usize).min(height as usize) as u32;
         (bottom > top).then_some((top, bottom))
     }
 

@@ -942,8 +942,10 @@ version = "0.1.0"
 dependencies = [
  "mdview-core",
  "mdview-render",
+ "resvg",
  "windows-collections 0.100.0",
  "windows-core 0.100.0",
+ "windows-future 0.100.0",
  "windows-link 0.100.0",
  "windows-reference",
 ]
@@ -2560,7 +2562,7 @@ checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
 dependencies = [
  "windows-collections 0.3.2",
  "windows-core 0.62.2",
- "windows-future",
+ "windows-future 0.3.2",
  "windows-numerics",
 ]
 
@@ -2614,7 +2616,18 @@ checksum = "e1d6f90251fe18a279739e78025bd6ddc52a7e22f921070ccdc67dde84c605cb"
 dependencies = [
  "windows-core 0.62.2",
  "windows-link 0.2.1",
- "windows-threading",
+ "windows-threading 0.2.1",
+]
+
+[[package]]
+name = "windows-future"
+version = "0.100.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a74555161b6c58612bbe052b9964c9c069326c487d24b8f7e77d5a8e83fb81c8"
+dependencies = [
+ "windows-core 0.100.0",
+ "windows-link 0.100.0",
+ "windows-threading 0.100.0",
 ]
 
 [[package]]
@@ -2723,6 +2736,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3949bd5b99cafdf1c7ca86b43ca564028dfe27d66958f2470940f73d86d75b37"
 dependencies = [
  "windows-link 0.2.1",
+]
+
+[[package]]
+name = "windows-threading"
+version = "0.100.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cff005f1c94bffb9b073230837d3448d0e0ba3cf11c34b6f1f7d4c3875eded09"
+dependencies = [
+ "windows-link 0.100.0",
 ]
 
 [[package]]

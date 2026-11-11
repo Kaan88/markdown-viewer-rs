@@ -46,7 +46,18 @@ const FRAMELESS: WindowType = WindowType(0x0800); // Qt::FramelessWindowHint
 const TOP_TOOLBAR: ToolBarArea = ToolBarArea(0x4); // Qt::TopToolBarArea
 const EV_MOUSE_DOUBLE_CLICK: u32 = 4;
 
+/// A modal dialog over `parent` with `title` and `text` (which may be simple HTML).
+pub fn about_box(parent: H<QWidget>, title: &str, text: &str) {
+    unsafe { QMessageBox::about(parent.0, &qs(title), &qs(text)) }
+}
+
+/// Popup menus created from now on are children of `window`, and so styled like it.
+pub fn set_menu_parent(window: H<QWidget>) {
+    MENU_PARENT.with(|p| p.set(window.0));
+}
+
 thread_local! {
+    static MENU_PARENT: std::cell::Cell<*mut QWidget> = const { std::cell::Cell::new(std::ptr::null_mut()) };
     /// The title row's drag area; a press there moves the window, a double click maximizes.
     static TITLE_DRAG: std::cell::Cell<(*mut QObject, *mut QWidget)> =
         const { std::cell::Cell::new((std::ptr::null_mut(), std::ptr::null_mut())) };
@@ -153,8 +164,38 @@ unsafe extern "C" {
 /// up at run time: a `const` member function takes `this` and returns the enum as an `int`.
 #[cfg(not(unix))]
 pub fn system_is_dark() -> bool {
-    // dlsym is POSIX. The WinUI shell is the Windows shell and follows Windows itself; this one reports light.
-    false
+    // Windows' own app setting, as the WinUI shell reads it: AppsUseLightTheme = 0 means dark.
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegGetValueW(
+            key: isize,
+            subkey: *const u16,
+            value: *const u16,
+            flags: u32,
+            kind: *mut u32,
+            data: *mut std::ffi::c_void,
+            size: *mut u32,
+        ) -> i32;
+    }
+    const HKEY_CURRENT_USER: isize = 0x8000_0001_u32 as i32 as isize;
+    const RRF_RT_REG_DWORD: u32 = 0x10;
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let subkey = wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+    let value = wide("AppsUseLightTheme");
+    let mut data = 1u32;
+    let mut size = 4u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&mut data as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    status == 0 && data == 0
 }
 
 #[cfg(unix)]
@@ -233,6 +274,11 @@ impl Canvas {
         h.paint(&mut t);
     }
     unsafe fn mouse_press_event(self: Pin<&mut Self>, e: *mut QMouseEvent) {
+        // Only the left button selects and follows links; the right one opens the context menu
+        // (a separate event) and must leave the selection as it is.
+        if (*e).mouse_button() != MouseButton::LeftButton {
+            return;
+        }
         let p = (*e).mouse_pos();
         self.handler().mouse_press(p.x(), p.y());
     }
@@ -241,6 +287,9 @@ impl Canvas {
         self.handler().mouse_move(p.x(), p.y());
     }
     unsafe fn mouse_release_event(self: Pin<&mut Self>, e: *mut QMouseEvent) {
+        if (*e).mouse_button() != MouseButton::LeftButton {
+            return;
+        }
         let p = (*e).mouse_pos();
         self.handler().mouse_release(p.x(), p.y());
     }
@@ -521,7 +570,7 @@ impl H<QWidget> {
     /// A right click anywhere on the widget: the point in widget coordinates, then in global ones.
     pub fn on_context_menu_at(&self, mut f: impl FnMut((i32, i32), (i32, i32)) + 'static) {
         let widget = *self;
-        pin!(widget).setContextMenuPolicy(ContextMenuPolicy(2)); // Qt::CustomContextMenu
+        pin!(widget).setContextMenuPolicy(ContextMenuPolicy(3)); // Qt::CustomContextMenu (2 is ActionsContextMenu)
         let mut f = GuiThreadOnly(move |p: &QPoint| {
             let g = unsafe { &*widget.0 }.mapToGlobal(p);
             f((p.x(), p.y()), (g.x(), g.y()));
@@ -784,9 +833,15 @@ impl H<QMenuBar> {
     }
 }
 impl H<QMenu> {
-    /// A free-standing menu for `popup`; it lives until the process exits, like the other handles.
+    /// A menu for `popup`; it lives until the process exits, like the other handles. It is parented
+    /// to the main window once that exists (`set_menu_parent`), so it takes the window's style sheet.
     pub fn new_popup() -> Self {
-        H(new_menu())
+        let parent = MENU_PARENT.with(|p| p.get());
+        if parent.is_null() {
+            H(new_menu())
+        } else {
+            H(unsafe { new_menu_in(parent) })
+        }
     }
     /// Shows the menu at global point `at` without blocking.
     pub fn popup(&self, at: (i32, i32)) {
@@ -852,6 +907,18 @@ impl H<QToolBar> {
         self.add_widget(spacer);
         spacer
     }
+    /// Where `menu` opens so that its right edge lines up with `action`'s button, for buttons at
+    /// the right end of the bar.
+    pub fn below_right(&self, action: H<QAction>, menu: H<QMenu>) -> Option<(i32, i32)> {
+        let button = unsafe { (*self.0).toolbar_widget_for_action(action.0) };
+        if button.is_null() {
+            return None;
+        }
+        let button = unsafe { &*button };
+        let p = button.mapToGlobal(&QPoint::new(button.width(), button.height()));
+        let menu = unsafe { &*<QMenu as Upcast<QWidget>>::upcast_ptr(menu.0) };
+        Some((p.x() - menu.size_hint().width(), p.y()))
+    }
     /// Global coordinates of the bottom-left corner of `action`'s button, where its menu opens.
     pub fn below(&self, action: H<QAction>) -> Option<(i32, i32)> {
         let button = unsafe { (*self.0).toolbar_widget_for_action(action.0) };
@@ -900,6 +967,10 @@ impl H<QWidget> {
     pub fn set_tool_tip(&self, t: &str) {
         pin!(self).set_tool_tip(&qs(t))
     }
+    /// A Qt style sheet for this widget and everything inside it.
+    pub fn set_style_sheet(&self, sheet: &str) {
+        pin!(self).set_style_sheet(&qs(sheet))
+    }
     pub fn set_fixed_width(&self, w: i32) {
         pin!(self).set_fixed_width(w)
     }
@@ -926,6 +997,10 @@ impl H<QLineEdit> {
     }
     pub fn select_all(&self) {
         pin!(self).select_all()
+    }
+    /// Shows an x in the field that empties it.
+    pub fn set_clear_button(&self, on: bool) {
+        pin!(self).set_clear_button_enabled(on)
     }
     pub fn on_return_pressed(&self, f: impl FnMut() + 'static) {
         let mut f = GuiThreadOnly(f);
@@ -1001,7 +1076,7 @@ impl H<QTabBar> {
     /// coordinates, where a menu belongs.
     pub fn on_context_menu(&self, mut f: impl FnMut(Option<usize>, (i32, i32)) + 'static) {
         let widget = self.widget();
-        pin!(widget).setContextMenuPolicy(ContextMenuPolicy(2)); // Qt::CustomContextMenu
+        pin!(widget).setContextMenuPolicy(ContextMenuPolicy(3)); // Qt::CustomContextMenu (2 is ActionsContextMenu)
         let bar = *self;
         let mut f = GuiThreadOnly(move |p: &QPoint| {
             let tab = usize::try_from(unsafe { &*bar.0 }.tabAt(p)).ok();

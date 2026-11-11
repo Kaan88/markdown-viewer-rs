@@ -23,6 +23,9 @@ pub mod glyph {
     pub const ZOOM_IN: &str = "\u{E8A3}";
     pub const THEME: &str = "\u{E793}";
     pub const MORE: &str = "\u{E712}";
+    pub const SYSTEM: &str = "\u{E7F4}";
+    pub const LIGHT: &str = "\u{E706}";
+    pub const DARK: &str = "\u{E708}";
     pub const UP: &str = "\u{E70E}";
     pub const DOWN: &str = "\u{E70D}";
 }
@@ -83,12 +86,25 @@ fn icon(glyph: &str) -> Result<b::FontIcon> {
 
 /// A flat bar button: an icon, an optional label beside it, a tooltip and an accessible name.
 pub fn button(glyph: &str, label: Option<&str>, tip: &str) -> Result<b::Button> {
+    Ok(button_parts(glyph, label, tip)?.0)
+}
+
+/// `button`, also handing back its icon and label so they can change later (the Theme button).
+pub fn button_parts(
+    glyph: &str,
+    label: Option<&str>,
+    tip: &str,
+) -> Result<(b::Button, b::FontIcon, Option<b::TextBlock>)> {
     let button = b::Button::new()?;
     let content = row()?;
     content.SetSpacing(8.0)?;
-    append(&content, &icon(glyph)?)?;
+    let glyph_icon = icon(glyph)?;
+    append(&content, &glyph_icon)?;
+    let mut text_block = None;
     if let Some(label) = label {
-        append(&content, &text(label, 14.0)?)?;
+        let block = text(label, 14.0)?;
+        append(&content, &block)?;
+        text_block = Some(block);
     }
     button.cast::<ContentControl>()?.SetContent(&content)?;
     let control: b::IControl = button.cast()?;
@@ -106,7 +122,7 @@ pub fn button(glyph: &str, label: Option<&str>, tip: &str) -> Result<b::Button> 
     element.SetVerticalAlignment(b::VerticalAlignment::Center)?;
     tabs::set_tooltip(&button, tip)?;
     b::AutomationProperties::SetName(&button.cast::<b::DependencyObject>()?, tip)?;
-    Ok(button)
+    Ok((button, glyph_icon, text_block))
 }
 
 pub fn on_click(button: &b::Button, action: impl Fn() + 'static) -> Result<()> {
@@ -117,9 +133,59 @@ pub fn on_click(button: &b::Button, action: impl Fn() + 'static) -> Result<()> {
     Ok(())
 }
 
-/// Opens `menu` under the button when it is clicked.
-pub fn set_menu(button: &b::Button, menu: &MenuFlyout) -> Result<()> {
-    button.SetFlyout(&menu.cast::<FlyoutBase>()?.cast::<b::FlyoutBase>()?)
+/// Opens `menu` under the button when it is clicked, lined up with its left edge, or with its right
+/// edge for a button at the right of the bar (XAML otherwise picks a side, often above).
+pub fn set_menu(button: &b::Button, menu: &MenuFlyout, right: bool) -> Result<()> {
+    let flyout: b::FlyoutBase = menu.cast::<FlyoutBase>()?.cast()?;
+    flyout.SetPlacement(if right {
+        b::FlyoutPlacementMode::BottomEdgeAlignedRight
+    } else {
+        b::FlyoutPlacementMode::BottomEdgeAlignedLeft
+    })?;
+    button.SetFlyout(&flyout)
+}
+
+/// A flat, full-width, left-aligned row button, for the outline pane.
+pub fn list_button(label: &str, indent: f64) -> Result<b::Button> {
+    let button = b::Button::new()?;
+    button
+        .cast::<ContentControl>()?
+        .SetContent(&text(label, 13.0)?)?;
+    let control: b::IControl = button.cast()?;
+    control.SetBackground(&transparent()?)?;
+    control.SetBorderThickness(thickness(0.0, 0.0, 0.0, 0.0))?;
+    control.SetPadding(thickness(10.0 + indent, 5.0, 8.0, 5.0))?;
+    control.SetHorizontalContentAlignment(b::HorizontalAlignment::Left)?;
+    let element: b::IFrameworkElement = button.cast()?;
+    element.SetHorizontalAlignment(b::HorizontalAlignment::Stretch)?;
+    b::AutomationProperties::SetName(&button.cast::<b::DependencyObject>()?, label)?;
+    Ok(button)
+}
+
+/// A vertical list in a scrolling area, for the outline pane. Returns the area and the list.
+pub fn scrolling_list() -> Result<(b::ScrollViewer, b::StackPanel)> {
+    let list = b::StackPanel::new()?;
+    list.SetOrientation(b::Orientation::Vertical)?;
+    list.SetSpacing(0.0)?;
+    list.cast::<b::IFrameworkElement>()?
+        .SetMargin(thickness(4.0, 8.0, 4.0, 8.0))?;
+    let area = b::ScrollViewer::new()?;
+    area.cast::<ContentControl>()?.SetContent(&list)?;
+    Ok((area, list))
+}
+
+/// Whether the right (or middle) button is down for a pointer event's point.
+pub fn buttons(point: &crate::bindings::PointerPoint) -> (bool, bool) {
+    let Ok(properties) = point.Properties() else {
+        return (false, false);
+    };
+    let Ok(properties) = properties.cast::<b::IPointerPointProperties>() else {
+        return (false, false);
+    };
+    (
+        properties.IsRightButtonPressed().unwrap_or(false),
+        properties.IsMiddleButtonPressed().unwrap_or(false),
+    )
 }
 
 pub fn separator() -> Result<Grid> {
@@ -160,12 +226,47 @@ pub fn brand() -> Result<b::StackPanel> {
     panel
         .cast::<b::IFrameworkElement>()?
         .SetMargin(thickness(14.0, 0.0, 14.0, 0.0))?;
-    let mark = icon("\u{E8A5}")?; // Document
-    append(&panel, &mark)?;
+    // The logo, drawn to a PNG (the same mark as the Qt shell's); the plain glyph if that fails.
+    match logo() {
+        Some(mark) => append(&panel, &mark)?,
+        None => append(&panel, &icon("\u{E8A5}")?)?,
+    }
     let name = text("mdview", 13.0)?;
     name.SetFontWeight(b::FontWeight { weight: 600 })?;
     append(&panel, &name)?;
     Ok(panel)
+}
+
+/// The mdview mark: a blue rounded square with an "M" and a down arrow, as a 20 px icon.
+pub fn logo_sized(size: f64) -> Option<b::BitmapIcon> {
+    let mark = logo()?;
+    let element: b::IFrameworkElement = mark.cast().ok()?;
+    element.SetWidth(size).ok()?;
+    element.SetHeight(size).ok()?;
+    Some(mark)
+}
+
+fn logo() -> Option<b::BitmapIcon> {
+    let dir = std::env::temp_dir().join("mdview-icons");
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join("logo-winui.png");
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#005fb8"/><path d="M6.5 16V8.5l3 3.5 3-3.5V16M16.5 8.5v7.5m-2-2 2 2.2 2-2.2" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>"##;
+    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default()).ok()?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(48, 48)?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(2.0, 2.0),
+        &mut pixmap.as_mut(),
+    );
+    pixmap.save_png(&path).ok()?;
+    let uri = format!("file:///{}", path.display().to_string().replace('\\', "/"));
+    let mark = b::BitmapIcon::new().ok()?;
+    mark.SetShowAsMonochrome(false).ok()?;
+    mark.SetUriSource(&b::Uri::CreateUri(&uri).ok()?).ok()?;
+    let element: b::IFrameworkElement = mark.cast().ok()?;
+    element.SetWidth(20.0).ok()?;
+    element.SetHeight(20.0).ok()?;
+    Some(mark)
 }
 
 /// A grid column definition, for the title row.

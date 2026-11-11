@@ -21,4 +21,15 @@ Microsoft::UI::Xaml::VerticalAlignment::{Center, Stretch, Top}
 Microsoft::UI::Xaml::HorizontalAlignment::{Left, Right, Stretch, Center}
 Microsoft::UI::Xaml::IWindow::{put_ExtendsContentIntoTitleBar, SetTitleBar}
 Microsoft::UI::Xaml::Automation::AutomationProperties::SetName
-Microsoft::UI::Xaml::IUIElement::{add_GotFocus, add_LostFocus}
+Microsoft::UI::Xaml::IUIElement::{add_GotFocus, add_LostFocus, add_PointerExited}
+Microsoft::UI::Input::IPointerPointProperties::{get_IsRightButtonPressed, get_IsMiddleButtonPressed}
+Microsoft::UI::Xaml::Controls::Primitives::IFlyoutBase::put_Placement
+Microsoft::UI::Xaml::Controls::Primitives::FlyoutPlacementMode::{Bottom, BottomEdgeAlignedLeft, BottomEdgeAlignedRight}
+Microsoft::UI::Xaml::Controls::ScrollViewer::CreateInstance
+Microsoft::UI::Xaml::Controls::IControl::put_HorizontalContentAlignment
+Microsoft::UI::Xaml::Controls::BitmapIcon::CreateInstance
+Microsoft::UI::Xaml::Controls::IBitmapIcon::{put_UriSource, put_ShowAsMonochrome}
+Windows::Foundation::Uri::CreateUri
+Microsoft::UI::Xaml::Controls::ContentDialog::CreateInstance
+Microsoft::UI::Xaml::Controls::IContentDialog::{put_Title, put_CloseButtonText, ShowAsync}
+Microsoft::UI::Xaml::IUIElement::{get_XamlRoot, put_XamlRoot}

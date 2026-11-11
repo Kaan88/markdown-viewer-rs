@@ -129,6 +129,10 @@ struct Shell {
     /// The find bar, its input and the current matches.
     /// The command bar (layout A), which also holds the find box.
     find_bar: Cell<Option<H<QToolBar>>>,
+    /// The command bar's main menu (☰), filled once the actions it repeats exist.
+    main_menu: Cell<Option<H<QMenu>>>,
+    /// The match count beside the find box ("2 of 4").
+    find_count: Cell<Option<H<QAction>>>,
     /// The command bar's zoom percentage; clicking it resets to 100%.
     zoom_label: Cell<Option<H<QAction>>>,
     find_edit: Cell<Option<H<QLineEdit>>>,
@@ -203,6 +207,8 @@ impl Shell {
             pending_anchor: RefCell::new(None),
             find_bar: Cell::new(None),
             zoom_label: Cell::new(None),
+            main_menu: Cell::new(None),
+            find_count: Cell::new(None),
             find_edit: Cell::new(None),
             find: RefCell::new(Find::default()),
             outline_dock: Cell::new(None),
@@ -318,6 +324,9 @@ impl Shell {
         let find = self.find.borrow();
         if find.query.is_empty() {
             self.message("");
+            if let Some(count) = self.find_count.get() {
+                count.set_text("");
+            }
             return;
         }
         let text = if total == 0 {
@@ -332,6 +341,10 @@ impl Shell {
         };
         drop(find);
         self.message(&format!("Find: {text}"));
+        // Also beside the find box, where WinUI shows it.
+        if let Some(count) = self.find_count.get() {
+            count.set_text(&text);
+        }
     }
 
     /// The page rectangles of the matches. `current_only` selects the active one.
@@ -755,9 +768,6 @@ impl Shell {
             .hit(local.0 as f64, local.1 as f64)
             .and_then(|hit| hit.link);
         let has_selection = self.selection.get().is_some_and(|(a, b)| a != b);
-        if link.is_none() && !has_selection {
-            return;
-        }
         let menu = H::<QMenu>::new_popup();
         if let Some(index) = link {
             let destination = self.document.borrow().as_ref().and_then(|d| {
@@ -773,11 +783,16 @@ impl Shell {
                     .on_triggered(move |_| set_clipboard(&destination));
             }
         }
-        if has_selection {
-            let s = self.clone();
-            menu.add_action("&Copy")
-                .on_triggered(move |_| s.copy_selection());
-        }
+        let s = self.clone();
+        let copy = menu.add_action("&Copy\tCtrl+C");
+        copy.set_enabled(has_selection);
+        copy.on_triggered(move |_| s.copy_selection());
+        let s = self.clone();
+        menu.add_action("&Find...\tCtrl+F")
+            .on_triggered(move |_| s.show_find());
+        let s = self.clone();
+        menu.add_action("&Reload\tF5")
+            .on_triggered(move |_| s.refresh());
         // Leaks one small popup per use at most; the popup deletes itself when it closes.
         menu.popup(at);
     }
@@ -972,8 +987,22 @@ impl Shell {
             }
         });
         *self.layout.borrow_mut() = None;
+        self.style_chrome();
         self.redraw();
         self.save_session();
+    }
+
+    /// Styles the window's own controls in the page's colours, so the title row, command bar, tabs,
+    /// panes and menus look like one surface with the page (layout A), whatever the platform style.
+    fn style_chrome(&self) {
+        let Some(window) = self.window.get() else {
+            return;
+        };
+        let sheet = chrome_style(self.theme.get());
+        let mode = theme_label(self.choice.get());
+        window
+            .widget()
+            .set_style_sheet(&format!("/* {mode} */\n{sheet}"));
     }
 
     /// Sets the zoom (clamped to 60-250%), keeping the reading position roughly in place.
@@ -2332,6 +2361,7 @@ fn build(
         }
     };
     let window = H::<QMainWindow>::new();
+    set_menu_parent(window.widget());
     window.widget().set_title("mdview");
     window.widget().resize(1100, 900);
 
@@ -2403,13 +2433,13 @@ fn build(
     let bar = window.add_tool_bar("Commands");
     bar.set_movable(false);
     let open_button = bar.add_action("Open");
-    open_button.set_tool_tip("Open a file (Ctrl+O)");
+    open_button.set_tool_tip(TIP_OPEN);
     open_button.on_triggered(move |_| open.trigger());
     let reload_button = bar.add_action("↻");
-    reload_button.set_tool_tip("Reload (F5)");
+    reload_button.set_tool_tip(TIP_RELOAD);
     reload_button.on_triggered(move |_| refresh.trigger());
-    let recent_button = bar.add_action("Recent ▾");
-    recent_button.set_tool_tip("Recent files");
+    let recent_button = bar.add_action("Recent");
+    recent_button.set_tool_tip(TIP_RECENT);
     let s = shell.clone();
     recent_button.on_triggered(move |_| {
         s.fill_recent(recent_menu);
@@ -2419,12 +2449,12 @@ fn build(
     });
     bar.add_separator();
     let files_button = bar.add_action("Files");
-    files_button.set_tool_tip("Files pane (Ctrl+B)");
+    files_button.set_tool_tip(TIP_FILES);
     let outline_button = bar.add_action("Outline");
-    outline_button.set_tool_tip("Outline pane");
+    outline_button.set_tool_tip(TIP_OUTLINE);
     bar.add_separator();
     let zoom_out_button = bar.add_action("−");
-    zoom_out_button.set_tool_tip("Zoom out (Ctrl+-)");
+    zoom_out_button.set_tool_tip(TIP_ZOOM_OUT);
     let s = shell.clone();
     zoom_out_button.on_triggered(move |_| s.set_zoom(s.zoom.get() - ZOOM_STEP));
     let zoom_label = bar.add_action("100%");
@@ -2432,20 +2462,24 @@ fn build(
     let s = shell.clone();
     zoom_label.on_triggered(move |_| s.set_zoom(1.0));
     let zoom_in_button = bar.add_action("+");
-    zoom_in_button.set_tool_tip("Zoom in (Ctrl++)");
+    zoom_in_button.set_tool_tip(TIP_ZOOM_IN);
     let s = shell.clone();
     zoom_in_button.on_triggered(move |_| s.set_zoom(s.zoom.get() + ZOOM_STEP));
     shell.zoom_label.set(Some(zoom_label));
     shell.refresh_zoom_label();
     bar.add_spacer();
+    let find_count = bar.add_action("");
+    find_count.set_enabled(false);
+    shell.find_count.set(Some(find_count));
     let find_edit = H::<QLineEdit>::new();
-    find_edit.set_placeholder("Find in document   Ctrl+F");
+    find_edit.set_clear_button(true);
+    find_edit.set_placeholder("Find in document  (Ctrl+F)");
     find_edit.widget().set_fixed_width(260);
     bar.add_widget(find_edit.widget());
     let previous = bar.add_action("↑");
-    previous.set_tool_tip("Previous match (Shift+F3)");
+    previous.set_tool_tip(TIP_PREVIOUS);
     let next = bar.add_action("↓");
-    next.set_tool_tip("Next match (F3)");
+    next.set_tool_tip(TIP_NEXT);
     let s = shell.clone();
     find_edit.on_text_changed(move |text| s.find_update(&text));
     let s = shell.clone();
@@ -2455,29 +2489,29 @@ fn build(
     let s = shell.clone();
     next.on_triggered(move |_| s.find_step(1));
     bar.add_separator();
-    let theme_button = bar.add_action("Theme ▾");
-    theme_button.set_tool_tip("Theme");
-    let theme_menu = H::<QMenu>::new_popup();
-    for (label, choice) in [
-        ("System theme", ThemeChoice::System),
-        ("Light theme", ThemeChoice::Light),
-        ("Dark theme", ThemeChoice::Dark),
-    ] {
-        let s = shell.clone();
-        theme_menu
-            .add_action(label)
-            .on_triggered(move |_| s.set_theme_choice(choice));
-    }
+    // Theme cycles System -> Light -> Dark -> System; its label names the current mode.
+    let theme_button = bar.add_action(theme_label(shell.choice.get()));
+    theme_button.set_tool_tip(theme_tip(shell.choice.get()));
+    let s = shell.clone();
     theme_button.on_triggered(move |_| {
-        if let Some(at) = bar.below(theme_button) {
-            theme_menu.popup(at);
-        }
+        let next = match s.choice.get() {
+            ThemeChoice::System => ThemeChoice::Light,
+            ThemeChoice::Light => ThemeChoice::Dark,
+            ThemeChoice::Dark => ThemeChoice::System,
+        };
+        // Text and tooltip first: the restyle in `set_theme_choice` then gives the button the new
+        // mode's icon (a text change alone would drop the icon the style sheet set).
+        theme_button.set_text(theme_label(next));
+        theme_button.set_tool_tip(theme_tip(next));
+        s.set_theme_choice(next);
     });
     let main_button = bar.add_action("☰");
-    main_button.set_tool_tip("Main menu");
+    main_button.set_tool_tip(TIP_MENU);
+    let main_menu = H::<QMenu>::new_popup();
+    shell.main_menu.set(Some(main_menu));
     main_button.on_triggered(move |_| {
-        if let Some(at) = bar.below(main_button) {
-            menus.popup(at);
+        if let Some(at) = bar.below_right(main_button, main_menu) {
+            main_menu.popup(at);
         }
     });
     shell.find_bar.set(Some(bar));
@@ -2486,7 +2520,7 @@ fn build(
     let outline_dock = H::<QDockWidget>::new("Outline", window.clone());
     let outline_tree = Tree::new();
     outline_dock.set_widget(outline_tree.widget());
-    window.add_dock(true, outline_dock);
+    window.add_dock(false, outline_dock);
     outline_dock.widget().set_visible(false);
     outline_dock.widget().resize(240, 700);
     let s = shell.clone();
@@ -2544,6 +2578,19 @@ fn build(
     let files_toggle = view_menu.add_action("&Files");
     let s = shell.clone();
     files_toggle.on_triggered(move |_| {
+        // No folder yet: show the one the current file is in; ask only with no file open.
+        if s.folder.borrow().is_none() {
+            let dir = s
+                .path
+                .borrow()
+                .as_ref()
+                .and_then(|path| path.parent().map(Path::to_path_buf));
+            match dir {
+                Some(dir) => s.open_folder(&dir),
+                None => s.choose_folder(),
+            }
+            return;
+        }
         if let Some(dock) = s.files_dock.get() {
             dock.widget().set_visible(!dock.widget().is_visible());
         }
@@ -2577,7 +2624,21 @@ fn build(
     let help = menus.add_menu("&Help");
     let shortcuts = help.add_action("&Keyboard shortcuts");
     let s = shell.clone();
-    shortcuts.on_triggered(move |_| s.message(SHORTCUTS));
+    shortcuts.on_triggered(move |_| {
+        let rows: String = mdview_core::commands::shortcut_help()
+            .into_iter()
+            .map(|(keys, label)| {
+                format!("<tr><td><b>{keys}</b>&nbsp;&nbsp;</td><td>{label}</td></tr>")
+            })
+            .collect();
+        if let Some(window) = s.window.get() {
+            about_box(
+                window.widget(),
+                strings::SHORTCUTS_TITLE,
+                &format!("<table cellspacing=\"4\">{rows}</table>"),
+            );
+        }
+    });
     if crate::appimage_update::appimage().is_some() {
         let update_now = help.add_action("&Update mdview now");
         let s = shell.clone();
@@ -2596,7 +2657,43 @@ fn build(
     }
     let about = help.add_action("&About");
     let s = shell.clone();
-    about.on_triggered(move |_| s.message("mdview 0.1 - Qt shell"));
+    about.on_triggered(move |_| {
+        if let Some(window) = s.window.get() {
+            about_box(
+                window.widget(),
+                strings::ABOUT_TITLE,
+                &format!(
+                    "<table><tr><td valign=\"top\">{}</td><td style=\"padding-left: 16px\"><h3>mdview {}</h3><p>{}</p><p>WinUI 3 on Windows, Qt on Linux; one renderer, no webview.</p></td></tr></table>",
+                    about_logo(),
+                    env!("CARGO_PKG_VERSION"),
+                    strings::ABOUT
+                ),
+            );
+        }
+    });
+    // The ☰ menu: the same flat list as WinUI's "More", then what only this shell has.
+    if let Some(main_menu) = shell.main_menu.get() {
+        let entries = [
+            ("Open folder...\tCtrl+Shift+O", open_folder),
+            ("Manage recent files...", manage),
+            ("Close tab\tCtrl+W", close_tab),
+            ("Close all tabs\tCtrl+Shift+W", close_all),
+            ("Copy\tCtrl+C", copy),
+            ("Actual size\tCtrl+0", zoom_reset),
+            ("Focus reading mode\tCtrl+Shift+F", focus_mode),
+            ("Keyboard shortcuts", shortcuts),
+            ("About mdview", about),
+            ("Exit", quit),
+        ];
+        for (index, (label, action)) in entries.into_iter().enumerate() {
+            if index == 6 || index == 9 {
+                main_menu.add_separator();
+            }
+            main_menu
+                .add_action(label)
+                .on_triggered(move |_| action.trigger());
+        }
+    }
     let system = view_menu.add_action("&System theme");
     for (action, choice) in [
         (system, ThemeChoice::System),
@@ -2658,34 +2755,33 @@ fn build(
     });
     let s = shell.clone();
     tabs.on_context_menu(move |tab, at| s.tab_menu(tab, at));
-    if let Some(canvas) = shell.canvas.get() {
-        let s = shell.clone();
-        canvas
-            .widget()
-            .on_context_menu_at(move |local, global| s.canvas_menu(local, global));
-    }
+    let s = shell.clone();
+    canvas
+        .widget()
+        .on_context_menu_at(move |local, global| s.canvas_menu(local, global));
     shell.tab_bar.set(Some(tabs));
     let brand = title.add_action("mdview");
-    brand.set_tool_tip("mdview");
+    brand.set_tool_tip(TIP_BRAND);
     title.add_widget(tabs.widget());
     let drag = title.add_spacer();
     drag.set_tool_tip("Drag to move the window; double-click to maximize");
     canvas.watch_title_drag(drag);
     let top = window.widget();
     let minimize = title.add_action("—");
-    minimize.set_tool_tip("Minimize");
+    minimize.set_tool_tip(TIP_MINIMIZE);
     minimize.on_triggered(move |_| top.minimize());
     let maximize = title.add_action("☐");
-    maximize.set_tool_tip("Maximize");
+    maximize.set_tool_tip(TIP_MAXIMIZE);
     maximize.on_triggered(move |_| top.toggle_maximized());
     let close_window = title.add_action("✕");
-    close_window.set_tool_tip("Close");
+    close_window.set_tool_tip(TIP_CLOSE);
     close_window.on_triggered(move |_| top.close());
     mark("canvas and tabs");
     window.set_central(page);
     shell.canvas.set(Some(canvas));
     shell.scrollbar.set(Some(bar));
     shell.window.set(Some(window));
+    shell.style_chrome();
     shell.status.set(Some(window.status_bar()));
     window.menu_bar().widget().set_visible(false);
     shell.menu_bar.set(Some(window.menu_bar()));
@@ -2764,6 +2860,257 @@ fn build(
     }
 }
 
+/// The logo as an `<img>` for the About dialog: a 64 px PNG drawn beside the bar icons.
+fn about_logo() -> String {
+    let dir = std::env::temp_dir().join("mdview-icons");
+    let path = dir.join("logo-about.png");
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="#2980b9"/><path d="M6.5 16V8.5l3 3.5 3-3.5V16M16.5 8.5v7.5m-2-2 2 2.2 2-2.2" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>"##;
+    if std::fs::create_dir_all(&dir).is_err() || write_png_sized(&path, svg, 64).is_none() {
+        return String::new();
+    }
+    let src = path.to_string_lossy().replace('\\', "/");
+    format!("<img src=\"{src}\" width=\"64\" height=\"64\">")
+}
+
+fn theme_label(choice: ThemeChoice) -> &'static str {
+    match choice {
+        ThemeChoice::System => "System",
+        ThemeChoice::Light => "Light",
+        ThemeChoice::Dark => "Dark",
+    }
+}
+
+const TIP_BRAND: &str = "mdview";
+const TIP_OPEN: &str = "Open a file (Ctrl+O)";
+const TIP_RELOAD: &str = "Reload (F5)";
+const TIP_RECENT: &str = "Recent files";
+const TIP_FILES: &str = "Files pane (Ctrl+B)";
+const TIP_OUTLINE: &str = "Outline pane";
+const TIP_ZOOM_OUT: &str = "Zoom out (Ctrl+-)";
+const TIP_ZOOM_IN: &str = "Zoom in (Ctrl++)";
+const TIP_PREVIOUS: &str = "Previous match (Shift+F3)";
+const TIP_NEXT: &str = "Next match (F3)";
+const TIP_THEME_SYSTEM: &str = "Theme: System (click for Light)";
+const TIP_THEME_LIGHT: &str = "Theme: Light (click for Dark)";
+const TIP_THEME_DARK: &str = "Theme: Dark (click for System)";
+
+fn theme_tip(choice: ThemeChoice) -> &'static str {
+    match choice {
+        ThemeChoice::System => TIP_THEME_SYSTEM,
+        ThemeChoice::Light => TIP_THEME_LIGHT,
+        ThemeChoice::Dark => TIP_THEME_DARK,
+    }
+}
+const TIP_MENU: &str = "Main menu";
+const TIP_MINIMIZE: &str = "Minimize";
+const TIP_MAXIMIZE: &str = "Maximize";
+const TIP_CLOSE: &str = "Close";
+
+/// Line icons (24 px grid) for the bar buttons, as SVG bodies drawn in `{c}`.
+const ICONS: &[(&str, &str)] = &[
+    (
+        "open",
+        r#"<path d="M3.5 7.5v10a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-8a1.5 1.5 0 0 0-1.5-1.5h-7l-2-2H5a1.5 1.5 0 0 0-1.5 1.5z"/>"#,
+    ),
+    (
+        "reload",
+        r#"<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>"#,
+    ),
+    (
+        "recent",
+        r#"<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/>"#,
+    ),
+    (
+        "files",
+        r#"<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/>"#,
+    ),
+    ("outline", r#"<path d="M4 6.5h16M7 12h13M7 17.5h13"/>"#),
+    ("zoom_out", r#"<path d="M6 12h12"/>"#),
+    ("zoom_in", r#"<path d="M6 12h12M12 6v12"/>"#),
+    ("up", r#"<path d="M6.5 14.5 12 9l5.5 5.5"/>"#),
+    ("down", r#"<path d="M6.5 9.5 12 15l5.5-5.5"/>"#),
+    (
+        "theme",
+        r#"<circle cx="12" cy="12" r="7.5"/><path d="M12 4.5a7.5 7.5 0 0 1 0 15z" fill="{c}"/>"#,
+    ),
+    ("menu", r#"<path d="M4.5 7h15M4.5 12h15M4.5 17h15"/>"#),
+    (
+        "mode_system",
+        r#"<rect x="3.5" y="4.5" width="17" height="11.5" rx="1.5"/><path d="M9 19.5h6M12 16v3.5"/>"#,
+    ),
+    (
+        "mode_light",
+        r#"<circle cx="12" cy="12" r="3.5"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M6 18l1.4-1.4M16.6 7.4 18 6"/>"#,
+    ),
+    (
+        "mode_dark",
+        r#"<path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z"/>"#,
+    ),
+    ("minimize", r#"<path d="M6 12h12"/>"#),
+    (
+        "maximize",
+        r#"<rect x="6.5" y="6.5" width="11" height="11" rx="1"/>"#,
+    ),
+    ("close", r#"<path d="M7 7l10 10M17 7 7 17"/>"#),
+    ("tab_close", r#"<path d="M8.5 8.5l7 7M15.5 8.5l-7 7"/>"#),
+];
+
+/// Writes the bar icons in the theme's text colour (and the logo in its accent) as PNGs to a
+/// per-theme folder in the temp directory, and returns that folder with forward slashes, as a style
+/// sheet `url()` wants it.
+fn write_icons(theme: Theme) -> Option<String> {
+    let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+    let dir = std::env::temp_dir().join("mdview-icons").join(theme.name);
+    std::fs::create_dir_all(&dir).ok()?;
+    let colour = hex(theme.text);
+    let svg = |body: &str, c: &str| {
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="{c}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">{}</svg>"#,
+            body.replace("{c}", c)
+        )
+    };
+    for (name, body) in ICONS {
+        write_png(&dir.join(format!("{name}.png")), &svg(body, &colour))?;
+    }
+    let muted = hex(theme.muted);
+    write_png(&dir.join("tab_close_muted.png"), &svg(ICONS[14].1, &muted))?;
+    write_png(&dir.join("close_white.png"), &svg(ICONS[13].1, "#ffffff"))?;
+    let accent = hex(theme.accent);
+    let logo = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="5" fill="{accent}"/><path d="M6.5 16V8.5l3 3.5 3-3.5V16M16.5 8.5v7.5m-2-2 2 2.2 2-2.2" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>"##
+    );
+    write_png(&dir.join("logo.png"), &logo)?;
+    Some(dir.to_string_lossy().replace('\\', "/"))
+}
+
+/// Renders an SVG icon to a 48 px PNG (2x, so it stays sharp at 200%).
+fn write_png(path: &Path, svg: &str) -> Option<()> {
+    write_png_sized(path, svg, 48)
+}
+
+/// Renders a 24 px SVG icon to a `size` px square PNG.
+fn write_png_sized(path: &Path, svg: &str, size: u32) -> Option<()> {
+    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default()).ok()?;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(size, size)?;
+    let scale = size as f32 / 24.0;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    pixmap.save_png(path).ok()
+}
+
+/// Gives each bar button its icon, picked out by its tooltip.
+fn icon_rules(dir: &str) -> String {
+    let rules: [(&str, &str, bool); 17] = [
+        (TIP_BRAND, "logo", true),
+        (TIP_OPEN, "open", true),
+        (TIP_RELOAD, "reload", false),
+        (TIP_RECENT, "recent", true),
+        (TIP_FILES, "files", false),
+        (TIP_OUTLINE, "outline", false),
+        (TIP_ZOOM_OUT, "zoom_out", false),
+        (TIP_ZOOM_IN, "zoom_in", false),
+        (TIP_PREVIOUS, "up", false),
+        (TIP_NEXT, "down", false),
+        (TIP_THEME_SYSTEM, "mode_system", true),
+        (TIP_THEME_LIGHT, "mode_light", true),
+        (TIP_THEME_DARK, "mode_dark", true),
+        (TIP_MENU, "menu", false),
+        (TIP_MINIMIZE, "minimize", false),
+        (TIP_MAXIMIZE, "maximize", false),
+        (TIP_CLOSE, "close", false),
+    ];
+    let mut out = String::new();
+    for (tip, icon, with_text) in rules {
+        let style = if with_text {
+            "ToolButtonTextBesideIcon"
+        } else {
+            "ToolButtonIconOnly"
+        };
+        out.push_str(&format!(
+            "QToolButton[toolTip=\"{tip}\"] {{ qproperty-icon: url({dir}/{icon}.png); qproperty-toolButtonStyle: {style}; }}\n"
+        ));
+    }
+    out
+}
+
+/// The style sheet for the window chrome in `theme`'s colours.
+fn chrome_style(theme: Theme) -> String {
+    let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+    let mix = |a: [u8; 3], b: [u8; 3], t: f32| {
+        let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+        hex([m(a[0], b[0]), m(a[1], b[1]), m(a[2], b[2])])
+    };
+    let (page, text) = (theme.bg, theme.text);
+    let bar = mix(page, text, 0.06);
+    let title = mix(page, text, 0.10);
+    // Hover and press as WinUI shows them on its bar: a clear fill, darker while pressed.
+    let hover = mix(page, text, 0.20);
+    let press = mix(page, text, 0.28);
+    let line = mix(page, text, 0.18);
+    let muted = hex(theme.muted);
+    let accent = hex(theme.accent);
+    let page = hex(page);
+    let text = hex(text);
+    let icons = write_icons(theme)
+        .map(|dir| (icon_rules(&dir), dir))
+        .unwrap_or_default();
+    let (icon_rules, dir) = icons;
+    let tab_close = if dir.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "QTabBar::close-button {{ image: url({dir}/tab_close_muted.png); subcontrol-position: right; width: 16px; height: 16px; margin: 0 2px; border-radius: 3px; }}\n\
+             QTabBar::close-button:hover {{ image: url({dir}/tab_close.png); background: {hover}; }}\n\
+             QToolButton[toolTip=\"{TIP_CLOSE}\"]:hover {{ background: #c42b1c; qproperty-icon: url({dir}/close_white.png); }}\n"
+        )
+    };
+    format!(
+        "QMainWindow {{ background: {bar}; }}
+QMainWindow::separator {{ background: {line}; width: 1px; height: 1px; }}
+QToolBar {{ background: {bar}; border: 0; padding: 6px 8px; spacing: 2px; qproperty-iconSize: 18px; }}
+QToolBar:first {{ background: {title}; padding: 6px 4px 0 8px; spacing: 0; }}
+QToolBar::separator {{ background: {line}; width: 1px; margin: 8px 6px; }}
+QToolButton {{ color: {text}; background: transparent; border: 0; border-radius: 4px; padding: 6px 8px; font-size: 13px; }}
+QToolButton:hover {{ background: {hover}; }}
+QToolButton:pressed {{ background: {press}; }}
+QToolButton[toolTip=\"{TIP_BRAND}\"] {{ font-weight: 600; padding: 4px 12px 8px 6px; }}
+QToolButton[toolTip=\"{TIP_BRAND}\"]:hover {{ background: transparent; }}
+QToolButton[toolTip=\"{TIP_MINIMIZE}\"], QToolButton[toolTip=\"{TIP_MAXIMIZE}\"], QToolButton[toolTip=\"{TIP_CLOSE}\"] {{ border-radius: 0; padding: 8px 16px; margin-top: -6px; }}
+QLineEdit {{ background: {page}; color: {text}; border: 1px solid {line}; border-radius: 4px; padding: 6px 10px; font-size: 13px; selection-background-color: {accent}; }}
+QLineEdit:hover {{ border: 1px solid {press}; }}
+QLineEdit:focus {{ border: 1px solid {accent}; border-bottom: 2px solid {accent}; }}
+QTabBar {{ background: transparent; qproperty-drawBase: 0; }}
+QTabBar::tab {{ background-color: {title}; color: {muted}; border: 1px solid {title}; border-top: 2px solid {title}; border-bottom: 0; padding: 6px 10px 7px 14px; margin-right: 2px; min-width: 120px; border-top-left-radius: 6px; border-top-right-radius: 6px; }}
+QTabBar::tab:selected {{ background-color: {bar}; color: {text}; border: 1px solid {line}; border-top: 2px solid {accent}; border-bottom: 0; }}
+QTabBar::tab:hover:!selected {{ background-color: {hover}; color: {text}; border-color: {hover}; }}
+QStatusBar {{ background: {bar}; color: {muted}; border-top: 1px solid {line}; }}
+QStatusBar::item {{ border: 0; }}
+QDockWidget {{ color: {muted}; font-size: 12px; }}
+QDockWidget::title {{ background: {bar}; padding: 10px 12px 6px 12px; text-transform: uppercase; }}
+QTreeWidget {{ background: {bar}; color: {text}; border: 0; padding: 2px 6px; font-size: 13px; outline: 0; }}
+QTreeWidget::item {{ padding: 5px 4px; border-radius: 4px; }}
+QTreeWidget::item:hover {{ background: {hover}; }}
+QTreeWidget::item:selected {{ background: {accent}; color: {page}; }}
+QMenu {{ background: {page}; color: {text}; border: 1px solid {line}; padding: 4px 0; font-size: 13px; min-width: 200px; }}
+QMenu::item {{ padding: 8px 32px 8px 16px; background: transparent; }}
+QMenu::item:selected:disabled {{ background: transparent; }}
+QMenu::item:selected {{ background: {hover}; }}
+QMenu::item:disabled {{ color: {muted}; }}
+QMenu::separator {{ height: 1px; background: {line}; margin: 4px 0; }}
+QMenu::right-arrow {{ width: 8px; height: 8px; }}
+QToolTip {{ background: {page}; color: {text}; border: 1px solid {line}; padding: 4px 6px; }}
+QScrollBar:vertical {{ background: {page}; width: 12px; margin: 0; }}
+QScrollBar::handle:vertical {{ background: {line}; border-radius: 4px; min-height: 32px; margin: 2px 3px; }}
+QScrollBar::handle:vertical:hover {{ background: {press}; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+{tab_close}{icon_rules}"
+    )
+}
+
 /// `mdview-qt [FILE...] [--light|--dark] [--no-session] [--select-test|--link-test|...]`.
 /// `MDVIEW_SETTINGS` names the session file instead of the per-user default.
 pub fn run() -> i32 {
@@ -2819,6 +3166,10 @@ pub fn run() -> i32 {
         }
     }
     let shell = Rc::new(Shell::new(theme, zoom.clamp(0.5, 3.0)));
+    if !theme_flag {
+        // Follows the system unless a flag or the saved session (below) says otherwise.
+        shell.set_theme_choice(ThemeChoice::System);
+    }
     // Scripted checks start from a known state, so they never read or write the user's session
     // unless `MDVIEW_SETTINGS` points them at a scratch one.
     let explicit = std::env::var_os("MDVIEW_SETTINGS").map(PathBuf::from);
