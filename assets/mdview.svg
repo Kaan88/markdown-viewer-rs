@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <!-- The mdview mark: the Markdown "M" and down arrow on a blue tile. Replace for a branded release. -->
+  <!-- The mdview mark. Written by make_icon.py; change the shapes there. -->
   <rect x="8" y="8" width="240" height="240" rx="52" fill="#2b5fab"/>
   <rect x="8" y="8" width="240" height="120" rx="52" fill="#fff" opacity="0.08"/>
-  <path d="M44 176V80h28l28 36 28-36h28v96h-28v-54l-28 36-28-36v54zM178 128h-24l38 44 38-44h-24V80h-28z" fill="#fff" transform="translate(-8 4) scale(0.96)"/>
+  <path d="M38.72 174.08 38.72 81.92 65.60 81.92 92.48 116.48 119.36 81.92 146.24 81.92 146.24 174.08 119.36 174.08 119.36 122.24 92.48 156.80 65.60 122.24 65.60 174.08zM167.36 128.00 144.32 128.00 180.80 170.24 217.28 128.00 194.24 128.00 194.24 81.92 167.36 81.92z" fill="#fff"/>
 </svg>
