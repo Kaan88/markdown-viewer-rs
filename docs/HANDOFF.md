@@ -166,7 +166,7 @@ Run `bins/mdv-qt/target/release/mdview-qt.exe` with Qt's `bin` on `PATH`. Its sc
 one line and exit: `--drop-test <path>`, `--select-test`, `--select-hold`, `--link-test`,
 `--details-test`, `--find-test`, `--outline-test`, `--copy-test`, `--tabs-test`. Not verified in
 this rewrite: that the Qt crate still builds against the renderer API changed on 2026-11-11 and
-2026-11-12 (`7ef3831` adapted it; nothing since was built here).
+2026-11-12 (`cff387c` adapted it; nothing since was built here).
 
 **crates.io** was unreachable from the PC for a while (`SEC_E_NO_CREDENTIALS`) and worked again from
 2026-11-08. With crates cached, `--offline` builds; a stale local index can fail to resolve locked
@@ -200,7 +200,7 @@ presents the whole frame.
 composed and presented, then the window is shown and the whole frame is presented again, because
 a present to a hidden window shows nothing. A `RedrawRequested` the app did not ask for (the
 system showed, restored or uncovered the window) sets `expose` and presents the whole frame; before
-`147b805` the title row and command bar stayed white until something changed under the pointer.
+`846a9c2` the title row and command bar stayed white until something changed under the pointer.
 
 **Hit and Act.** Drawing records `(Hit, Rect)` pairs per region and for overlays; `hit_at` asks
 overlays first when a dialog is open, then the regions. `Hit::region()` says which region repaints
@@ -329,7 +329,7 @@ inline origin map; a hit asks parley's `Cluster::from_point` and maps back to `D
 selection asks `Cluster::from_byte_index` for the boundaries. Selection and find marks are drawn by
 the shell over the frame, never into it.
 
-**Image store** (`layout/store.rs`, since `1ad57b4`). Every raster (file images, remote images,
+**Image store** (`layout/store.rs`, since `8d2437f`). Every raster (file images, remote images,
 inline and display math, Mermaid) is keyed by what its pixels depend on: a file's resolved path,
 length and mtime; a formula's source, pixel size, colour and display flag; a diagram's source,
 scale and theme. Relayout, a width change, a zoom back to a known scale, a `<details>` toggle, a
@@ -340,7 +340,7 @@ rasterized by the engine at the device scale (`KIND_SVG_AT`).
 **Images.** PNG, JPEG, GIF (first frame only) and WebP decode in-process; SVG goes to the engine.
 Limits 12 MiB and 24 Mpx. `<picture>` light/dark sources follow the theme; `<img width height>`
 are honoured and reserve the box while loading. Below half size an image is area-averaged
-(`abf7b54`), at half size and up bilinear.
+(`56c61a3`), at half size and up bilinear.
 
 **Math** (RaTeX through the engine): inline `$...$` is one image atom rendered at twice the text
 size and halved, sitting on the baseline the engine reports; `$$...$$` and fenced `math` are
@@ -356,7 +356,7 @@ crash) retries once against a fresh process; a timeout kills and reaps it and le
 
 **Fixtures.** `fixtures/everything.md` is the one file that exercises every feature, in the order
 of `docs/COVERAGE.md`; only its last section needs the network. Rendering it on 2026-11-12 exposed
-six renderer bugs, fixed in `f5a8bed`: strikethrough and underline looked up at the shaped run's
+six renderer bugs, fixed in `ae4e7bf`: strikethrough and underline looked up at the shaped run's
 start (missing or spilling onto neighbours, also in the showcase goldens); sub- and superscript on
 the baseline; every alert blue; `<ol type>`, `<div align>`/`<center>` around Markdown, `<hr width>`
 and `align=justify` ignored; a code label drawn through a long first line. Others: `showcase.md`
@@ -377,7 +377,7 @@ was allowed or the "always" setting is on.
 **The bar.** Over a page that holds remote images back, a bar offers **Load images** (this
 document), **Always load** (every document from now on) and a close button (hides the bar for this
 document). Its count is the number of distinct `http(s)` image URLs in the document, counted when
-the file is read (`a4065b9`), not the number a frame has met. The main menu has a checked item
+the file is read (`a483ece`), not the number a frame has met. The main menu has a checked item
 "Always load remote images" that turns the setting on or off; it is saved in the session as
 `remote_images=0|1`. Images already shown stay when it is turned off.
 
@@ -635,36 +635,36 @@ testing on other machines (there is one PC). The editor is a second project (PLA
   Automation and real clicks; a MenuBar bug (later items stop responding after one is used) was
   bisected but not fixed and may have been a VM artifact. `docs/WINDOWS_HANDOFF.md` written.
   Clean-up of VM and temp leftovers at the user's request.
-- **2026-11-11, Windows PC, layout A** (`0e8ee6d`, `09c4371`). No menu bar; tabs in the title row;
+- **2026-11-11, Windows PC, layout A** (`cb82a36`, `16c5cd9`). No menu bar; tabs in the title row;
   one command bar (Open, Reload, Recent | Files, Outline | zoom; find box with count,
   previous/next, Theme, main menu); Files pane left, Outline right. Both shells brought to parity
   side by side. Two Qt bugs fixed: both right-click menus used `ActionsContextMenu` and never opened,
   and every mouse button acted as the left one.
-- **2026-11-11, WinUI final work** (`6014a7e`). Single instance before the Windows App SDK bootstrap
+- **2026-11-11, WinUI final work** (`46b2e97`). Single instance before the Windows App SDK bootstrap
   (17-24 ms hand-over), OS file watching through `DispatcherQueue`, Manage recent dialog, 0.1.0
   installer that registers the extensions and a registered application. Measured 383 ms first frame
   and 180-210 MiB private memory; `ExtendsContentIntoTitleBar` alone cost 70-95 ms. Retired the
-  same day (`94cf36f`); the code is on `winui-archive`.
+  same day (`b8e57ba`); the code is on `winui-archive`.
 - **2026-11-11, Qt as the only shell.** Panes and window size saved in the session
   (`layout=files=1;outline=0`, `geometry=WxH [max]`); Qt Files tree loads folders on expand; no
   console window; Qt installer (`mdview-qt.iss`, windeployqt output plus the MSVC runtime
   app-local, ProgId `mdview-qt.Markdown`) on the v0.1.0 pre-release.
-- **2026-11-11, shell mockups** (`ed9fb41`). `spikes/shell-fltk`, `shell-slint`, `shell-soft`, each
+- **2026-11-11, shell mockups** (`ca331de`). `spikes/shell-fltk`, `shell-slint`, `shell-soft`, each
   its own workspace; numbers in PLAN. winit + softbuffer chosen.
-- **2026-11-11, the new shell** (`a82c8c0`). `bins/mdv-app` with every control hand-drawn; the user
-  approved the look. Same day: full GitHub emoji list (`035b78c`), `layout.rs` split into modules
-  (`66c792e`), clipped text draw (`7bee6a3`), GIF and WebP (`bf3ab80`), cheaper glyph cache
-  bookkeeping (`3ffbe64`), subpixel order setting and ClearType-following chrome (`72b8285`),
-  installer with static CRT (`6c66a5c`, moved into `target\dist` by `a2faecb`, `8f441cb`),
-  area-averaged downscaling (`abf7b54`), `mdview-fetch` (`8ba8fa4`), 23 more Mermaid families
-  (`2915f08`, `50a0b85`), the image store (`1ad57b4`), startup trace counts (`3fafe69`), the
-  patchable layout (`7ef3831`), estimated first layout and refinement (`db29742`, `feee929`), the
-  editor noted as a second project (`49d5fbc`).
-- **2026-11-12.** Whole-frame present on a system repaint (`147b805`); remote images off until
-  asked, with the bar and the "always" setting (`6ac87a8`, `a4065b9`); softer popup shadows and
-  wider resize bands with corner zones (`a7d2417`); ruby, `<dl>` and `<figure>` styling (`b0fde23`);
-  copy formula and diagram source (`87d63f1`); page text follows the display's subpixel order
-  (`52814ce`); the six `everything.md` fixes (`f5a8bed`); `<mark>`, `dir`, table `align`/`width`/
+- **2026-11-11, the new shell** (`e84e117`). `bins/mdv-app` with every control hand-drawn; the user
+  approved the look. Same day: full GitHub emoji list (`85ba744`), `layout.rs` split into modules
+  (`f0d3adc`), clipped text draw (`f34848d`), GIF and WebP (`feca9fc`), cheaper glyph cache
+  bookkeeping (`dfbbd68`), subpixel order setting and ClearType-following chrome (`a9c6f1b`),
+  installer with static CRT (`7945d88`, moved into `target\dist` by `b0dcd29`, `de981b9`),
+  area-averaged downscaling (`56c61a3`), `mdview-fetch` (`7a6ef4a`), 23 more Mermaid families
+  (`b140780`, `8e005c2`), the image store (`8d2437f`), startup trace counts (`dd11284`), the
+  patchable layout (`cff387c`), estimated first layout and refinement (`ffd38e0`, `b115835`), the
+  editor noted as a second project (`d21dbc7`).
+- **2026-11-12.** Whole-frame present on a system repaint (`846a9c2`); remote images off until
+  asked, with the bar and the "always" setting (`099ded4`, `a483ece`); softer popup shadows and
+  wider resize bands with corner zones (`c5377a2`); ruby, `<dl>` and `<figure>` styling (`33bf887`);
+  copy formula and diagram source (`103654b`); page text follows the display's subpixel order
+  (`429adc9`); the six `everything.md` fixes (`ae4e7bf`); `<mark>`, `dir`, table `align`/`width`/
   `height`/`valign`/`<caption>`, image `align`, TypeScript and TOML highlighting, a reason on a
   block that falls back, and find agreeing with the page for unsupported diagrams and unlisted
   footnotes (2026-11-12).
