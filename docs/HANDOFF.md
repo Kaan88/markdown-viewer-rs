@@ -75,6 +75,9 @@ tests yourself before a push. Commit and push as phases complete or when asked.
 | `spikes/` | Throwaway reference code, excluded from the workspace; `spikes/parser/data` holds the spec suites and `generated_1mib.md` |
 | `docs/` | This file, `PLAN.md`, `PORT_CHECKLIST.md`, `COVERAGE.md`, `UPDATE.md`, `WINDOWS_HANDOFF.md` (2026-11-10 WinUI checklist, history), `AUDIT_PHASE1.md` |
 
+**The editor.** `Kaan88/markdown-editor-rs` (`mdedit`) has its own `docs/HANDOFF.md`, written 2026-11-13, which
+also covers the shared crates and what was left unchecked in this repository after the move.
+
 **Shared crates (2026-11-12).** Code the editor also needs now lives in
 `Kaan88/markdown-shared-rs`, pinned by `rev` in `crates/core`, `crates/render` and `bins/mdv-app`:
 `mdshared-text` (`Bitmap`, `TextEngine`, `shared_fonts`), `mdshared-highlight` (syntect),
