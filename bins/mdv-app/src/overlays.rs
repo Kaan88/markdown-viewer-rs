@@ -2,13 +2,17 @@
 //! dialogs, the status toast, the link hint and tooltips.
 
 use crate::chrome::{Ctx, glyph, logo};
-use crate::gfx::{Face, Painter, Rect, mix};
+use crate::gfx::{Face, Rect, mix};
 use crate::keys;
 use crate::menu::{Item, Menu};
 use crate::panes::{draw_scrollbar, scrollbar};
-use crate::theme::Palette;
 use crate::ui::{Act, Dialog, DialogKind, EditAct, Hit, Scroller, Ui};
 use crate::workspace::{PageContext, Workspace};
+pub use mdshared_ui::overlay::Bubble;
+use mdshared_ui::overlay::{
+    DIALOG_FOOTER, DIALOG_PAD, dialog_button_w, dialog_card, draw_backdrop, draw_dialog_button,
+    draw_dialog_card, draw_keycaps,
+};
 use mdview_core::commands::{CommandId as C, shortcut_help, strings};
 use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
@@ -176,120 +180,10 @@ pub fn find_menu(has_text: bool, has_selection: bool, x: f32, y: f32) -> Menu<Ac
     Menu::new(items, x, y, false)
 }
 
-// ---- toast, link hint, tooltip ---------------------------------------------------------------
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub enum Kind {
-    Toast,
-    Hint,
-    Tip,
-}
-
-/// A small text popup, placed but not yet drawn.
-pub struct Bubble {
-    pub kind: Kind,
-    pub rect: Rect,
-    pub text: String,
-}
-
-impl Bubble {
-    /// What drawing it touches, shadow included.
-    pub fn bounds(&self) -> Rect {
-        match self.kind {
-            Kind::Hint => self.rect.inset(-2.0),
-            _ => Rect::new(
-                self.rect.x - 18.0,
-                self.rect.y - 16.0,
-                self.rect.w + 36.0,
-                self.rect.h + 38.0,
-            ),
-        }
-    }
-
-    pub fn toast(p: &mut Painter, text: &str, page: Rect) -> Bubble {
-        let w = (p.measure(Face::Ui, 13.0, text) + 36.0)
-            .min(page.w - 32.0)
-            .max(80.0);
-        let rect = Rect::new(
-            (page.cx() - w / 2.0).round(),
-            (page.bottom() - 36.0 - 28.0).round(),
-            w.round(),
-            36.0,
-        );
-        Bubble {
-            kind: Kind::Toast,
-            rect,
-            text: text.to_string(),
-        }
-    }
-
-    pub fn hint(p: &mut Painter, text: &str, page: Rect) -> Bubble {
-        let max = (page.w * 0.7).min(640.0);
-        let w = (p.measure(Face::Ui, 12.0, text) + 20.0).min(max);
-        let rect = Rect::new(page.x + 6.0, page.bottom() - 6.0 - 24.0, w.round(), 24.0);
-        Bubble {
-            kind: Kind::Hint,
-            rect,
-            text: text.to_string(),
-        }
-    }
-
-    pub fn tip(p: &mut Painter, text: &str, anchor: Rect, win_w: f32, win_h: f32) -> Bubble {
-        let w = (p.measure(Face::Ui, 12.0, text) + 18.0).min(win_w - 16.0);
-        let h = 26.0;
-        let x = (anchor.cx() - w / 2.0).clamp(8.0, (win_w - w - 8.0).max(8.0));
-        let mut y = anchor.bottom() + 6.0;
-        if y + h > win_h - 4.0 {
-            y = anchor.y - h - 6.0;
-        }
-        Bubble {
-            kind: Kind::Tip,
-            rect: Rect::new(x.round(), y.round(), w.round(), h),
-            text: text.to_string(),
-        }
-    }
-
-    pub fn draw(&self, p: &mut Painter, pal: &Palette) {
-        let r = self.rect;
-        match self.kind {
-            Kind::Hint => {
-                p.frame(r, 5.0, pal.popup, pal.popup_line);
-                p.text(
-                    Face::Ui,
-                    12.0,
-                    r.x + 10.0,
-                    r.cy(),
-                    &self.text,
-                    pal.muted,
-                    r.w - 20.0,
-                );
-            }
-            Kind::Toast => {
-                p.shadow(r, 8.0, pal.dark);
-                p.frame(r, 8.0, pal.popup, pal.popup_line);
-                p.text_center(Face::Ui, 13.0, r.inset(10.0), &self.text, pal.text);
-            }
-            Kind::Tip => {
-                p.shadow(r, 5.0, pal.dark);
-                p.frame(r, 5.0, pal.popup, pal.popup_line);
-                p.text(
-                    Face::Ui,
-                    12.0,
-                    r.x + 9.0,
-                    r.cy(),
-                    &self.text,
-                    pal.text,
-                    r.w - 18.0,
-                );
-            }
-        }
-    }
-}
-
 // ---- dialogs ---------------------------------------------------------------------------------
 
-const PAD: f32 = 24.0;
-const FOOTER: f32 = 72.0;
+const PAD: f32 = DIALOG_PAD;
+const FOOTER: f32 = DIALOG_FOOTER;
 const KEY_ROW: f32 = 34.0;
 const RECENT_ROW: f32 = 52.0;
 
@@ -303,31 +197,7 @@ pub fn card(kind: DialogKind, rows: usize, w: f32, h: f32) -> Rect {
         DialogKind::Recent => (600.0, list(RECENT_ROW, 80.0).min(560.0)),
         DialogKind::AllowEdit => (500.0, 232.0),
     };
-    let cw = cw.min(w - 32.0).max(200.0);
-    let ch = ch.min(h - 48.0).max(160.0);
-    Rect::new(
-        ((w - cw) / 2.0).round(),
-        ((h - ch) / 2.0).round(),
-        cw.round(),
-        ch.round(),
-    )
-}
-
-/// Splits "Ctrl+Shift+F" into keys, keeping "Ctrl++" as Ctrl and "+".
-fn key_parts(combo: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut rest = combo;
-    while let Some(i) = rest.find('+') {
-        if i == 0 {
-            break;
-        }
-        out.push(&rest[..i]);
-        rest = &rest[i + 1..];
-    }
-    if !rest.is_empty() {
-        out.push(rest);
-    }
-    out
+    dialog_card(cw, ch, w, h)
 }
 
 fn shortcut_label(label: &str) -> String {
@@ -341,40 +211,20 @@ fn shortcut_label(label: &str) -> String {
 }
 
 fn button(c: &mut Ctx, r: Rect, hit: Hit, label: &str, primary: bool) {
-    let pal = *c.pal;
-    let (hover, press) = (
-        c.hover == Some(hit),
-        c.pressed == Some(hit) && c.hover == Some(hit),
+    let hovered = c.hover == Some(hit);
+    draw_dialog_button(
+        c.p,
+        c.pal,
+        r,
+        label,
+        primary,
+        hovered,
+        c.pressed == Some(hit),
     );
-    if primary {
-        let fill = if press {
-            mix(pal.accent, pal.popup, 0.2)
-        } else if hover {
-            mix(pal.accent, pal.popup, 0.1)
-        } else {
-            pal.accent
-        };
-        c.p.rbox(r, 5.0, fill);
-        c.p.text_center(Face::Semibold, 13.0, r, label, pal.on_accent);
-    } else {
-        let fill = if press {
-            pal.press
-        } else if hover {
-            pal.hover
-        } else {
-            mix(pal.popup, pal.text, 0.04)
-        };
-        c.p.frame(r, 5.0, fill, pal.popup_line);
-        c.p.text_center(Face::Ui, 13.0, r, label, pal.text);
-    }
     c.hit(hit, r);
 }
 
-fn button_w(p: &mut Painter, label: &str) -> f32 {
-    (p.measure(Face::Semibold, 13.0, label) + 40.0)
-        .max(96.0)
-        .round()
-}
+use dialog_button_w as button_w;
 
 pub fn draw_dialog(
     c: &mut Ctx,
@@ -386,11 +236,7 @@ pub fn draw_dialog(
 ) {
     let pal = *c.pal;
     c.hit(Hit::Backdrop, Rect::new(0.0, 0.0, w, h));
-    c.p.fill_a(
-        Rect::new(0.0, 0.0, w, h),
-        [0, 0, 0],
-        if pal.dark { 0.45 } else { 0.28 },
-    );
+    draw_backdrop(c.p, &pal, w, h);
     let rows = match d.kind {
         DialogKind::About => 0,
         DialogKind::Shortcuts => shortcut_help().len(),
@@ -398,30 +244,8 @@ pub fn draw_dialog(
         DialogKind::AllowEdit => 0,
     };
     let r = card(d.kind, rows, w, h);
-    c.p.shadow(r, 10.0, pal.dark);
-    if pal.dark {
-        c.p.shadow(r, 10.0, true);
-    }
-    c.p.frame(r, 10.0, pal.popup, pal.popup_line);
     c.hit(Hit::DlgCard, r);
-    let footer = Rect::new(r.x + 1.0, r.bottom() - FOOTER, r.w - 2.0, FOOTER - 1.0);
-    {
-        let old = c.p.clip(footer);
-        c.p.rbox(
-            Rect::new(footer.x, footer.y - 12.0, footer.w, footer.h + 12.0),
-            9.0,
-            mix(
-                pal.popup,
-                if pal.dark { [0, 0, 0] } else { pal.bar },
-                if pal.dark { 0.22 } else { 0.7 },
-            ),
-        );
-        c.p.restore(old);
-        c.p.fill(
-            Rect::new(footer.x, footer.y, footer.w, c.p.px()),
-            pal.popup_line,
-        );
-    }
+    let footer = draw_dialog_card(c.p, &pal, r);
     let by = footer.y + (FOOTER - 32.0) / 2.0;
     let title = match d.kind {
         DialogKind::About => strings::ABOUT_TITLE,
@@ -573,39 +397,7 @@ pub fn draw_dialog(
                     pal.text,
                     row.w * 0.5,
                 );
-                // Keycaps, right-aligned, alternatives separated by "or".
-                let mut x = row.right() - 12.0;
-                let alts: Vec<&str> = keys.split(", ").collect();
-                for (ai, alt) in alts.iter().enumerate().rev() {
-                    for part in key_parts(alt).iter().rev() {
-                        let kw = (c.p.measure(Face::Ui, 12.0, part) + 14.0).max(24.0).round();
-                        x -= kw;
-                        let cap = Rect::new(x, row.cy() - 11.0, kw, 22.0);
-                        c.p.frame(
-                            cap,
-                            4.0,
-                            mix(pal.popup, pal.text, 0.07),
-                            mix(pal.popup_line, pal.text, 0.08),
-                        );
-                        c.p.fill(
-                            Rect::new(
-                                cap.x + 3.0,
-                                cap.bottom() - 1.0 - c.p.px(),
-                                cap.w - 6.0,
-                                c.p.px(),
-                            ),
-                            mix(pal.popup_line, pal.text, 0.12),
-                        );
-                        c.p.text_center(Face::Ui, 12.0, cap, part, pal.text);
-                        x -= 4.0;
-                    }
-                    if ai > 0 {
-                        let ow = c.p.measure(Face::Ui, 12.0, "or");
-                        x -= ow + 4.0;
-                        c.p.text(Face::Ui, 12.0, x, row.cy(), "or", pal.faint, ow + 2.0);
-                        x -= 8.0;
-                    }
-                }
+                draw_keycaps(c.p, &pal, row, keys);
             }
             c.p.restore(old);
             dialog_scrollbar(c, d);
@@ -755,14 +547,6 @@ pub fn dialog_row_at(d: &Dialog, x: f32, y: f32) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn keycaps() {
-        assert_eq!(key_parts("Ctrl+Shift+F"), ["Ctrl", "Shift", "F"]);
-        assert_eq!(key_parts("Ctrl++"), ["Ctrl", "+"]);
-        assert_eq!(key_parts("Ctrl+-"), ["Ctrl", "-"]);
-        assert_eq!(key_parts("F5"), ["F5"]);
-    }
 
     #[test]
     fn cards_fit_small_windows() {

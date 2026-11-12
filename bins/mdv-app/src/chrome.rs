@@ -5,63 +5,17 @@ use crate::gfx::{Face, Painter, Rect, Rgb, mix};
 use crate::keys;
 use crate::textfield::FieldColors;
 use crate::theme::Palette;
-use crate::ui::{BAR_H, BarItem, Hit, PopupKind, TITLE_H, Ui};
+use crate::ui::{BarItem, Hit, PopupKind, Ui};
 use crate::workspace::{ThemeChoice, Workspace};
+use mdshared_ui::chrome::{
+    BAR_H, DRAG_MIN, NEW_TAB_W, TABS_X, TITLE_H, TabState, WIN_BTN_W, WinButton, button_fill,
+    draw_new_tab_button, draw_tab, draw_win_button, tab_natural_width, tab_widths, win_button_rect,
+};
+pub use mdshared_ui::glyph;
 use mdview_core::commands::{CommandId, strings};
 use mdview_core::session::PageWidth;
 
-pub const WIN_BTN_W: f32 = 46.0;
-pub const TAB_MIN: f32 = 90.0;
-pub const TAB_MAX: f32 = 220.0;
-/// Tabs squeeze below `TAB_MIN` only when nothing else fits; under this they would be unusable.
-pub const TAB_FLOOR: f32 = 36.0;
-/// Where the tabs start, after the logo.
-pub const TABS_X: f32 = 50.0;
-/// The new-tab button after the last tab, and the drag area kept free beside it.
-const NEW_TAB_W: f32 = 34.0;
-const DRAG_MIN: f32 = 56.0;
 const FIND_W: f32 = 260.0;
-
-/// Segoe Fluent Icons code points used across the chrome.
-pub mod glyph {
-    pub const DOC: &str = "\u{E8A5}";
-    pub const FOLDER: &str = "\u{E8B7}";
-    pub const FOLDER_OPEN: &str = "\u{E838}";
-    pub const OPEN: &str = "\u{E8E5}";
-    pub const RELOAD: &str = "\u{E72C}";
-    pub const RECENT: &str = "\u{E81C}";
-    pub const OUTLINE: &str = "\u{E8FD}";
-    pub const MINUS: &str = "\u{E738}";
-    pub const PLUS: &str = "\u{E710}";
-    pub const UP: &str = "\u{E70E}";
-    pub const DOWN: &str = "\u{E70D}";
-    pub const RIGHT: &str = "\u{E76C}";
-    pub const SEARCH: &str = "\u{E721}";
-    pub const CLOSE: &str = "\u{E711}";
-    pub const MORE: &str = "\u{E712}";
-    pub const SUN: &str = "\u{E706}";
-    pub const MOON: &str = "\u{E708}";
-    pub const SYSTEM: &str = "\u{E7F4}";
-    pub const WARN: &str = "\u{E7BA}";
-    pub const IMAGE: &str = "\u{E8B9}";
-    pub const COPY: &str = "\u{E8C8}";
-    pub const CUT: &str = "\u{E8C6}";
-    pub const PASTE: &str = "\u{E77F}";
-    pub const LINK: &str = "\u{E71B}";
-    pub const SELECT_ALL: &str = "\u{E8B3}";
-    pub const FULLSCREEN: &str = "\u{E740}";
-    pub const BACK_TO_WINDOW: &str = "\u{E73F}";
-    pub const KEYBOARD: &str = "\u{E765}";
-    pub const INFO: &str = "\u{E946}";
-    pub const POWER: &str = "\u{E7E8}";
-    pub const ZOOM: &str = "\u{E71E}";
-    pub const DELETE: &str = "\u{E74D}";
-    pub const OPEN_WITH: &str = "\u{E8A7}";
-    pub const WIN_MIN: &str = "\u{E921}";
-    pub const WIN_MAX: &str = "\u{E922}";
-    pub const WIN_RESTORE: &str = "\u{E923}";
-    pub const WIN_CLOSE: &str = "\u{E8BB}";
-}
 
 /// Shared by every drawing function: the painter, colours, and where hits are recorded.
 pub struct Ctx<'a, 'b> {
@@ -79,19 +33,13 @@ impl Ctx<'_, '_> {
 
     /// The fill behind a button: pressed, hovered, toggled on, or none.
     pub fn fill_for(&self, hit: Hit, on: bool, open: bool) -> Option<Rgb> {
-        if open || (self.pressed == Some(hit) && self.hover == Some(hit)) {
-            Some(self.pal.press)
-        } else if self.hover == Some(hit) {
-            Some(if on {
-                mix(self.pal.on, self.pal.text, 0.06)
-            } else {
-                self.pal.hover
-            })
-        } else if on {
-            Some(self.pal.on)
-        } else {
-            None
-        }
+        button_fill(
+            self.pal,
+            self.hover == Some(hit),
+            self.pressed == Some(hit),
+            on,
+            open,
+        )
     }
 }
 
@@ -153,35 +101,6 @@ pub fn logo(p: &mut Painter, r: Rect) {
     let white = [255, 255, 255];
     p.polygon(&MARK_M.iter().map(place).collect::<Vec<_>>(), white);
     p.polygon(&MARK_ARROW.iter().map(place).collect::<Vec<_>>(), white);
-}
-
-/// Widths for tabs that would like `natural` px each, fitting in `avail`: each between
-/// `TAB_MIN` and `TAB_MAX`; when they do not fit, the widest are capped first (so short labels
-/// keep their size), then all shrink evenly down to `TAB_FLOOR`.
-pub fn tab_widths(natural: &[f32], avail: f32) -> Vec<f32> {
-    let wants: Vec<f32> = natural
-        .iter()
-        .map(|w| w.clamp(TAB_MIN, TAB_MAX).round())
-        .collect();
-    let sum: f32 = wants.iter().sum();
-    if sum <= avail || wants.is_empty() {
-        return wants;
-    }
-    let fits = |cap: f32| wants.iter().map(|w| w.min(cap)).sum::<f32>() <= avail;
-    let (mut lo, mut hi) = (TAB_FLOOR, TAB_MAX);
-    if !fits(lo) {
-        return vec![TAB_FLOOR; wants.len()];
-    }
-    for _ in 0..40 {
-        let mid = (lo + hi) / 2.0;
-        if fits(mid) {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    let cap = lo.floor();
-    wants.iter().map(|w| w.min(cap)).collect()
 }
 
 /// What the command bar shows at a given width.
@@ -375,39 +294,22 @@ pub fn draw_title(c: &mut Ctx, ws: &Workspace, ui: &Ui, r: Rect, maximized: bool
     // Window buttons, right to left.
     let mut right = r.right();
     let buttons = [
-        (Hit::WinClose, glyph::WIN_CLOSE),
-        (
-            Hit::WinMax,
-            if maximized {
-                glyph::WIN_RESTORE
-            } else {
-                glyph::WIN_MAX
-            },
-        ),
-        (Hit::WinMin, glyph::WIN_MIN),
+        (Hit::WinClose, WinButton::Close),
+        (Hit::WinMax, WinButton::Max),
+        (Hit::WinMin, WinButton::Min),
     ];
-    for (hit, g) in buttons {
+    for (hit, kind) in buttons {
+        let b = win_button_rect(right, 0);
         right -= WIN_BTN_W;
-        let b = Rect::new(right, 0.0, WIN_BTN_W, TITLE_H);
-        let mut color = pal.text;
-        let (hovered, pressed) = (
+        draw_win_button(
+            c.p,
+            &pal,
+            kind,
+            b,
+            maximized,
             c.hover == Some(hit),
-            c.pressed == Some(hit) && c.hover == Some(hit),
+            c.pressed == Some(hit),
         );
-        if hit == Hit::WinClose && hovered {
-            c.p.fill(
-                b,
-                if pressed {
-                    mix(pal.danger, [0, 0, 0], 0.15)
-                } else {
-                    pal.danger
-                },
-            );
-            color = [255, 255, 255];
-        } else if hovered {
-            c.p.fill(b, if pressed { pal.press } else { pal.hover });
-        }
-        c.p.icon(g, 10.0, b.cx(), b.cy(), color);
         c.hit(hit, b);
     }
     if ui.focus_mode {
@@ -423,105 +325,43 @@ pub fn draw_title(c: &mut Ctx, ws: &Workspace, ui: &Ui, r: Rect, maximized: bool
     // Tabs.
     let labels = ws.labels();
     let avail = (right - DRAG_MIN - NEW_TAB_W - TABS_X).max(0.0);
-    let natural: Vec<f32> = labels
-        .iter()
-        .map(|l| c.p.measure(Face::Semibold, 12.5, l) + 74.0)
-        .collect();
+    let natural: Vec<f32> = labels.iter().map(|l| tab_natural_width(c.p, l)).collect();
     let widths = tab_widths(&natural, avail);
     let active = ws.active();
     let mut x = TABS_X;
     // Tabs that still do not fit at the floor width are cut off rather than drawn over the buttons.
     let clip = c.p.clip(Rect::new(0.0, 0.0, TABS_X + avail + 8.0, TITLE_H));
+    let is_hot = |hover: Option<Hit>, i: usize| matches!(hover, Some(Hit::Tab(j) | Hit::TabClose(j)) if j == i);
     for (i, label) in labels.iter().enumerate() {
         let w = widths[i];
-        let tab = Rect::new(x, 6.0, w, TITLE_H - 6.0);
-        let is_active = active == Some(i);
-        let hovered = matches!(c.hover, Some(Hit::Tab(j) | Hit::TabClose(j)) if j == i);
-        let dragging =
-            matches!(ui.drag, Some(crate::ui::Drag::Tab { index, moving: true, .. }) if index == i);
-        if is_active {
-            // The active tab joins the bar: square bottom, outward curves where it meets it.
-            let old = c.p.clip(Rect::new(0.0, 0.0, r.w, TITLE_H));
-            c.p.rbox(Rect::new(x, 6.0, w, TITLE_H), 8.0, pal.bar);
-            for (cx, sq) in [(x - 8.0, x - 8.0), (x + w + 8.0, x + w)] {
-                let corner = Rect::new(sq, TITLE_H - 8.0, 8.0, 8.0);
-                let o2 = c.p.clip(corner);
-                c.p.fill(corner, pal.bar);
-                c.p.rbox(
-                    Rect::new(cx - 8.0, TITLE_H - 16.0, 16.0, 16.0),
-                    8.0,
-                    pal.title,
-                );
-                c.p.restore(o2);
-            }
-            c.p.restore(old);
-        } else if hovered || dragging {
-            c.p.rbox(Rect::new(x + 2.0, 9.0, w - 4.0, 28.0), 6.0, pal.hover);
-        } else {
-            // A hairline between two quiet tabs.
-            let next_quiet = i + 1 < labels.len()
-                && active != Some(i + 1)
-                && !matches!(c.hover, Some(Hit::Tab(j) | Hit::TabClose(j)) if j == i + 1);
-            if next_quiet {
-                c.p.fill(Rect::new(x + w - c.p.px(), 15.0, c.p.px(), 16.0), pal.line);
-            }
-        }
-        let cy = 23.0;
-        let missing = ws.tab(i).is_some_and(|t| t.is_missing());
-        let show_close = (is_active || hovered) && w >= 64.0;
-        let tiny = w < 64.0;
-        let icon_x = if tiny { x + w / 2.0 } else { x + 19.0 };
-        let (g, gc) = if missing {
-            (glyph::WARN, pal.warn)
-        } else if is_active {
-            (glyph::DOC, pal.accent)
-        } else {
-            (glyph::DOC, pal.muted)
+        let state = TabState {
+            active: active == Some(i),
+            hovered: is_hot(c.hover, i),
+            dragging: matches!(
+                ui.drag,
+                Some(crate::ui::Drag::Tab { index, moving: true, .. }) if index == i
+            ),
+            missing: ws.tab(i).is_some_and(|t| t.is_missing()),
+            next_quiet: i + 1 < labels.len() && active != Some(i + 1) && !is_hot(c.hover, i + 1),
+            close_hovered: c.hover == Some(Hit::TabClose(i)),
+            close_pressed: c.pressed == Some(Hit::TabClose(i)),
         };
-        c.p.icon(g, 13.0, icon_x, cy, gc);
-        if !tiny {
-            let tx = x + 34.0;
-            let max = w - 34.0 - if show_close { 30.0 } else { 12.0 };
-            let (face, color) = if is_active {
-                (Face::Semibold, pal.text)
-            } else if hovered {
-                (Face::Ui, pal.text)
-            } else {
-                (Face::Ui, pal.muted)
-            };
-            let color = if missing { pal.faint } else { color };
-            let drawn = c.p.text(face, 12.5, tx, cy, label, color, max);
-            if missing {
-                c.p.fill(Rect::new(tx, cy + 0.5, drawn, c.p.px().max(1.0)), pal.faint);
-            }
-        }
-        c.hit(Hit::Tab(i), tab);
-        if show_close {
-            let b = Rect::new(x + w - 29.0, cy - 10.0, 20.0, 20.0);
-            if let Some(fill) = c.fill_for(Hit::TabClose(i), false, false) {
-                c.p.rbox(b, 4.0, fill);
-            }
-            c.p.icon(
-                glyph::CLOSE,
-                8.5,
-                b.cx(),
-                b.cy(),
-                if c.hover == Some(Hit::TabClose(i)) {
-                    pal.text
-                } else {
-                    pal.muted
-                },
-            );
+        let drawn = draw_tab(c.p, &pal, x, w, r.w, label, &state);
+        c.hit(Hit::Tab(i), drawn.tab);
+        if let Some(b) = drawn.close {
             c.hit(Hit::TabClose(i), b);
         }
         x += w;
     }
     c.p.restore(clip);
-    let b = Rect::new((x + 4.0).min(TABS_X + avail + 4.0), 8.0, 30.0, 30.0);
-    if let Some(fill) = c.fill_for(Hit::NewTab, false, false) {
-        c.p.rbox(b, 6.0, fill);
-    }
-    c.p.icon(glyph::PLUS, 12.0, b.cx(), b.cy() - 0.5, pal.text);
+    let b = draw_new_tab_button(
+        c.p,
+        &pal,
+        x,
+        avail,
+        c.hover == Some(Hit::NewTab),
+        c.pressed == Some(Hit::NewTab),
+    );
     c.hit(Hit::NewTab, b);
 }
 
@@ -790,29 +630,6 @@ fn draw_find(c: &mut Ctx, ui: &mut Ui, frame: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tabs_keep_natural_width_when_room() {
-        assert_eq!(tab_widths(&[100.0, 150.0], 1000.0), vec![100.0, 150.0]);
-        assert_eq!(tab_widths(&[40.0, 400.0], 1000.0), vec![TAB_MIN, TAB_MAX]);
-        assert!(tab_widths(&[], 10.0).is_empty());
-    }
-
-    #[test]
-    fn crowded_tabs_cap_the_widest_first() {
-        let w = tab_widths(&[100.0, 220.0, 220.0], 440.0);
-        assert_eq!(w[0], 100.0);
-        assert!(w[1] == w[2] && w[1] <= 170.0 && w[1] >= 160.0);
-        assert!(w.iter().sum::<f32>() <= 440.0);
-    }
-
-    #[test]
-    fn many_tabs_squeeze_to_the_floor() {
-        let w = tab_widths(&[200.0; 8], 500.0);
-        assert!(w.iter().all(|&x| (TAB_FLOOR..TAB_MIN).contains(&x)));
-        assert!(w.iter().sum::<f32>() <= 500.0);
-        assert_eq!(tab_widths(&[200.0; 20], 100.0), vec![TAB_FLOOR; 20]);
-    }
 
     fn text() -> BarText {
         BarText {

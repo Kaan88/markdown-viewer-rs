@@ -12,8 +12,7 @@ use mdview_render::SourceKind;
 use std::path::PathBuf;
 use std::time::Instant;
 
-pub const TITLE_H: f32 = 40.0;
-pub const BAR_H: f32 = 44.0;
+pub use mdshared_ui::chrome::{BAR_H, TITLE_H};
 pub const PANE_MIN: f32 = 160.0;
 pub const PANE_MAX: f32 = 480.0;
 /// Below this the page would be too narrow to read; panes give way first.

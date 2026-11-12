@@ -2,103 +2,29 @@
 //! with the page.
 
 use crate::chrome::{Ctx, glyph};
-use crate::gfx::{Face, Painter, Rect};
+use crate::gfx::{Face, Rect};
 use crate::theme::Palette;
 use crate::ui::{Hit, Scroller, Side, Ui};
 use crate::workspace::Workspace;
+pub use mdshared_ui::pane::ROW;
+use mdshared_ui::pane::{HEAD, ROW_H, draw_head, draw_row_fill, draw_splitter};
+pub use mdshared_ui::scroll::{draw_scrollbar, offset_for_thumb, scrollbar};
 use mdview_core::commands::strings;
 
-/// Row pitch and height in both panes.
-pub const ROW: f32 = 30.0;
-const ROW_H: f32 = 28.0;
-/// The pane title row.
-const HEAD: f32 = 40.0;
-
-/// The track and thumb of an overlay scrollbar for `area`, or `None` when everything fits.
-/// `content`, `view` and `offset` may be in any one unit.
-pub fn scrollbar(area: Rect, content: f32, view: f32, offset: f32) -> Option<(Rect, Rect)> {
-    if content <= view + 0.5 || area.h < 24.0 {
-        return None;
-    }
-    let track = Rect::new(area.right() - 12.0, area.y + 2.0, 12.0, area.h - 4.0);
-    let len = (track.h * view / content).clamp(28.0_f32.min(track.h), track.h);
-    let t = (offset / (content - view)).clamp(0.0, 1.0);
-    let thumb = Rect::new(track.x, track.y + t * (track.h - len), track.w, len);
-    Some((track, thumb))
-}
-
-/// The scroll offset that puts the thumb's top at `thumb_y`.
-pub fn offset_for_thumb(track: Rect, thumb_h: f32, thumb_y: f32, content: f32, view: f32) -> f32 {
-    let span = (track.h - thumb_h).max(1.0);
-    ((thumb_y - track.y) / span).clamp(0.0, 1.0) * (content - view).max(0.0)
-}
-
-/// Thin at rest, wider while hovered or dragged.
-pub fn draw_scrollbar(p: &mut Painter, pal: &Palette, track: Rect, thumb: Rect, active: bool) {
-    let w = if active { 8.0 } else { 3.0 };
-    if active {
-        p.rbox_a(
-            Rect::new(track.right() - w - 3.0, track.y, w, track.h),
-            w / 2.0,
-            pal.thumb,
-            0.10,
-        );
-    }
-    let r = Rect::new(track.right() - w - 3.0, thumb.y, w, thumb.h);
-    p.rbox_a(r, w / 2.0, pal.thumb, if active { 0.85 } else { 0.55 });
-}
-
 fn pane_head(c: &mut Ctx, r: Rect, title: &str) {
-    let pal = *c.pal;
-    c.p.fill(r, pal.pane);
-    c.p.text(
-        Face::Semibold,
-        11.0,
-        r.x + 16.0,
-        r.y + HEAD / 2.0,
-        title,
-        pal.muted,
-        r.w - 60.0,
-    );
+    draw_head(c.p, c.pal, r, title);
 }
 
 fn row_fill(c: &mut Ctx, row: Rect, hit: Hit, selected: bool) {
-    let pal = *c.pal;
-    if selected {
-        c.p.rbox(row, 5.0, pal.on);
-        c.p.rbox(
-            Rect::new(row.x, row.y + 7.0, 3.0, row.h - 14.0),
-            1.5,
-            pal.accent,
-        );
-    } else if c.hover == Some(hit) {
-        c.p.rbox(
-            row,
-            5.0,
-            if c.pressed == Some(hit) {
-                pal.press
-            } else {
-                pal.hover
-            },
-        );
-    }
+    let hovered = c.hover == Some(hit);
+    draw_row_fill(c.p, c.pal, row, hovered, c.pressed == Some(hit), selected);
 }
 
 /// The splitter on a pane's inner edge, and the hairline that marks it.
 fn edge(c: &mut Ctx, r: Rect, side: Side, dragging: bool) {
-    let pal = *c.pal;
-    let px = c.p.px();
-    let x = match side {
-        Side::Files => r.right() - px,
-        Side::Outline => r.x,
-    };
     let hot = dragging || c.hover == Some(Hit::Splitter(side));
-    if hot {
-        c.p.fill(Rect::new(x - px, r.y, 3.0 * px, r.h), pal.accent);
-    } else {
-        c.p.fill(Rect::new(x, r.y, px, r.h), pal.line);
-    }
-    c.hit(Hit::Splitter(side), Rect::new(x - 3.0, r.y, 6.0, r.h));
+    let hit = draw_splitter(c.p, c.pal, r, side == Side::Files, hot);
+    c.hit(Hit::Splitter(side), hit);
 }
 
 pub fn draw_files(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
@@ -348,27 +274,5 @@ pub fn reveal_outline_row(ui: &mut Ui, index: usize) {
         *s = (top - ROW).max(0.0);
     } else if top + ROW > *s + view {
         *s = top + 2.0 * ROW - view;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn scrollbar_geometry() {
-        let area = Rect::new(0.0, 0.0, 100.0, 404.0);
-        assert!(scrollbar(area, 300.0, 404.0, 0.0).is_none());
-        let (track, thumb) = scrollbar(area, 800.0, 400.0, 0.0).unwrap();
-        assert_eq!(track.h, 400.0);
-        assert_eq!(thumb.h, 200.0);
-        assert_eq!(thumb.y, track.y);
-        let (_, end) = scrollbar(area, 800.0, 400.0, 400.0).unwrap();
-        assert_eq!(end.bottom(), track.bottom());
-        let back = offset_for_thumb(track, end.h, end.y, 800.0, 400.0);
-        assert!((back - 400.0).abs() < 0.01);
-        // A huge document keeps a grabbable thumb.
-        let (_, tiny) = scrollbar(area, 1e7, 400.0, 0.0).unwrap();
-        assert_eq!(tiny.h, 28.0);
     }
 }
