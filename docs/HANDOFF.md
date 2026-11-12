@@ -276,6 +276,12 @@ the scan reads differently from the parser (the tick is refused with a message),
 `<input>` boxes. `--dialog edit` shows the question in a shot. Everything else stays read-only;
 the editor is still a second project.
 
+**Live Files tree (2026-11-13).** The watcher follows the tree's root and expanded folders while
+the Files pane is open (`App::watch_tree`, `FileWatcher::set_folders` in `mdshared-app`): an entry
+created, removed or renamed directly in one of them wakes the shell, which re-reads the tree.
+Content changes wake only for open files, as before. `MDVIEW_TRACE=1` prints a line per wake. Run
+in a real window with that trace; the user has not looked at it.
+
 **Logo (2026-11-12).** One drawing in two places. `assets/make_icon.py` writes `mdview.svg`,
 `.ico` and `.png` from a list of shapes (and the editor's mark with `mdedit` as its argument);
 `chrome::logo` draws the same shapes with `Painter::polygon`, in the icon's own blue in both
@@ -536,9 +542,6 @@ window, 4 s after launch. First frame with `--no-session`: showcase 85-94 ms ove
 **New shell:**
 
 - No snap-layouts flyout on the maximize button. The system accent colour is not used.
-- Pane widths are not saved (which panes are open is).
-- The Files tree refreshes when the window gains focus, on F5 and on a file-watcher wake (the
-  watcher watches the open files' folders), not on every change under its root.
 - Maximized memory is three full-window bitmaps.
 - Icons need Segoe Fluent Icons or Segoe MDL2 Assets (Windows only).
 - No update check (by decision; a manual menu item is future work, `docs/UPDATE.md`).
@@ -607,12 +610,13 @@ needs a small `mime/packages` XML. The package itself has never been installed w
 The user used the new shell with `fixtures/everything.md` on 2026-11-12 and approved it
 ("it looks beautiful and everything seems to work"); the three things they raised (cursor, back and
 forward, window position and pane widths) are fixed. They then set this list, in this order.
-Item 1 is done; nothing else on it is started.
+Items 1 and 2 are done; nothing else on it is started.
 
 1. **Retire Qt:** done 2026-11-13 (section 1). The Qt Linux packaging went to the archive branch
    with it, which the list did not name: it could only build the removed crate.
-2. **Go through `docs/PORT_CHECKLIST.md`:** the new-shell table's "differs" and "not done" rows,
-   one by one. Fix or record each.
+2. **Go through `docs/PORT_CHECKLIST.md`:** done 2026-11-13. The Files tree now follows its
+   folder live; the pane-widths row was stale (they are saved); the other differing rows are kept
+   on purpose and say why. Still open there: the hand checks and Linux.
 3. **A simple automatic update:** the app replaces its own exe. The manifest and SHA-256 logic is
    in `crates/core/src/update.rs` and `docs/UPDATE.md`; the download can go through `mdview-fetch`.
    The binary will never be code-signed (the user's decision), so the hash check is the only
@@ -631,7 +635,8 @@ testing on other machines (there is one PC). The editor is a second project (PLA
 ## 14. History
 
 - **2026-11-13.** Qt shell retired to the `qt-archive` branch with its installer and Linux
-  packaging; `mdview` is the only shell.
+  packaging; `mdview` is the only shell. Numbers re-measured after the shared crates. Port
+  checklist gone through; the Files tree follows its folder live.
 - **2026-11-08.** Phases 1 and 2 closed: the user approved the four `showcase-*` goldens. Phase 4
   slices landed: SVG, math and Mermaid (eight families) through `mdview-engine`, syntect in-process.
   Both shells (WinUI and Qt) built ahead of the plan; the Qt shell ran on the Debian VM under Xvfb.

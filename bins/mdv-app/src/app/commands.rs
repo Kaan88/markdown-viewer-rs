@@ -387,6 +387,10 @@ impl App {
                 }
                 let (f, o) = (p.files, p.outline);
                 self.ws.set_panes(f, o);
+                if f {
+                    // A closed pane is not watched, so its listing may be old.
+                    self.ui.tree.refresh();
+                }
             }
             C::FocusMode => {
                 self.ui.focus_mode = !self.ui.focus_mode;
@@ -464,7 +468,13 @@ impl App {
                     w.woken();
                 }
                 self.ws.check_changed();
-                self.ui.tree.refresh();
+                let changed = self.ui.tree.refresh();
+                if self.trace {
+                    let rows = self.ui.tree.rows().len();
+                    eprintln!(
+                        "mdview: file watcher woke; files tree changed: {changed}, {rows} rows"
+                    );
+                }
             }
             Wake::Images => {
                 self.ws.remote_completed();

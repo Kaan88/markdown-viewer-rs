@@ -98,6 +98,9 @@ struct App {
     proxy: Option<EventLoopProxy<Wake>>,
     incoming: Option<Receiver<PathBuf>>,
     watcher: Option<FileWatcher>,
+    /// The folders the watcher follows for the Files pane: the tree's root and expanded folders
+    /// while the pane is open.
+    tree_dirs: Vec<PathBuf>,
     session: Option<PathBuf>,
     screen: Bitmap,
     gfx: Gfx,
@@ -156,6 +159,7 @@ impl App {
             proxy: None,
             incoming: None,
             watcher: None,
+            tree_dirs: Vec::new(),
             session,
             screen: Bitmap::new(1, 1),
             gfx: Gfx::new(),
@@ -614,6 +618,23 @@ impl App {
     /// Gives the page's refinement one slice between events (the first layout only estimated the
     /// blocks off screen). True while there is more; once the page is refined this does nothing,
     /// so an idle window costs no CPU.
+    /// Keeps the watcher on the folders the Files pane lists, so a file created, removed or renamed
+    /// there shows without a refresh. A closed pane watches nothing.
+    fn watch_tree(&mut self) {
+        let Some(w) = self.watcher.as_mut() else {
+            return;
+        };
+        let dirs = if self.ui.panes.files {
+            self.ui.tree.watched_dirs()
+        } else {
+            Vec::new()
+        };
+        if dirs != self.tree_dirs {
+            w.set_folders(dirs.iter().map(PathBuf::as_path));
+            self.tree_dirs = dirs;
+        }
+    }
+
     fn refine_slice(&mut self) -> bool {
         if self.first || !self.ws.refining() {
             return false;
@@ -1019,6 +1040,7 @@ impl ApplicationHandler<Wake> for App {
         {
             w.set_files(self.ws.watched_paths());
         }
+        self.watch_tree();
         let refining = self.refine_slice();
         let next = self.timers(Instant::now());
         if refining {

@@ -492,7 +492,7 @@ outline scroll sync, Ctrl+Q, window geometry in the session, and a hand-run drop
 
 The WinUI shell was retired on 2026-11-11 (branch `winui-archive`); the table above is history.
 
-## New shell status (`bins/mdv-app`, 2026-11-12)
+## New shell status (`bins/mdv-app`, 2026-11-12; differing rows gone through 2026-11-13)
 
 Section 1 checked row by row against `bins/mdv-app/src` (the winit + softbuffer shell, binary
 `mdview`), same rows as the WinUI table. "Test" means a unit test in `workspace.rs` or a headless
@@ -500,19 +500,24 @@ Section 1 checked row by row against `bins/mdv-app/src` (the winit + softbuffer 
 been checked by hand yet** (PLAN A3): every "done" below is built, not hand-checked, until the
 user has used it and this table says "run".
 
+On 2026-11-13 the rows marked "differs" or not done were gone through one by one. Two were
+fixed or found already fixed (the Files tree, pane widths); the rest are differences kept on
+purpose, each with its reason in the row. The user used the app on 2026-11-11 and 2026-11-12 and
+approved it, but no row was recorded as a hand check then.
+
 | Behaviour (section 1) | mdview (winit) | How known |
 |---|---|---|
-| Window: default 1220x820, min 720x480 | **differs**: 1280x800, minimum 520x360; size and maximized state saved | code |
+| Window: default 1220x820, min 720x480 | **differs, kept**: 1280x800, minimum 520x360; size, position and maximized state saved. The smaller minimum is possible because the command bar has no menu bar to fit | code |
 | Window title `<file> — …` | done (core `strings::window_title`; the title row shows tabs) | code |
 | Accepts drops | done: a folder sets the Files pane, a Markdown file opens, anything else says "Only Markdown file links…" | code; built, not hand-checked |
 | Tabs: closable, movable, document mode | done (close button, middle click, drag to reorder) | test (`tab_close_button_and_middle_click_close_tabs`, `dragging_a_tab_reorders_tabs`) |
-| Tab bar auto-hides with one tab | **differs**: always shown, it is the title row | code |
+| Tab bar auto-hides with one tab | **differs, kept**: always shown, it is the title row (layout A, approved 2026-11-11); hiding it would leave the caption buttons alone in an empty row | code |
 | Closing the last tab shows the empty state | done (empty state with an Open button and the recent files) | code |
-| Status bar: path, startup and all-closed texts | **differs**: no status bar; the texts show as toasts | test (`STATUS_ALL_CLOSED`) |
+| Status bar: path, startup and all-closed texts | **differs, kept**: no status bar; the texts show as toasts, and the file's full path is the tab's tooltip | test (`STATUS_ALL_CLOSED`); tooltip: code |
 | Tab context menu: close, close others, copy path, show in Explorer | done (plus Close all tabs) | code; built, not hand-checked |
 | Tab labels incl. duplicate names | done (core `tab_labels`) | code |
 | Ctrl+Tab / Ctrl+Shift+Tab | done (`NextTab`/`PreviousTab` from core's command table) | code |
-| Menus | **differs** (layout A): command bar plus the ⋯ main menu; every item reachable | code, test (`menus_take_the_keyboard`) |
+| Menus | **differs, kept** (layout A, approved 2026-11-11): command bar plus the ⋯ main menu; every item reachable | code, test (`menus_take_the_keyboard`) |
 | Open files… Ctrl+O (multi-select, filter) | done (rfd, Markdown and All files filters) | code; built, not hand-checked |
 | Open folder… Ctrl+Shift+O | done (rfd folder picker) | code; built, not hand-checked |
 | Refresh F5 | done; keeps the reading position, also refreshes the Files tree | test (`reload_keeps_the_reading_position`) |
@@ -530,16 +535,16 @@ user has used it and this table says "run".
 | Docks: Files left, outline right | done (panes with splitters; not floatable) | test (`splitter_drag_resizes_within_limits`) |
 | Search: substring, case-insensitive, cap, wrap, re-run on tab change | done (core `find_visible`); also re-runs after a reload | test |
 | Recent: max 15, order, missing marker, persisted on change | done (core) | test |
-| Folder tree: live updates, Markdown filter | lazy tree, Markdown filter, hidden files skipped; refreshes on window focus, F5 and file-watcher wakes, **not live** for every change under the root | code |
+| Folder tree: live updates, Markdown filter | done (2026-11-13): lazy tree, Markdown filter, hidden files skipped; the watcher follows the root and every expanded folder while the pane is open, so an entry created, removed or renamed there shows at once. Also refreshes on window focus, F5 and when the pane opens. Collapsed folders are read when expanded | run with `MDVIEW_TRACE=1` in a real window: one wake each for a new file, a rename, a delete and a new folder, none for a file in a collapsed folder or a write to a file that is not open; an expanded subfolder was not tried; the user has not looked at it |
 | Outline: nesting, click scrolls | done; the current heading is highlighted as the page scrolls | code |
 | File watching and reload, deleted-file handling | done: OS watcher (`mdview_core::watch`); a deleted file keeps its text and reloads when it returns | test (`a_deleted_file_keeps_its_text_and_reloads_when_it_returns`); live watching built, not hand-checked |
 | Background tabs reload on change | done for loaded tabs (`check_changed`); unloaded tabs read the file when shown | code |
 | Scroll preservation on reload | done (core `remap_scroll`, block plus offset) | test |
 | Link following (fragments, local Markdown, http/mailto, others ignored) | done | test (`links_scroll_open_tabs_hand_out_urls_and_refuse`); opening URLs built, not hand-checked |
 | Details toggle | done (view state, no reload, reading position kept) | test (`a_details_toggle_above_keeps_the_reading_position`) |
-| Images: limits, schemes | done (renderer + engine); **differs**: remote images load only after the reader allows them (per-document bar, "Always load remote images" setting) | test (`remote_images_wait_for_the_reader`); bar buttons built, not hand-checked |
-| Settings: tabs, active, recent, folder, theme, zoom | done, plus window geometry, open panes and `remote_images`; pane widths not saved | test (`session_round_trip`) |
+| Images: limits, schemes | done (renderer + engine); **differs, kept** (decided 2026-11-12): remote images load only after the reader allows them (per-document bar, "Always load remote images" setting) | test (`remote_images_wait_for_the_reader`); bar buttons built, not hand-checked |
+| Settings: tabs, active, recent, folder, theme, zoom | done, plus window size and position, open panes and their widths, `remote_images`, `page_width` and `edit_tasks` | test (`session_round_trip`, core `position_and_pane_widths_round_trip_beside_the_older_keys`) |
 | Single instance | done (core `single::forward` before the window, `listen_waking`) | code; built, not hand-checked |
 
-**Open items from this table:** every hand check (PLAN A3), a Files tree that follows its root
-live, saved pane widths, and a run on Linux (nothing above has been built there).
+**Open items from this table:** every hand check (PLAN A3) and a run on Linux (nothing above has
+been built there).
