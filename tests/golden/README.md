@@ -14,7 +14,8 @@ built against Qt 6.9.3 for MSVC) at the same size, at the top and after a click 
 `shell-qt-open.png` is the Qt File > Open dialog, opened in `fixtures/`.
 `shell-qt-linux.png` is the same shell built against Qt 6.8.2 on Debian 13, running under Xvfb on
 the test VM. `shell-qt-1mb.png` is the Qt shell showing `spikes/parser/data/generated_1mib.md`, the
-virtualization test document. They are evidence that both shells run, not a baseline.
+virtualization test document. They are evidence that both shells ran, not a baseline: both are retired (`winui-archive` and
+`qt-archive` branches), and the screenshots are kept as history.
 
 `shell-qt-selection.png` and `shell-winui-selection.png` show the word "Markdown" selected in the
 showcase heading. The Qt one is from `--select-hold`, which drags through the real Qt mouse path and

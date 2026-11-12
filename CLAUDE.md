@@ -1,6 +1,6 @@
 # mdview
 
-A Rust remake of Kaan88/markdown-viewer-cpp, a Markdown viewer with a custom renderer. The shell being built is winit + softbuffer with every control hand-drawn (`bins/mdv-app`, binary `mdview`); the Qt Widgets shell (`bins/mdv-qt`) still ships until that one reaches parity. The WinUI 3 shell is retired and archived on the `winui-archive` branch.
+A Rust remake of Kaan88/markdown-viewer-cpp, a Markdown viewer with a custom renderer. The shell is winit + softbuffer with every control hand-drawn (`bins/mdv-app`, binary `mdview`). The earlier shells are retired and archived: Qt Widgets on the `qt-archive` branch, WinUI 3 on `winui-archive`.
 
 Before doing anything, read `docs/HANDOFF.md`: current state, decisions already made, and what to do next. The full plan is `docs/PLAN.md`.
 

@@ -256,7 +256,7 @@ crates and can overlap once A is approved.
 | A3 | Checks by hand: real mouse and keys, drag and drop, single instance, file watching, a DPI change at runtime, maximize and snap | Each one run on the Windows PC and recorded |
 | A4 | Tick `docs/PORT_CHECKLIST.md` for the new shell; measure against Qt release (exe, private memory, first frame, 1 MB scroll) | Budget table rows filled with real numbers |
 | A5 | Installer builds `mdview.exe` and the engine with no Qt; update checks become manual only | Install, launch, uninstall on the PC |
-| A6 | Retire the Qt shell on Windows (archive branch, as with WinUI) | Only after A2-A5 |
+| A6 | Retire the Qt shell on Windows (archive branch, as with WinUI) | Only after A2-A5. Done 2026-11-13: `qt-archive` branch, with the Qt Linux packaging |
 
 **B. Make real READMEs look right** (mostly `crates/render` image loading and `crates/engine`)
 

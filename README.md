@@ -103,7 +103,6 @@ The full list is in the app under "Keyboard shortcuts".
 | `crates/fetch` | Remote image downloads and their cache |
 | `bins/mdv-app` | The application, binary `mdview` |
 | `bins/mdv-bench` | Headless renders, timings and golden images |
-| `bins/mdv-qt` | The earlier Qt shell, kept until it is retired |
 | `docs/` | The plan, the current state, and the coverage list |
 
 [docs/HANDOFF.md](docs/HANDOFF.md) describes the current state in detail and

@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/core", "crates/render", "crates/engine", "crates/engine-proto", "crates/fetch","bins/mdv-bench", "bins/mdv-app"]
-exclude = ["spikes", "bins/mdv-qt"]
+exclude = ["spikes"]
 
 [workspace.package]
 version = "0.1.0"

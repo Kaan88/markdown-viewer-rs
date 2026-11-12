@@ -5,7 +5,8 @@ renderer, no webview, and no authored C++. This file is the current state: what 
 being built, how to build and check it, the traps already found, and what to do next.
 `docs/PLAN.md` is the full plan (budgets, phases, the 2026-11-11 roadmap). Read this file first.
 
-Rewritten on 2026-11-12 from the dated sections that had accumulated since 2026-11-08. The commit
+Rewritten on 2026-11-12 from the dated sections that had accumulated since 2026-11-08; the Qt shell
+was retired on 2026-11-13. The commit
 that last changed this file is the state it describes; check `git log --oneline -5`.
 
 ---
@@ -18,13 +19,17 @@ row, tabs, command bar, panes, menus, dialogs, tooltips, text field) drawn by th
 page's own text path. Windows first. The user approved its look by using the running app on
 2026-11-11 (PLAN roadmap step A2). It has never been built or run on Linux.
 
-**What ships.** The Qt 6 shell, `bins/mdv-qt` (CXX-Qt, Qt Widgets), is still the shipping shell
-until the new one is approved by hand (roadmap A3) and the checklist and numbers are done (A4). Its
-installer is `packaging/windows/mdview-qt.iss` (built by `build-installer-qt.ps1`). There is no
-GitHub release: the v0.1.0 pre-release that carried the Qt installer was deleted with its tag on
-2026-11-12. On Linux it is packaged as a PKGBUILD and an AppImage (section 13).
+**What ships.** `mdview` is the only shell. Its installer is `packaging/windows/mdview.iss` (built
+by `build-installer.ps1`, section 8) and is the release, though nothing is published: there is no
+GitHub release (the v0.1.0 pre-release that carried the Qt installer was deleted with its tag on
+2026-11-12). Nothing is packaged for Linux.
 
-**What is retired.** The WinUI 3 shell (`bins/mdv-winui`), its installer and build script are on
+**What is retired.** The Qt 6 shell (`bins/mdv-qt`, CXX-Qt, Qt Widgets), its installer
+(`mdview-qt.iss`, `build-installer-qt.ps1`) and its Linux packaging (`packaging/arch`,
+`packaging/appimage`) are on the `qt-archive` branch since 2026-11-13 (roadmap A6). The branch is
+`main` as it was just before the removal; whether the Qt crate still built against the renderer
+API of that commit was never checked. `bins/mdv-qt/target` (2.7 GB of ignored build output) was
+left on the PC's disk. The WinUI 3 shell (`bins/mdv-winui`), its installer and build script are on
 the `winui-archive` branch since 2026-11-11. Why it was dropped: about 383 ms to first frame and
 about 180 MiB private memory for an empty window against PLAN's 50-90 MB, a system-wide Windows App
 Runtime dependency, Windows only, and hand-trimmed generated bindings.
@@ -44,7 +49,7 @@ Runtime dependency, Windows only, and hand-trimmed generated bindings.
 
 **Plan phases.** 0 spikes, 1 core, 2 headless renderer, 4 engine: closed. 3 (Qt parity) and 5
 (WinUI) are superseded by the roadmap in PLAN ("Roadmap from 2026-11-11"): A1-A2 done, A3 (hand
-checks) and A4 (checklist and numbers) open, A5 (installer) built and run, A6 (retire Qt) waiting.
+checks) and A4 (checklist and numbers) open, A5 (installer) built and run, A6 (retire Qt) done.
 B1-B5 (GIF/WebP, remote images, Mermaid families, emoji list, ruby/dl/figure and copy-source) and
 C1-C5 (image store, `layout.rs` split, estimated heights, cheap toggles, text and bitmap work) have
 landed in `main`; see section 14 for the commits.
@@ -67,9 +72,7 @@ tests yourself before a push. Commit and push as phases complete or when asked.
 | `crates/fetch` | `mdview-fetch`: remote image downloads through WinHTTP, disk cache; a failing stub elsewhere |
 | `bins/mdv-app` | The new shell, binary `mdview` |
 | `bins/mdv-bench` | Headless render to PNG, timings, golden generation |
-| `bins/mdv-qt` | Qt shell, **excluded** from the workspace (needs Qt to build); own `Cargo.lock` and `target/` |
-| `packaging/windows` | `mdview.iss` + `build-installer.ps1` (new shell), `mdview-qt.iss` + `build-installer-qt.ps1` (Qt) |
-| `packaging/arch`, `packaging/appimage` | Linux packaging for the Qt shell |
+| `packaging/windows` | `mdview.iss` + `build-installer.ps1` |
 | `fixtures/` | Test documents; `everything.md` exercises every feature (section 5) |
 | `tests/golden/` | Renderer goldens (`showcase-*`, compared by a test) and review screenshots |
 | `spikes/` | Throwaway reference code, excluded from the workspace; `spikes/parser/data` holds the spec suites and `generated_1mib.md` |
@@ -96,8 +99,8 @@ repository 74.
 
 ## 3. Build, test and run on Windows
 
-Toolchain on the PC: rustc/cargo 1.99.1, MSVC 2022, Qt 6.9.3 MSVC at `C:\Qt\6.9.3\msvc2022_64`,
-Inno Setup 7.
+Toolchain on the PC: rustc/cargo 1.99.1, MSVC 2022, Inno Setup 7. Qt 6.9.3 MSVC is still installed
+at `C:\Qt\6.9.3\msvc2022_64`; only the `qt-archive` branch needs it.
 
 Point `TEMP`/`TMP` at a writable folder when building, or `lib.exe` and `rc.exe` fail with access
 denied:
@@ -106,7 +109,7 @@ denied:
 cd C:\Users\kaank\Desktop\mv
 $env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
 cargo build --release --workspace          # includes mdview.exe and mdview-engine.exe
-cargo test --release --workspace           # 2026-11-12: 368 passed, 0 failed, 6 ignored
+cargo test --release --workspace           # 2026-11-13: 319 passed, 0 failed, 5 ignored
 cargo fmt --all --check
 ```
 
@@ -168,23 +171,6 @@ $env:MDV_BLESS = 1; cargo test --release -p mdview-render --test golden; Remove-
 A failing compare writes `target/golden-actual-<name>.png`. The engine must be built, or SVG, math
 and diagrams render as placeholders.
 
-**The Qt shell** builds from its own directory:
-
-```powershell
-cd bins\mdv-qt
-$env:PATH = "C:\Qt\6.9.3\msvc2022_64\bin;$env:PATH"
-$env:QMAKE = "C:\Qt\6.9.3\msvc2022_64\bin\qmake.exe"
-$env:CMAKE_PREFIX_PATH = "C:\Qt\6.9.3\msvc2022_64"
-$env:TEMP = "C:\Users\kaank\Desktop\mv\target\tmp"; $env:TMP = $env:TEMP
-cargo build --release
-```
-
-Run `bins/mdv-qt/target/release/mdview-qt.exe` with Qt's `bin` on `PATH`. Its scripted checks print
-one line and exit: `--drop-test <path>`, `--select-test`, `--select-hold`, `--link-test`,
-`--details-test`, `--find-test`, `--outline-test`, `--copy-test`, `--tabs-test`. Not verified in
-this rewrite: that the Qt crate still builds against the renderer API changed on 2026-11-11 and
-2026-11-12 (`cff387c` adapted it; nothing since was built here).
-
 **crates.io** was unreachable from the PC for a while (`SEC_E_NO_CREDENTIALS`) and worked again from
 2026-11-08. With crates cached, `--offline` builds; a stale local index can fail to resolve locked
 versions, and a build without `--offline` refreshes it.
@@ -196,7 +182,7 @@ the renderer's font context, so system fonts are enumerated once.
 
 | Module | What is in it |
 |---|---|
-| `workspace.rs` | All tab, document, session, find, selection, link, scroll, outline, remote-image and status logic, headless and unit-tested. Ported from `bins/mdv-qt/src/shell.rs`. One shared `DocumentRenderer`; only the active tab is laid out |
+| `workspace.rs` | All tab, document, session, find, selection, link, scroll, outline, remote-image and status logic, headless and unit-tested. Ported from the Qt shell's `shell.rs`. One shared `DocumentRenderer`; only the active tab is laid out |
 | `app.rs`, `app/input.rs`, `app/commands.rs` | State, region compose and present, the winit handler, pointer and key handling, every `CommandId`, wakes and timers |
 | `app/tests.rs` | A headless `App` at 1280x800 driven through the real handlers |
 | `chrome.rs`, `panes.rs`, `page.rs`, `overlays.rs` | Title row and command bar; Files and Outline panes and the overlay scrollbar; page blit, find and selection overlays, missing-file banner, remote-image bar, empty state; menus, dialogs, toast, link hint, tooltips |
@@ -330,7 +316,7 @@ One per window (the new shell shares one across all tabs).
 | `image_stats()` | Decodes and engine jobs so far, for tests and traces |
 
 `layout_exact` (also behind the crate-level `layout()` and `render_slice`) still measures everything
-up front; the Qt shell uses it.
+up front; the bench, the goldens and tests use it (the Qt shell did too).
 
 **Patchable layout.** Each top-level block's height is recorded; positions are prefix sums rebuilt
 from the first changed block. Anything that lays a block out (a frame, a hit test, a selection, a
@@ -465,8 +451,8 @@ job killed at 5003.9 ms and the next started in 13.4 ms.
 1. Sets `TEMP`/`TMP` to `target\tmp`.
 2. Builds `-p mdview -p mdview-engine` with `RUSTFLAGS=-C target-feature=+crt-static` into
    `target\dist`, so both exes import only system DLLs (no `VCRUNTIME140`, no `api-ms-win-crt-*`).
-   The flag is set in the script, not in `.cargo/config.toml`, because it must not reach the Qt
-   crate (Qt needs the dynamic CRT) or a Linux build. Ordinary `cargo build` output in
+   The flag is set in the script, not in `.cargo/config.toml`, because it must not reach a Linux
+   build. Ordinary `cargo build` output in
    `target\release` keeps the dynamic CRT. `-SkipBuild` reuses `target\dist\release`.
 3. Runs `ISCC /DAppVersion=<workspace version> mdview.iss` and writes
    `target\installer\mdview-setup-<version>.exe` and its `.sha256`.
@@ -490,7 +476,8 @@ writes an extension's default value. The last page offers (unchecked) to open
 | Engine | `mdview-engine.exe` 26 MB | |
 | Installer | 11 MB | 17 MB |
 
-Tests: `cargo test --release --workspace`: 368 passed, 0 failed, 6 ignored.
+Tests: `cargo test --release --workspace`: 368 passed, 0 failed, 6 ignored on 2026-11-12; 319
+passed, 5 ignored on 2026-11-13, after tests moved to the shared repository with their code.
 
 Earlier, 2026-11-11, before estimated heights: a scroll frame in a maximized window with both
 panes, 150 frames, median 3.1 ms, p90 3.5, worst 4.2 (paint 1.2, compose 1.0, copy 0.8, OS
@@ -534,7 +521,6 @@ frame 27 ms (layout 8, page paint 3, chrome 15), showing the window 12 ms.
 - The installer's wizard pages, an upgrade over an older version, the Default apps page link.
 - Anything on Linux or KDE for the new shell; the Linux dependency features in `Cargo.toml` are
   untested.
-- Retiring Qt (A6).
 
 ## 11. Known gaps
 
@@ -561,11 +547,6 @@ frame 27 ms (layout 8, page paint 3, chrome 15), showing the window 12 ms.
 - Table `colspan`/`rowspan` are laid out up to 200 columns. Highlighting covers fenced blocks only.
 - No bundled fonts, so the golden compare runs on Windows only and Linux metrics differ.
 - Any image format other than PNG, JPEG, GIF, WebP and SVG keeps its placeholder.
-
-**Qt shell** (until retired): Manage recent is a dock, not a dialog; no empty-state Open button;
-frameless window that resizes only from the status-bar grip; the AppImage build still checks for
-updates once a day (`spawn_check` in `shell.rs`), against the manual-only decision; not run on KDE
-since the 2026-11-11 redesign.
 
 ## 12. Linux: what exists for the KDE run
 
@@ -608,7 +589,7 @@ use single quotes or spell the path out as above. Xvfb has no window manager; ca
 Linux font metrics differ (the showcase was 4095 px tall there, 4071 on Windows), so Linux renders
 are for "runs and looks sane", not golden comparison.
 
-**Linux file association** (Qt packages): the PKGBUILD's desktop entry registers `text/markdown`
+**Linux file association** (Qt packages, now on `qt-archive`): the PKGBUILD's desktop entry registers `text/markdown`
 and `text/x-markdown` and never sets a default; `.mdown` is `text/plain` in shared-mime-info, so it
 needs a small `mime/packages` XML. The package itself has never been installed with `pacman -U`.
 
@@ -617,10 +598,10 @@ needs a small `mime/packages` XML. The package itself has never been installed w
 The user used the new shell with `fixtures/everything.md` on 2026-11-12 and approved it
 ("it looks beautiful and everything seems to work"); the three things they raised (cursor, back and
 forward, window position and pane widths) are fixed. They then set this list, in this order.
-Nothing on it is started.
+Item 1 is done; nothing else on it is started.
 
-1. **Retire Qt:** archive branch, as with WinUI; drop `bins/mdv-qt`, `mdview-qt.iss` and its build
-   script from `main`; the new installer becomes the release.
+1. **Retire Qt:** done 2026-11-13 (section 1). The Qt Linux packaging went to the archive branch
+   with it, which the list did not name: it could only build the removed crate.
 2. **Go through `docs/PORT_CHECKLIST.md`:** the new-shell table's "differs" and "not done" rows,
    one by one. Fix or record each.
 3. **A simple automatic update:** the app replaces its own exe. The manifest and SHA-256 logic is
@@ -640,6 +621,8 @@ testing on other machines (there is one PC). The editor is a second project (PLA
 
 ## 14. History
 
+- **2026-11-13.** Qt shell retired to the `qt-archive` branch with its installer and Linux
+  packaging; `mdview` is the only shell.
 - **2026-11-08.** Phases 1 and 2 closed: the user approved the four `showcase-*` goldens. Phase 4
   slices landed: SVG, math and Mermaid (eight families) through `mdview-engine`, syntect in-process.
   Both shells (WinUI and Qt) built ahead of the plan; the Qt shell ran on the Debian VM under Xvfb.

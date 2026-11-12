@@ -19,7 +19,8 @@
 //! frame. `<details>` toggles are view state the renderer holds, so each tab keeps a copy and the
 //! copy is applied to the renderer when the tab becomes active.
 //!
-//! Ported from `bins/mdv-qt/src/shell.rs`; differences are noted where they are made.
+//! Ported from the Qt shell's `shell.rs` (now on the `qt-archive` branch); differences are noted
+//! where they are made.
 
 use mdview_core::commands::strings;
 use mdview_core::files::{FileStamp, canonical_or_absolute, read_stable, stamp, tab_labels};

@@ -5,7 +5,7 @@
 > hand-over in `crates/core/src/single.rs`, 127.0.0.1 only) is `mdview-fetch`, which downloads a
 > document's remote images through WinHTTP, and only after the reader allows them (2026-11-12). Updates are manual by decision: a
 > "Check for updates" menu item is future work, and the flow below describes it, not shipped
-> behaviour. The Qt AppImage's daily check is legacy and goes away with the Qt shell.
+> behaviour. The Qt AppImage's daily check went with the Qt shell (retired 2026-11-13, `qt-archive` branch).
 
 Design for checking, downloading and applying updates. The shared logic (version ordering, manifest
 parsing, SHA-256) lives in `crates/core/src/update.rs` and is pure: it does no network I/O. The

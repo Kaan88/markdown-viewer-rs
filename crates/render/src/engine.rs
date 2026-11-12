@@ -234,7 +234,7 @@ fn decode(reply: Reply) -> Option<DecodedImage> {
 }
 
 /// The engine binary: `MDV_ENGINE`, a sibling of this executable, or the workspace target beside
-/// an ancestor (the Qt shell builds into its own `bins/mdv-qt/target/release`).
+/// an ancestor (a test binary runs from `target/release/deps`).
 fn engine_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("MDV_ENGINE") {
         let path = PathBuf::from(path);
