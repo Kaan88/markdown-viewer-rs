@@ -294,13 +294,14 @@ impl<'a, 'b> Pager<'a, 'b> {
     }
 
     /// Rows of the cells' wrapped text, with columns sized by their longest cell as the table
-    /// layout does, scaled down together when they do not fit.
+    /// layout does, narrowed towards their longest word when they do not fit.
     fn estimate_table(&mut self, m: &Metrics, b: u32, width: f32) -> f32 {
         let pad_x = self.px(13.0);
         let pad_y = self.px(8.0);
         let hr = self.hair();
         let advance = m.sans * 15.0 * self.scale;
-        let rows: Vec<Vec<usize>> = self
+        // Each cell's length and its longest word, in characters.
+        let rows: Vec<Vec<(usize, usize)>> = self
             .doc
             .children(b)
             .map(|row| {
@@ -308,7 +309,12 @@ impl<'a, 'b> Pager<'a, 'b> {
                     .children(row)
                     .map(|cell| {
                         let text = self.doc.text_of(self.doc.blocks[cell as usize].text);
-                        text.chars().count()
+                        let word = text
+                            .split_whitespace()
+                            .map(|word| word.chars().count())
+                            .max()
+                            .unwrap_or(0);
+                        (text.chars().count(), word)
                     })
                     .collect()
             })
@@ -318,22 +324,30 @@ impl<'a, 'b> Pager<'a, 'b> {
             return 0.0;
         }
         let mut natural = vec![0f32; columns];
+        let mut minimal = vec![0f32; columns];
         for row in &rows {
-            for (c, &chars) in row.iter().enumerate().take(columns) {
+            for (c, &(chars, word)) in row.iter().enumerate().take(columns) {
                 natural[c] = natural[c].max(chars as f32 * advance);
+                minimal[c] = minimal[c].max(word as f32 * advance);
             }
         }
         let available = width - 2.0 * hr;
-        let total: f32 = natural.iter().sum::<f32>() + 2.0 * pad_x * columns as f32;
-        let fit = if total > available {
-            available / total
-        } else {
-            1.0
-        };
-        let text_width: Vec<f32> = natural
-            .iter()
-            .map(|w| {
-                (((w + 2.0 * pad_x) * fit).max(2.0 * pad_x + self.px(8.0)) - 2.0 * pad_x).max(1.0)
+        let columns_pad = 2.0 * pad_x * columns as f32;
+        let total: f32 = natural.iter().sum::<f32>() + columns_pad;
+        let min_total: f32 = minimal.iter().sum::<f32>() + columns_pad;
+        // The same three cases as the table layout: everything fits, the longest words fit,
+        // or the words themselves must break.
+        let text_width: Vec<f32> = (0..columns)
+            .map(|c| {
+                let w = if total <= available {
+                    natural[c]
+                } else if min_total <= available {
+                    let share = (available - min_total) / (total - min_total);
+                    minimal[c] + (natural[c] - minimal[c]) * share
+                } else {
+                    (minimal[c] + 2.0 * pad_x) * available / min_total - 2.0 * pad_x
+                };
+                w.max(1.0)
             })
             .collect();
         let line = (15.0 * 1.45 * self.scale).round();
@@ -343,7 +357,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 .iter()
                 .enumerate()
                 .take(columns)
-                .map(|(c, &chars)| {
+                .map(|(c, &(chars, _))| {
                     (chars as f32 * advance / (text_width[c] * FILL))
                         .ceil()
                         .max(1.0)

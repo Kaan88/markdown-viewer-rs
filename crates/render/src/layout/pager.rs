@@ -12,8 +12,8 @@ use crate::theme::{Color, Theme};
 use mdview_core::model::{Align, BlockKind, Dir, Document, ImageAlign, Length, NONE};
 use parley::{
     Alignment, AlignmentOptions, Cluster, FontContext, FontFamily, FontStyle, FontWeight,
-    InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
-    StyleProperty, VerticalAlign,
+    InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, OverflowWrap,
+    PositionedLayoutItem, StyleProperty, VerticalAlign,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -73,6 +73,9 @@ pub(super) struct Pager<'a, 'b> {
     pub(super) undrawn: Vec<(u32, u32)>,
     /// Set around one `text_layout` call: the text's first lines run beside an image.
     pub(super) wrap: Option<Wrap>,
+    /// Text may break inside a word that is wider than its line, as a table cell's must when
+    /// its column is narrower than the word.
+    pub(super) break_words: bool,
     /// `<details>` open overrides from the shell; empty means use the document.
     pub(super) details: &'b HashMap<u32, bool>,
 }
@@ -128,6 +131,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             used: Vec::new(),
             undrawn: Vec::new(),
             wrap: None,
+            break_words: false,
             details,
         }
     }
@@ -346,6 +350,9 @@ impl<'a, 'b> Pager<'a, 'b> {
         )));
         builder.push_default(StyleProperty::FontWeight(FontWeight::new(txt.weight)));
         builder.push_default(StyleProperty::Brush(brush(txt.color)));
+        if self.break_words {
+            builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));
+        }
         for (range, style) in &inline.runs {
             let range = range.clone();
             if style.bold {

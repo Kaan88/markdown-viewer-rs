@@ -183,48 +183,72 @@ impl<'a, 'b> Pager<'a, 'b> {
             color,
             max,
         };
-        // Natural width of each cell's text; a spanning cell is spread over its columns afterwards.
-        let naturals: Vec<f32> = cells
+        // Two widths of each cell's text: on one line (natural), and with every line break taken,
+        // which is its longest word (minimal). A spanning cell is spread over its columns
+        // afterwards.
+        let widths: Vec<(f32, f32)> = cells
             .iter()
             .map(|cell| {
                 if cell.inline.text.trim().is_empty() && cell.inline.boxes.is_empty() {
-                    return 0.0;
+                    return (0.0, 0.0);
                 }
                 let txt = txt_of(cell, None, self.theme.text);
-                self.text_layout(&cell.inline, &txt).width().ceil()
+                let layout = self.text_layout(&cell.inline, &txt);
+                let natural = layout.width().ceil();
+                (
+                    natural,
+                    layout.calculate_content_widths().min.ceil().min(natural),
+                )
             })
             .collect();
-        let mut natural = vec![0f32; columns];
-        for (cell, w) in cells.iter().zip(&naturals) {
-            if cell.colspan == 1 {
-                natural[cell.col] = natural[cell.col].max(*w);
+        let spread = |pick: fn(&(f32, f32)) -> f32| -> Vec<f32> {
+            let mut column = vec![0f32; columns];
+            for (cell, w) in cells.iter().zip(&widths) {
+                if cell.colspan == 1 {
+                    column[cell.col] = column[cell.col].max(pick(w));
+                }
             }
-        }
-        for (cell, w) in cells.iter().zip(&naturals) {
-            if cell.colspan > 1 {
-                let span = cell.col..cell.col + cell.colspan;
-                let have: f32 = natural[span.clone()].iter().sum::<f32>()
-                    + 2.0 * pad_x * (cell.colspan - 1) as f32;
-                if *w > have {
-                    let extra = (*w - have) / cell.colspan as f32;
-                    for n in &mut natural[span] {
-                        *n += extra;
+            for (cell, w) in cells.iter().zip(&widths) {
+                if cell.colspan > 1 {
+                    let w = pick(w);
+                    let span = cell.col..cell.col + cell.colspan;
+                    let have: f32 = column[span.clone()].iter().sum::<f32>()
+                        + 2.0 * pad_x * (cell.colspan - 1) as f32;
+                    if w > have {
+                        let extra = (w - have) / cell.colspan as f32;
+                        for n in &mut column[span] {
+                            *n += extra;
+                        }
                     }
                 }
             }
-        }
+            column
+        };
+        let natural = spread(|w| w.0);
+        let minimal = spread(|w| w.1);
         let available = width - 2.0 * hr;
-        let total: f32 = natural.iter().sum::<f32>() + 2.0 * pad_x * columns as f32;
+        let columns_pad = 2.0 * pad_x * columns as f32;
+        let total: f32 = natural.iter().sum::<f32>() + columns_pad;
+        let min_total: f32 = minimal.iter().sum::<f32>() + columns_pad;
         let mut columns_w = vec![0f32; columns];
         if total <= available {
             let extra = ((available - total) / columns as f32).floor();
             for (ci, w) in natural.iter().enumerate() {
                 columns_w[ci] = w + 2.0 * pad_x + extra;
             }
+        } else if min_total <= available {
+            // Too wide on one line: every column keeps its longest word whole, and the room
+            // left over goes to the columns in proportion to what they would still wrap.
+            let share = (available - min_total) / (total - min_total);
+            for ci in 0..columns {
+                columns_w[ci] = minimal[ci] + 2.0 * pad_x + (natural[ci] - minimal[ci]) * share;
+            }
         } else {
-            let scale = available / total;
-            for (ci, w) in natural.iter().enumerate() {
-                columns_w[ci] = ((w + 2.0 * pad_x) * scale).max(2.0 * pad_x + self.px(8.0));
+            // Not even the longest words fit side by side: the columns shrink together and
+            // the words break inside their cells.
+            let scale = available / min_total;
+            for (ci, w) in minimal.iter().enumerate() {
+                columns_w[ci] = (w + 2.0 * pad_x) * scale;
             }
         }
         // A cell's `width` fixes its column (the widest ask wins); the other columns share what
@@ -270,6 +294,8 @@ impl<'a, 'b> Pager<'a, 'b> {
         let span_width =
             |cell: &Cell| -> f32 { columns_w[cell.col..cell.col + cell.colspan].iter().sum() };
         let mut laid: Vec<Laid> = Vec::with_capacity(cells.len());
+        // A word wider than its column breaks inside the cell instead of running over the next.
+        self.break_words = true;
         for (i, cell) in cells.iter().enumerate() {
             let max = (span_width(cell) - 2.0 * pad_x).max(1.0);
             let txt = txt_of(cell, Some(max), self.theme.text);
@@ -278,6 +304,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                 layout: self.text_layout(&cell.inline, &txt),
             });
         }
+        self.break_words = false;
         // Row heights: single-row cells first, then each spanning cell grows its last row if the
         // rows it covers are too short.
         let mut heights: Vec<f32> = asked_heights
