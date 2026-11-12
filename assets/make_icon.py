@@ -19,7 +19,8 @@ SCALE = 0.96  # the shapes below are drawn a little large and scaled about the t
 
 M = [(44, 176), (44, 80), (72, 80), (100, 116), (128, 80), (156, 80), (156, 176),
      (128, 176), (128, 122), (100, 158), (72, 122), (72, 176)]
-ARROW = [(178, 128), (154, 128), (192, 172), (230, 128), (206, 128), (206, 80), (178, 80)]
+# The arrow stands 8 units clear of the M.
+ARROW = [(188, 128), (164, 128), (202, 172), (240, 128), (216, 128), (216, 80), (188, 80)]
 
 
 def pencil(cx, cy, length, width, degrees):

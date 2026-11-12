@@ -108,13 +108,19 @@ pub fn logo(p: &mut Painter, r: Rect, pal: &Palette) {
     let white = [255, 255, 255];
     let t = 1.9 * s;
     // "M" on the left two thirds, an arrow on the right third; together centred on the tile.
-    let (x0, x1, y0, y1) = (r.x + 3.3 * s, r.x + 11.7 * s, r.y + 7.0 * s, r.y + 15.2 * s);
+    let (x0, x1, y0, y1) = (
+        r.x + 2.65 * s,
+        r.x + 11.05 * s,
+        r.y + 7.0 * s,
+        r.y + 15.2 * s,
+    );
     let xm = (x0 + x1) / 2.0;
     p.line((x0, y1), (x0, y0), t, white);
     p.line((x0, y0), (xm, y0 + 4.6 * s), t, white);
     p.line((xm, y0 + 4.6 * s), (x1, y0), t, white);
     p.line((x1, y0), (x1, y1), t, white);
-    let ax = r.x + 15.9 * s;
+    // The arrow stands a little clear of the M's right leg.
+    let ax = r.x + 16.55 * s;
     p.line((ax, y0), (ax, y1 - 0.4 * s), t, white);
     p.line((ax - 2.8 * s, y1 - 3.0 * s), (ax, y1), t, white);
     p.line((ax + 2.8 * s, y1 - 3.0 * s), (ax, y1), t, white);
