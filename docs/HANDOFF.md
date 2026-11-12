@@ -600,6 +600,10 @@ Nothing on it is started.
    the reader's place; animated GIFs; content-sized tables; the missing highlight languages
    (Kotlin, Swift, PowerShell, Dockerfile); a true float across blocks; wiki-links and backlinks.
 
+The editor and the shared code have their own repositories since 2026-11-12, holding plans only:
+`Kaan88/markdown-editor-rs` and `Kaan88/markdown-shared-rs` (PLAN section E, item 4). The user
+asked for the plans and said not to start.
+
 Set aside by the user for now: crash reporting, accessibility, non-Latin input methods, Linux,
 testing on other machines (there is one PC). The editor is a second project (PLAN section E).
 

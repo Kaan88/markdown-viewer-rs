@@ -303,6 +303,11 @@ alternative with syntax highlighting. Not started until the reader has shipped (
    text and highlighting code, so the viewer's exe and memory budgets stay untouched. Before it
    starts, the shared parts of `bins/mdv-app` (window chrome, `gfx`, `textfield`, menus, theme,
    `platform`) move into a library crate both binaries use.
+4. 2026-11-12: two private repositories hold the plans, and nothing else yet.
+   `Kaan88/markdown-shared-rs` is where the shared crates will live (what moves, in what order,
+   and the checks for each step); `Kaan88/markdown-editor-rs` is the editor, `mdedit` (goals,
+   budgets, phases, open decisions). Both are checked out beside this repository on the PC. No
+   code has moved and the user has not said to start.
 
 ### Scope to port
 
