@@ -282,9 +282,10 @@ themes. Change the shapes in both together.
 with a README. Before that, every version of this file was rewritten to remove the old test VM's
 address and login, and `main`, `winui-archive`, `phase2-renderer` and `winui-tabs-wip` were
 force-pushed; all commit hashes changed, and the ones written in this file were updated. Any
-other clone (the Linux desktop's) has the old history and must be cloned again, not pulled. The
-old history is still on the PC in `target/backup-before-rewrite.bundle`, under `refs/original/`
-and in the agent worktree branches.
+other clone (the Linux desktop's) has the old history and must be cloned again, not pulled: do
+that before any work there. On the PC the old history was deleted the same day (the backup bundle,
+`refs/original/` and the nine merged agent worktrees), so the PC's checkout holds only what GitHub
+has.
 
 ## 5. The renderer (`crates/render`)
 
