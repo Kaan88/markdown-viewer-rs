@@ -89,7 +89,7 @@ denied:
 cd C:\Users\kaank\Desktop\mv
 $env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
 cargo build --release --workspace          # includes mdview.exe and mdview-engine.exe
-cargo test --release --workspace           # 2026-11-12: 355 passed, 0 failed, 6 ignored
+cargo test --release --workspace           # 2026-11-12: 356 passed, 0 failed, 6 ignored
 cargo fmt --all --check
 ```
 
@@ -428,12 +428,21 @@ writes an extension's default value. The last page offers (unchecked) to open
 | Engine | `mdview-engine.exe` 26 MB | |
 | Installer | 11 MB | 17 MB |
 
-Tests: `cargo test --release --workspace`: 355 passed, 0 failed, 6 ignored.
+Tests: `cargo test --release --workspace`: 356 passed, 0 failed, 6 ignored.
 
 Earlier, 2026-11-11, before estimated heights: a scroll frame in a maximized window with both
 panes, 150 frames, median 3.1 ms, p90 3.5, worst 4.2 (paint 1.2, compose 1.0, copy 0.8, OS
 present 0.9). Maximized memory then was 76 MiB for the showcase (three full-window bitmaps: screen,
 renderer frame, softbuffer's).
+
+**Launch time, corrected (2026-11-12).** The first-frame figures above were taken with
+`--no-session`, which skips the single-instance check. A real launch was about 370 ms: the port
+file of the last instance outlives it, and on Windows a connection to a loopback port nobody
+listens on waits out its whole 300 ms timeout instead of being refused. The running instance now
+holds `instance.lock` open with no sharing, so a launch knows at once whether to hand over
+(`crates/core/src/single.rs`). Real launches of the showcase now reach the first frame in 63 to
+98 ms. `MDVIEW_STARTUP_TRACE=1` prints each stage: event loop about 10 ms, window 9 ms, first
+frame 27 ms (layout 8, page paint 3, chrome 15), showing the window 12 ms.
 
 ## 10. What has and has not run
 

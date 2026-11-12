@@ -667,9 +667,11 @@ impl App {
         }
         if self.first {
             self.first = false;
+            stage(self.started, "first frame drawn and presented hidden");
             if let Some(w) = &self.window {
                 w.set_visible(true);
             }
+            stage(self.started, "window shown");
             // The first frame was presented to a hidden window, which shows nothing: send it
             // again now that there is a window to draw on.
             let whole = (0, 0, self.screen.width as i32, self.screen.height as i32);
@@ -856,6 +858,7 @@ impl ApplicationHandler<Wake> for App {
         if self.window.is_some() {
             return;
         }
+        stage(self.started, "resumed");
         let (w, h, max) = self.ws.window_size().unwrap_or((1280, 800, false));
         let mut attributes = Window::default_attributes()
             .with_title(self.ws.title())
@@ -885,6 +888,7 @@ impl ApplicationHandler<Wake> for App {
             attributes = attributes.with_undecorated_shadow(true);
         }
         let window = Rc::new(event_loop.create_window(attributes).expect("window"));
+        stage(self.started, "window created");
         self.scale = window.scale_factor() as f32;
         let size = window.inner_size();
         self.size = (size.width.max(1), size.height.max(1));
@@ -894,7 +898,9 @@ impl ApplicationHandler<Wake> for App {
         let context = softbuffer::Context::new(window.clone()).expect("display");
         self.surface = Some(softbuffer::Surface::new(&context, window.clone()).expect("surface"));
         self.window = Some(window);
+        stage(self.started, "surface");
         self.draw();
+        stage(self.started, "first draw returned");
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, wake: Wake) {
@@ -1115,6 +1121,16 @@ fn shot(mut app: App, path: &Path) -> i32 {
     }
 }
 
+/// `MDVIEW_STARTUP_TRACE`: prints how long after launch each stage of startup finished.
+fn stage(started: Instant, what: &str) {
+    if std::env::var_os("MDVIEW_STARTUP_TRACE").is_some() {
+        eprintln!(
+            "mdview: {:7.1} ms  {what}",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+}
+
 pub fn run() -> i32 {
     let started = Instant::now();
     let args = Args::parse(std::env::args().skip(1));
@@ -1131,10 +1147,13 @@ pub fn run() -> i32 {
             return 0;
         }
     }
+    stage(started, "single-instance check");
     let ws = Workspace::new(session.clone());
+    stage(started, "workspace (session, file read, parse)");
     let mut app = App::new(args, ws, session);
     app.started = started;
     app.setup();
+    stage(started, "app setup");
     if let Some(path) = app.args.shot.clone() {
         return shot(app, &path);
     }
@@ -1145,6 +1164,7 @@ pub fn run() -> i32 {
             return 1;
         }
     };
+    stage(started, "event loop");
     let proxy = event_loop.create_proxy();
     if let Some(settings) = &app.session {
         let p = proxy.clone();
@@ -1156,12 +1176,14 @@ pub fn run() -> i32 {
     app.watcher = FileWatcher::new(move || {
         let _ = p.send_event(Wake::Files);
     });
+    stage(started, "listener and file watcher");
     app.ws.set_subpixel(crate::platform::subpixel_order());
     let p = proxy.clone();
     app.ws.set_remote_wake(move || {
         let _ = p.send_event(Wake::Images);
     });
     app.proxy = Some(proxy);
+    stage(started, "ready to run");
     let _ = event_loop.run_app(&mut app);
     0
 }
