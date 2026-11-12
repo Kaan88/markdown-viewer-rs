@@ -70,11 +70,10 @@ tests yourself before a push. Commit and push as phases complete or when asked.
 
 | Path | What it is |
 |---|---|
-| `crates/core` | Parser (pulldown-cmark), HTML allow-list mapping, autolink, slugs, document model, find, command table, session, recents, limits, file watching (notify), single instance, tab labels, update-manifest logic |
+| `crates/core` | Parser (pulldown-cmark), HTML allow-list mapping, autolink, slugs, document model, find, command table, session, recents, limits, tab labels; re-exports of the shared file watching, single instance and update logic |
 | `crates/render` | Headless renderer: parley layout, swash raster, image store, patchable `PageLayout`, scroll frames, hit testing, selection, syntect highlighting, the engine client |
 | `crates/engine` | Library and the `mdview-engine` binary: SVG (resvg 0.47), TeX math (RaTeX 0.1.15), Mermaid (merman 0.9.3) |
 | `crates/engine-proto` | Job and reply wire format between the renderer and the engine process |
-| `crates/fetch` | `mdview-fetch`: remote image downloads through WinHTTP, disk cache; a failing stub elsewhere |
 | `bins/mdv-app` | The new shell, binary `mdview` |
 | `bins/mdv-bench` | Headless render to PNG, timings, golden generation |
 | `packaging/windows` | `mdview.iss` + `build-installer.ps1` |
@@ -91,13 +90,17 @@ also covers the shared crates and what was left unchecked in this repository aft
 `mdshared-text` (`Bitmap`, `TextEngine`, `shared_fonts`), `mdshared-highlight` (syntect),
 `mdshared-ui` (`gfx`, `theme`, `menu`, `textfield`, `tree`, the key parser, `platform`, and the
 generic parts of `chrome`, `panes` and `overlays`) and `mdshared-app` (path helpers, file reading,
-recents, the settings file layer, single instance, file watching). The viewer re-exports them at
+recents, the settings file layer, single instance, file watching, and since 2026-11-13 updating
+in place: manifest, swap, `updater::Updates`) and `mdshared-fetch` (the former `crates/fetch`:
+remote images and the update download, with the user agent passed in). `mdshared-ui` also draws
+the update bar (`notice.rs`). mdview's part of the updater is `updater::APP` in `bins/mdv-app`.
+The viewer re-exports them at
 their old paths, so `crate::gfx::Painter`, `mdview_render::TextEngine` and the like still resolve.
 To change shared code: edit it there, push, and move the `rev` here. The move was checked with 43
 `--shot` renders compared byte for byte before and after; `mdview.exe` went from 7,439,872 to
 7,457,280 bytes. First-frame time and memory were re-measured on 2026-11-13 (section 9) and are
-unchanged. The user has not run the app since the move. Tests moved with the code: this workspace now runs 319 (5 ignored), the shared
-repository 74.
+unchanged. The user has not run the app since the move. Tests moved with the code: this workspace now runs
+293 (4 ignored), the shared repository 119 (3 ignored).
 
 `target/` is git-ignored. Helper scripts that once lived there (`vm.py`, `seed-lock.py`,
 `cap.ps1`) are not committed; sections 9 and 12 say what they did.
@@ -398,7 +401,7 @@ and `align=justify` ignored; a code label drawn through a long first line. Other
 blocks): scroll frames 0.2/0.8 ms mean/worst at 780x900 100%, 0.6/1.1 at 1170x1350 150%, 2.6/3.4
 at 3840x2200 150%, inside PLAN's 4 ms and 8 ms budgets.
 
-## 6. Remote images and `crates/fetch`
+## 6. Remote images and `mdshared-fetch`
 
 **Policy.** A document never contacts a server unasked. The renderer asks for remote URLs only in
 passes that show them; the workspace holds them back (`RemoteState::Blocked`) unless this document
@@ -411,7 +414,8 @@ the file is read (`a483ece`), not the number a frame has met. The main menu has 
 "Always load remote images" that turns the setting on or off; it is saved in the session as
 `remote_images=0|1`. Images already shown stay when it is turned off.
 
-**`mdview-fetch`.** Started by the first image that may load; nothing touches the network before.
+**`mdshared-fetch`** (in the shared repository; was `crates/fetch` here until 2026-11-13).
+Started by the first image that may load; nothing touches the network before.
 GET only, `User-Agent: mdview`, `Accept: image/*`, no cookies, credentials, client certificates,
 `Referer` or decompression. At most 5 redirects, handled by hand, never https to http or to another
 scheme. Only a 200 counts. One overall deadline of 10 s, enforced by a watchdog thread that closes
@@ -575,7 +579,7 @@ window, 4 s after launch. First frame with `--no-session`: showcase 85-94 ms ove
 
 Nothing of the new shell has been built on Linux. PLAN D lists the work: Wayland file drops,
 portal dialogs (rfd is already configured with `xdg-portal`), an icon font to replace Segoe
-Fluent Icons, and a build of `crates/fetch`'s stub (remote images will fail there until a
+Fluent Icons, and a build of `mdshared-fetch`'s stub (remote images will fail there until a
 transport is written; `stub.rs` describes the intended approach). PLAN's "Verification" section
 lists the end-to-end Plasma run.
 

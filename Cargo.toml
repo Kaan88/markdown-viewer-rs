@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/render", "crates/engine", "crates/engine-proto", "crates/fetch","bins/mdv-bench", "bins/mdv-app"]
+members = ["crates/core", "crates/render", "crates/engine", "crates/engine-proto", "bins/mdv-bench", "bins/mdv-app"]
 exclude = ["spikes"]
 
 [workspace.package]

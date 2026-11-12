@@ -103,26 +103,6 @@ fn stale_generation_is_ignored() {
 }
 
 #[test]
-fn failed_images_retry() {
-    let mut r = ImageRequests::with_retry_after(Duration::from_secs(30));
-    let t0 = Instant::now();
-    assert!(r.should_fetch("u", t0));
-    assert!(!r.should_fetch("u", t0), "one request at a time");
-    r.finished("u", false, t0);
-    assert!(
-        !r.should_fetch("u", t0 + Duration::from_secs(1)),
-        "not in a tight loop"
-    );
-    assert!(
-        r.should_fetch("u", t0 + Duration::from_secs(31)),
-        "the old app never retried"
-    );
-    r.finished("u", false, t0);
-    r.on_reload();
-    assert!(r.should_fetch("u", t0), "reloading clears failures");
-}
-
-#[test]
 fn reload_keeps_exact_position_instead_of_snapping_to_heading() {
     let old = parse("# Top\n\nfirst paragraph\n\nsecond paragraph\n\nthird paragraph\n");
     let at_third = old

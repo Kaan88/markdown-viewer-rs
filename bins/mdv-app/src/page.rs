@@ -5,8 +5,9 @@ use crate::chrome::{Ctx, glyph, logo};
 use crate::gfx::{Face, Rect, mix};
 use crate::panes::{draw_scrollbar, scrollbar};
 use crate::ui::{BANNER_H, Drag, Hit, Scroller, Ui};
-use crate::updater::Stage;
+use crate::updater::{self, Stage};
 use crate::workspace::Workspace;
+use mdshared_ui::notice::{self, UpdateBarState};
 use mdview_core::commands::strings;
 use std::time::{Duration, Instant};
 
@@ -33,83 +34,28 @@ fn below_update_bar(ws: &Workspace, r: Rect) -> Rect {
     }
 }
 
-/// The Segoe "Download" glyph.
-const GLYPH_DOWNLOAD: &str = "\u{E896}";
-
 /// The bar that offers a newer version, shows its download, and says when it is in place.
 fn draw_update_bar(c: &mut Ctx, bar: Rect, stage: &Stage) {
-    let pal = *c.pal;
-    c.p.fill(bar, pal.bar);
-    c.p.fill(
-        Rect::new(bar.x, bar.bottom() - c.p.px(), bar.w, c.p.px()),
-        pal.line,
-    );
-    let mut right = bar.right() - 10.0;
-    if !matches!(stage, Stage::Installing(_)) {
-        let close = Rect::new(bar.right() - 34.0, bar.cy() - 12.0, 24.0, 24.0);
-        if c.hover == Some(Hit::UpdateClose) {
-            c.p.rbox(close, 5.0, mix(pal.bar, pal.text, 0.10));
-        }
-        c.p.icon(glyph::CLOSE, 10.0, close.cx(), close.cy(), pal.muted);
-        c.hit(Hit::UpdateClose, close);
-        right = close.x - 10.0;
-    }
-    let label = match stage {
-        Stage::None => return,
-        Stage::Available(offer) => {
-            let go = strings::UPDATE_GO;
-            let w = (c.p.measure(Face::Ui, 12.5, go) + 22.0).round();
-            right -= w;
-            bar_button(c, Hit::UpdateGo, right, bar.cy(), go, true);
-            right -= 12.0;
-            let text = strings::UPDATE_AVAILABLE.replace("{}", &offer.version.to_string());
-            match &offer.notes {
-                Some(notes) => format!("{text} {notes}"),
-                None => text,
-            }
-        }
-        Stage::Installing(offer) => {
-            strings::UPDATE_INSTALLING.replace("{}", &offer.version.to_string())
-        }
-        Stage::Installed(version) => strings::UPDATE_INSTALLED.replace("{}", &version.to_string()),
+    let state = UpdateBarState {
+        go_hovered: c.hover == Some(Hit::UpdateGo),
+        go_pressed: c.pressed == Some(Hit::UpdateGo),
+        close_hovered: c.hover == Some(Hit::UpdateClose),
     };
-    c.p.icon(GLYPH_DOWNLOAD, 13.0, bar.x + 22.0, bar.cy(), pal.muted);
-    c.p.text(
-        Face::Ui,
-        12.5,
-        bar.x + 38.0,
-        bar.cy(),
-        &label,
-        pal.text,
-        (right - (bar.x + 38.0)).max(0.0),
-    );
+    let hits = notice::draw_update_bar(c.p, c.pal, bar, &updater::APP, stage, state);
+    if let Some(r) = hits.go {
+        c.hit(Hit::UpdateGo, r);
+    }
+    if let Some(r) = hits.close {
+        c.hit(Hit::UpdateClose, r);
+    }
 }
 
 /// A text button on a bar: quiet until hovered, or filled with the accent when `primary`.
 fn bar_button(c: &mut Ctx, hit: Hit, x: f32, cy: f32, label: &str, primary: bool) -> f32 {
-    let pal = *c.pal;
-    let w = (c.p.measure(Face::Ui, 12.5, label) + 22.0).round();
-    let b = Rect::new(x, cy - 12.0, w, 24.0);
     let (hover, pressed) = (c.hover == Some(hit), c.pressed == Some(hit));
-    let (fill, text) = if primary {
-        let fill = match (hover, pressed) {
-            (true, true) => mix(pal.accent, pal.page, 0.2),
-            (true, false) => mix(pal.accent, pal.page, 0.1),
-            _ => pal.accent,
-        };
-        (fill, pal.on_accent)
-    } else {
-        let lift = match (hover, pressed) {
-            (true, true) => 0.16,
-            (true, false) => 0.10,
-            _ => 0.05,
-        };
-        (mix(pal.bar, pal.text, lift), pal.text)
-    };
-    c.p.rbox(b, 5.0, fill);
-    c.p.text_center(Face::Ui, 12.5, b, label, text);
+    let b = notice::bar_button(c.p, c.pal, x, cy, label, primary, hover, pressed);
     c.hit(hit, b);
-    w
+    b.w
 }
 
 /// The bar over a document whose remote images are held back.

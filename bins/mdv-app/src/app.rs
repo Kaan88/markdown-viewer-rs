@@ -1156,7 +1156,9 @@ fn check_update() -> i32 {
         Ok(Some(offer)) => {
             eprintln!("mdview {} is available", offer.version);
             eprintln!("  {}", offer.app.url);
-            eprintln!("  {}", offer.engine.url);
+            if let Some(engine) = &offer.engine {
+                eprintln!("  {}", engine.url);
+            }
             0
         }
         Ok(None) => {

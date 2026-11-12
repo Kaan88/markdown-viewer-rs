@@ -7,7 +7,7 @@ use crate::keys;
 use crate::menu::{Item, Menu};
 use crate::panes::{draw_scrollbar, scrollbar};
 use crate::ui::{Act, Dialog, DialogKind, EditAct, Hit, Scroller, Ui};
-use crate::updater::Stage;
+use crate::updater;
 use crate::workspace::{PageContext, Workspace};
 pub use mdshared_ui::overlay::Bubble;
 use mdshared_ui::overlay::{
@@ -201,15 +201,6 @@ pub fn card(kind: DialogKind, rows: usize, w: f32, h: f32) -> Rect {
     dialog_card(cw, ch, w, h)
 }
 
-/// The About dialog's update button: what it would do now.
-fn about_update_label(ws: &Workspace) -> String {
-    match ws.update_stage() {
-        Stage::Available(offer) => strings::UPDATE_TO.replace("{}", &offer.version.to_string()),
-        Stage::Installing(_) => strings::UPDATE_BUSY.to_string(),
-        _ => strings::UPDATE_CHECK.to_string(),
-    }
-}
-
 fn shortcut_label(label: &str) -> String {
     if label == strings::FILES_DOCK {
         "Files pane".into()
@@ -308,7 +299,7 @@ pub fn draw_dialog(
             );
             // Updates live here, beside the version: look now (or install what was found, which
             // stays one click away after its bar is closed), and the at-launch setting.
-            let look = about_update_label(ws);
+            let look = ws.update_label();
             let lw = button_w(c.p, &look);
             button(
                 c,
@@ -317,11 +308,7 @@ pub fn draw_dialog(
                 &look,
                 false,
             );
-            let launch = if ws.checks_updates() {
-                strings::UPDATE_AT_LAUNCH_ON
-            } else {
-                strings::UPDATE_AT_LAUNCH_OFF
-            };
+            let launch = updater::at_launch_label(ws.checks_updates());
             let aw = button_w(c.p, launch);
             button(
                 c,

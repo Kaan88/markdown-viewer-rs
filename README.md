@@ -103,7 +103,6 @@ The full list is in the app under "Keyboard shortcuts".
 | `crates/core` | Parser, document model, find, session, file watching |
 | `crates/render` | The headless renderer: layout, text, images, hit testing |
 | `crates/engine` | The helper process: SVG, TeX math, Mermaid |
-| `crates/fetch` | Remote image downloads and their cache |
 | `bins/mdv-app` | The application, binary `mdview` |
 | `bins/mdv-bench` | Headless renders, timings and golden images |
 | `docs/` | The plan, the current state, and the coverage list |
@@ -116,7 +115,7 @@ The full list is in the app under "Keyboard shortcuts".
 - [markdown-editor-rs](https://github.com/Kaan88/markdown-editor-rs): `mdedit`, a text
   editor with the same interface.
 - [markdown-shared-rs](https://github.com/Kaan88/markdown-shared-rs): the painter, widgets, text
-  engine and highlighting both use. This repository pins a commit of it.
+  engine, highlighting, downloads and the updater both use. This repository pins a commit of it.
 
 The editor is at its first, read-only phase.
 

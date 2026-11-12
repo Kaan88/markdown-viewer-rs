@@ -32,12 +32,19 @@ can update itself."
 
 | Where | What |
 |---|---|
-| `crates/core/src/update.rs` | Version ordering, the manifest parser, SHA-256. Pure: no I/O beyond hashing a file it is handed |
-| `crates/core/src/selfupdate.rs` | The swap: `<name>.new` in, the running file aside to `<name>.old`, all files or none, and the clean-up of what an earlier update left |
-| `crates/fetch/src/lib.rs` `fetch_file` | One blocking https GET with the caller's size cap and deadline, on the image fetcher's transport |
-| `bins/mdv-app/src/updater.rs` | `check`, `install`, `installed_files`, `record_version`, the `Stage` the bar shows |
-| `bins/mdv-app/src/workspace.rs` ("updates") | The state: due or not, the offer, installing, installed, bar closed |
-| `bins/mdv-app/src/page.rs` `draw_update_bar`, `overlays.rs` (About) | The bar and the two buttons |
+The mechanism lives in `Kaan88/markdown-shared-rs`, so the editor updates itself with the same
+code; mdview supplies its name, manifest address and file names.
+
+| Where | What |
+|---|---|
+| shared `mdshared-app/src/update.rs` | Version ordering, the manifest parser, SHA-256. Pure: no I/O beyond hashing a file it is handed. `mdview_core::update` re-exports it |
+| shared `mdshared-app/src/selfupdate.rs` | The swap: `<name>.new` in, the running file aside to `<name>.old`, all files or none, and the clean-up of what an earlier update left. `mdview_core::selfupdate` re-exports it |
+| shared `mdshared-app/src/updater.rs` | `App` (what names an application), `check`, `install`, `installed_files`, `record_version`, `check_due`, and `Updates`: the offer, installing, installed, bar closed, and every message |
+| shared `mdshared-fetch` `fetch_file` | One blocking https GET with the caller's size cap and deadline, on the image fetcher's transport |
+| shared `mdshared-ui/src/notice.rs` | `draw_update_bar`: the bar, its button and its close button |
+| `bins/mdv-app/src/updater.rs` | `APP`: mdview's name, version, manifest address, engine name and installed-apps key |
+| `bins/mdv-app/src/workspace.rs` ("updates") | Holds the `Updates`, remembers the time of the last look in the session |
+| `bins/mdv-app/src/page.rs` `draw_update_bar`, `overlays.rs` (About) | Where the bar and the two buttons are placed and hit |
 | `bins/mdv-app/src/app/commands.rs` | The threads (`mdview-update`) and their `Wake::Update` answers |
 
 ## Manifest
@@ -45,7 +52,7 @@ can update itself."
 A release asset named `mdview-update.txt` on the latest GitHub release of
 `Kaan88/markdown-viewer-rs`, fetched from
 `https://github.com/Kaan88/markdown-viewer-rs/releases/latest/download/mdview-update.txt`.
-The grammar and limits are in the module docs of `crates/core/src/update.rs`; in short:
+The grammar and limits are in the module docs of `mdshared-app/src/update.rs`; in short:
 
 ```text
 manifest: 1

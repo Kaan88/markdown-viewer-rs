@@ -341,23 +341,6 @@ pub mod strings {
     pub const REMOTE_MANY: &str = "This document has {} remote images that were not loaded.";
     pub const REMOTE_LOAD: &str = "Load images";
     pub const REMOTE_ALWAYS: &str = "Always load";
-    /// `{}` is the new version.
-    pub const UPDATE_AVAILABLE: &str = "mdview {} is available.";
-    pub const UPDATE_GO: &str = "Update";
-    pub const UPDATE_CHECK: &str = "Check for updates";
-    /// `{}` is the new version.
-    pub const UPDATE_TO: &str = "Update to {}";
-    pub const UPDATE_BUSY: &str = "Updating…";
-    pub const UPDATE_AT_LAUNCH_ON: &str = "Check at launch: on";
-    pub const UPDATE_AT_LAUNCH_OFF: &str = "Check at launch: off";
-    pub const UPDATE_INSTALLING: &str = "Downloading mdview {}…";
-    pub const UPDATE_INSTALLED: &str =
-        "mdview {} is installed. It starts the next time you open mdview.";
-    /// `{}` is the running version.
-    pub const UPDATE_NONE: &str = "mdview {} is the newest version.";
-    pub const UPDATE_CHECK_FAILED: &str = "Could not look for a newer version.";
-    pub const UPDATE_FAILED: &str = "The update could not be installed. Nothing was changed.";
-    pub const UPDATE_NOT_INSTALLED: &str = "Only an installed mdview can update itself.";
     pub const FILE_DELETED: &str =
         "File was deleted or is unavailable. Showing the last loaded content.";
     pub const FILE_NOT_FOUND: &str =

@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::ui::EditAct;
-use mdview_core::commands::strings;
+
 use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
 
@@ -556,7 +556,7 @@ impl App {
     /// Downloads and swaps in the version that was offered, on its own thread.
     pub(super) fn install_update(&mut self) {
         let (Some(files), Some(proxy)) = (updater::installed_files(), self.proxy.clone()) else {
-            self.ws.set_status(strings::UPDATE_NOT_INSTALLED);
+            self.ws.set_status(updater::NOT_INSTALLED);
             return;
         };
         let Some(offer) = self.ws.update_begin() else {
