@@ -20,8 +20,9 @@ page's own text path. Windows first. The user approved its look by using the run
 
 **What ships.** The Qt 6 shell, `bins/mdv-qt` (CXX-Qt, Qt Widgets), is still the shipping shell
 until the new one is approved by hand (roadmap A3) and the checklist and numbers are done (A4). Its
-installer is `packaging/windows/mdview-qt.iss` (built by `build-installer-qt.ps1`) and is on the
-v0.1.0 GitHub pre-release. On Linux it is packaged as a PKGBUILD and an AppImage (section 13).
+installer is `packaging/windows/mdview-qt.iss` (built by `build-installer-qt.ps1`). There is no
+GitHub release: the v0.1.0 pre-release that carried the Qt installer was deleted with its tag on
+2026-11-12. On Linux it is packaged as a PKGBUILD and an AppImage (section 13).
 
 **What is retired.** The WinUI 3 shell (`bins/mdv-winui`), its installer and build script are on
 the `winui-archive` branch since 2026-11-11. Why it was dropped: about 383 ms to first frame and
@@ -276,6 +277,14 @@ the editor is still a second project.
 `.ico` and `.png` from a list of shapes (and the editor's mark with `mdedit` as its argument);
 `chrome::logo` draws the same shapes with `Painter::polygon`, in the icon's own blue in both
 themes. Change the shapes in both together.
+
+**Public, and history rewritten (2026-11-12).** The repository is public under the MIT licence,
+with a README. Before that, every version of this file was rewritten to remove the old test VM's
+address and login, and `main`, `winui-archive`, `phase2-renderer` and `winui-tabs-wip` were
+force-pushed; all commit hashes changed, and the ones written in this file were updated. Any
+other clone (the Linux desktop's) has the old history and must be cloned again, not pulled. The
+old history is still on the PC in `target/backup-before-rewrite.bundle`, under `refs/original/`
+and in the agent worktree branches.
 
 ## 5. The renderer (`crates/render`)
 
