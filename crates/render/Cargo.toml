@@ -7,10 +7,11 @@ publish.workspace = true
 [dependencies]
 mdview-core = { path = "../core" }
 mdview-engine-proto = { path = "../engine-proto" }
+mdshared-text = { path = "../../../markdown-shared-rs/crates/mdshared-text" }
+mdshared-highlight = { path = "../../../markdown-shared-rs/crates/mdshared-highlight" }
 parley = "=0.12.0"
 swash = "=0.2.10"
 png = "0.18"
 zune-jpeg = "=0.5.15"
-syntect = { version = "=5.3.0", default-features = false, features = ["default-fancy"] }
 gif = { version = "=0.14.2", default-features = false, features = ["std"] }
 image-webp = { version = "=0.2.4", default-features = false }

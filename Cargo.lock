@@ -1584,6 +1584,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mdshared-highlight"
+version = "0.1.0"
+dependencies = [
+ "syntect",
+]
+
+[[package]]
+name = "mdshared-text"
+version = "0.1.0"
+dependencies = [
+ "parley",
+ "png",
+ "swash",
+]
+
+[[package]]
 name = "mdv-bench"
 version = "0.1.0"
 dependencies = [
@@ -1649,12 +1665,13 @@ version = "0.1.0"
 dependencies = [
  "gif",
  "image-webp",
+ "mdshared-highlight",
+ "mdshared-text",
  "mdview-core",
  "mdview-engine-proto",
  "parley",
  "png",
  "swash",
- "syntect",
  "zune-jpeg",
 ]
 
