@@ -89,7 +89,7 @@ denied:
 cd C:\Users\kaank\Desktop\mv
 $env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
 cargo build --release --workspace          # includes mdview.exe and mdview-engine.exe
-cargo test --release --workspace           # 2026-11-12: 356 passed, 0 failed, 6 ignored
+cargo test --release --workspace           # 2026-11-12: 359 passed, 0 failed, 6 ignored
 cargo fmt --all --check
 ```
 
@@ -109,7 +109,7 @@ document with SVG, math or Mermaid.
 |---|---|
 | `<files>` | Documents to open (a folder sets the Files pane) |
 | `--light` / `--dark` | Override the theme |
-| `--zoom <pct>`, `--folder <dir>`, `--maximize` | Start-up overrides |
+| `--zoom <pct>`, `--page-width narrow\|wide\|full`, `--folder <dir>`, `--maximize` | Start-up overrides |
 | `--no-session` | Neither reads nor writes the session and skips the single-instance hand-over. Use it for every test |
 | `--load-remote` | Load the first document's remote images without the bar (for checks) |
 | `--shot out.png` | Draw one frame of the state the other flags describe, write it, exit. No window |
@@ -240,6 +240,19 @@ was closed since. The session also keeps the window's position (`geometry=1010x7
 restored only if a screen still shows that place) and the side panes' widths
 (`layout=files=1;outline=0;files_w=300`). The text cursor shows only on a line of text; margins,
 gaps and pictures keep the arrow, and a link is a link only where its text is.
+
+**Page width (2026-11-12).** The reader chooses how wide the page's column may grow: narrow (the
+theme's 700 px reading width, the default), wide (1000 px, `WIDE_PAGE` in `workspace.rs`) or full
+(the window). It is one setting for every document, saved in the session as
+`page_width=narrow|wide|full`. A button after the zoom buttons steps through the three (its icon
+is drawn by hand and shows the current choice), and the main menu lists them. The user asked for
+it after a report with wide tables read badly in the narrow column.
+
+**Table columns (2026-11-12).** A table too wide for the page no longer shrinks every column by
+one factor, which made short columns narrower than their longest word so text ran into the next
+column. Each column keeps its longest word (parley's min-content width) and the room left goes to
+the columns in proportion to what they would still wrap; when even the longest words do not fit,
+the columns shrink together and words break inside their cells (`break_words` in the pager).
 
 ## 5. The renderer (`crates/render`)
 
@@ -428,7 +441,7 @@ writes an extension's default value. The last page offers (unchecked) to open
 | Engine | `mdview-engine.exe` 26 MB | |
 | Installer | 11 MB | 17 MB |
 
-Tests: `cargo test --release --workspace`: 356 passed, 0 failed, 6 ignored.
+Tests: `cargo test --release --workspace`: 359 passed, 0 failed, 6 ignored.
 
 Earlier, 2026-11-11, before estimated heights: a scroll frame in a maximized window with both
 panes, 150 frames, median 3.1 ms, p90 3.5, worst 4.2 (paint 1.2, compose 1.0, copy 0.8, OS

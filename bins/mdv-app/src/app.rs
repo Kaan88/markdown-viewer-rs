@@ -209,6 +209,9 @@ impl App {
         if let Some(z) = a.zoom {
             self.ws.set_zoom(z);
         }
+        if let Some(width) = a.page_width {
+            self.ws.set_page_width(width);
+        }
         let (files, outline) = self.ws.panes();
         self.ui.panes.files = a.files_pane.unwrap_or(files);
         self.ui.panes.outline = a.outline_pane.unwrap_or(outline);
@@ -293,7 +296,7 @@ impl App {
             }
             Region::Bar => sig((
                 common,
-                self.ws.zoom(),
+                (self.ws.zoom(), self.ws.page_width() as u8),
                 self.ws.theme_choice() as u8,
                 ui.find.text(),
                 ui.find.caret(),

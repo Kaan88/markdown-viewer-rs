@@ -2,6 +2,7 @@
 //! dialogs, plus wakes from other threads and the loop's timers.
 
 use super::*;
+use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
 
 impl App {
@@ -30,6 +31,14 @@ impl App {
                 BarItem::ZoomOut => self.command(C::ZoomOut),
                 BarItem::Zoom => self.command(C::ZoomReset),
                 BarItem::ZoomIn => self.command(C::ZoomIn),
+                BarItem::PageWidth => {
+                    let next = match self.ws.page_width() {
+                        PageWidth::Narrow => PageWidth::Wide,
+                        PageWidth::Wide => PageWidth::Full,
+                        PageWidth::Full => PageWidth::Narrow,
+                    };
+                    self.ws.set_page_width(next);
+                }
                 BarItem::FindPrev => self.command(C::FindPrevious),
                 BarItem::FindNext => self.command(C::FindNext),
                 BarItem::Theme => self.command(C::Theme),
@@ -117,6 +126,9 @@ impl App {
             Act::RemoteAlways => {
                 let on = !self.ws.remote_always();
                 self.ws.set_remote_always(on);
+            }
+            Act::PageWidth(width) => {
+                self.ws.set_page_width(width);
             }
         }
         self.redraw();

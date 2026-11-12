@@ -117,6 +117,37 @@ impl Recents {
     }
 }
 
+/// How wide the page's column of text may grow. The shell decides what each means in px.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PageWidth {
+    /// A column sized for reading prose.
+    #[default]
+    Narrow,
+    /// A wider column, for documents with large tables or long code lines.
+    Wide,
+    /// As wide as the window.
+    Full,
+}
+
+impl PageWidth {
+    pub const ALL: [PageWidth; 3] = [PageWidth::Narrow, PageWidth::Wide, PageWidth::Full];
+
+    /// The word the session file and the command line use.
+    pub fn name(self) -> &'static str {
+        match self {
+            PageWidth::Narrow => "narrow",
+            PageWidth::Wide => "wide",
+            PageWidth::Full => "full",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<PageWidth> {
+        PageWidth::ALL
+            .into_iter()
+            .find(|w| w.name().eq_ignore_ascii_case(name.trim()))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
     pub tabs: Vec<PathBuf>,
@@ -131,6 +162,8 @@ pub struct Session {
     /// Load remote (`http`/`https`) images in every document without asking. Off by default: a
     /// document then shows a bar offering to load its own.
     pub remote_images: bool,
+    /// The reader's choice of page width, for every document.
+    pub page_width: PageWidth,
 }
 
 impl Default for Session {
@@ -145,6 +178,7 @@ impl Default for Session {
             geometry: String::new(),
             layout: String::new(),
             remote_images: false,
+            page_width: PageWidth::default(),
         }
     }
 }
@@ -174,6 +208,7 @@ impl Session {
                 "geometry" => s.geometry = unescape(value),
                 "layout" => s.layout = unescape(value),
                 "remote_images" => s.remote_images = value.trim() == "1",
+                "page_width" => s.page_width = PageWidth::from_name(value).unwrap_or_default(),
                 _ => {}
             }
         }
@@ -208,6 +243,7 @@ impl Session {
         line("geometry", &escape(&self.geometry));
         line("layout", &escape(&self.layout));
         line("remote_images", if self.remote_images { "1" } else { "0" });
+        line("page_width", self.page_width.name());
         out
     }
 
@@ -422,7 +458,23 @@ fn decode_path(s: &str) -> PathBuf {
 
 #[cfg(test)]
 mod window_state_tests {
-    use super::Session;
+    use super::{PageWidth, Session};
+
+    #[test]
+    fn page_width_round_trips_and_defaults_to_narrow() {
+        assert_eq!(Session::parse("").page_width, PageWidth::Narrow);
+        assert_eq!(
+            Session::parse("page_width=sideways").page_width,
+            PageWidth::Narrow
+        );
+        for width in PageWidth::ALL {
+            let s = Session {
+                page_width: width,
+                ..Session::default()
+            };
+            assert_eq!(Session::parse(&s.serialize()).page_width, width);
+        }
+    }
 
     #[test]
     fn panes_round_trip() {

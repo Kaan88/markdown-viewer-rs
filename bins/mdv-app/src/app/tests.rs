@@ -99,6 +99,19 @@ fn toolbar_toggles_panes_and_the_layout_follows() {
 }
 
 #[test]
+fn the_page_width_button_steps_through_the_widths() {
+    use mdview_core::session::PageWidth;
+    let mut a = app(&["linked.md"]);
+    assert_eq!(a.ws.page_width(), PageWidth::Narrow);
+    click(&mut a, Hit::Bar(BarItem::PageWidth));
+    assert_eq!(a.ws.page_width(), PageWidth::Wide);
+    click(&mut a, Hit::Bar(BarItem::PageWidth));
+    assert_eq!(a.ws.page_width(), PageWidth::Full);
+    click(&mut a, Hit::Bar(BarItem::PageWidth));
+    assert_eq!(a.ws.page_width(), PageWidth::Narrow);
+}
+
+#[test]
 fn splitter_drag_resizes_within_limits() {
     let mut a = app(&["linked.md"]);
     let w0 = a.areas.files.unwrap().w;

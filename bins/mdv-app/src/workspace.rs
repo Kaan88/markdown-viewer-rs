@@ -25,7 +25,7 @@ use mdview_core::commands::strings;
 use mdview_core::files::{FileStamp, canonical_or_absolute, read_stable, stamp, tab_labels};
 use mdview_core::links::{LinkAction, classify_link};
 use mdview_core::model::{NONE, ScrollPos};
-use mdview_core::session::{self, RecentEntry, Recents, Session};
+use mdview_core::session::{self, PageWidth, RecentEntry, Recents, Session};
 use mdview_core::{Document, parse_bytes};
 use mdview_fetch::{Fetcher, State as Fetched};
 use mdview_render::{
@@ -300,6 +300,9 @@ impl Tab {
         }
     }
 }
+
+/// The widest column of the "wide" page width, in logical px at 100% zoom.
+const WIDE_PAGE: f32 = 1000.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Viewport {
@@ -1110,6 +1113,27 @@ impl Workspace {
         self.set_zoom(session::ZOOM_DEFAULT)
     }
 
+    /// How wide the page's column of text may grow.
+    pub fn page_width(&self) -> PageWidth {
+        self.session.page_width
+    }
+
+    /// Sets the page width for every document, keeping the reading position, and saves.
+    pub fn set_page_width(&mut self, width: PageWidth) -> bool {
+        if width == self.session.page_width {
+            return false;
+        }
+        self.session.page_width = width;
+        self.message(match width {
+            PageWidth::Narrow => "Page width: narrow",
+            PageWidth::Wide => "Page width: wide",
+            PageWidth::Full => "Page width: full",
+        });
+        self.dirty = true;
+        self.persist();
+        true
+    }
+
     // ---- layout and painting -----------------------------------------------------------------
 
     /// Records the page viewport in device px and the display scale. `paint` does this too; call
@@ -1405,7 +1429,13 @@ impl Workspace {
             return false;
         };
         self.load(index);
-        let theme = self.theme();
+        let mut theme = self.theme();
+        // Narrow is the theme's own reading width; the others let the column grow.
+        match self.session.page_width {
+            PageWidth::Narrow => {}
+            PageWidth::Wide => theme.reading_width = WIDE_PAGE,
+            PageWidth::Full => theme.reading_width = f32::MAX,
+        }
         let zoom = f32::from(self.zoom) / 100.0;
         let width = viewport.width as f32 / viewport.scale / zoom;
         let scale = viewport.scale * zoom;
@@ -1414,6 +1444,7 @@ impl Workspace {
             v.options.width == width
                 && (v.options.scale - scale).abs() < 0.001
                 && v.options.theme.name == theme.name
+                && v.options.theme.reading_width == theme.reading_width
         });
         if !fresh {
             tab.drop_view(self.renderer.page_layout());
@@ -2723,6 +2754,27 @@ mod tests {
         assert!(ws.clear_selection());
         assert!(ws.selected_text().is_none());
         _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn page_width_widens_the_layout() {
+        let dir = temp_dir("pagewidth");
+        let file = write(&dir, "wide.md", &"word ".repeat(600));
+        let mut ws = Workspace::new(None);
+        ws.open(&file).unwrap();
+        assert_eq!(ws.page_width(), PageWidth::Narrow);
+        assert!(ws.paint(1600, 600, 1.0).is_some());
+        let narrow = ws.total_height();
+        assert!(ws.set_page_width(PageWidth::Wide));
+        assert!(!ws.set_page_width(PageWidth::Wide));
+        assert!(ws.paint(1600, 600, 1.0).is_some());
+        let wide = ws.total_height();
+        assert!(ws.set_page_width(PageWidth::Full));
+        assert!(ws.paint(1600, 600, 1.0).is_some());
+        let full = ws.total_height();
+        // The same text on longer lines is a shorter page.
+        assert!(wide < narrow, "{wide} < {narrow}");
+        assert!(full < wide, "{full} < {wide}");
     }
 
     #[test]

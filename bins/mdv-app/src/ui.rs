@@ -7,6 +7,7 @@ use crate::menu::Menu;
 use crate::textfield::TextField;
 use crate::tree::FileTree;
 use mdview_core::commands::CommandId;
+use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -45,6 +46,8 @@ pub enum BarItem {
     ZoomOut,
     Zoom,
     ZoomIn,
+    /// Steps the page width: narrow, wide, full.
+    PageWidth,
     FindPrev,
     FindNext,
     Theme,
@@ -169,6 +172,8 @@ pub enum Act {
     SelectAll,
     /// Toggle loading remote images in every document.
     RemoteAlways,
+    /// Choose how wide the page's column of text may grow.
+    PageWidth(PageWidth),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

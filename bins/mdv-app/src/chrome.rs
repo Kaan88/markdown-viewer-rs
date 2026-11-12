@@ -8,6 +8,7 @@ use crate::theme::Palette;
 use crate::ui::{BAR_H, BarItem, Hit, PopupKind, TITLE_H, Ui};
 use crate::workspace::{ThemeChoice, Workspace};
 use mdview_core::commands::{CommandId, strings};
+use mdview_core::session::PageWidth;
 
 pub const WIN_BTN_W: f32 = 46.0;
 pub const TAB_MIN: f32 = 90.0;
@@ -191,7 +192,8 @@ fn plan_width(plan: &BarPlan, t: &BarText) -> f32 {
         w += SEP + labelled(t.files, l) + GAP + labelled(t.outline, l) + GAP;
     }
     if plan.zoom {
-        w += SEP + ICON_BTN + GAP + ZOOM_LABEL + GAP + ICON_BTN + GAP;
+        // Zoom out, the percentage, zoom in, page width.
+        w += SEP + ICON_BTN + GAP + ZOOM_LABEL + GAP + 2.0 * (ICON_BTN + GAP);
     }
     // Right group: more, theme, separator, next, previous, find box, counter.
     w += ICON_BTN + GAP + labelled(t.theme, l) + SEP + 2.0 * (ICON_BTN + GAP) + plan.find_w;
@@ -307,6 +309,9 @@ pub fn tooltip(hit: Hit, ws: &Workspace, maximized: bool) -> Option<String> {
             BarItem::ZoomOut => with("Zoom out", CommandId::ZoomOut),
             BarItem::Zoom => with("Reset zoom", CommandId::ZoomReset),
             BarItem::ZoomIn => with("Zoom in", CommandId::ZoomIn),
+            BarItem::PageWidth => {
+                format!("Page width: {} (click to change)", ws.page_width().name())
+            }
             BarItem::FindPrev => with("Previous match", CommandId::FindPrevious),
             BarItem::FindNext => with("Next match", CommandId::FindNext),
             BarItem::Theme => format!(
@@ -617,7 +622,8 @@ pub fn draw_bar(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
         c.p.text_center(Face::Ui, 13.0, b, &format!("{}%", ws.zoom()), pal.text);
         c.hit(hit, b);
         x += ZOOM_LABEL + GAP;
-        button(c, x, BarItem::ZoomIn, glyph::PLUS, None, false);
+        x += button(c, x, BarItem::ZoomIn, glyph::PLUS, None, false) + GAP;
+        page_width_button(c, ws, Rect::new(x, y, ICON_BTN, 32.0));
     }
 
     // Right group, from the right edge.
@@ -655,6 +661,35 @@ pub fn draw_bar(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
             if none { pal.warn } else { pal.muted },
         );
     }
+}
+
+/// The page-width button: a small window outline holding a column as wide as the choice, so
+/// the icon shows the current setting. A click steps to the next one.
+fn page_width_button(c: &mut Ctx, ws: &Workspace, b: Rect) {
+    let pal = *c.pal;
+    let hit = Hit::Bar(BarItem::PageWidth);
+    let fill = c.fill_for(hit, false, false);
+    if let Some(fill) = fill {
+        c.p.rbox(b, 6.0, fill);
+    }
+    let window = Rect::new(b.cx() - 9.0, b.cy() - 7.0, 18.0, 14.0);
+    c.p.frame(window, 3.0, fill.unwrap_or(pal.bar), pal.text);
+    let column = match ws.page_width() {
+        PageWidth::Narrow => 4.0,
+        PageWidth::Wide => 8.0,
+        PageWidth::Full => 12.0,
+    };
+    c.p.rbox(
+        Rect::new(
+            b.cx() - column / 2.0,
+            window.y + 3.0,
+            column,
+            window.h - 6.0,
+        ),
+        1.0,
+        pal.text,
+    );
+    c.hit(hit, b);
 }
 
 fn draw_find(c: &mut Ctx, ui: &mut Ui, frame: Rect) {

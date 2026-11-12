@@ -1,6 +1,7 @@
 //! Command-line arguments: files to open, start-up overrides, and the flags that render a UI state
 //! to a PNG without a window (`--shot`), so the look can be checked without a human.
 
+use mdview_core::session::PageWidth;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +25,8 @@ pub struct Args {
     /// `--light` (false) or `--dark` (true).
     pub dark: Option<bool>,
     pub zoom: Option<u16>,
+    /// `--page-width narrow|wide|full`.
+    pub page_width: Option<PageWidth>,
     pub folder: Option<PathBuf>,
     /// Do not read or write the user's session (and skip single-instance hand-over).
     pub no_session: bool,
@@ -80,6 +83,9 @@ impl Args {
                 "--load-remote" => out.load_remote = true,
                 "--maximize" => out.maximize = true,
                 "--zoom" => out.zoom = value(&a).and_then(|v| v.trim_end_matches('%').parse().ok()),
+                "--page-width" => {
+                    out.page_width = value(&a).and_then(|v| PageWidth::from_name(&v));
+                }
                 "--folder" => out.folder = value(&a).map(PathBuf::from),
                 "--shot" => out.shot = value(&a).map(PathBuf::from),
                 "--size" => out.size = value(&a).and_then(|v| pair(&v.to_ascii_lowercase(), 'x')),
