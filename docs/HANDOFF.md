@@ -28,8 +28,9 @@ GitHub release (the v0.1.0 pre-release that carried the Qt installer was deleted
 (`mdview-qt.iss`, `build-installer-qt.ps1`) and its Linux packaging (`packaging/arch`,
 `packaging/appimage`) are on the `qt-archive` branch since 2026-11-13 (roadmap A6). The branch is
 `main` as it was just before the removal; whether the Qt crate still built against the renderer
-API of that commit was never checked. `bins/mdv-qt/target` (2.7 GB of ignored build output) was
-left on the PC's disk. The WinUI 3 shell (`bins/mdv-winui`), its installer and build script are on
+API of that commit was never checked. Its build output on the PC
+(`bins/mdv-qt/target`, `target/qt-deploy`, the Qt installer in `target/installer`) was deleted the
+same day. The WinUI 3 shell (`bins/mdv-winui`), its installer and build script are on
 the `winui-archive` branch since 2026-11-11. Why it was dropped: about 383 ms to first frame and
 about 180 MiB private memory for an empty window against PLAN's 50-90 MB, a system-wide Windows App
 Runtime dependency, Windows only, and hand-trimmed generated bindings.
@@ -90,8 +91,8 @@ recents, the settings file layer, single instance, file watching). The viewer re
 their old paths, so `crate::gfx::Painter`, `mdview_render::TextEngine` and the like still resolve.
 To change shared code: edit it there, push, and move the `rev` here. The move was checked with 43
 `--shot` renders compared byte for byte before and after; `mdview.exe` went from 7,439,872 to
-7,457,280 bytes. First-frame time and memory were NOT re-measured after it, and the user has not
-run the app since. Tests moved with the code: this workspace now runs 319 (5 ignored), the shared
+7,457,280 bytes. First-frame time and memory were re-measured on 2026-11-13 (section 9) and are
+unchanged. The user has not run the app since the move. Tests moved with the code: this workspace now runs 319 (5 ignored), the shared
 repository 74.
 
 `target/` is git-ignored. Helper scripts that once lived there (`vm.py`, `seed-lock.py`,
@@ -492,6 +493,14 @@ holds `instance.lock` open with no sharing, so a launch knows at once whether to
 (`crates/core/src/single.rs`). Real launches of the showcase now reach the first frame in 63 to
 98 ms. `MDVIEW_STARTUP_TRACE=1` prints each stage: event loop about 10 ms, window 9 ms, first
 frame 27 ms (layout 8, page paint 3, chrome 15), showing the window 12 ms.
+
+**After the shared crates, re-measured (2026-11-13).** The static `target\dist` build of `de9db37`,
+run from the install folder (the installed exes were replaced with it by hand, not through the
+installer): `mdview.exe` 7,579,648 bytes, installer 11.4 MB. Private memory 24.3 MiB for the
+showcase and 34.3 MiB for the 1 MiB document (working set 42.0 and 52.8 MiB), a default 1280x800
+window, 4 s after launch. First frame with `--no-session`: showcase 85-94 ms over five runs, the
+1 MiB document 79-105 ms over three, refined after 0.66-0.93 s. Real launches of the showcase
+(three): 82-84 ms. All inside the ranges above.
 
 ## 10. What has and has not run
 
