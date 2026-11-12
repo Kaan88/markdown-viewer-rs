@@ -22,7 +22,7 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
 - **Images:** PNG, JPEG, GIF, WebP and SVG. Remote images stay off until you allow them, per
   document or always.
 - **Updates:** an installed mdview looks for a newer version at launch, at most once a day, and
-  asks before it downloads anything. About mdview turns the look off. No release is published yet.
+  asks before it downloads anything. About mdview turns the look off.
 - **Reading:** tabs, a Files pane, an Outline pane, find, zoom, light and dark themes, a focus
   mode, three page widths, back and forward, session restore, and reload when the file changes on
   disk, keeping your place.
@@ -48,8 +48,9 @@ a document needs it and exits when idle, so a malformed document cannot take the
 
 ## Status
 
-A personal project, usable every day on Windows 11, and still a pre-release: version 0.1.0, no
-published installer, no code signing. It has been built and run on one PC. Linux is planned and
+A personal project, usable every day on Windows 11. Version 0.1.0 is on the
+[releases page](https://github.com/Kaan88/markdown-viewer-rs/releases/latest) with its installer;
+it is not code-signed. It has been built and run on one PC. Linux is planned and
 not done for this shell.
 
 Known gaps are listed in [docs/HANDOFF.md](docs/HANDOFF.md), section 11. The larger ones: tables
