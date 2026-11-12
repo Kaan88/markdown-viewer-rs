@@ -20,9 +20,11 @@ page's own text path. Windows first. The user approved its look by using the run
 2026-11-11 (PLAN roadmap step A2). It has never been built or run on Linux.
 
 **What ships.** `mdview` is the only shell. Its installer is `packaging/windows/mdview.iss` (built
-by `build-installer.ps1`, section 8) and is the release, though nothing is published: there is no
-GitHub release (the v0.1.0 pre-release that carried the Qt installer was deleted with its tag on
-2026-11-12). Nothing is packaged for Linux.
+by `build-installer.ps1`, section 8). **v0.1.0 was published on GitHub on 2026-11-13** from
+`5cbd354`, as the latest release, with the installer, the two executables and `mdview-update.txt`
+(the earlier v0.1.0 pre-release, which carried the Qt installer, was deleted with its tag on
+2026-11-12). The installer from that release has not been downloaded and run. Nothing is packaged
+for Linux.
 
 **What is retired.** The Qt 6 shell (`bins/mdv-qt`, CXX-Qt, Qt Widgets), its installer
 (`mdview-qt.iss`, `build-installer-qt.ps1`) and its Linux packaging (`packaging/arch`,
@@ -553,9 +555,8 @@ window, 4 s after launch. First frame with `--no-session`: showcase 85-94 ms ove
 - No snap-layouts flyout on the maximize button. The system accent colour is not used.
 - Maximized memory is three full-window bitmaps.
 - Icons need Segoe Fluent Icons or Segoe MDL2 Assets (Windows only).
-- The update has never run against a real release: none is published (`docs/UPDATE.md`, "What
-  has run").
-- `cargo clippy` style warnings remain.
+- The update has never installed anything from a real release: v0.1.0 is the first, so there
+  is nothing newer yet (`docs/UPDATE.md`, "What has run").
 
 **Renderer and engine:**
 
@@ -630,9 +631,10 @@ Items 1 and 2 are done and item 3 is built but waits for a first release; item 4
 3. **A simple automatic update:** built 2026-11-13, not yet proven. The look at launch, the bar,
    the download, hash check and in-place swap of both executables are in and tested with a
    stand-in transport; `build-installer.ps1` now also writes the release's files and manifest.
-   What is left needs a published release, which is the user's to make: bump the version, publish
-   `v<version>` with the four files from `target\release-files`, and watch an installed older
-   build update itself. `docs/UPDATE.md` has the steps and what has and has not run.
+   v0.1.0 is published and a look against it answers "nothing newer". What is left: install
+   0.1.0, bump the version, publish the next release with the four files the script writes, and
+   watch the installed copy update itself. `docs/UPDATE.md` has the steps and what has and has
+   not run.
 4. Features, in the user's order: remember the scroll position per file; live reload that keeps
    the reader's place; animated GIFs; content-sized tables; the missing highlight languages
    (Kotlin, Swift, PowerShell, Dockerfile); a true float across blocks; wiki-links and backlinks.
@@ -649,7 +651,7 @@ testing on other machines (there is one PC). The editor is a second project (PLA
 - **2026-11-13.** Qt shell retired to the `qt-archive` branch with its installer and Linux
   packaging; `mdview` is the only shell. Numbers re-measured after the shared crates. Port
   checklist gone through; the Files tree follows its folder live. In-place updates built
-  (`docs/UPDATE.md`); no release published.
+  (`docs/UPDATE.md`); v0.1.0 published on GitHub.
 - **2026-11-08.** Phases 1 and 2 closed: the user approved the four `showcase-*` goldens. Phase 4
   slices landed: SVG, math and Mermaid (eight families) through `mdview-engine`, syntect in-process.
   Both shells (WinUI and Qt) built ahead of the plan; the Qt shell ran on the Debian VM under Xvfb.

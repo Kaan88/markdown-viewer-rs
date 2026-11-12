@@ -2,8 +2,9 @@
 
 mdview updates itself in place: it looks for a newer version, asks, downloads the two executables,
 checks their hashes and swaps them in. Built 2026-11-13 after the user chose "at launch, then ask"
-and "both exes, swapped in place". **No release has been published yet, so the whole flow has not
-run against a real release**; see "What has run" at the end.
+and "both exes, swapped in place". v0.1.0, the first release, was published the same day, so a look finds
+its manifest; **no update has been installed from a real release yet**, because there is nothing
+newer than 0.1.0. See "What has run" at the end.
 
 ## What the reader sees
 
@@ -106,12 +107,14 @@ finds and exits, with no window.
   executable; `install` with a stand-in transport (a damaged file, a failed download, a good
   pair); the workspace's stages and saved settings; the bar and the About buttons in a headless
   `App`.
-- `mdview --check-update` against GitHub: `Status(404)` for the manifest (there is no release),
-  a redirected download of another file from the repository that then failed to parse as a
-  manifest, and an `http` URL refused.
+- `mdview --check-update` against GitHub. Before the release: `Status(404)` for the manifest, a
+  redirected download of another file from the repository that then failed to parse as a
+  manifest, and an `http` URL refused. After v0.1.0 was published: the manifest fetched through
+  GitHub's redirect and read, answer "nothing newer". The two published executables, downloaded
+  with curl, match the hashes in the published manifest.
 - `--shot` renders of the bar in its three stages and of the About dialog, looked at by Claude.
 
-**Not run:** an update from a real release, start to finish (the download of the real files, the
+**Not run:** an update from a real release, start to finish (the download of the real files by mdview's own transport, the
 swap of the running installed exe, the registry entry, the clean-up on the next launch); the bar
 and the About buttons by hand in a window. The user has not looked at any of it.
 
