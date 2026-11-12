@@ -111,11 +111,12 @@ The full list is in the app under "Keyboard shortcuts".
 
 ## Related
 
-- [markdown-editor-rs](https://github.com/Kaan88/markdown-editor-rs): `mdedit`, a planned text
+- [markdown-editor-rs](https://github.com/Kaan88/markdown-editor-rs): `mdedit`, a text
   editor with the same interface.
-- [markdown-shared-rs](https://github.com/Kaan88/markdown-shared-rs): the code both will share.
+- [markdown-shared-rs](https://github.com/Kaan88/markdown-shared-rs): the painter, widgets, text
+  engine and highlighting both use. This repository pins a commit of it.
 
-Both hold plans only for now.
+The editor is at its first, read-only phase.
 
 ## Licence
 

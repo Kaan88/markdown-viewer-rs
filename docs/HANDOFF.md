@@ -75,6 +75,19 @@ tests yourself before a push. Commit and push as phases complete or when asked.
 | `spikes/` | Throwaway reference code, excluded from the workspace; `spikes/parser/data` holds the spec suites and `generated_1mib.md` |
 | `docs/` | This file, `PLAN.md`, `PORT_CHECKLIST.md`, `COVERAGE.md`, `UPDATE.md`, `WINDOWS_HANDOFF.md` (2026-11-10 WinUI checklist, history), `AUDIT_PHASE1.md` |
 
+**Shared crates (2026-11-12).** Code the editor also needs now lives in
+`Kaan88/markdown-shared-rs`, pinned by `rev` in `crates/core`, `crates/render` and `bins/mdv-app`:
+`mdshared-text` (`Bitmap`, `TextEngine`, `shared_fonts`), `mdshared-highlight` (syntect),
+`mdshared-ui` (`gfx`, `theme`, `menu`, `textfield`, `tree`, the key parser, `platform`, and the
+generic parts of `chrome`, `panes` and `overlays`) and `mdshared-app` (path helpers, file reading,
+recents, the settings file layer, single instance, file watching). The viewer re-exports them at
+their old paths, so `crate::gfx::Painter`, `mdview_render::TextEngine` and the like still resolve.
+To change shared code: edit it there, push, and move the `rev` here. The move was checked with 43
+`--shot` renders compared byte for byte before and after; `mdview.exe` went from 7,439,872 to
+7,457,280 bytes. First-frame time and memory were NOT re-measured after it, and the user has not
+run the app since. Tests moved with the code: this workspace now runs 319 (5 ignored), the shared
+repository 74.
+
 `target/` is git-ignored. Helper scripts that once lived there (`vm.py`, `seed-lock.py`,
 `cap.ps1`) are not committed; sections 9 and 12 say what they did.
 
