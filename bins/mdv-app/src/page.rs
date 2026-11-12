@@ -216,7 +216,7 @@ fn draw_empty(c: &mut Ctx, ws: &Workspace, r: Rect) {
     let block_h = 64.0 + 24.0 + 30.0 + 26.0 + 28.0 + 36.0 + list_h;
     let mut y = (r.y + (r.h - block_h) * 0.42).max(r.y + 24.0).round();
     let cx = r.cx();
-    logo(c.p, Rect::new((cx - 32.0).round(), y, 64.0, 64.0), &pal);
+    logo(c.p, Rect::new((cx - 32.0).round(), y, 64.0, 64.0));
     y += 64.0 + 24.0;
     c.p.text_center(
         Face::Semibold,

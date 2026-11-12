@@ -317,26 +317,6 @@ impl<'a> Painter<'a> {
         self.rbox_dev(x0, y0, x1, y1, 0.0, c, alpha);
     }
 
-    /// A rounded box shaded from `top` to `bottom`, for the logo.
-    pub fn rbox_gradient(&mut self, r: Rect, radius: f32, top: Rgb, bottom: Rgb) {
-        let (x0, y0, x1, y1) = self.dev_rect(r);
-        let old = self.clip;
-        for y in y0..y1 {
-            let t = (y - y0) as f32 / (y1 - y0).max(1) as f32;
-            self.clip = (old.0, y.max(old.1), old.2, (y + 1).min(old.3));
-            self.rbox_dev(
-                x0,
-                y0,
-                x1,
-                y1,
-                radius * self.scale,
-                mix(top, bottom, t),
-                1.0,
-            );
-        }
-        self.clip = old;
-    }
-
     /// A soft drop shadow around `r`, for popups: a few expanding translucent boxes.
     pub fn shadow(&mut self, r: Rect, radius: f32, dark: bool) {
         let steps = 10;
@@ -348,22 +328,41 @@ impl<'a> Painter<'a> {
         }
     }
 
-    /// An antialiased line with round ends, for the glyphs drawn by hand.
-    pub fn line(&mut self, a: (f32, f32), b: (f32, f32), thickness: f32, c: Rgb) {
+    /// A filled polygon (even-odd), antialiased by sampling each pixel on a 4 x 4 grid. For the
+    /// logo's few small shapes; it tests every sample against every edge.
+    pub fn polygon(&mut self, points: &[(f32, f32)], c: Rgb) {
+        const GRID: i32 = 4;
+        if points.len() < 3 {
+            return;
+        }
         let s = self.scale;
-        let (ax, ay, bx, by, t) = (a.0 * s, a.1 * s, b.0 * s, b.1 * s, thickness * s);
-        let (dx, dy) = (bx - ax, by - ay);
-        let len2 = (dx * dx + dy * dy).max(0.0001);
-        let y0 = (ay.min(by) - t).floor() as i32;
-        let y1 = (ay.max(by) + t).ceil() as i32;
-        let x0 = (ax.min(bx) - t).floor() as i32;
-        let x1 = (ax.max(bx) + t).ceil() as i32;
-        for y in y0..y1 {
-            for x in x0..x1 {
-                let (qx, qy) = (x as f32 + 0.5 - ax, y as f32 + 0.5 - ay);
-                let u = ((qx * dx + qy * dy) / len2).clamp(0.0, 1.0);
-                let d = (qx - u * dx).hypot(qy - u * dy) - t / 2.0;
-                self.span(y, x, x + 1, c, (0.5 - d).clamp(0.0, 1.0));
+        let pts: Vec<(f32, f32)> = points.iter().map(|&(x, y)| (x * s, y * s)).collect();
+        let (mut x0, mut x1, mut y0, mut y1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for &(x, y) in &pts {
+            (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
+        }
+        let inside = |px: f32, py: f32| {
+            let mut odd = false;
+            let mut a = pts[pts.len() - 1];
+            for &b in &pts {
+                if (a.1 > py) != (b.1 > py) && px < a.0 + (py - a.1) / (b.1 - a.1) * (b.0 - a.0) {
+                    odd = !odd;
+                }
+                a = b;
+            }
+            odd
+        };
+        for y in y0.floor() as i32..y1.ceil() as i32 {
+            for x in x0.floor() as i32..x1.ceil() as i32 {
+                let mut hits = 0;
+                for sy in 0..GRID {
+                    for sx in 0..GRID {
+                        let px = x as f32 + (sx as f32 + 0.5) / GRID as f32;
+                        let py = y as f32 + (sy as f32 + 0.5) / GRID as f32;
+                        hits += i32::from(inside(px, py));
+                    }
+                }
+                self.span(y, x, x + 1, c, hits as f32 / (GRID * GRID) as f32);
             }
         }
     }

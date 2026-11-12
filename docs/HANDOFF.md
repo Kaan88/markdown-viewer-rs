@@ -272,6 +272,11 @@ the scan reads differently from the parser (the tick is refused with a message),
 `<input>` boxes. `--dialog edit` shows the question in a shot. Everything else stays read-only;
 the editor is still a second project.
 
+**Logo (2026-11-12).** One drawing in two places. `assets/make_icon.py` writes `mdview.svg`,
+`.ico` and `.png` from a list of shapes (and the editor's mark with `mdedit` as its argument);
+`chrome::logo` draws the same shapes with `Painter::polygon`, in the icon's own blue in both
+themes. Change the shapes in both together.
+
 ## 5. The renderer (`crates/render`)
 
 Headless: no window system, BGRA bitmaps, parley 0.12 for layout, swash for raster. The layout
@@ -549,12 +554,12 @@ last built and run (2026-11-10, Qt 6.12.0, offscreen and briefly on Wayland/X11)
 2026-11-10: the build caches (`target/`, `bins/mdv-qt/target/`), `~/.local/rust-win`, and the
 AppImage in `~/mdview-appimage/`.
 
-**The Debian test VM** (used up to 2026-11-08; not verified since): `user@vm-host`,
-password not recorded, Debian 13, 20 cores, 7.8 GB RAM, packages `qt6-base-dev` (Qt 6.8.2),
+**The Debian test VM** (used up to 2026-11-08; not verified since; its address and login are not
+kept in this repository): Debian 13, 20 cores, 7.8 GB RAM, packages `qt6-base-dev` (Qt 6.8.2),
 `libfontconfig1-dev`, `libxcb-cursor0`, `libxkbcommon-x11-0`, `xvfb`, `imagemagick`,
 `fonts-noto-cjk`. Driven over SSH by `target/vm.py` (not committed; `paramiko`, env
 `MDV_VM_HOST`/`USER`/`PASS`, subcommands `run`, `put`, `get`). A window can be shown on a Windows
-X server listening on TCP (`DISPLAY=windows-host:0.0` was the user's MobaXterm); `ssh -X` did not
+X server listening on TCP (`DISPLAY=<host>:0.0`, the user's MobaXterm); `ssh -X` did not
 work (no xauth cookie). Upload a snapshot and build:
 
 ```powershell

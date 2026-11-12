@@ -95,35 +95,64 @@ impl Ctx<'_, '_> {
     }
 }
 
-/// The app logo: a rounded accent square with a white "M" and a small down arrow, the Markdown mark.
-pub fn logo(p: &mut Painter, r: Rect, pal: &Palette) {
-    let top = mix(
-        pal.accent,
+/// The mark's shapes on the icon's 256-unit canvas, as in `assets/make_icon.py`: the Markdown
+/// "M" and a down arrow standing a little clear of it.
+const MARK_M: [(f32, f32); 12] = [
+    (44.0, 176.0),
+    (44.0, 80.0),
+    (72.0, 80.0),
+    (100.0, 116.0),
+    (128.0, 80.0),
+    (156.0, 80.0),
+    (156.0, 176.0),
+    (128.0, 176.0),
+    (128.0, 122.0),
+    (100.0, 158.0),
+    (72.0, 122.0),
+    (72.0, 176.0),
+];
+const MARK_ARROW: [(f32, f32); 7] = [
+    (188.0, 128.0),
+    (164.0, 128.0),
+    (202.0, 172.0),
+    (240.0, 128.0),
+    (216.0, 128.0),
+    (216.0, 80.0),
+    (188.0, 80.0),
+];
+
+/// The app logo, the same drawing as the icon file: a blue tile with a lighter top half, and
+/// the white mark scaled and centred on it. `r` is the tile.
+pub fn logo(p: &mut Painter, r: Rect) {
+    const TILE: Rgb = [0x2b, 0x5f, 0xab];
+    // The icon's tile is 240 of its 256 units wide, with corners of 52.
+    let radius = r.w * 52.0 / 240.0;
+    p.rbox(r, radius, TILE);
+    p.rbox_a(
+        Rect::new(r.x, r.y, r.w, r.h / 2.0),
+        radius,
         [255, 255, 255],
-        if pal.dark { 0.10 } else { 0.22 },
+        0.08,
     );
-    let bottom = mix(pal.accent, [0, 0, 0], if pal.dark { 0.25 } else { 0.10 });
-    p.rbox_gradient(r, r.w * 0.26, top, bottom);
-    let s = r.w / 22.0;
+    let scale = 0.96;
+    let all = MARK_M.iter().chain(&MARK_ARROW);
+    let (mut x0, mut x1, mut y0, mut y1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+    for &(x, y) in all {
+        (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
+    }
+    let (dx, dy) = (
+        128.0 - (x0 + x1) / 2.0 * scale,
+        128.0 - (y0 + y1) / 2.0 * scale,
+    );
+    let place = |&(x, y): &(f32, f32)| {
+        (
+            r.x + (x * scale + dx - 8.0) / 240.0 * r.w,
+            r.y + (y * scale + dy - 8.0) / 240.0 * r.h,
+        )
+    };
     let white = [255, 255, 255];
-    let t = 1.9 * s;
-    // "M" on the left two thirds, an arrow on the right third; together centred on the tile.
-    let (x0, x1, y0, y1) = (
-        r.x + 2.65 * s,
-        r.x + 11.05 * s,
-        r.y + 7.0 * s,
-        r.y + 15.2 * s,
-    );
-    let xm = (x0 + x1) / 2.0;
-    p.line((x0, y1), (x0, y0), t, white);
-    p.line((x0, y0), (xm, y0 + 4.6 * s), t, white);
-    p.line((xm, y0 + 4.6 * s), (x1, y0), t, white);
-    p.line((x1, y0), (x1, y1), t, white);
-    // The arrow stands a little clear of the M's right leg.
-    let ax = r.x + 16.55 * s;
-    p.line((ax, y0), (ax, y1 - 0.4 * s), t, white);
-    p.line((ax - 2.8 * s, y1 - 3.0 * s), (ax, y1), t, white);
-    p.line((ax + 2.8 * s, y1 - 3.0 * s), (ax, y1), t, white);
+    p.polygon(&MARK_M.iter().map(place).collect::<Vec<_>>(), white);
+    p.polygon(&MARK_ARROW.iter().map(place).collect::<Vec<_>>(), white);
 }
 
 /// Widths for tabs that would like `natural` px each, fitting in `avail`: each between
@@ -341,7 +370,7 @@ pub fn draw_title(c: &mut Ctx, ws: &Workspace, ui: &Ui, r: Rect, maximized: bool
     let pal = *c.pal;
     c.p.fill(r, pal.title);
     c.hit(Hit::TitleDrag, r);
-    logo(c.p, Rect::new(14.0, 9.0, 22.0, 22.0), &pal);
+    logo(c.p, Rect::new(14.0, 9.0, 22.0, 22.0));
 
     // Window buttons, right to left.
     let mut right = r.right();

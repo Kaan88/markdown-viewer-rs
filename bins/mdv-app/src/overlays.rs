@@ -431,7 +431,7 @@ pub fn draw_dialog(
     };
     match d.kind {
         DialogKind::About => {
-            logo(c.p, Rect::new(r.x + PAD, r.y + PAD + 4.0, 56.0, 56.0), &pal);
+            logo(c.p, Rect::new(r.x + PAD, r.y + PAD + 4.0, 56.0, 56.0));
             let x = r.x + PAD + 56.0 + 20.0;
             let tw = r.right() - x - PAD;
             c.p.text(
