@@ -492,6 +492,31 @@ fn download(
     Err(Error::TooManyRedirects)
 }
 
+/// One blocking GET of an `https` URL for the updater: the manifest, then the files it names.
+///
+/// The same transport and rules as an image download (no cookies or credentials, redirects
+/// followed by hand and never down to http, only a 200 counts), with the caller's size cap and
+/// deadline, `Accept: */*`, no cache and no retry. Call it from a thread of your own; it returns
+/// when the body has arrived or the deadline has passed. The error is a short reason for a log.
+pub fn fetch_file(url: &str, max_bytes: usize, timeout: Duration) -> Result<Vec<u8>, String> {
+    let url = Url::parse(url)
+        .filter(|u| u.https)
+        .ok_or_else(|| "not an https URL".to_string())?;
+    let session = Session::new(USER_AGENT)
+        .map_err(|e| format!("{e:?}"))?
+        .accepting("*/*");
+    let cfg = Config {
+        max_bytes,
+        deadline: timeout,
+        ..Config::default()
+    };
+    match download(&session, &url, None, &cfg) {
+        Ok(Downloaded::Body(entry)) => Ok(entry.body),
+        Ok(Downloaded::NotModified) => Err("unexpected 304".to_string()),
+        Err(e) => Err(format!("{e:?}")),
+    }
+}
+
 /// Where a redirect from `current` leads: an http(s) URL, and never from https down to http.
 fn redirect_target(current: &Url, location: Option<&str>) -> Result<Url, Error> {
     let next = current

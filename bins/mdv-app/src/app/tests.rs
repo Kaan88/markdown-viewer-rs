@@ -281,3 +281,54 @@ fn focus_mode_hides_chrome_and_escape_leaves() {
     assert!(!a.ui.focus_mode);
     assert!(a.areas.files.is_some());
 }
+
+#[test]
+fn the_update_bar_pushes_the_page_down_and_closes() {
+    let mut a = app(&["linked.md"]);
+    let before = page::viewport(&a.ws, a.areas.page);
+    a.ws.preview_update("available");
+    a.compose();
+    let with_bar = page::viewport(&a.ws, a.areas.page);
+    assert_eq!(with_bar.y, before.y + crate::ui::BANNER_H);
+    assert_eq!(with_bar.h, before.h - crate::ui::BANNER_H);
+    assert!(rect(&a, Hit::UpdateGo).y < with_bar.y);
+    // While it downloads there is nothing to press.
+    a.ws.preview_update("installing");
+    a.compose();
+    assert!(a.hit_rect(Hit::UpdateGo).is_none());
+    assert!(a.hit_rect(Hit::UpdateClose).is_none());
+    a.ws.preview_update("installed");
+    a.compose();
+    click(&mut a, Hit::UpdateClose);
+    a.compose();
+    assert!(a.hit_rect(Hit::UpdateClose).is_none());
+    assert_eq!(page::viewport(&a.ws, a.areas.page), before);
+}
+
+#[test]
+fn the_update_bar_shows_over_the_empty_state() {
+    let mut a = app(&[]);
+    a.ws.preview_update("available");
+    a.compose();
+    let bar = rect(&a, Hit::UpdateGo);
+    let open = rect(&a, Hit::EmptyOpen);
+    assert!(bar.bottom() < open.y);
+}
+
+#[test]
+fn about_holds_the_update_setting() {
+    let mut a = app(&["linked.md"]);
+    a.command(CommandId::About);
+    a.compose();
+    assert!(a.ws.checks_updates());
+    click(&mut a, Hit::DlgButton(2));
+    assert!(!a.ws.checks_updates());
+    assert!(a.ui.dialog.is_some(), "the toggle keeps the dialog open");
+    a.compose();
+    click(&mut a, Hit::DlgButton(2));
+    assert!(a.ws.checks_updates());
+    // Looking now closes the dialog; with no event loop in a test, nothing is fetched.
+    a.compose();
+    click(&mut a, Hit::DlgButton(1));
+    assert!(a.ui.dialog.is_none());
+}

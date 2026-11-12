@@ -104,6 +104,9 @@ pub enum Hit {
     RemoteLoad,
     RemoteAlways,
     RemoteClose,
+    /// The bar that offers a newer version.
+    UpdateGo,
+    UpdateClose,
     DlgButton(usize),
     DlgOpen(usize),
     DlgRemove(usize),
@@ -134,7 +137,9 @@ impl Hit {
             | Hit::EmptyRecent(_)
             | Hit::RemoteLoad
             | Hit::RemoteAlways
-            | Hit::RemoteClose => Region::Page,
+            | Hit::RemoteClose
+            | Hit::UpdateGo
+            | Hit::UpdateClose => Region::Page,
             _ => return None,
         })
     }

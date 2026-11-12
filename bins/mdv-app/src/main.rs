@@ -11,6 +11,7 @@ mod panes;
 mod platform;
 mod tree;
 mod ui;
+mod updater;
 mod workspace;
 
 use mdshared_ui::{gfx, menu, textfield, theme};

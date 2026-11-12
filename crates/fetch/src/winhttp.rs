@@ -3,7 +3,7 @@
 //!
 //! What this module sets on every request: no automatic redirects, no cookies, no authentication
 //! or auto-logon, no client certificate, no decompression (WinHTTP sends no `Accept-Encoding`
-//! unless asked), `Accept: image/*`, no `Referer`, the fixed user agent given to [`Session::new`],
+//! unless asked), `Accept: image/*` (or what [`Session::accepting`] set), no `Referer`, the fixed user agent given to [`Session::new`],
 //! TLS 1.2 or later with the system's certificate validation left on.
 //!
 //! # The deadline
@@ -241,6 +241,8 @@ fn watchdog(watch: &Watch, deadline: Instant) {
 /// kept-alive connections so nothing lingers while the app is idle.
 pub struct Session {
     handle: Handle,
+    /// The `Accept` header's value.
+    accept: &'static str,
 }
 
 impl Session {
@@ -276,7 +278,16 @@ impl Session {
                 )?;
             }
         }
-        Ok(Session { handle })
+        Ok(Session {
+            handle,
+            accept: "image/*",
+        })
+    }
+
+    /// The same session asking for `accept` instead of images.
+    pub fn accepting(mut self, accept: &'static str) -> Session {
+        self.accept = accept;
+        self
     }
 
     /// One GET of `url`, no redirects followed, finished or abandoned by `deadline`.
@@ -298,7 +309,7 @@ impl Session {
 
         let verb = wide("GET");
         let target = wide(&url.target);
-        let accept = wide("image/*");
+        let accept = wide(self.accept);
         let accept_types = [accept.as_ptr(), null()];
         let flags = if url.https { WINHTTP_FLAG_SECURE } else { 0 };
         // SAFETY: the connect handle is open; every string is NUL-terminated and outlives the

@@ -48,6 +48,11 @@ pub struct Args {
     pub focus_mode: bool,
     /// Load the first document's remote images without showing the bar (for checks).
     pub load_remote: bool,
+    /// Show the update bar at this stage (`available`, `installing` or `installed`) with a
+    /// made-up version, for a shot. Nothing is looked up or downloaded.
+    pub update_bar: Option<String>,
+    /// Look for a newer version, print the answer, and exit. No window.
+    pub check_update: bool,
     /// Scroll this many wheel steps after the first frame, log timings, and exit.
     pub scroll_steps: Option<u32>,
     /// Start maximized (for checking the frameless maximized geometry).
@@ -83,6 +88,8 @@ impl Args {
                 "--no-outline" => out.outline_pane = Some(false),
                 "--focus-mode" => out.focus_mode = true,
                 "--load-remote" => out.load_remote = true,
+                "--update-bar" => out.update_bar = value(&a),
+                "--check-update" => out.check_update = true,
                 "--maximize" => out.maximize = true,
                 "--zoom" => out.zoom = value(&a).and_then(|v| v.trim_end_matches('%').parse().ok()),
                 "--page-width" => {

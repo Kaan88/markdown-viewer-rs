@@ -1,75 +1,122 @@
 # Updates
 
-> **2026-11-11.** The winit + softbuffer shell (`bins/mdv-app`) has no automatic update check and
-> does not call `mdview_core::update`. Its only network use besides loopback (the single-instance
-> hand-over in `crates/core/src/single.rs`, 127.0.0.1 only) is `mdview-fetch`, which downloads a
-> document's remote images through WinHTTP, and only after the reader allows them (2026-11-12). Updates are manual by decision: a
-> "Check for updates" menu item is future work, and the flow below describes it, not shipped
-> behaviour. The Qt AppImage's daily check went with the Qt shell (retired 2026-11-13, `qt-archive` branch).
+mdview updates itself in place: it looks for a newer version, asks, downloads the two executables,
+checks their hashes and swaps them in. Built 2026-11-13 after the user chose "at launch, then ask"
+and "both exes, swapped in place". **No release has been published yet, so the whole flow has not
+run against a real release**; see "What has run" at the end.
 
-Design for checking, downloading and applying updates. The shared logic (version ordering, manifest
-parsing, SHA-256) lives in `crates/core/src/update.rs` and is pure: it does no network I/O. The
-shells do the downloading.
+## What the reader sees
 
-## Flow (both platforms)
+- **At launch**, at most once a day, an installed mdview fetches a small manifest from GitHub on a
+  background thread. A failure is silent. Nothing else is sent or fetched.
+- If the manifest names a newer version, a bar appears over the page: "mdview 0.2.0 is available."
+  with the release's one line of notes, an **Update** button and a close button. Nothing downloads
+  until Update is pressed.
+- While it downloads, the bar says so and has no buttons. Then: "mdview 0.2.0 is installed. It
+  starts the next time you open mdview." The running window stays on the old version.
+- **About mdview** holds the controls: **Check for updates** (looks now, ignoring the once-a-day
+  limit, and always answers: the bar, "mdview x is the newest version." or "Could not look for a
+  newer version."), which reads **Update to 0.2.0** when a version was found and its bar was
+  closed; and **Check at launch: on/off**. They are in About and not in the main menu because two
+  more rows did not fit the menu in the default 800 px window.
 
-1. At startup, unless the user turned it off, and at most once per 24 hours (timestamp kept in the
-   session/settings file), fetch the manifest on a background thread. Failure is silent.
-2. Parse with `UpdateManifest::parse`; any error means "no update". Ask `update::newer(current,
-   manifest, Platform::current())`.
-3. If there is an asset, tell the user (a non-modal notice with the notes). Nothing downloads until
-   they agree.
-4. Download `asset.url` (https only; the manifest parser already enforced that) to a temp file,
-   cap the size at a sane limit (for example 200 MB), then `verify_sha256_file`. On mismatch delete
-   the file and report failure; never run it.
-5. Apply (platform sections below).
+Settings (session file): `check_updates=0|1` (default 1) and `update_checked=<seconds since 1970>`.
 
-Setting: `check_for_updates` (default on). Opt out disables step 1 entirely; a menu item "Check for
-updates" still performs it manually and ignores the 24 hour limit.
+The automatic look does not run for a launch with `--no-session` or `--shot`, for a copy that has
+no `mdview-engine` beside it, or for a cargo build (an exe in a folder named `release`, `debug` or
+`deps`). Such a copy can still look when asked, but pressing Update says "Only an installed mdview
+can update itself."
 
-## Manifest format
+## Code
 
-Hosted as a release asset named `mdview-update.txt` on the latest GitHub release of
+| Where | What |
+|---|---|
+| `crates/core/src/update.rs` | Version ordering, the manifest parser, SHA-256. Pure: no I/O beyond hashing a file it is handed |
+| `crates/core/src/selfupdate.rs` | The swap: `<name>.new` in, the running file aside to `<name>.old`, all files or none, and the clean-up of what an earlier update left |
+| `crates/fetch/src/lib.rs` `fetch_file` | One blocking https GET with the caller's size cap and deadline, on the image fetcher's transport |
+| `bins/mdv-app/src/updater.rs` | `check`, `install`, `installed_files`, `record_version`, the `Stage` the bar shows |
+| `bins/mdv-app/src/workspace.rs` ("updates") | The state: due or not, the offer, installing, installed, bar closed |
+| `bins/mdv-app/src/page.rs` `draw_update_bar`, `overlays.rs` (About) | The bar and the two buttons |
+| `bins/mdv-app/src/app/commands.rs` | The threads (`mdview-update`) and their `Wake::Update` answers |
+
+## Manifest
+
+A release asset named `mdview-update.txt` on the latest GitHub release of
 `Kaan88/markdown-viewer-rs`, fetched from
 `https://github.com/Kaan88/markdown-viewer-rs/releases/latest/download/mdview-update.txt`.
-The full grammar and limits are in the module docs of `crates/core/src/update.rs`; in short:
+The grammar and limits are in the module docs of `crates/core/src/update.rs`; in short:
 
 ```text
 manifest: 1
 version: 0.2.0
 notes: One line of release notes.
-windows-x86_64.asset: mdview-setup-0.2.0.exe
-windows-x86_64.url: https://github.com/Kaan88/markdown-viewer-rs/releases/download/v0.2.0/mdview-setup-0.2.0.exe
+windows-x86_64.asset: mdview.exe
+windows-x86_64.url: https://github.com/Kaan88/markdown-viewer-rs/releases/download/v0.2.0/mdview.exe
 windows-x86_64.sha256: <64 hex digits>
-linux-x86_64.asset: ...
-linux-x86_64.url: ...
-linux-x86_64.sha256: ...
+windows-x86_64.engine.url: https://github.com/Kaan88/markdown-viewer-rs/releases/download/v0.2.0/mdview-engine.exe
+windows-x86_64.engine.sha256: <64 hex digits>
 ```
 
-Limits: 8 KiB, 64 lines, https URLs only (<= 512 bytes, no userinfo), 64-hex SHA-256, asset names
-limited to `[A-Za-z0-9._-]`, unknown or duplicate keys reject the whole manifest. A pre-release
-version is only offered to a build that is older by SemVer precedence.
+Limits: 8 KiB, 64 lines, https URLs only (at most 512 bytes, no userinfo), 64-hex SHA-256, asset
+names limited to `[A-Za-z0-9._-]`, unknown or duplicate keys reject the whole manifest. The
+`engine.*` pair is both or neither; a platform entry without it is not offered, because an
+in-place update needs both files. A pre-release version is offered only to a build that is older
+by SemVer precedence.
 
-The hash in the manifest is the integrity check for the download, not an authenticity check: the
-manifest's own authenticity comes from TLS to GitHub. (Signing the manifest is a possible later step.)
+**Integrity.** The binaries are not code-signed and will not be (the user's decision), so the
+SHA-256 in the manifest is the only integrity check, and the manifest's own authenticity rests on
+TLS to GitHub. A download that does not match its hash is discarded and nothing is replaced.
 
-## Windows
+## Download and swap
 
-* Artifact: `mdview-setup-<version>.exe`, built by `packaging/windows/build-installer.ps1`
-  (Inno Setup, `packaging/windows/mdview.iss`), which also writes `mdview-setup-<version>.exe.sha256`.
-  Publishing a release means uploading the installer and a `mdview-update.txt` whose
-  `windows-x86_64.sha256` equals that file's hash.
-* Apply: after the user confirms, the shell starts the downloaded installer with
-  `/SILENT /CLOSEAPPLICATIONS` and exits. The installer closes any running viewer (Restart Manager),
-  replaces the files, and `[Run]` does not relaunch when silent. Install mode (per-user or all users)
-  is the one chosen originally: Inno reuses it from the existing uninstall entry for the same `AppId`.
-  The installer file is deleted by the shell on its next start (or left in the temp folder).
-* Dependencies: the installer itself checks for the Windows App Runtime 2.6.4 or newer and, if
-  missing, downloads the official Microsoft installer, verifies that its Authenticode signer is
-  Microsoft Corporation, and runs it with `--quiet`.
-* File associations are an optional installer task and only add mdview to "Open with"; the default
-  handler is never overwritten.
+1. Each file is fetched whole into memory (cap 128 MiB, 10 minutes for the pair), with the fixed
+   `User-Agent: mdview`, `Accept: */*`, no cookies or credentials, at most 5 redirects followed by
+   hand and never from https down to http. GitHub redirects a release asset to its storage host.
+2. Its SHA-256 is compared with the manifest's. On a mismatch, or any failed download, the files
+   already written are removed and the bar goes back to offering the update.
+3. A matching file is written beside its target as `mdview.exe.new` / `mdview-engine.exe.new`.
+4. When both are there: `mdview.exe` is renamed to `mdview.exe.old` and the new file renamed into
+   its place, then the same for the engine. Windows allows a running executable to be renamed,
+   though not overwritten or deleted. If the second file fails, the first is put back.
+5. The version in Windows' installed-apps entry (the installer's `AppId` key under `HKCU`) is
+   rewritten through `reg.exe`, if the entry exists.
+6. The next launch deletes the `.old` files, on its updater thread.
 
-## Linux (AppImage)
+A window of the old version that is still open when a second update arrives keeps `mdview.exe.old`
+locked; that update fails cleanly and can be tried again once the old window is closed.
 
-<!-- PLACEHOLDER: the Linux packaging agent adds its section here (AppImageUpdate / zsync delta). -->
+## Publishing a release
+
+1. Set the version in `[workspace.package]` of `Cargo.toml`.
+2. `packaging\windows\build-installer.ps1 -Notes 'One line.'` builds the static executables and
+   the installer, and fills `target\release-files\` with `mdview.exe`, `mdview-engine.exe`,
+   `mdview-setup-<version>.exe` and `mdview-update.txt`, whose URLs point at tag `v<version>`.
+   A test (`the_release_script_writes_a_manifest_this_build_reads`) checks that manifest and the
+   two hashes when the folder exists.
+3. Create the GitHub release with tag `v<version>` and upload those four files. It must be the
+   latest release, not a pre-release, for `releases/latest/download/` to serve its manifest.
+
+To try a release before it is the latest, point a build at its manifest:
+`MDVIEW_UPDATE_MANIFEST=https://…/mdview-update.txt`. `mdview --check-update` prints what a look
+finds and exits, with no window.
+
+## What has run (2026-11-13, the Windows PC)
+
+- Unit tests: the manifest's engine keys; the swap, its rollback, and swapping a running
+  executable; `install` with a stand-in transport (a damaged file, a failed download, a good
+  pair); the workspace's stages and saved settings; the bar and the About buttons in a headless
+  `App`.
+- `mdview --check-update` against GitHub: `Status(404)` for the manifest (there is no release),
+  a redirected download of another file from the repository that then failed to parse as a
+  manifest, and an `http` URL refused.
+- `--shot` renders of the bar in its three stages and of the About dialog, looked at by Claude.
+
+**Not run:** an update from a real release, start to finish (the download of the real files, the
+swap of the running installed exe, the registry entry, the clean-up on the next launch); the bar
+and the About buttons by hand in a window. The user has not looked at any of it.
+
+## Linux
+
+Nothing. `Platform::LinuxX64` exists in the manifest grammar, `fetch_file` fails on the stub
+transport, and a running ELF binary can be replaced by rename as well, so the same flow should
+apply once there is a Linux build and a transport.

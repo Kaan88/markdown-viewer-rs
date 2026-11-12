@@ -21,6 +21,8 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
 - **Syntax highlighting** in fenced code blocks.
 - **Images:** PNG, JPEG, GIF, WebP and SVG. Remote images stay off until you allow them, per
   document or always.
+- **Updates:** an installed mdview looks for a newer version at launch, at most once a day, and
+  asks before it downloads anything. About mdview turns the look off. No release is published yet.
 - **Reading:** tabs, a Files pane, an Outline pane, find, zoom, light and dark themes, a focus
   mode, three page widths, back and forward, session restore, and reload when the file changes on
   disk, keeping your place.

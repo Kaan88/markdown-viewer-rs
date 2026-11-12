@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::ui::EditAct;
+use mdview_core::commands::strings;
 use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
 
@@ -71,6 +72,8 @@ impl App {
             Hit::RemoteLoad => self.ws.allow_remote(false),
             Hit::RemoteAlways => self.ws.allow_remote(true),
             Hit::RemoteClose => self.ws.dismiss_remote(),
+            Hit::UpdateGo => self.install_update(),
+            Hit::UpdateClose => self.ws.dismiss_update(),
             Hit::EmptyRecent(i) => {
                 if let Some(p) = self.ws.recents().get(i).cloned() {
                     let _ = self.ws.open_recent(&p);
@@ -84,6 +87,19 @@ impl App {
                         2 => Some(true),
                         _ => None,
                     });
+                }
+                Some(DialogKind::About) if n == 1 => {
+                    // The answer shows on the page (the bar or a toast), so the dialog goes.
+                    self.close_dialog();
+                    if matches!(self.ws.update_stage(), updater::Stage::Available(_)) {
+                        self.install_update();
+                    } else {
+                        self.check_for_updates(true);
+                    }
+                }
+                Some(DialogKind::About) if n == 2 => {
+                    let on = !self.ws.checks_updates();
+                    self.ws.set_checks_updates(on);
                 }
                 _ if n == 0 => self.close_dialog(),
                 _ => self.ws.clear_recents(),
@@ -479,6 +495,12 @@ impl App {
             Wake::Images => {
                 self.ws.remote_completed();
             }
+            Wake::Update(updater::Event::Checked { manual, result }) => {
+                self.ws.update_checked(unix_now(), manual, result);
+            }
+            Wake::Update(updater::Event::Installed(result)) => {
+                self.ws.update_finished(result);
+            }
         }
         self.redraw();
     }
@@ -496,6 +518,59 @@ impl App {
     }
 
     /// Runs whatever timers are due and returns the next deadline.
+    /// At launch: clears what an earlier update left behind and, when a look for a newer version
+    /// is due, takes it. Nothing here runs for a session-less launch or a copy that cannot update
+    /// itself, and all of it is on its own thread.
+    pub(super) fn updates_at_launch(&mut self) {
+        if self.session.is_none() {
+            return;
+        }
+        let Some(files) = updater::installed_files() else {
+            return;
+        };
+        let due = self.ws.update_check_due(unix_now());
+        let proxy = self.proxy.clone();
+        spawn_updater(move || {
+            updater::clean_up(&files);
+            if due && let Some(proxy) = proxy {
+                let result = updater::check(&updater::fetch);
+                let _ = proxy.send_event(Wake::Update(updater::Event::Checked {
+                    manual: false,
+                    result,
+                }));
+            }
+        });
+    }
+
+    /// Looks for a newer version now, on its own thread.
+    pub(super) fn check_for_updates(&mut self, manual: bool) {
+        let Some(proxy) = self.proxy.clone() else {
+            return;
+        };
+        spawn_updater(move || {
+            let result = updater::check(&updater::fetch);
+            let _ = proxy.send_event(Wake::Update(updater::Event::Checked { manual, result }));
+        });
+    }
+
+    /// Downloads and swaps in the version that was offered, on its own thread.
+    pub(super) fn install_update(&mut self) {
+        let (Some(files), Some(proxy)) = (updater::installed_files(), self.proxy.clone()) else {
+            self.ws.set_status(strings::UPDATE_NOT_INSTALLED);
+            return;
+        };
+        let Some(offer) = self.ws.update_begin() else {
+            return;
+        };
+        spawn_updater(move || {
+            let result = updater::install(&offer, &files, &updater::fetch);
+            if result.is_ok() {
+                updater::record_version(&offer.version);
+            }
+            let _ = proxy.send_event(Wake::Update(updater::Event::Installed(result)));
+        });
+    }
+
     pub(super) fn timers(&mut self, now: Instant) -> Option<Instant> {
         let mut next: Option<Instant> = None;
         let mut at = |t: Instant| next = Some(next.map_or(t, |n| n.min(t)));
@@ -653,4 +728,18 @@ impl App {
         }
         self.draw();
     }
+}
+
+/// Seconds since the Unix epoch.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Runs `work` on a thread named for the updater; if the thread cannot start, nothing happens.
+fn spawn_updater(work: impl FnOnce() + Send + 'static) {
+    let _ = std::thread::Builder::new()
+        .name("mdview-update".into())
+        .spawn(work);
 }

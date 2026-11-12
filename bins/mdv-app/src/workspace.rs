@@ -22,6 +22,7 @@
 //! Ported from the Qt shell's `shell.rs` (now on the `qt-archive` branch); differences are noted
 //! where they are made.
 
+use crate::updater::{self, Offer, Stage};
 use mdview_core::commands::strings;
 use mdview_core::files::{FileStamp, canonical_or_absolute, read_stable, stamp, tab_labels};
 use mdview_core::links::{LinkAction, classify_link};
@@ -388,6 +389,10 @@ pub struct Workspace {
     held: Vec<String>,
     /// The task box (its block) whose tick waits for the reader's answer.
     pending_task: Option<u32>,
+    /// A newer version found, being installed, or installed.
+    update: Stage,
+    /// The reader closed the update bar; it stays closed until the stage changes.
+    update_hidden: bool,
 }
 
 impl Workspace {
@@ -425,6 +430,8 @@ impl Workspace {
             remote_scale: 0.0,
             held: Vec::new(),
             pending_task: None,
+            update: Stage::None,
+            update_hidden: false,
         };
         for path in ws.session.tabs.clone() {
             let path = canonical_or_absolute(&path);
@@ -2246,6 +2253,133 @@ impl Workspace {
             .checked_sub(1)
     }
 
+    // ---- updates -----------------------------------------------------------------------------
+
+    /// Whether mdview looks for a newer version at launch.
+    pub fn checks_updates(&self) -> bool {
+        self.session.check_updates
+    }
+
+    pub fn set_checks_updates(&mut self, on: bool) {
+        if self.session.check_updates != on {
+            self.session.check_updates = on;
+            self.persist();
+        }
+    }
+
+    /// True when a launch at `now` (seconds since the Unix epoch) should look for a newer
+    /// version: the setting is on, there is a session to remember the answer in, and the last
+    /// look was a day ago or more.
+    pub fn update_check_due(&self, now: u64) -> bool {
+        self.session.check_updates
+            && self.session_path.is_some()
+            && now.saturating_sub(self.session.update_checked) >= updater::CHECK_EVERY
+    }
+
+    /// A look for a newer version finished at `now`. A failed automatic look says nothing; one
+    /// the reader asked for always answers.
+    pub fn update_checked(
+        &mut self,
+        now: u64,
+        manual: bool,
+        result: Result<Option<Offer>, String>,
+    ) {
+        if self.session.update_checked != now {
+            self.session.update_checked = now;
+            self.persist();
+        }
+        match result {
+            Ok(Some(offer)) => {
+                // Never step back from an installation under way or done.
+                if matches!(self.update, Stage::None | Stage::Available(_)) {
+                    self.update = Stage::Available(offer);
+                    self.update_hidden = false;
+                    self.dirty = true;
+                }
+            }
+            Ok(None) if manual => {
+                let text =
+                    strings::UPDATE_NONE.replace("{}", &updater::current_version().to_string());
+                self.message(&text);
+            }
+            Err(e) if manual => {
+                eprintln!("mdview: update check failed: {e}");
+                self.message(strings::UPDATE_CHECK_FAILED);
+            }
+            _ => {}
+        }
+    }
+
+    /// The reader chose to update: the offer to install, once.
+    pub fn update_begin(&mut self) -> Option<Offer> {
+        let Stage::Available(offer) = &self.update else {
+            return None;
+        };
+        let offer = offer.clone();
+        self.update = Stage::Installing(offer.clone());
+        self.update_hidden = false;
+        self.dirty = true;
+        Some(offer)
+    }
+
+    /// The installation ended. A failure puts the offer back, so the reader can try again.
+    pub fn update_finished(&mut self, result: Result<(), String>) {
+        let Stage::Installing(offer) = std::mem::take(&mut self.update) else {
+            return;
+        };
+        match result {
+            Ok(()) => self.update = Stage::Installed(offer.version),
+            Err(e) => {
+                eprintln!("mdview: update failed: {e}");
+                self.update = Stage::Available(offer);
+                self.message(strings::UPDATE_FAILED);
+            }
+        }
+        self.update_hidden = false;
+        self.dirty = true;
+    }
+
+    /// Closes the update bar until the stage changes. An installation under way keeps its bar.
+    pub fn dismiss_update(&mut self) {
+        if !matches!(self.update, Stage::Installing(_)) {
+            self.update_hidden = true;
+            self.dirty = true;
+        }
+    }
+
+    /// Puts the update bar at a stage with a made-up version, for a shot or a test.
+    pub fn preview_update(&mut self, stage: &str) {
+        let download = |name: &str| mdview_core::update::Download {
+            url: format!("https://example.com/{name}"),
+            sha256: "0".repeat(64),
+        };
+        let offer = Offer {
+            version: mdview_core::update::Version::parse("0.2.0").expect("a valid version"),
+            notes: Some("Faster scrolling in long documents.".to_string()),
+            app: download("mdview.exe"),
+            engine: download("mdview-engine.exe"),
+        };
+        self.update = match stage {
+            "available" => Stage::Available(offer),
+            "installing" => Stage::Installing(offer),
+            "installed" => Stage::Installed(offer.version),
+            _ => Stage::None,
+        };
+        self.update_hidden = false;
+        self.dirty = true;
+    }
+
+    /// What the update bar shows, if it shows.
+    pub fn update_bar(&self) -> Option<&Stage> {
+        (!self.update_hidden && self.update != Stage::None).then_some(&self.update)
+    }
+
+    /// The update as it stands, shown or not (the main menu offers it again after the bar is
+    /// closed).
+    pub fn update_stage(&self) -> &Stage {
+        &self.update
+    }
+
     // ---- status ------------------------------------------------------------------------------
 
     /// The status text while it is fresh (`strings::TRANSIENT_MS` after it was set).
@@ -3361,6 +3495,71 @@ A line of text here.
         // Plain text offers no source.
         let (x, y) = point_of(&mut ws, "sentence");
         assert_eq!(ws.context_at(x, y).source, None);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_update_is_offered_installed_and_remembered() {
+        let dir = temp_dir("update");
+        let settings = dir.join("settings.ini");
+        let day = updater::CHECK_EVERY;
+        let mut ws = Workspace::new(Some(settings.clone()));
+        assert!(ws.checks_updates());
+        assert!(ws.update_check_due(10 * day), "never looked before");
+        assert_eq!(ws.update_bar(), None);
+
+        // Nothing new, and a failed look: an automatic look says nothing either way.
+        ws.update_checked(10 * day, false, Ok(None));
+        ws.update_checked(10 * day, false, Err("Timeout".into()));
+        assert_eq!(ws.update_bar(), None);
+        assert!(ws.status_line().is_none());
+        assert!(!ws.update_check_due(10 * day + day - 1), "once a day");
+        assert!(ws.update_check_due(11 * day));
+        // One the reader asked for answers.
+        ws.update_checked(10 * day, true, Ok(None));
+        assert!(ws.status_line().is_some_and(|s| s.text.contains("newest")));
+
+        ws.preview_update("available");
+        let Stage::Available(offer) = ws.update_stage().clone() else {
+            panic!("an offer");
+        };
+        ws.update_checked(11 * day, false, Ok(Some(offer.clone())));
+        assert!(matches!(ws.update_bar(), Some(Stage::Available(_))));
+        // Closing the bar hides it; the offer stays for the About dialog.
+        ws.dismiss_update();
+        assert_eq!(ws.update_bar(), None);
+        assert!(matches!(ws.update_stage(), Stage::Available(_)));
+
+        // A failed installation puts the offer back and says so.
+        assert_eq!(ws.update_begin(), Some(offer.clone()));
+        assert_eq!(ws.update_begin(), None, "one installation at a time");
+        ws.dismiss_update();
+        assert!(matches!(ws.update_bar(), Some(Stage::Installing(_))));
+        ws.update_finished(Err("mdview.exe does not match its SHA-256".into()));
+        assert!(matches!(ws.update_bar(), Some(Stage::Available(_))));
+        assert!(
+            ws.status_line()
+                .is_some_and(|s| s.text.contains("Nothing was changed"))
+        );
+
+        assert!(ws.update_begin().is_some());
+        ws.update_finished(Ok(()));
+        assert_eq!(
+            ws.update_bar(),
+            Some(&Stage::Installed(offer.version.clone()))
+        );
+        // A later look does not step back from an installed update.
+        ws.update_checked(12 * day, false, Ok(Some(offer)));
+        assert!(matches!(ws.update_stage(), Stage::Installed(_)));
+
+        // The setting and the time of the last look are saved.
+        ws.set_checks_updates(false);
+        assert!(!ws.update_check_due(99 * day));
+        let again = Workspace::new(Some(settings));
+        assert!(!again.checks_updates());
+        assert_eq!(again.session.update_checked, 12 * day);
+        // Without a session nothing is remembered, so nothing is looked up at launch.
+        assert!(!Workspace::new(None).update_check_due(99 * day));
         _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -42,7 +42,9 @@ Runtime dependency, Windows only, and hand-trimmed generated bindings.
   shell than Qt" has the numbers.
 - The user approves the interface by looking at it. Screenshots and tests do not stand in for that.
 - Remote images are off until the reader allows them, per document, with an "always" setting.
-- Update checks are manual only (2026-11-10). The new shell has no update check at all.
+- Updates (2026-11-13, replacing "manual only" of 2026-11-10): mdview looks for a newer version
+  at launch, at most once a day, and asks before it downloads anything; it then replaces its own
+  two executables in place. A setting turns the look off. `docs/UPDATE.md`.
 - No bundled fonts (2026-11-08), so the golden compare runs on Windows only.
 - An editor is a second project, not a mode of mdview (PLAN section E).
 - The installer never takes the `.md` default; it registers and offers Windows' Default apps page.
@@ -110,7 +112,7 @@ denied:
 cd C:\Users\kaank\Desktop\mv
 $env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
 cargo build --release --workspace          # includes mdview.exe and mdview-engine.exe
-cargo test --release --workspace           # 2026-11-13: 319 passed, 0 failed, 5 ignored
+cargo test --release --workspace           # 2026-11-13: 332 passed, 0 failed, 6 ignored
 cargo fmt --all --check
 ```
 
@@ -139,6 +141,8 @@ document with SVG, math or Mermaid.
 | `--find q`, `--scroll px`, `--hover x,y` | Find query, scroll offset, pointer position |
 | `--menu main\|recent\|tab\|page`, `--dialog about\|shortcuts\|recent` | Open a popup or dialog in the shot |
 | `--scroll-steps n` | Open a real window, wait until the page is refined, scroll n wheel steps, log timings, exit |
+| `--update-bar available\|installing\|installed` | Show the update bar at that stage with a made-up version, for a shot |
+| `--check-update` | Look for a newer version as the app would, print the answer, exit. No window |
 
 ```sh
 target/release/mdview.exe --no-session --shot out.png --dark --size 1280x800 --menu main fixtures/showcase.md
@@ -188,6 +192,7 @@ the renderer's font context, so system fonts are enumerated once.
 | `app/tests.rs` | A headless `App` at 1280x800 driven through the real handlers |
 | `chrome.rs`, `panes.rs`, `page.rs`, `overlays.rs` | Title row and command bar; Files and Outline panes and the overlay scrollbar; page blit, find and selection overlays, missing-file banner, remote-image bar, empty state; menus, dialogs, toast, link hint, tooltips |
 | `ui.rs`, `keys.rs`, `args.rs` | Regions, `Hit`, `Act` and window state; shortcuts parsed from core's command strings; command line |
+| `updater.rs` | Looking for a newer version, downloading and checking its two executables, swapping them in (`docs/UPDATE.md`) |
 | `gfx.rs`, `menu.rs`, `textfield.rs`, `tree.rs`, `theme.rs` | Painter (logical px, device snapping, clip, shadows), popup menu, single-line editor, lazy folder tree, chrome palettes |
 | `platform.rs` | The only `unsafe`: clipboard, URLs, file manager, system theme and subpixel order, dialogs (rfd), DWM attributes |
 | `build.rs` | Embeds `assets/mdview.ico` when `rc.exe` is found |
@@ -281,6 +286,10 @@ the Files pane is open (`App::watch_tree`, `FileWatcher::set_folders` in `mdshar
 created, removed or renamed directly in one of them wakes the shell, which re-reads the tree.
 Content changes wake only for open files, as before. `MDVIEW_TRACE=1` prints a line per wake. Run
 in a real window with that trace; the user has not looked at it.
+
+**Updates (2026-11-13).** `updater.rs` and the "updates" part of `workspace.rs`; the bar is drawn
+by `page::draw_update_bar` above the remote-image bar, and the About dialog has the "Check for
+updates" and "Check at launch" buttons. `docs/UPDATE.md` describes all of it.
 
 **Logo (2026-11-12).** One drawing in two places. `assets/make_icon.py` writes `mdview.svg`,
 `.ico` and `.png` from a list of shapes (and the editor's mark with `mdedit` as its argument);
@@ -413,8 +422,8 @@ next request retries; Reload clears every failure. Disk cache under
 stack; other platforms build a stub whose requests fail. A remote SVG is rasterized by the engine at
 the device scale and re-requested when the scale changes.
 
-This is the shell's only network use besides the loopback single-instance hand-over
-(`docs/UPDATE.md`, top note).
+The shell's network use is this, the update look and download (`docs/UPDATE.md`), and the
+loopback single-instance hand-over.
 
 ## 7. The engine (`crates/engine`): math and Mermaid
 
@@ -544,7 +553,8 @@ window, 4 s after launch. First frame with `--no-session`: showcase 85-94 ms ove
 - No snap-layouts flyout on the maximize button. The system accent colour is not used.
 - Maximized memory is three full-window bitmaps.
 - Icons need Segoe Fluent Icons or Segoe MDL2 Assets (Windows only).
-- No update check (by decision; a manual menu item is future work, `docs/UPDATE.md`).
+- The update has never run against a real release: none is published (`docs/UPDATE.md`, "What
+  has run").
 - `cargo clippy` style warnings remain.
 
 **Renderer and engine:**
@@ -610,17 +620,19 @@ needs a small `mime/packages` XML. The package itself has never been installed w
 The user used the new shell with `fixtures/everything.md` on 2026-11-12 and approved it
 ("it looks beautiful and everything seems to work"); the three things they raised (cursor, back and
 forward, window position and pane widths) are fixed. They then set this list, in this order.
-Items 1 and 2 are done; nothing else on it is started.
+Items 1 and 2 are done and item 3 is built but waits for a first release; item 4 is not started.
 
 1. **Retire Qt:** done 2026-11-13 (section 1). The Qt Linux packaging went to the archive branch
    with it, which the list did not name: it could only build the removed crate.
 2. **Go through `docs/PORT_CHECKLIST.md`:** done 2026-11-13. The Files tree now follows its
    folder live; the pane-widths row was stale (they are saved); the other differing rows are kept
    on purpose and say why. Still open there: the hand checks and Linux.
-3. **A simple automatic update:** the app replaces its own exe. The manifest and SHA-256 logic is
-   in `crates/core/src/update.rs` and `docs/UPDATE.md`; the download can go through `mdview-fetch`.
-   The binary will never be code-signed (the user's decision), so the hash check is the only
-   integrity check there is.
+3. **A simple automatic update:** built 2026-11-13, not yet proven. The look at launch, the bar,
+   the download, hash check and in-place swap of both executables are in and tested with a
+   stand-in transport; `build-installer.ps1` now also writes the release's files and manifest.
+   What is left needs a published release, which is the user's to make: bump the version, publish
+   `v<version>` with the four files from `target\release-files`, and watch an installed older
+   build update itself. `docs/UPDATE.md` has the steps and what has and has not run.
 4. Features, in the user's order: remember the scroll position per file; live reload that keeps
    the reader's place; animated GIFs; content-sized tables; the missing highlight languages
    (Kotlin, Swift, PowerShell, Dockerfile); a true float across blocks; wiki-links and backlinks.
@@ -636,7 +648,8 @@ testing on other machines (there is one PC). The editor is a second project (PLA
 
 - **2026-11-13.** Qt shell retired to the `qt-archive` branch with its installer and Linux
   packaging; `mdview` is the only shell. Numbers re-measured after the shared crates. Port
-  checklist gone through; the Files tree follows its folder live.
+  checklist gone through; the Files tree follows its folder live. In-place updates built
+  (`docs/UPDATE.md`); no release published.
 - **2026-11-08.** Phases 1 and 2 closed: the user approved the four `showcase-*` goldens. Phase 4
   slices landed: SVG, math and Mermaid (eight families) through `mdview-engine`, syntect in-process.
   Both shells (WinUI and Qt) built ahead of the plan; the Qt shell ran on the Debian VM under Xvfb.

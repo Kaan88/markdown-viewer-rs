@@ -5,6 +5,7 @@ use crate::chrome::{Ctx, glyph, logo};
 use crate::gfx::{Face, Rect, mix};
 use crate::panes::{draw_scrollbar, scrollbar};
 use crate::ui::{BANNER_H, Drag, Hit, Scroller, Ui};
+use crate::updater::Stage;
 use crate::workspace::Workspace;
 use mdview_core::commands::strings;
 use std::time::{Duration, Instant};
@@ -19,7 +20,69 @@ pub fn viewport(ws: &Workspace, r: Rect) -> Rect {
     if ws.remote_blocked() > 0 {
         top += BANNER_H;
     }
+    let r = below_update_bar(ws, r);
     Rect::new(r.x, r.y + top, r.w, (r.h - top).max(0.0))
+}
+
+/// The region without the update bar, which sits at its top over a document or the empty state.
+fn below_update_bar(ws: &Workspace, r: Rect) -> Rect {
+    if ws.update_bar().is_some() {
+        Rect::new(r.x, r.y + BANNER_H, r.w, (r.h - BANNER_H).max(0.0))
+    } else {
+        r
+    }
+}
+
+/// The Segoe "Download" glyph.
+const GLYPH_DOWNLOAD: &str = "\u{E896}";
+
+/// The bar that offers a newer version, shows its download, and says when it is in place.
+fn draw_update_bar(c: &mut Ctx, bar: Rect, stage: &Stage) {
+    let pal = *c.pal;
+    c.p.fill(bar, pal.bar);
+    c.p.fill(
+        Rect::new(bar.x, bar.bottom() - c.p.px(), bar.w, c.p.px()),
+        pal.line,
+    );
+    let mut right = bar.right() - 10.0;
+    if !matches!(stage, Stage::Installing(_)) {
+        let close = Rect::new(bar.right() - 34.0, bar.cy() - 12.0, 24.0, 24.0);
+        if c.hover == Some(Hit::UpdateClose) {
+            c.p.rbox(close, 5.0, mix(pal.bar, pal.text, 0.10));
+        }
+        c.p.icon(glyph::CLOSE, 10.0, close.cx(), close.cy(), pal.muted);
+        c.hit(Hit::UpdateClose, close);
+        right = close.x - 10.0;
+    }
+    let label = match stage {
+        Stage::None => return,
+        Stage::Available(offer) => {
+            let go = strings::UPDATE_GO;
+            let w = (c.p.measure(Face::Ui, 12.5, go) + 22.0).round();
+            right -= w;
+            bar_button(c, Hit::UpdateGo, right, bar.cy(), go, true);
+            right -= 12.0;
+            let text = strings::UPDATE_AVAILABLE.replace("{}", &offer.version.to_string());
+            match &offer.notes {
+                Some(notes) => format!("{text} {notes}"),
+                None => text,
+            }
+        }
+        Stage::Installing(offer) => {
+            strings::UPDATE_INSTALLING.replace("{}", &offer.version.to_string())
+        }
+        Stage::Installed(version) => strings::UPDATE_INSTALLED.replace("{}", &version.to_string()),
+    };
+    c.p.icon(GLYPH_DOWNLOAD, 13.0, bar.x + 22.0, bar.cy(), pal.muted);
+    c.p.text(
+        Face::Ui,
+        12.5,
+        bar.x + 38.0,
+        bar.cy(),
+        &label,
+        pal.text,
+        (right - (bar.x + 38.0)).max(0.0),
+    );
 }
 
 /// A text button on a bar: quiet until hovered, or filled with the accent when `primary`.
@@ -95,12 +158,17 @@ const EMPTY_RECENTS: usize = 6;
 /// Draws the page region. Returns the time the workspace spent laying out and painting.
 pub fn draw_page(c: &mut Ctx, ws: &mut Workspace, ui: &Ui, r: Rect) -> Duration {
     let pal = *c.pal;
+    let whole = r;
+    let r = below_update_bar(ws, whole);
+    if let Some(stage) = ws.update_bar() {
+        draw_update_bar(c, Rect::new(whole.x, whole.y, whole.w, BANNER_H), stage);
+    }
     if ws.active().is_none() {
         c.p.fill(r, pal.page);
         draw_empty(c, ws, r);
         return Duration::ZERO;
     }
-    let vr = viewport(ws, r);
+    let vr = viewport(ws, whole);
     let blocked = ws.remote_blocked();
     if blocked > 0 {
         draw_remote_bar(c, Rect::new(r.x, vr.y - BANNER_H, r.w, BANNER_H), blocked);

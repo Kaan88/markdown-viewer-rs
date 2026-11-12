@@ -19,6 +19,10 @@ impl Session {
         Err(Error::Unsupported)
     }
 
+    pub fn accepting(self, _accept: &'static str) -> Session {
+        self
+    }
+
     pub fn get(
         &self,
         _url: &Url,

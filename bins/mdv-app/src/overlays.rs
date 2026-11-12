@@ -7,6 +7,7 @@ use crate::keys;
 use crate::menu::{Item, Menu};
 use crate::panes::{draw_scrollbar, scrollbar};
 use crate::ui::{Act, Dialog, DialogKind, EditAct, Hit, Scroller, Ui};
+use crate::updater::Stage;
 use crate::workspace::{PageContext, Workspace};
 pub use mdshared_ui::overlay::Bubble;
 use mdshared_ui::overlay::{
@@ -192,12 +193,21 @@ pub fn card(kind: DialogKind, rows: usize, w: f32, h: f32) -> Rect {
     let list =
         |row: f32, min: f32| (PAD + 36.0 + (rows as f32 * row + 12.0).max(min) + FOOTER).round();
     let (cw, ch): (f32, f32) = match kind {
-        DialogKind::About => (460.0, 236.0),
+        DialogKind::About => (500.0, 236.0),
         DialogKind::Shortcuts => (580.0, list(KEY_ROW, 0.0).min(700.0)),
         DialogKind::Recent => (600.0, list(RECENT_ROW, 80.0).min(560.0)),
         DialogKind::AllowEdit => (500.0, 232.0),
     };
     dialog_card(cw, ch, w, h)
+}
+
+/// The About dialog's update button: what it would do now.
+fn about_update_label(ws: &Workspace) -> String {
+    match ws.update_stage() {
+        Stage::Available(offer) => strings::UPDATE_TO.replace("{}", &offer.version.to_string()),
+        Stage::Installing(_) => strings::UPDATE_BUSY.to_string(),
+        _ => strings::UPDATE_CHECK.to_string(),
+    }
 }
 
 fn shortcut_label(label: &str) -> String {
@@ -295,6 +305,30 @@ pub fn draw_dialog(
                 Hit::DlgButton(0),
                 "OK",
                 true,
+            );
+            // Updates live here, beside the version: look now (or install what was found, which
+            // stays one click away after its bar is closed), and the at-launch setting.
+            let look = about_update_label(ws);
+            let lw = button_w(c.p, &look);
+            button(
+                c,
+                Rect::new(r.x + PAD, by, lw, 32.0),
+                Hit::DlgButton(1),
+                &look,
+                false,
+            );
+            let launch = if ws.checks_updates() {
+                strings::UPDATE_AT_LAUNCH_ON
+            } else {
+                strings::UPDATE_AT_LAUNCH_OFF
+            };
+            let aw = button_w(c.p, launch);
+            button(
+                c,
+                Rect::new(r.x + PAD + lw + 8.0, by, aw, 32.0),
+                Hit::DlgButton(2),
+                launch,
+                false,
             );
         }
         DialogKind::AllowEdit => {

@@ -18,7 +18,11 @@
 //!     `P.asset: file name` (letters, digits, `.`, `_`, `-`; no path separators; <= 128 bytes),
 //!     `P.url: https://...` (https only, <= 512 bytes, no whitespace/control characters, no
 //!     userinfo), `P.sha256: 64 hex digits` (either case, stored lower-case).
-//!     A platform is present only if all three of its keys are present.
+//!     A platform is present only if all three of its keys are present. These three describe
+//!     the application's own executable.
+//!     `P.engine.url` and `P.engine.sha256` (same rules; both or neither) describe the engine
+//!     executable that ships beside it. A build that updates itself in place needs both files, so
+//!     it ignores a platform entry without them.
 //! * At least one platform must be present.
 //!
 //! Example:
@@ -27,9 +31,11 @@
 //! manifest: 1
 //! version: 0.2.0
 //! notes: Faster scrolling; fixes a crash on empty files.
-//! windows-x86_64.asset: mdview-setup-0.2.0.exe
-//! windows-x86_64.url: https://github.com/Kaan88/markdown-viewer-rs/releases/download/v0.2.0/mdview-setup-0.2.0.exe
+//! windows-x86_64.asset: mdview.exe
+//! windows-x86_64.url: https://github.com/Kaan88/markdown-viewer-rs/releases/download/v0.2.0/mdview.exe
 //! windows-x86_64.sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+//! windows-x86_64.engine.url: https://github.com/Kaan88/markdown-viewer-rs/releases/download/v0.2.0/mdview-engine.exe
+//! windows-x86_64.engine.sha256: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
 //! ```
 //!
 //! Anything else (unknown key, bad value, http URL, short hash) rejects the whole manifest. The
@@ -237,13 +243,22 @@ impl Platform {
 
 const PLATFORMS: [Platform; 2] = [Platform::WindowsX64, Platform::LinuxX64];
 
-/// A downloadable file for one platform.
+/// A file to download and the hash it must have.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Download {
+    pub url: String,
+    /// Lower-case 64-digit hex.
+    pub sha256: String,
+}
+
+/// A platform's release: the application's executable, and the engine's when the manifest lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asset {
     pub name: String,
     pub url: String,
     /// Lower-case 64-digit hex.
     pub sha256: String,
+    pub engine: Option<Download>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -274,7 +289,7 @@ impl UpdateManifest {
         let mut header = false;
         let mut version = None;
         let mut notes = None;
-        let mut fields: [[Option<String>; 3]; 2] = Default::default();
+        let mut fields: [[Option<String>; 5]; 2] = Default::default();
         for (i, raw) in text.lines().enumerate() {
             let line = raw.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -316,6 +331,10 @@ impl UpdateManifest {
                         "url" => return Err(UpdateError::BadValue("url")),
                         "sha256" if valid_sha(v) => (2, v.to_ascii_lowercase()),
                         "sha256" => return Err(UpdateError::BadValue("sha256")),
+                        "engine.url" if valid_url(v) => (3, v.to_string()),
+                        "engine.url" => return Err(UpdateError::BadValue("engine.url")),
+                        "engine.sha256" if valid_sha(v) => (4, v.to_ascii_lowercase()),
+                        "engine.sha256" => return Err(UpdateError::BadValue("engine.sha256")),
                         _ => return Err(UpdateError::UnknownKey(k.chars().take(40).collect())),
                     };
                     fields[pi][slot] = Some(val);
@@ -329,11 +348,25 @@ impl UpdateManifest {
         let version = version.ok_or(UpdateError::MissingField("version"))?;
         let mut assets: [Option<Asset>; 2] = [None, None];
         for (pi, f) in fields.into_iter().enumerate() {
-            let [name, url, sha256] = f;
+            let [name, url, sha256, engine_url, engine_sha256] = f;
+            let engine = match (engine_url, engine_sha256) {
+                (None, None) => None,
+                (Some(url), Some(sha256)) => Some(Download { url, sha256 }),
+                _ => {
+                    return Err(UpdateError::MissingField(
+                        "platform engine.url/engine.sha256",
+                    ));
+                }
+            };
             match (name, url, sha256) {
-                (None, None, None) => {}
+                (None, None, None) if engine.is_none() => {}
                 (Some(name), Some(url), Some(sha256)) => {
-                    assets[pi] = Some(Asset { name, url, sha256 })
+                    assets[pi] = Some(Asset {
+                        name,
+                        url,
+                        sha256,
+                        engine,
+                    })
                 }
                 _ => return Err(UpdateError::MissingField("platform asset/url/sha256")),
             }
@@ -616,6 +649,41 @@ mod tests {
         assert_eq!(a.name, "mdview-setup-0.2.0.exe");
         assert_eq!(a.sha256, SHA);
         assert!(m.asset(Platform::LinuxX64).is_none());
+    }
+
+    #[test]
+    fn manifest_engine_is_both_keys_or_neither() {
+        let plain = UpdateManifest::parse(manifest("").as_bytes()).unwrap();
+        assert!(plain.asset(Platform::WindowsX64).unwrap().engine.is_none());
+        let url = "windows-x86_64.engine.url: https://example.com/a/mdview-engine.exe
+";
+        let sha = format!(
+            "windows-x86_64.engine.sha256: {}
+",
+            SHA.to_uppercase()
+        );
+        let m = UpdateManifest::parse(manifest(&format!("{url}{sha}")).as_bytes()).unwrap();
+        let engine = m
+            .asset(Platform::WindowsX64)
+            .unwrap()
+            .engine
+            .clone()
+            .unwrap();
+        assert_eq!(engine.url, "https://example.com/a/mdview-engine.exe");
+        assert_eq!(engine.sha256, SHA);
+        for half in [url.to_string(), sha.clone()] {
+            assert!(UpdateManifest::parse(manifest(&half).as_bytes()).is_err());
+        }
+        let http = "windows-x86_64.engine.url: http://example.com/e.exe
+";
+        assert!(UpdateManifest::parse(manifest(&format!("{http}{sha}")).as_bytes()).is_err());
+        // An engine alone does not make a platform.
+        let lone = format!(
+            "linux-x86_64.engine.url: https://example.com/e
+linux-x86_64.engine.sha256: {SHA}
+"
+        );
+        assert!(UpdateManifest::parse(manifest(&lone).as_bytes()).is_err());
     }
 
     #[test]

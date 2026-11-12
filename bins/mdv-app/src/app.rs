@@ -25,6 +25,7 @@ use crate::ui::{
     Act, Areas, BarItem, Dialog, DialogKind, Drag, Hit, PAGE_MIN, PANE_MAX, PANE_MIN, Popup,
     PopupKind, REGIONS, Region, Scroller, Side, Tip, Ui,
 };
+use crate::updater;
 use crate::workspace::{Click, LinkOutcome, ThemeChoice, Workspace};
 use mdview_core::commands::CommandId as C;
 use mdview_core::watch::FileWatcher;
@@ -69,6 +70,8 @@ pub enum Wake {
     Files,
     /// A remote image finished downloading.
     Images,
+    /// An updater thread has an answer.
+    Update(updater::Event),
 }
 
 fn sig<T: Hash>(t: T) -> u64 {
@@ -235,6 +238,9 @@ impl App {
             self.ws.find_set(q);
         }
         self.ui.focus_mode = a.focus_mode;
+        if let Some(stage) = &a.update_bar {
+            self.ws.preview_update(stage);
+        }
         if a.load_remote {
             self.ws.allow_remote(false);
         }
@@ -369,7 +375,8 @@ impl App {
                 } else {
                     0
                 };
-                sig((common, self.ws.active(), missing, drag, recents))
+                let update = self.ws.update_bar().map(|stage| format!("{stage:?}"));
+                sig((common, self.ws.active(), missing, drag, recents, update))
             }
         }
     }
@@ -1141,9 +1148,34 @@ fn stage(started: Instant, what: &str) {
     }
 }
 
+/// `--check-update`: looks for a newer version as the application would and prints the answer.
+fn check_update() -> i32 {
+    let current = updater::current_version();
+    eprintln!("mdview {current}; manifest {}", updater::manifest_url());
+    match updater::check(&updater::fetch) {
+        Ok(Some(offer)) => {
+            eprintln!("mdview {} is available", offer.version);
+            eprintln!("  {}", offer.app.url);
+            eprintln!("  {}", offer.engine.url);
+            0
+        }
+        Ok(None) => {
+            eprintln!("nothing newer");
+            0
+        }
+        Err(e) => {
+            eprintln!("could not look: {e}");
+            1
+        }
+    }
+}
+
 pub fn run() -> i32 {
     let started = Instant::now();
     let args = Args::parse(std::env::args().skip(1));
+    if args.check_update {
+        return check_update();
+    }
     let explicit = std::env::var_os("MDVIEW_SETTINGS").map(PathBuf::from);
     // A shot never touches the user's session; it may use a scratch one named by MDVIEW_SETTINGS.
     let session = match (args.no_session, args.shot.is_some()) {
@@ -1193,6 +1225,7 @@ pub fn run() -> i32 {
         let _ = p.send_event(Wake::Images);
     });
     app.proxy = Some(proxy);
+    app.updates_at_launch();
     stage(started, "ready to run");
     let _ = event_loop.run_app(&mut app);
     0

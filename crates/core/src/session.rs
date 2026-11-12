@@ -101,6 +101,11 @@ pub struct Session {
     /// Tick task boxes in any file without asking first. Off by default: the first tick in a
     /// file then asks.
     pub edit_tasks: bool,
+    /// Look for a newer version at launch, at most once a day. On by default.
+    pub check_updates: bool,
+    /// When the last look for a newer version finished, in seconds since the Unix epoch; 0 for
+    /// never.
+    pub update_checked: u64,
 }
 
 impl Default for Session {
@@ -117,6 +122,8 @@ impl Default for Session {
             remote_images: false,
             page_width: PageWidth::default(),
             edit_tasks: false,
+            check_updates: true,
+            update_checked: 0,
         }
     }
 }
@@ -145,6 +152,8 @@ impl Session {
                 "remote_images" => s.remote_images = value.trim() == "1",
                 "page_width" => s.page_width = PageWidth::from_name(value).unwrap_or_default(),
                 "edit_tasks" => s.edit_tasks = value.trim() == "1",
+                "check_updates" => s.check_updates = value.trim() != "0",
+                "update_checked" => s.update_checked = value.trim().parse().unwrap_or(0),
                 _ => {}
             }
         }
@@ -176,6 +185,8 @@ impl Session {
         line("remote_images", if self.remote_images { "1" } else { "0" });
         line("page_width", self.page_width.name());
         line("edit_tasks", if self.edit_tasks { "1" } else { "0" });
+        line("check_updates", if self.check_updates { "1" } else { "0" });
+        line("update_checked", &self.update_checked.to_string());
         out.finish()
     }
 

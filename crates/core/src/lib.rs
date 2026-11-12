@@ -11,6 +11,7 @@ pub mod limits;
 pub mod links;
 pub mod model;
 mod parse;
+pub mod selfupdate;
 pub mod session;
 pub mod single;
 pub mod slug;

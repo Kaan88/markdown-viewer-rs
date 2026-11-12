@@ -1,12 +1,14 @@
 <#
 .SYNOPSIS
   Builds mdview and mdview-engine in release (static C runtime, no DLLs to ship), then builds the
-  Inno Setup installer and its .sha256 file.
+  Inno Setup installer and its .sha256 file, and puts the files of a GitHub release together.
 .NOTES
-  pwsh packaging\windows\build-installer.ps1 [-SkipBuild]
-  Output: target\installer\mdview-setup-<version>.exe and .exe.sha256
+  pwsh packaging\windows\build-installer.ps1 [-SkipBuild] [-Notes 'One line of release notes.']
+  Output: target\installer\mdview-setup-<version>.exe and .exe.sha256, and target\release-files\
+  with what a release v<version> carries: the installer, mdview.exe, mdview-engine.exe and
+  mdview-update.txt (the manifest an installed mdview reads to update itself; docs\UPDATE.md).
 #>
-param([switch]$SkipBuild)
+param([switch]$SkipBuild, [string]$Notes = '')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 function Fail($msg) { Write-Error $msg; exit 1 }
@@ -48,3 +50,26 @@ $hash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvaria
 [System.IO.File]::WriteAllText("$setup.sha256", "$hash  mdview-setup-$version.exe`n", [System.Text.UTF8Encoding]::new($false))
 Write-Host "Built $setup"
 Write-Host "SHA256 $hash"
+
+# The files of the release. The manifest's URLs are where GitHub serves the assets of tag v<version>.
+$dist = Join-Path $root 'target\dist\release'
+$files = Join-Path $root 'target\release-files'
+if (Test-Path -LiteralPath $files) { Remove-Item -LiteralPath $files -Recurse -Force }
+New-Item -ItemType Directory -Force $files | Out-Null
+Copy-Item -LiteralPath $setup, (Join-Path $dist 'mdview.exe'), (Join-Path $dist 'mdview-engine.exe') -Destination $files
+$base = "https://github.com/Kaan88/markdown-viewer-rs/releases/download/v$version"
+$sha = { param($f) (Get-FileHash -LiteralPath (Join-Path $files $f) -Algorithm SHA256).Hash.ToLowerInvariant() }
+$lines = @('manifest: 1', "version: $version")
+if ($Notes) {
+  if ($Notes -match '[\x00-\x1f]' -or [System.Text.Encoding]::UTF8.GetByteCount($Notes) -gt 1024) { Fail 'Notes must be one line of at most 1024 bytes.' }
+  $lines += "notes: $Notes"
+}
+$lines += @(
+  'windows-x86_64.asset: mdview.exe',
+  "windows-x86_64.url: $base/mdview.exe",
+  "windows-x86_64.sha256: $(& $sha 'mdview.exe')",
+  "windows-x86_64.engine.url: $base/mdview-engine.exe",
+  "windows-x86_64.engine.sha256: $(& $sha 'mdview-engine.exe')"
+)
+[System.IO.File]::WriteAllText((Join-Path $files 'mdview-update.txt'), (($lines -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
+Write-Host "Release files in $files"
