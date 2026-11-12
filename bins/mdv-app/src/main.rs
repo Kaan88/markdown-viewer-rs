@@ -4,18 +4,16 @@
 mod app;
 mod args;
 mod chrome;
-mod gfx;
 mod keys;
-mod menu;
 mod overlays;
 mod page;
 mod panes;
 mod platform;
-mod textfield;
-mod theme;
 mod tree;
 mod ui;
 mod workspace;
+
+use mdshared_ui::{gfx, menu, textfield, theme};
 
 fn main() {
     std::process::exit(app::run());

@@ -5,7 +5,7 @@
 use crate::gfx::Rect;
 use crate::menu::Menu;
 use crate::textfield::TextField;
-use crate::tree::FileTree;
+use crate::tree::{FileTree, new_tree};
 use mdview_core::commands::CommandId;
 use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
@@ -351,7 +351,7 @@ impl Ui {
                 outline_view: 0.0,
             },
             focus_mode: false,
-            tree: FileTree::new(),
+            tree: new_tree(),
             find: TextField::new(),
             find_focused: false,
             caret_on: true,
