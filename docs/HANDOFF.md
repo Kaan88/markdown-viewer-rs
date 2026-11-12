@@ -543,19 +543,25 @@ needs a small `mime/packages` XML. The package itself has never been installed w
 
 ## 13. What to do next
 
-1. **The user's hand checks of the new shell** (PLAN A3) on the Windows PC: the items in section 10's
-   "not run" list, starting with the remote-image bar, copy-source menu, resize edges and corners,
-   and shadows. Record each result here.
-2. **Finish A4:** tick the new-shell table in `docs/PORT_CHECKLIST.md` by hand-checking its
-   "built, not hand-checked" rows; measure Qt's first frame (find why `--measure` hung) and a
-   1 MiB scroll comparison.
-3. **Retire Qt on Windows** (A6): archive branch, as with WinUI; drop `mdview-qt.iss` and its build
-   script from `main`; replace the v0.1.0 pre-release installer. Only after 1 and 2 and the user's
-   approval.
-4. **The KDE run** (section 12).
-5. The limits `docs/COVERAGE.md` lists under "Drawn with limits" (a floated image ends with its
-   paragraph, because each top-level block is laid out on its own), and the clippy warnings.
-6. The editor is a second project (PLAN section E), not started until the reader has shipped.
+The user used the new shell with `fixtures/everything.md` on 2026-11-12 and approved it
+("it looks beautiful and everything seems to work"); the three things they raised (cursor, back and
+forward, window position and pane widths) are fixed. They then set this list, in this order.
+Nothing on it is started.
+
+1. **Retire Qt:** archive branch, as with WinUI; drop `bins/mdv-qt`, `mdview-qt.iss` and its build
+   script from `main`; the new installer becomes the release.
+2. **Go through `docs/PORT_CHECKLIST.md`:** the new-shell table's "differs" and "not done" rows,
+   one by one. Fix or record each.
+3. **A simple automatic update:** the app replaces its own exe. The manifest and SHA-256 logic is
+   in `crates/core/src/update.rs` and `docs/UPDATE.md`; the download can go through `mdview-fetch`.
+   The binary will never be code-signed (the user's decision), so the hash check is the only
+   integrity check there is.
+4. Features, in the user's order: remember the scroll position per file; live reload that keeps
+   the reader's place; animated GIFs; content-sized tables; the missing highlight languages
+   (Kotlin, Swift, PowerShell, Dockerfile); a true float across blocks; wiki-links and backlinks.
+
+Set aside by the user for now: crash reporting, accessibility, non-Latin input methods, Linux,
+testing on other machines (there is one PC). The editor is a second project (PLAN section E).
 
 ## 14. History
 
