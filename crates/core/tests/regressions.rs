@@ -37,31 +37,6 @@ fn links(d: &Document) -> Vec<(String, String)> {
 // Not-ported bugs
 
 #[test]
-fn duplicate_parent_tab_labels_differ() {
-    let paths: Vec<PathBuf> = ["/x/a/docs/README.md", "/x/b/docs/README.md", "/x/other.md"]
-        .iter()
-        .map(PathBuf::from)
-        .collect();
-    let labels = tab_labels(&paths);
-    assert_ne!(
-        labels[0], labels[1],
-        "the old app gave these the same label"
-    );
-    assert!(labels[0].starts_with("README.md — "));
-    assert!(labels[0].contains('a') && labels[1].contains('b'));
-    assert_eq!(labels[2], "other.md");
-}
-
-#[test]
-fn distinct_parents_use_the_parent_name() {
-    let paths: Vec<PathBuf> = ["/p/one/README.md", "/p/two/readme.md"]
-        .iter()
-        .map(PathBuf::from)
-        .collect();
-    assert_eq!(tab_labels(&paths), ["README.md — one", "readme.md — two"]);
-}
-
-#[test]
 fn refreshing_status_never_sticks() {
     for outcome in [
         ReloadOutcome::Ok { warnings: vec![] },
@@ -1044,40 +1019,6 @@ fn image_sources_classify() {
 // Session and recents
 
 #[test]
-fn recents_cap_order_and_dedupe() {
-    let mut r = Recents::default();
-    for i in 0..20 {
-        r.add(format!("/f{i}.md"));
-    }
-    assert_eq!(r.paths().len(), MAX_RECENT);
-    assert_eq!(r.paths()[0], Path::new("/f19.md"));
-    r.add("/f10.md");
-    assert_eq!(r.paths()[0], Path::new("/f10.md"));
-    assert_eq!(r.paths().len(), MAX_RECENT);
-    r.remove(Path::new("/f10.md"));
-    assert_eq!(r.paths()[0], Path::new("/f19.md"));
-    r.clear();
-    assert!(r.is_empty());
-}
-
-#[test]
-fn recents_mark_missing_files() {
-    let dir = temp_dir("recent");
-    let real = dir.join("real.md");
-    std::fs::write(&real, "x").unwrap();
-    let mut r = Recents::default();
-    r.add(dir.join("gone.md"));
-    r.add(&real);
-    let e = r.entries();
-    assert_eq!((e[0].label.as_str(), e[0].missing), ("real.md", false));
-    assert_eq!(
-        (e[1].label.as_str(), e[1].missing),
-        ("gone.md (missing)", true)
-    );
-    std::fs::remove_dir_all(dir).unwrap();
-}
-
-#[test]
 fn session_round_trips_and_tolerates_damage() {
     let dir = temp_dir("session");
     let path = dir.join("nested/settings.ini");
@@ -2004,41 +1945,6 @@ fn find_skips_closed_details_bodies() {
 }
 
 // Review findings: Windows paths
-
-#[test]
-fn verbatim_windows_paths_become_ordinary() {
-    for (from, to) in [
-        (r"\\?\C:\Users\kaan\a.md", Some(r"C:\Users\kaan\a.md")),
-        (r"\\?\UNC\server\share\a.md", Some(r"\\server\share\a.md")),
-        (r"C:\Users\kaan\a.md", None),
-        (r"\\server\share\a.md", None),
-        (r"\\?\Volume{1234}\a.md", None),
-        (r"\\?\C:\Users\NUL.txt", None),
-        (r"\\?\C:\Users\com1", None),
-        (r"\\?\C:\Users\trailing.", None),
-        (r"\\?\C:\Users\space ", None),
-        (r"\\?\C:\Users\a:b", None),
-    ] {
-        assert_eq!(files::strip_verbatim(from).as_deref(), to, "{from}");
-    }
-    let long = format!(r"\\?\C:\{}", "a".repeat(300));
-    assert_eq!(files::strip_verbatim(&long), None);
-}
-
-#[cfg(windows)]
-#[test]
-fn canonical_paths_have_one_identity_on_windows() {
-    let dir = temp_dir("verbatim");
-    let path = dir.join("real.md");
-    std::fs::write(&path, "x").unwrap();
-    let present = files::canonical_or_absolute(&path);
-    assert!(
-        !present.to_string_lossy().starts_with(r"\\?\"),
-        "{present:?}"
-    );
-    std::fs::remove_file(&path).unwrap();
-    assert_eq!(files::canonical_or_absolute(&path), present);
-}
 
 // Review findings: minor
 

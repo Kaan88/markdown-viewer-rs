@@ -2,10 +2,9 @@
 
 pub use mdshared_ui::tree::{FileTree, Rules};
 
-/// A tree that lists Markdown files, with core's spelling of verbatim paths.
+/// A tree that lists Markdown files.
 pub fn new_tree() -> FileTree {
     FileTree::new(Rules {
-        shows_file: mdview_core::links::is_markdown_path,
-        strip_verbatim: mdview_core::files::strip_verbatim,
+        shows_file: Box::new(mdview_core::links::is_markdown_path),
     })
 }
