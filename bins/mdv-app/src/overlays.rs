@@ -54,6 +54,7 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
         cmd(C::ToggleOutline, "Outline pane", "").checked(ui.panes.outline && !ui.focus_mode),
         cmd(C::FocusMode, "Focus reading mode", glyph::FULLSCREEN).checked(ui.focus_mode),
         Item::new(Act::RemoteAlways, "Always load remote images").checked(ws.remote_always()),
+        Item::new(Act::EditAlways, "Tick task boxes without asking").checked(ws.edit_always()),
         width(PageWidth::Narrow, "Narrow page").sep(),
         width(PageWidth::Wide, "Wide page"),
         width(PageWidth::Full, "Full-width page"),
@@ -300,6 +301,7 @@ pub fn card(kind: DialogKind, rows: usize, w: f32, h: f32) -> Rect {
         DialogKind::About => (460.0, 236.0),
         DialogKind::Shortcuts => (580.0, list(KEY_ROW, 0.0).min(700.0)),
         DialogKind::Recent => (600.0, list(RECENT_ROW, 80.0).min(560.0)),
+        DialogKind::AllowEdit => (500.0, 232.0),
     };
     let cw = cw.min(w - 32.0).max(200.0);
     let ch = ch.min(h - 48.0).max(160.0);
@@ -393,6 +395,7 @@ pub fn draw_dialog(
         DialogKind::About => 0,
         DialogKind::Shortcuts => shortcut_help().len(),
         DialogKind::Recent => ws.recents().len(),
+        DialogKind::AllowEdit => 0,
     };
     let r = card(d.kind, rows, w, h);
     c.p.shadow(r, 10.0, pal.dark);
@@ -424,6 +427,7 @@ pub fn draw_dialog(
         DialogKind::About => strings::ABOUT_TITLE,
         DialogKind::Shortcuts => strings::SHORTCUTS_TITLE,
         DialogKind::Recent => strings::MANAGE_RECENT_TITLE,
+        DialogKind::AllowEdit => "Change this file?",
     };
     match d.kind {
         DialogKind::About => {
@@ -467,6 +471,66 @@ pub fn draw_dialog(
                 Hit::DlgButton(0),
                 "OK",
                 true,
+            );
+        }
+        DialogKind::AllowEdit => {
+            let x = r.x + PAD;
+            let tw = r.w - 2.0 * PAD;
+            c.p.text(
+                Face::Semibold,
+                17.0,
+                x,
+                r.y + PAD + 10.0,
+                title,
+                pal.text,
+                tw,
+            );
+            let name = ws.edit_target().unwrap_or_default();
+            let y = r.y + PAD + 36.0;
+            let used = c.p.paragraph(
+                Face::Ui,
+                13.5,
+                x,
+                y,
+                tw,
+                &format!(
+                    "Ticking this box saves the change to {name}. Only the mark between the \
+                     brackets is rewritten; the rest of the file stays as it is."
+                ),
+                pal.text,
+            );
+            c.p.paragraph(
+                Face::Ui,
+                12.5,
+                x,
+                y + used + 8.0,
+                tw,
+                "\"Always allow\" stops asking, for every file. The main menu turns it off again.",
+                pal.muted,
+            );
+            let ew = button_w(c.p, "Change this file");
+            button(
+                c,
+                Rect::new(r.right() - PAD - ew, by, ew, 32.0),
+                Hit::DlgButton(1),
+                "Change this file",
+                true,
+            );
+            let aw = button_w(c.p, "Always allow");
+            button(
+                c,
+                Rect::new(r.right() - PAD - ew - 8.0 - aw, by, aw, 32.0),
+                Hit::DlgButton(2),
+                "Always allow",
+                false,
+            );
+            let cw = button_w(c.p, "Cancel");
+            button(
+                c,
+                Rect::new(r.x + PAD, by, cw, 32.0),
+                Hit::DlgButton(0),
+                "Cancel",
+                false,
             );
         }
         DialogKind::Shortcuts => {
@@ -702,7 +766,12 @@ mod tests {
 
     #[test]
     fn cards_fit_small_windows() {
-        for kind in [DialogKind::About, DialogKind::Shortcuts, DialogKind::Recent] {
+        for kind in [
+            DialogKind::About,
+            DialogKind::Shortcuts,
+            DialogKind::Recent,
+            DialogKind::AllowEdit,
+        ] {
             let r = card(kind, 30, 520.0, 360.0);
             assert!(r.x >= 0.0 && r.y >= 0.0 && r.right() <= 520.0 && r.bottom() <= 360.0);
         }

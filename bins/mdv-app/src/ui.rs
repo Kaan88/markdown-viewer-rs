@@ -176,6 +176,8 @@ pub enum Act {
     PageWidth(PageWidth),
     /// An editing command for the find box.
     Edit(EditAct),
+    /// Toggle ticking task boxes in every file without asking.
+    EditAlways,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,6 +208,8 @@ pub enum DialogKind {
     About,
     Shortcuts,
     Recent,
+    /// Asks before the first task box is ticked in a file.
+    AllowEdit,
 }
 
 pub struct Dialog {

@@ -26,7 +26,7 @@ use mdview_core::files::{FileStamp, canonical_or_absolute, read_stable, stamp, t
 use mdview_core::links::{LinkAction, classify_link};
 use mdview_core::model::{NONE, ScrollPos};
 use mdview_core::session::{self, PageWidth, RecentEntry, Recents, Session};
-use mdview_core::{Document, parse_bytes};
+use mdview_core::{Document, parse_bytes, tasks};
 use mdview_fetch::{Fetcher, State as Fetched};
 use mdview_render::{
     DARK, DocumentRenderer, Frame, Hit, Jump, LIGHT, Options, PageLayout, Rect, RemoteState,
@@ -115,6 +115,20 @@ pub enum Click {
     Footnote,
     /// Opened or closed a `<details>`.
     Details,
+    /// A click on a task-list box.
+    Task(TaskClick),
+}
+
+/// What a click on a task-list box came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskClick {
+    /// The box was flipped in the file and the page shows it.
+    Toggled,
+    /// The reader has not allowed changing this file yet: ask, then call
+    /// [`Workspace::answer_edit`].
+    Ask,
+    /// Nothing was changed; the status says why.
+    Failed,
 }
 
 /// What is under the pointer, for the cursor shape and a hover hint.
@@ -226,6 +240,8 @@ pub struct Tab {
     /// When the tab was last left, for [`Workspace::drop_idle`].
     left_at: Option<Instant>,
     remote: Remote,
+    /// The reader allowed ticking task boxes in this file, until the tab closes.
+    edit_allowed: bool,
 }
 
 /// What a tab decided about its document's remote images.
@@ -256,6 +272,7 @@ impl Tab {
             view: None,
             left_at: None,
             remote: Remote::default(),
+            edit_allowed: false,
         }
     }
 
@@ -330,6 +347,7 @@ struct Press {
     link: Option<u32>,
     footnote: Option<u32>,
     details: Option<u32>,
+    task: Option<u32>,
     moved: bool,
 }
 
@@ -367,6 +385,8 @@ pub struct Workspace {
     /// Remote URLs a page asked for and did not get, each once. The image store is shared by
     /// every tab, so this is too: a document's share is the URLs its own images name.
     held: Vec<String>,
+    /// The task box (its block) whose tick waits for the reader's answer.
+    pending_task: Option<u32>,
 }
 
 impl Workspace {
@@ -403,6 +423,7 @@ impl Workspace {
             remote_svgs: Vec::new(),
             remote_scale: 0.0,
             held: Vec::new(),
+            pending_task: None,
         };
         for path in ws.session.tabs.clone() {
             let path = canonical_or_absolute(&path);
@@ -986,6 +1007,112 @@ impl Workspace {
         }
         self.dirty = true;
         true
+    }
+
+    // ---- task boxes --------------------------------------------------------------------------
+
+    /// Whether task boxes may be ticked in every file without asking.
+    pub fn edit_always(&self) -> bool {
+        self.session.edit_tasks
+    }
+
+    /// Turns "always allow ticking task boxes" on or off. Turning it off also withdraws what was
+    /// allowed file by file, so the next tick asks again.
+    pub fn set_edit_always(&mut self, always: bool) {
+        if self.session.edit_tasks == always {
+            return;
+        }
+        self.session.edit_tasks = always;
+        if !always {
+            self.tabs.iter_mut().for_each(|t| t.edit_allowed = false);
+        }
+        self.persist();
+    }
+
+    /// The name of the file a tick would change, for the question put to the reader.
+    pub fn edit_target(&self) -> Option<String> {
+        self.active_tab().map(|tab| file_name(&tab.path))
+    }
+
+    /// The reader's answer to [`TaskClick::Ask`]: `None` leaves the file alone, `Some(false)`
+    /// allows this file, `Some(true)` every file from now on. True when the box was flipped.
+    pub fn answer_edit(&mut self, answer: Option<bool>) -> bool {
+        let Some(block) = self.pending_task.take() else {
+            return false;
+        };
+        let Some(always) = answer else {
+            return false;
+        };
+        if always {
+            self.set_edit_always(true);
+        }
+        if let Some(tab) = self.active.and_then(|i| self.tabs.get_mut(i)) {
+            tab.edit_allowed = true;
+        }
+        self.toggle_task(block)
+    }
+
+    /// A click on the task box of `block`: flips it if the reader allowed changing this file,
+    /// and otherwise remembers it until they answer.
+    fn click_task(&mut self, block: u32) -> TaskClick {
+        let allowed = self.session.edit_tasks || self.active_tab().is_some_and(|t| t.edit_allowed);
+        if !allowed {
+            self.pending_task = Some(block);
+            return TaskClick::Ask;
+        }
+        if self.toggle_task(block) {
+            TaskClick::Toggled
+        } else {
+            TaskClick::Failed
+        }
+    }
+
+    /// Flips the task box of `block` in the file and shows the result. The file is the record:
+    /// the page is read from it again, in place, with the reading position and open `<details>`
+    /// kept. A file that no longer matches the page is left alone and read again.
+    fn toggle_task(&mut self, block: u32) -> bool {
+        let Some(index) = self.active else {
+            return false;
+        };
+        let tab = &self.tabs[index];
+        let Some(doc) = tab.doc.as_ref() else {
+            return false;
+        };
+        let boxes = tasks::document_boxes(doc);
+        let Some(ordinal) = boxes.iter().position(|(b, _)| *b == block) else {
+            return false;
+        };
+        let states: Vec<bool> = boxes.iter().map(|(_, checked)| *checked).collect();
+        let path = tab.path.clone();
+        let details = tab.details.clone();
+        let outcome = tasks::toggle_in_file(&path, ordinal, &states);
+        // Read the file again either way: after a failure it is the file that is right.
+        self.reload_tab(index, false);
+        if outcome.is_ok() {
+            // One byte changed, so every block is where it was: what was open stays open.
+            let tab = &mut self.tabs[index];
+            if let Some(doc) = tab.doc.as_ref() {
+                for (&block, &open) in &details {
+                    self.renderer.set_details(doc, block, open);
+                }
+            }
+            tab.details = details;
+            self.refind();
+        }
+        match outcome {
+            Ok(checked) => {
+                self.message(if checked {
+                    "Checked, file saved"
+                } else {
+                    "Unchecked, file saved"
+                });
+                true
+            }
+            Err(text) => {
+                self.message(&text);
+                false
+            }
+        }
     }
 
     // ---- recents -----------------------------------------------------------------------------
@@ -1664,7 +1791,10 @@ impl Workspace {
         };
         Hover {
             link: hit.link.and_then(|i| self.link_destination(i)),
-            pointing: hit.link.is_some() || hit.footnote.is_some() || hit.details.is_some(),
+            pointing: hit.link.is_some()
+                || hit.footnote.is_some()
+                || hit.details.is_some()
+                || hit.task.is_some(),
             text: hit.on_text,
         }
     }
@@ -1722,6 +1852,7 @@ impl Workspace {
             link: hit.link.filter(|_| !multi),
             footnote: hit.footnote.filter(|_| !multi),
             details: hit.details.filter(|_| !multi),
+            task: hit.task.filter(|_| !multi),
             moved: multi,
         });
         self.dirty = true;
@@ -1780,6 +1911,10 @@ impl Workspace {
             self.clear_selection();
             self.toggle_details(block);
             return Click::Details;
+        }
+        if let Some(block) = press.task {
+            self.clear_selection();
+            return Click::Task(self.click_task(block));
         }
         self.clear_selection();
         Click::Deselected
@@ -2775,6 +2910,51 @@ mod tests {
         // The same text on longer lines is a shorter page.
         assert!(wide < narrow, "{wide} < {narrow}");
         assert!(full < wide, "{full} < {wide}");
+    }
+
+    #[test]
+    fn a_task_box_asks_first_and_then_changes_one_byte() {
+        let dir = temp_dir("tasks");
+        let text = "# List\r\n\r\n- [ ] one\r\n- [x] two\r\n\r\nİki ğ\r\n";
+        let file = write(&dir, "todo.md", text);
+        let mut ws = workspace();
+        ws.open(&file).unwrap();
+        assert!(ws.paint(800, 600, 1.0).is_some());
+        // The box is a target on the page, and the text beside it is not.
+        let found = (0..800).step_by(2).find_map(|x| {
+            (60..160)
+                .step_by(2)
+                .find_map(|y| ws.hit(x as f32, y as f32).and_then(|hit| hit.task))
+        });
+        let block = found.expect("a task box under some point");
+        let boxes = tasks::document_boxes(ws.active_tab().unwrap().doc.as_ref().unwrap());
+        assert!(boxes.iter().any(|(b, _)| *b == block));
+        let (first, second) = (boxes[0].0, boxes[1].0);
+
+        assert_eq!(ws.click_task(first), TaskClick::Ask);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), text, "not yet");
+        assert!(!ws.answer_edit(None), "declined");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+
+        assert_eq!(ws.click_task(first), TaskClick::Ask);
+        assert!(ws.answer_edit(Some(false)));
+        let ticked = text.replace("- [ ] one", "- [x] one");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), ticked);
+        let boxes = tasks::document_boxes(ws.active_tab().unwrap().doc.as_ref().unwrap());
+        assert_eq!(boxes, vec![(first, true), (second, true)]);
+
+        // Allowed for this file now: no question.
+        assert_eq!(ws.click_task(second), TaskClick::Toggled);
+        let both = ticked.replace("- [x] two", "- [ ] two");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), both);
+
+        // The file changed behind the page: nothing is written, and the page catches up.
+        let other = format!("- [ ] new\r\n{both}");
+        std::fs::write(&file, &other).unwrap();
+        assert_eq!(ws.click_task(second), TaskClick::Failed);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), other);
+        let boxes = tasks::document_boxes(ws.active_tab().unwrap().doc.as_ref().unwrap());
+        assert_eq!(boxes.len(), 3);
     }
 
     #[test]

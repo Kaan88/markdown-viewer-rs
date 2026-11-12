@@ -15,6 +15,7 @@ pub mod session;
 pub mod single;
 pub mod slug;
 pub mod status;
+pub mod tasks;
 pub mod update;
 pub mod watch;
 

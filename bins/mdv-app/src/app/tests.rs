@@ -129,6 +129,21 @@ fn right_click_in_the_find_box_opens_its_edit_menu() {
 }
 
 #[test]
+fn a_task_box_click_asks_and_cancel_changes_nothing() {
+    use crate::workspace::TaskClick;
+    let mut a = app(&["linked.md"]);
+    a.handle_click(Click::Task(TaskClick::Ask));
+    a.compose();
+    assert_eq!(
+        a.ui.dialog.as_ref().map(|d| d.kind),
+        Some(DialogKind::AllowEdit)
+    );
+    click(&mut a, Hit::DlgButton(0));
+    assert!(a.ui.dialog.is_none());
+    assert!(!a.ws.edit_always());
+}
+
+#[test]
 fn splitter_drag_resizes_within_limits() {
     let mut a = app(&["linked.md"]);
     let w0 = a.areas.files.unwrap().w;

@@ -1105,6 +1105,7 @@ fn shot(mut app: App, path: &Path) -> i32 {
         Some(ShotDialog::About) => app.open_dialog(DialogKind::About),
         Some(ShotDialog::Shortcuts) => app.open_dialog(DialogKind::Shortcuts),
         Some(ShotDialog::Recent) => app.open_dialog(DialogKind::Recent),
+        Some(ShotDialog::Edit) => app.open_dialog(DialogKind::AllowEdit),
         None => {}
     }
     if app.ui.dialog.is_some() || app.ui.popup.is_some() {

@@ -121,6 +121,8 @@ pub struct Hit {
     pub footnote: Option<u32>,
     /// The `<details>` block whose summary is under the point; clicking toggles it.
     pub details: Option<u32>,
+    /// The block whose task-list box is under the point.
+    pub task: Option<u32>,
     /// The formula or diagram drawn at the point, when it is inside the picture itself.
     pub source: Option<Source>,
     /// Whether the point is on a line of text, rather than beside, above or below the nearest

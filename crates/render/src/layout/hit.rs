@@ -55,6 +55,23 @@ impl SourceBox {
     }
 }
 
+/// Where a task-list box is drawn, relative to its block like the lines, and the block whose
+/// text it starts.
+#[derive(Clone, Copy)]
+pub(super) struct TaskBox {
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) w: f32,
+    pub(super) h: f32,
+    pub(super) block: u32,
+}
+
+impl TaskBox {
+    pub(super) fn shift(&mut self, dy: f32) {
+        self.y += dy;
+    }
+}
+
 impl DocumentRenderer {
     /// What is at page position `x, y`: the document offset, plus a link or footnote reference when
     /// the point is over one. Lays out the one block that was hit if the frame has not painted it
@@ -75,6 +92,18 @@ impl DocumentRenderer {
             .iter()
             .find(|b| x >= b.x && x <= b.x + b.w && local >= b.y && local <= b.y + b.h)
             .map(|b| b.source);
+        // A little slack around the box, which is a small target.
+        let slack = 3.0 * options.scale;
+        let task = cached
+            .tasks
+            .iter()
+            .find(|t| {
+                x >= t.x - slack
+                    && x <= t.x + t.w + slack
+                    && local >= t.y - slack
+                    && local <= t.y + t.h + slack
+            })
+            .map(|t| t.block);
         let line = cached.lines.iter().min_by(|a, b| {
             distance(a, local)
                 .total_cmp(&distance(b, local))
@@ -84,7 +113,8 @@ impl DocumentRenderer {
         let offset = match (line, source) {
             (Some(line), _) => offset_at(line, x, local),
             (None, Some(source)) => source.start,
-            (None, None) => return None,
+            // A task item with no text is only its box.
+            (None, None) => doc.blocks.get(task? as usize)?.text.start,
         };
         let on_text = line.is_some_and(|line| {
             let slack = 2.0 * options.scale;
@@ -96,6 +126,7 @@ impl DocumentRenderer {
             link: None,
             footnote: None,
             details: None,
+            task,
             source,
             on_text,
         };

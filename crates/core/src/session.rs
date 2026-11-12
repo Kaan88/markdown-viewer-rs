@@ -164,6 +164,9 @@ pub struct Session {
     pub remote_images: bool,
     /// The reader's choice of page width, for every document.
     pub page_width: PageWidth,
+    /// Tick task boxes in any file without asking first. Off by default: the first tick in a
+    /// file then asks.
+    pub edit_tasks: bool,
 }
 
 impl Default for Session {
@@ -179,6 +182,7 @@ impl Default for Session {
             layout: String::new(),
             remote_images: false,
             page_width: PageWidth::default(),
+            edit_tasks: false,
         }
     }
 }
@@ -209,6 +213,7 @@ impl Session {
                 "layout" => s.layout = unescape(value),
                 "remote_images" => s.remote_images = value.trim() == "1",
                 "page_width" => s.page_width = PageWidth::from_name(value).unwrap_or_default(),
+                "edit_tasks" => s.edit_tasks = value.trim() == "1",
                 _ => {}
             }
         }
@@ -244,6 +249,7 @@ impl Session {
         line("layout", &escape(&self.layout));
         line("remote_images", if self.remote_images { "1" } else { "0" });
         line("page_width", self.page_width.name());
+        line("edit_tasks", if self.edit_tasks { "1" } else { "0" });
         out
     }
 

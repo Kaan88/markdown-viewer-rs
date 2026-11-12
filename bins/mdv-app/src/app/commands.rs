@@ -76,8 +76,18 @@ impl App {
                     let _ = self.ws.open_recent(&p);
                 }
             }
-            Hit::DlgButton(0) => self.close_dialog(),
-            Hit::DlgButton(_) => self.ws.clear_recents(),
+            Hit::DlgButton(n) => match self.ui.dialog.as_ref().map(|d| d.kind) {
+                Some(DialogKind::AllowEdit) => {
+                    self.close_dialog();
+                    self.ws.answer_edit(match n {
+                        1 => Some(false),
+                        2 => Some(true),
+                        _ => None,
+                    });
+                }
+                _ if n == 0 => self.close_dialog(),
+                _ => self.ws.clear_recents(),
+            },
             Hit::DlgOpen(i) => {
                 if let Some(p) = self.ws.recents().get(i).cloned()
                     && self.ws.open_recent(&p).is_ok()
@@ -130,6 +140,10 @@ impl App {
             }
             Act::PageWidth(width) => {
                 self.ws.set_page_width(width);
+            }
+            Act::EditAlways => {
+                let on = !self.ws.edit_always();
+                self.ws.set_edit_always(on);
             }
             Act::Edit(edit) => {
                 let f = &mut self.ui.find;

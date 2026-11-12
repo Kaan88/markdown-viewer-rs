@@ -1,5 +1,6 @@
 //! Text blocks: paragraphs, tight list text (`Plain`), headings, and the drawn task checkbox.
 
+use super::hit::TaskBox;
 use super::inline::ImageBox;
 use super::pager::{Pager, Txt, Wrap};
 use super::paint::Paint;
@@ -9,9 +10,16 @@ use parley::{Alignment, AlignmentOptions};
 
 impl<'a, 'b> Pager<'a, 'b> {
     /// A task-list box, drawn rather than typeset so it looks the same with any font stack.
-    fn draw_checkbox(&mut self, x: f32, baseline: f32, checked: bool) {
+    fn draw_checkbox(&mut self, block: u32, x: f32, baseline: f32, checked: bool) {
         let side = self.px(15.0);
         let top = baseline - self.px(12.0);
+        self.tasks.push(TaskBox {
+            x,
+            y: top,
+            w: side,
+            h: side,
+            block,
+        });
         let radius = self.px(3.0);
         if checked {
             self.paints.push(Paint::Rect {
@@ -165,7 +173,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             .next()
             .map_or(height * 0.78, |line| line.metrics().baseline);
         if let Some(checked) = task {
-            self.draw_checkbox(left, self.y + baseline, checked);
+            self.draw_checkbox(b, left, self.y + baseline, checked);
         }
         let size = txt.size;
         if !inline.text.trim().is_empty() || !inline.boxes.is_empty() {
@@ -207,7 +215,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             .next()
             .map_or(height * 0.78, |line| line.metrics().baseline);
         if let Some(checked) = task {
-            self.draw_checkbox(left, self.y + baseline, checked);
+            self.draw_checkbox(b, left, self.y + baseline, checked);
         }
         let size = txt.size;
         if !inline.text.trim().is_empty() || !inline.boxes.is_empty() {

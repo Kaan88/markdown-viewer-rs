@@ -89,7 +89,7 @@ denied:
 cd C:\Users\kaank\Desktop\mv
 $env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
 cargo build --release --workspace          # includes mdview.exe and mdview-engine.exe
-cargo test --release --workspace           # 2026-11-12: 361 passed, 0 failed, 6 ignored
+cargo test --release --workspace           # 2026-11-12: 368 passed, 0 failed, 6 ignored
 cargo fmt --all --check
 ```
 
@@ -259,6 +259,18 @@ Paste and Select all (`overlays::find_menu`, `Act::Edit`); `--menu find` shows i
 Explorer" on a tab did nothing useful because the slash of Explorer's `/select` switch was turned
 into a backslash with the path's; `platform::select_argument` now converts the path only. That fix
 has a test of the argument, and has not been watched opening an Explorer window.
+
+**Ticking task boxes (2026-11-12).** The first write the viewer makes to a document, asked for by
+the user. A click on a task box flips `[ ]`/`[x]` in the file. The first click in a file asks
+(`DialogKind::AllowEdit`: Cancel, Always allow, Change this file); "this file" lasts until the tab
+closes, "always" is `edit_tasks=1` in the session and a checked item in the main menu.
+`crates/core/src/tasks.rs` finds the box by its own scan of the file's bytes and writes only when
+the scan finds the same boxes in the same states as the page, then writes one byte in place; a
+file that differs is left alone and reloaded. UTF-16 and read-only files are refused. The page is
+re-read after the write with the reading position and open `<details>` kept. Not handled: a box
+the scan reads differently from the parser (the tick is refused with a message), raw HTML
+`<input>` boxes. `--dialog edit` shows the question in a shot. Everything else stays read-only;
+the editor is still a second project.
 
 ## 5. The renderer (`crates/render`)
 
@@ -447,7 +459,7 @@ writes an extension's default value. The last page offers (unchecked) to open
 | Engine | `mdview-engine.exe` 26 MB | |
 | Installer | 11 MB | 17 MB |
 
-Tests: `cargo test --release --workspace`: 361 passed, 0 failed, 6 ignored.
+Tests: `cargo test --release --workspace`: 368 passed, 0 failed, 6 ignored.
 
 Earlier, 2026-11-11, before estimated heights: a scroll frame in a maximized window with both
 panes, 150 frames, median 3.1 ms, p90 3.5, worst 4.2 (paint 1.2, compose 1.0, copy 0.8, OS

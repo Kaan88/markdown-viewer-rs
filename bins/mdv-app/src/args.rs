@@ -18,6 +18,7 @@ pub enum ShotDialog {
     About,
     Shortcuts,
     Recent,
+    Edit,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -114,6 +115,7 @@ impl Args {
                         Some("about") => Some(ShotDialog::About),
                         Some("shortcuts") => Some(ShotDialog::Shortcuts),
                         Some("recent") => Some(ShotDialog::Recent),
+                        Some("edit") => Some(ShotDialog::Edit),
                         _ => None,
                     }
                 }

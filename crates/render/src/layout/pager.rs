@@ -2,7 +2,7 @@
 //! the block tree, dispatches each block kind, builds parley layouts from [`Inline`] runs and
 //! emits their glyphs, chips, decorations and inline images.
 
-use super::hit::{LineGeom, SourceBox};
+use super::hit::{LineGeom, SourceBox, TaskBox};
 use super::inline::{ImageBox, Inline, RubyNote, Style};
 use super::paint::Paint;
 use super::store::{Found, ImageStore};
@@ -52,6 +52,7 @@ pub(super) struct Pager<'a, 'b> {
     pub(super) hits: Vec<LineGeom>,
     /// The formulas and diagrams of the block being laid out, kept like `hits`.
     pub(super) sources: Vec<SourceBox>,
+    pub(super) tasks: Vec<TaskBox>,
     /// Whether to keep hit geometry; a measuring pass does not need it.
     pub(super) record: bool,
     /// The measured y of each footnote entry, built by the height pass.
@@ -120,6 +121,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             blocks: Vec::new(),
             hits: Vec::new(),
             sources: Vec::new(),
+            tasks: Vec::new(),
             record,
             notes: Vec::new(),
             fonts,

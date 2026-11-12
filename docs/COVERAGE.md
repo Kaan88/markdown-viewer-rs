@@ -52,7 +52,7 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 | Images, remote | Supported | Fetched over WinHTTP by `crates/fetch` (GET only, no cookies or credentials, at most 5 redirects, never https to http), with a disk cache. Off until the reader allows them: a bar above the page counts the document's remote images and offers to load them for that document, and the "Always load remote images" setting loads them everywhere. A held-back image with a declared `width` and `height` keeps a grey box of that size; one without keeps its alt text |
 | `<picture>` with light and dark sources | Supported | The source for the current theme is drawn. A `<source>` counts only as a direct child of a `<picture>`, only for its first `<img>`, and only while that picture's block is open; the first matching source wins. A picture that closes without an image leaves nothing behind |
 | Ordered, unordered, nested lists | Supported | |
-| Task lists | Supported | Read-only check boxes |
+| Task lists | Supported | A click on a box flips it in the file, after asking once per file (or never, with the menu setting); the write is the one mark between the brackets |
 | Backslash escapes, entities | Supported | |
 | Hard and soft line breaks | Supported | |
 | Hidden comments `<!-- -->` | Supported | |

@@ -526,8 +526,12 @@ impl App {
     }
 
     pub(super) fn handle_click(&mut self, click: Click) {
-        if let Click::Link(outcome) = click {
-            self.link_outcome(outcome);
+        match click {
+            Click::Link(outcome) => self.link_outcome(outcome),
+            Click::Task(crate::workspace::TaskClick::Ask) => {
+                self.open_dialog(DialogKind::AllowEdit);
+            }
+            _ => {}
         }
     }
 
