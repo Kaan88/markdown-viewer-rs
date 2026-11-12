@@ -10,6 +10,7 @@ pub enum ShotMenu {
     Recent,
     Tab,
     Page,
+    Find,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,6 +105,7 @@ impl Args {
                         Some("recent") => Some(ShotMenu::Recent),
                         Some("tab") => Some(ShotMenu::Tab),
                         Some("page") => Some(ShotMenu::Page),
+                        Some("find") => Some(ShotMenu::Find),
                         _ => None,
                     }
                 }

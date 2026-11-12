@@ -1093,6 +1093,12 @@ fn shot(mut app: App, path: &Path) -> i32 {
             app.ui.mouse = (page.x + page.w * 0.3, page.y + 160.0);
             app.right_press();
         }
+        Some(ShotMenu::Find) => {
+            if let Some(r) = app.hit_rect(Hit::Find) {
+                app.ui.mouse = (r.x + 60.0, r.cy());
+                app.right_press();
+            }
+        }
         None => {}
     }
     match app.args.dialog {

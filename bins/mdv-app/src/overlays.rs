@@ -7,7 +7,7 @@ use crate::keys;
 use crate::menu::{Item, Menu};
 use crate::panes::{draw_scrollbar, scrollbar};
 use crate::theme::Palette;
-use crate::ui::{Act, Dialog, DialogKind, Hit, Scroller, Ui};
+use crate::ui::{Act, Dialog, DialogKind, EditAct, Hit, Scroller, Ui};
 use crate::workspace::{PageContext, Workspace};
 use mdview_core::commands::{CommandId as C, shortcut_help, strings};
 use mdview_core::session::PageWidth;
@@ -149,6 +149,29 @@ pub fn page_menu(ctx: &PageContext, x: f32, y: f32) -> Menu<Act> {
     );
     items.push(cmd(C::Find, "Find…", glyph::SEARCH).sep());
     items.push(cmd(C::Refresh, "Reload", glyph::RELOAD));
+    Menu::new(items, x, y, false)
+}
+
+/// The find box's menu: the editing commands a text box has everywhere.
+pub fn find_menu(has_text: bool, has_selection: bool, x: f32, y: f32) -> Menu<Act> {
+    let items = vec![
+        Item::new(Act::Edit(EditAct::Cut), "Cut")
+            .hint("Ctrl+X")
+            .icon(glyph::CUT)
+            .enabled(has_selection),
+        Item::new(Act::Edit(EditAct::Copy), "Copy")
+            .hint("Ctrl+C")
+            .icon(glyph::COPY)
+            .enabled(has_selection),
+        Item::new(Act::Edit(EditAct::Paste), "Paste")
+            .hint("Ctrl+V")
+            .icon(glyph::PASTE),
+        Item::new(Act::Edit(EditAct::SelectAll), "Select all")
+            .hint("Ctrl+A")
+            .icon(glyph::SELECT_ALL)
+            .enabled(has_text)
+            .sep(),
+    ];
     Menu::new(items, x, y, false)
 }
 

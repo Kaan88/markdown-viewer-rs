@@ -424,6 +424,21 @@ impl App {
                     menu: overlays::page_menu(&ctx, x + 2.0, y + 2.0),
                 });
             }
+            Some(Hit::Find | Hit::FindClear) => {
+                // The box takes the focus and keeps its selection, so Cut and Copy act on it.
+                self.ui.find_focused = true;
+                self.caret_reset();
+                let find = &self.ui.find;
+                self.ui.popup = Some(Popup {
+                    kind: PopupKind::Find,
+                    menu: overlays::find_menu(
+                        !find.is_empty(),
+                        find.has_selection(),
+                        x + 2.0,
+                        y + 2.0,
+                    ),
+                });
+            }
             _ => {}
         }
         self.redraw();

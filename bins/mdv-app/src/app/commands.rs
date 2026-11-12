@@ -2,6 +2,7 @@
 //! dialogs, plus wakes from other threads and the loop's timers.
 
 use super::*;
+use crate::ui::EditAct;
 use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
 
@@ -129,6 +130,36 @@ impl App {
             }
             Act::PageWidth(width) => {
                 self.ws.set_page_width(width);
+            }
+            Act::Edit(edit) => {
+                let f = &mut self.ui.find;
+                let changed = match edit {
+                    EditAct::Cut => {
+                        f.has_selection()
+                            && platform::set_clipboard_text(f.selected_text())
+                            && f.delete_selection()
+                    }
+                    EditAct::Copy => {
+                        if f.has_selection() {
+                            platform::set_clipboard_text(f.selected_text());
+                        }
+                        false
+                    }
+                    EditAct::Paste => match platform::clipboard_text() {
+                        // A search is one line: a pasted line break would never match.
+                        Some(text) => f.insert(text.lines().next().unwrap_or("")),
+                        None => false,
+                    },
+                    EditAct::SelectAll => {
+                        f.select_all();
+                        false
+                    }
+                };
+                self.ui.find_focused = true;
+                if changed {
+                    self.find_changed();
+                }
+                self.caret_reset();
             }
         }
         self.redraw();

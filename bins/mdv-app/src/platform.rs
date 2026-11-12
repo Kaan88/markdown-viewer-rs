@@ -167,15 +167,19 @@ mod imp {
 
     pub fn reveal_in_file_manager(path: &Path) -> bool {
         use std::os::windows::process::CommandExt;
-        let mut arg = std::ffi::OsString::from("/select,\"");
-        arg.push(path.as_os_str());
-        arg.push("\"");
-        // Explorer wants backslashes; raw_arg avoids Rust's own quoting.
-        let arg = arg.to_string_lossy().replace('/', "\\");
+        // raw_arg avoids Rust's own quoting, which Explorer does not understand.
         std::process::Command::new("explorer.exe")
-            .raw_arg(arg)
+            .raw_arg(select_argument(path))
             .spawn()
             .is_ok()
+    }
+
+    /// Explorer's `/select,"<path>"` argument. Explorer wants backslashes in the path, and the
+    /// switch itself keeps its slash: with `\select` Explorer ignores the argument and opens
+    /// its default folder.
+    pub(super) fn select_argument(path: &Path) -> String {
+        let path = path.to_string_lossy().replace('/', "\\");
+        format!("/select,\"{path}\"")
     }
 
     fn reg_dword(subkey: &str, name: &str) -> Option<u32> {
@@ -421,7 +425,7 @@ pub fn style_window(hwnd: isize, dark: bool) {
 }
 
 #[cfg(all(test, windows))]
-mod tests {
+mod explorer_tests {
     use super::*;
 
     #[test]
@@ -445,5 +449,18 @@ mod tests {
         let order = subpixel_order();
         eprintln!("system subpixel order: {order:?}");
         assert_eq!(order, subpixel_order());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn explorer_select_keeps_its_switch_and_gets_backslashes() {
+        assert_eq!(
+            super::imp::select_argument(Path::new("C:/docs/a b/read me.md")),
+            "/select,\"C:\\docs\\a b\\read me.md\""
+        );
     }
 }

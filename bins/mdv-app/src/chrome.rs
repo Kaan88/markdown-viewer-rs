@@ -45,6 +45,8 @@ pub mod glyph {
     pub const WARN: &str = "\u{E7BA}";
     pub const IMAGE: &str = "\u{E8B9}";
     pub const COPY: &str = "\u{E8C8}";
+    pub const CUT: &str = "\u{E8C6}";
+    pub const PASTE: &str = "\u{E77F}";
     pub const LINK: &str = "\u{E71B}";
     pub const SELECT_ALL: &str = "\u{E8B3}";
     pub const FULLSCREEN: &str = "\u{E740}";

@@ -174,6 +174,16 @@ pub enum Act {
     RemoteAlways,
     /// Choose how wide the page's column of text may grow.
     PageWidth(PageWidth),
+    /// An editing command for the find box.
+    Edit(EditAct),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditAct {
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -182,6 +192,8 @@ pub enum PopupKind {
     Recent,
     Tab(usize),
     Page,
+    /// The find box's editing menu.
+    Find,
 }
 
 pub struct Popup {

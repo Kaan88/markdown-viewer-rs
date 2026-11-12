@@ -89,7 +89,7 @@ denied:
 cd C:\Users\kaank\Desktop\mv
 $env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
 cargo build --release --workspace          # includes mdview.exe and mdview-engine.exe
-cargo test --release --workspace           # 2026-11-12: 359 passed, 0 failed, 6 ignored
+cargo test --release --workspace           # 2026-11-12: 361 passed, 0 failed, 6 ignored
 cargo fmt --all --check
 ```
 
@@ -253,6 +253,12 @@ one factor, which made short columns narrower than their longest word so text ra
 column. Each column keeps its longest word (parley's min-content width) and the room left goes to
 the columns in proportion to what they would still wrap; when even the longest words do not fit,
 the columns shrink together and words break inside their cells (`break_words` in the pager).
+
+**Find box menu and Show in Explorer (2026-11-12).** A right click in the find box opens Cut, Copy,
+Paste and Select all (`overlays::find_menu`, `Act::Edit`); `--menu find` shows it in a shot. "Show in
+Explorer" on a tab did nothing useful because the slash of Explorer's `/select` switch was turned
+into a backslash with the path's; `platform::select_argument` now converts the path only. That fix
+has a test of the argument, and has not been watched opening an Explorer window.
 
 ## 5. The renderer (`crates/render`)
 
@@ -441,7 +447,7 @@ writes an extension's default value. The last page offers (unchecked) to open
 | Engine | `mdview-engine.exe` 26 MB | |
 | Installer | 11 MB | 17 MB |
 
-Tests: `cargo test --release --workspace`: 359 passed, 0 failed, 6 ignored.
+Tests: `cargo test --release --workspace`: 361 passed, 0 failed, 6 ignored.
 
 Earlier, 2026-11-11, before estimated heights: a scroll frame in a maximized window with both
 panes, 150 frames, median 3.1 ms, p90 3.5, worst 4.2 (paint 1.2, compose 1.0, copy 0.8, OS

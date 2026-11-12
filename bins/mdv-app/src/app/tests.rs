@@ -112,6 +112,23 @@ fn the_page_width_button_steps_through_the_widths() {
 }
 
 #[test]
+fn right_click_in_the_find_box_opens_its_edit_menu() {
+    use crate::ui::EditAct;
+    let mut a = app(&["linked.md"]);
+    click(&mut a, Hit::Find);
+    type_text(&mut a, "abc");
+    let r = rect(&a, Hit::Find);
+    a.pointer_moved(r.cx(), r.cy());
+    a.right_press();
+    a.compose();
+    assert_eq!(a.ui.popup_kind(), Some(PopupKind::Find));
+    assert!(a.ui.find_focused);
+    a.act(Act::Edit(EditAct::SelectAll));
+    assert_eq!(a.ui.find.selected_text(), "abc");
+    assert!(a.ui.find_focused);
+}
+
+#[test]
 fn splitter_drag_resizes_within_limits() {
     let mut a = app(&["linked.md"]);
     let w0 = a.areas.files.unwrap().w;
