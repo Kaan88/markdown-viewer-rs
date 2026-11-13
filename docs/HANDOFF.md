@@ -874,6 +874,35 @@ testing on other machines (there is one PC). The editor is a second project (PLA
 
 ## 14. History
 
+- **2026-11-13, 0.2.3 (not published).** Menus taller than the window scroll and stay below the
+  title row. Found in a real window 665 to 760 logical px tall: the main menu rose to the top edge
+  over the caption buttons and its last rows ("Keyboard shortcuts", "About", "Exit") were cut off
+  (the scrollbar seen there was the page's); nothing in the menu scrolled and the wheel closed it.
+  Shared (branch `fix/tall-menus` of `markdown-shared-rs`, head `f49edd3`, pinned in
+  `bins/mdv-app`, `crates/core`, `crates/render`; the shared `main` was not moved):
+  `Menu::place_in` / `draw_in` take the area a menu may use; a menu pushed up to fit stops at the
+  area's top, one taller than the area is as tall as fits and scrolls (`scroll_by`, `step` keeps the
+  lit row in view and wraps as before, a thin scrollbar, hits on the placed rows), `row_rect`,
+  `scroll`, `scroll_to_end`. The viewer: `app.rs` `menu_room(title, w, h)` for both the
+  pre-placement and the draw (they must use the same room) and the scroll in the overlay signature;
+  `app/input.rs` `wheel` scrolls the menu under the pointer when it is taller than its room (else
+  closes the menus as before); `open_submenu` subtracts the parent's scroll; `--menu main-end` and
+  two shots, `menu-tall-main` and `menu-tall-main-end` (1000x520), in `tests/shots.sh` (now 57;
+  `MDVIEW_EXE` overrides the exe, for a build outside `targetelease`). **The installer's last page
+  no longer asks about default apps** (changed in `fc6e825`, after 0.2.2). **Shots:** 55 before and
+  after (both with `mdview-engine.exe` beside the exe: without it the math, diagrams and images shots differ for that reason alone): 49 byte-identical; six differ (`hover-menu`, `menu-cascade-dark`, `menu-cascade-light`,
+  `menu-main-dark`, `menu-main-light`, `scale-150-menu`), and only in the menu's area: at the
+  default 1280x800 the main menu (792 px with Exit) used to fill the window from y 4 to 796, over
+  the caption buttons, and now starts under the title row and scrolls by about 12 px. That is the
+  fix itself, not a regression; the baseline could not stay identical and keep the title row clear.
+  **Ran:** build, `cargo test --release --workspace` (371 passed, as before: the new logic is tested in the shared crate), clippy `-D warnings`, fmt; a real window at the
+  display's scale 1.0, 1000x560: the main menu below the title row, the wheel scrolled it to Exit,
+  "About mdview" opened its dialog, Up from nothing lit Exit with the menu scrolled, Down wrapped to
+  the first row, Right on "Open recent" opened its submenu inside the window. First frame (`MDVIEW_STARTUP_TRACE=1`, `--no-session`, showcase, dev-style non-static build): drawn
+  and presented hidden at about 60 ms, window shown at about 70 ms (three runs). **Not run:** another
+  display scale, a menu taller than the window opened by a right click, a scrollbar drag, the
+  installer on another PC, an update by the app itself.
+
 - **2026-11-13, clean-up (no release).** Headless: the shared pin moved to `24865c5` (clippy
   clean, and `menu::row_span`, which replaced the three mirrored menu constants in
   `overlays::menu_row_offset`). `cargo clippy --release --workspace --all-targets -- -D warnings`

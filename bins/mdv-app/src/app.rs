@@ -497,9 +497,10 @@ impl App {
                 bubbles.push(Bubble::tip(&mut p, &tip.text, tip.anchor, w, h));
             }
             if let Some(popup) = self.ui.popup.as_mut() {
-                popup.menu.place(&mut p, w, h);
+                let room = menu_room(self.areas.title, w, h);
+                popup.menu.place_in(&mut p, room);
                 if let Some(s) = popup.sub.as_mut() {
-                    s.place(&mut p, w, h);
+                    s.place_in(&mut p, room);
                 }
             }
         }
@@ -529,9 +530,11 @@ impl App {
             self.ui.popup.as_ref().map(|p| {
                 (
                     p.kind,
-                    p.menu.hover,
+                    (p.menu.hover, p.menu.scroll().to_bits()),
                     p.menu.items.len(),
-                    p.sub.as_ref().map(|s| (s.hover, s.items.len())),
+                    p.sub
+                        .as_ref()
+                        .map(|s| (s.hover, s.items.len(), s.scroll().to_bits())),
                 )
             }),
             self.ui.dialog.as_ref().map(|d| {
@@ -658,9 +661,10 @@ impl App {
                     overlays::draw_dialog(&mut c, &self.ws, d, w, h, self.ui.dlg_hover_row);
                 }
                 if let Some(popup) = self.ui.popup.as_mut() {
-                    popup.menu.draw(c.p, &pal, w, h);
+                    let room = menu_room(self.areas.title, w, h);
+                    popup.menu.draw_in(c.p, &pal, room);
                     if let Some(s) = popup.sub.as_mut() {
-                        s.draw(c.p, &pal, w, h);
+                        s.draw_in(c.p, &pal, room);
                     }
                 }
                 for b in &bubbles {
@@ -916,6 +920,13 @@ impl App {
             }
         }
     }
+}
+
+/// The part of the window a popup menu may use: all of it below the title row, so that the
+/// caption buttons stay uncovered; a menu taller than this scrolls.
+fn menu_room(title: Rect, w: f32, h: f32) -> Rect {
+    let top = title.bottom();
+    Rect::new(0.0, top, w, h - top)
 }
 
 fn overlaps(a: Rect, b: Rect) -> bool {
@@ -1186,6 +1197,12 @@ fn shot(mut app: App, path: &Path) -> i32 {
     let page = app.areas.page;
     match app.args.menu {
         Some(ShotMenu::Main) => app.open_popup(PopupKind::Main),
+        Some(ShotMenu::MainEnd) => {
+            app.open_popup(PopupKind::Main);
+            if let Some(p) = app.ui.popup.as_mut() {
+                p.menu.scroll_to_end();
+            }
+        }
         Some(ShotMenu::Recent) => app.open_popup(PopupKind::Recent),
         Some(ShotMenu::Cascade) => {
             app.open_popup(PopupKind::Main);

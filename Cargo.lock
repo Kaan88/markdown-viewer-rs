@@ -1640,7 +1640,7 @@ dependencies = [
 [[package]]
 name = "mdshared-app"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=24865c593279c977d610ba10c4df4e0ada9a371b#24865c593279c977d610ba10c4df4e0ada9a371b"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=f49edd3b8bf84de86440793b5fb765a9356203b5#f49edd3b8bf84de86440793b5fb765a9356203b5"
 dependencies = [
  "notify",
 ]
@@ -1648,7 +1648,7 @@ dependencies = [
 [[package]]
 name = "mdshared-fetch"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=24865c593279c977d610ba10c4df4e0ada9a371b#24865c593279c977d610ba10c4df4e0ada9a371b"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=f49edd3b8bf84de86440793b5fb765a9356203b5#f49edd3b8bf84de86440793b5fb765a9356203b5"
 dependencies = [
  "windows-sys 0.59.0",
 ]
@@ -1656,7 +1656,7 @@ dependencies = [
 [[package]]
 name = "mdshared-highlight"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=24865c593279c977d610ba10c4df4e0ada9a371b#24865c593279c977d610ba10c4df4e0ada9a371b"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=f49edd3b8bf84de86440793b5fb765a9356203b5#f49edd3b8bf84de86440793b5fb765a9356203b5"
 dependencies = [
  "syntect",
 ]
@@ -1664,7 +1664,7 @@ dependencies = [
 [[package]]
 name = "mdshared-text"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=24865c593279c977d610ba10c4df4e0ada9a371b#24865c593279c977d610ba10c4df4e0ada9a371b"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=f49edd3b8bf84de86440793b5fb765a9356203b5#f49edd3b8bf84de86440793b5fb765a9356203b5"
 dependencies = [
  "parley",
  "png",
@@ -1674,7 +1674,7 @@ dependencies = [
 [[package]]
 name = "mdshared-ui"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=24865c593279c977d610ba10c4df4e0ada9a371b#24865c593279c977d610ba10c4df4e0ada9a371b"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=f49edd3b8bf84de86440793b5fb765a9356203b5#f49edd3b8bf84de86440793b5fb765a9356203b5"
 dependencies = [
  "arboard",
  "mdshared-app",
@@ -1688,7 +1688,7 @@ dependencies = [
 
 [[package]]
 name = "mdv-bench"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "mdview-core",
  "mdview-render",
@@ -1696,7 +1696,7 @@ dependencies = [
 
 [[package]]
 name = "mdview"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "bytemuck",
  "mdshared-app",
@@ -1712,7 +1712,7 @@ dependencies = [
 
 [[package]]
 name = "mdview-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "mdshared-app",
  "memchr",
@@ -1724,7 +1724,7 @@ dependencies = [
 
 [[package]]
 name = "mdview-engine"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "mdview-engine-proto",
  "merman",
@@ -1737,11 +1737,11 @@ dependencies = [
 
 [[package]]
 name = "mdview-engine-proto"
-version = "0.2.2"
+version = "0.2.3"
 
 [[package]]
 name = "mdview-render"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "gif",
  "image-webp",

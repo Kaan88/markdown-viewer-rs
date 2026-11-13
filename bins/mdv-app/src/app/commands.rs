@@ -308,7 +308,7 @@ impl App {
             return;
         };
         let parent = p.menu.rect();
-        let row_y = parent.y + overlays::menu_row_offset(&p.menu.items, i);
+        let row_y = parent.y + overlays::menu_row_offset(&p.menu.items, i) - p.menu.scroll();
         // Beside the item, on the right unless the window has no room there.
         let room = w - parent.right();
         let left = room < 420.0 && parent.x > room;

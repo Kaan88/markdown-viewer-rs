@@ -7,6 +7,8 @@ use std::path::PathBuf;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShotMenu {
     Main,
+    /// The main menu scrolled to its last row (visible only when the window is too short for it).
+    MainEnd,
     Recent,
     /// The main menu with its Open recent submenu beside it.
     Cascade,
@@ -112,6 +114,7 @@ impl Args {
                 "--menu" => {
                     out.menu = match value(&a).as_deref() {
                         Some("main") => Some(ShotMenu::Main),
+                        Some("main-end") => Some(ShotMenu::MainEnd),
                         Some("recent") => Some(ShotMenu::Recent),
                         Some("cascade") => Some(ShotMenu::Cascade),
                         Some("tab") => Some(ShotMenu::Tab),

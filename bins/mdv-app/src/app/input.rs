@@ -505,9 +505,31 @@ impl App {
             MouseScrollDelta::LineDelta(_, dy) => (dy, None),
             MouseScrollDelta::PixelDelta(p) => (p.y as f32 / (48.0 * self.scale), Some(p.y as f32)),
         };
-        if self.ui.popup.is_some() {
-            self.ui.popup = None;
-            self.redraw();
+        if let Some(p) = self.ui.popup.as_mut() {
+            // Over a menu taller than its room the wheel scrolls it; anywhere else, and over a
+            // menu that fits, it closes the menus, as it always did.
+            let dy = match pixels {
+                Some(py) => -py / self.scale,
+                None => -notches * PANE_WHEEL,
+            };
+            let over_sub = p.sub.as_ref().is_some_and(|s| s.contains(x, y));
+            let menu = match p.sub.as_mut() {
+                Some(s) if over_sub => Some(s),
+                _ => Some(&mut p.menu).filter(|m| m.contains(x, y)),
+            };
+            match menu {
+                Some(m) if m.scrolls() => {
+                    if m.scroll_by(dy) {
+                        let hover = m.pointer(x, y);
+                        self.wants_frame |= hover;
+                        self.redraw();
+                    }
+                }
+                _ => {
+                    self.ui.popup = None;
+                    self.redraw();
+                }
+            }
             return;
         }
         if self.ui.dialog.is_some() {

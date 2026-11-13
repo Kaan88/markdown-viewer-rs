@@ -16,7 +16,7 @@ set -euo pipefail
 out="${1:?usage: tests/shots.sh <output-dir>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
-exe="target/release/mdview.exe"
+exe="${MDVIEW_EXE:-target/release/mdview.exe}"
 [ -x "$exe" ] || exe="target/release/mdview"
 fx="fixtures"
 mkdir -p "$out"
@@ -101,5 +101,9 @@ shot hover-menu --light --menu main --hover 1100,120 "$fx/showcase.md"
 shot update-available --light --update-bar available "$fx/showcase.md"
 shot update-installing --dark --update-bar installing "$fx/showcase.md"
 shot update-installed --dark --update-bar installed
+
+# A menu taller than its window: kept below the title row, scrolling, and scrolled to its end.
+shot menu-tall-main --light --size 1000x520 --menu main
+shot menu-tall-main-end --light --size 1000x520 --menu main-end
 
 ls "$out" | wc -l
