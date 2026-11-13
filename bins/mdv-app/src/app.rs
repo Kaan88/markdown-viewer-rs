@@ -134,6 +134,9 @@ struct App {
     /// Device px.
     size: (u32, u32),
     maximized: bool,
+    /// The compositor's drop shadow (Linux, KWin on Wayland); `None` everywhere else. Dropping it
+    /// would remove the shadow, so it lives as long as the window.
+    shadow: Option<mdshared_ui::shadow::Shadow>,
     areas: Areas,
     hits: [Vec<(Hit, Rect)>; 5],
     overlay_hits: Vec<(Hit, Rect)>,
@@ -201,6 +204,7 @@ impl App {
             scale: 1.0,
             size: (1, 1),
             maximized: false,
+            shadow: None,
             areas: Areas::default(),
             hits: Default::default(),
             overlay_hits: Vec::new(),
@@ -932,6 +936,16 @@ impl App {
         (vr, (x - vr.x) * self.scale, (y - vr.y) * self.scale)
     }
 
+    /// Hands the compositor the shadow for the window's scale, focus and maximised state. Cheap:
+    /// it returns at once when none of them changed, and does nothing without a shadow.
+    /// `focused` is the new focus when the event says it, otherwise the window's own.
+    fn update_shadow(&mut self, focused: Option<bool>) {
+        if let (Some(shadow), Some(w)) = (self.shadow.as_mut(), self.window.as_ref()) {
+            let active = focused.unwrap_or_else(|| w.has_focus());
+            shadow.update(w.scale_factor(), active, w.is_maximized());
+        }
+    }
+
     fn set_cursor(&mut self, c: CursorIcon) {
         if c != self.cursor {
             self.cursor = c;
@@ -1020,6 +1034,7 @@ impl ApplicationHandler<Wake> for App {
         let size = window.inner_size();
         self.size = (size.width.max(1), size.height.max(1));
         self.maximized = window.is_maximized();
+        self.shadow = mdshared_ui::shadow::Shadow::attach(&window);
         #[cfg(windows)]
         style(&window, self.pal.dark);
         let context = softbuffer::Context::new(window.clone()).expect("display");
@@ -1077,12 +1092,14 @@ impl ApplicationHandler<Wake> for App {
                         });
                     }
                     self.maximized = max;
+                    self.update_shadow(None);
                 }
                 self.size_save_due = Some(Instant::now() + SIZE_SAVE_DELAY);
                 self.redraw();
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.scale = scale_factor as f32;
+                self.update_shadow(None);
                 self.full = true;
                 self.redraw();
             }
@@ -1096,6 +1113,7 @@ impl ApplicationHandler<Wake> for App {
                 self.occluded = occluded;
             }
             WindowEvent::Focused(focused) => {
+                self.update_shadow(Some(focused));
                 if focused {
                     // The one place the system's "animation effects" setting is read again.
                     self.ws.set_system_animations(platform::shows_animations());
