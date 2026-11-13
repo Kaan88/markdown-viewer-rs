@@ -30,8 +30,10 @@ fn cmd(id: C, label: &str, icon: &'static str) -> Item<Act> {
 /// The "⋯" menu: everything the bar does not show, in the Qt shell's order.
 pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
     let has_tab = ws.active().is_some();
-    let width = |choice: PageWidth, label: &str| {
-        Item::new(Act::PageWidth(choice), label).checked(ws.page_width() == choice)
+    let width = |choice: PageWidth, label: &str, icon: &'static str| {
+        Item::new(Act::PageWidth(choice), label)
+            .icon(icon)
+            .checked(ws.page_width() == choice)
     };
     let mut items = vec![
         cmd(C::OpenFiles, "Open files…", glyph::OPEN),
@@ -40,38 +42,45 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
             .icon(glyph::RECENT)
             .hint("›")
             .enabled(!ws.recents().is_empty()),
-        cmd(C::ManageRecent, "Manage recent files…", ""),
+        cmd(C::ManageRecent, "Manage recent files…", glyph::SLIDERS),
         cmd(C::Refresh, "Reload", glyph::RELOAD)
             .sep()
             .enabled(has_tab),
         cmd(C::CloseTab, "Close tab", glyph::CLOSE).enabled(has_tab),
-        cmd(C::CloseAllTabs, "Close all tabs", "").enabled(has_tab),
-        cmd(C::ZoomIn, "Zoom in", glyph::PLUS).sep(),
-        cmd(C::ZoomOut, "Zoom out", glyph::MINUS),
+        cmd(C::CloseAllTabs, "Close all tabs", glyph::CLOSE_ALL).enabled(has_tab),
+        cmd(C::ZoomIn, "Zoom in", glyph::ZOOM).sep(),
+        cmd(C::ZoomOut, "Zoom out", glyph::ZOOM_OUT),
         Item::new(
             Act::Cmd(C::ZoomReset),
             format!("Reset zoom ({}%)", ws.zoom()),
         )
         .hint(keys::hint(C::ZoomReset))
-        .icon(glyph::ZOOM),
-        cmd(C::ToggleFiles, "Files pane", "")
+        .icon(glyph::ZOOM_RESET),
+        cmd(C::ToggleFiles, "Files pane", glyph::SIDEBAR)
             .sep()
             .checked(ui.panes.files && !ui.focus_mode),
-        cmd(C::ToggleOutline, "Outline pane", "").checked(ui.panes.outline && !ui.focus_mode),
+        cmd(C::ToggleOutline, "Outline pane", glyph::OUTLINE)
+            .checked(ui.panes.outline && !ui.focus_mode),
         cmd(C::FocusMode, "Focus reading mode", glyph::FULLSCREEN).checked(ui.focus_mode),
-        Item::new(Act::RemoteAlways, "Always load remote images").checked(ws.remote_always()),
-        Item::new(Act::EditAlways, "Tick task boxes without asking").checked(ws.edit_always()),
-        Item::new(Act::Animations, "Play animated images").checked(ws.animations()),
-        width(PageWidth::Narrow, "Narrow page").sep(),
-        width(PageWidth::Wide, "Wide page"),
-        width(PageWidth::Full, "Full-width page"),
+        Item::new(Act::RemoteAlways, "Always load remote images")
+            .icon(glyph::GLOBE)
+            .checked(ws.remote_always()),
+        Item::new(Act::EditAlways, "Tick task boxes without asking")
+            .icon(glyph::TASK)
+            .checked(ws.edit_always()),
+        Item::new(Act::Animations, "Play animated images")
+            .icon(glyph::ANIMATION)
+            .checked(ws.animations()),
+        width(PageWidth::Narrow, "Narrow page", glyph::PAGE_NARROW).sep(),
+        width(PageWidth::Wide, "Wide page", glyph::PAGE_WIDE),
+        width(PageWidth::Full, "Full-width page", glyph::PAGE_FULL),
         cmd(C::ShowShortcuts, "Keyboard shortcuts", glyph::KEYBOARD).sep(),
     ];
     if platform::can_offer_default_app() {
         items.push(cmd(
             C::MakeDefault,
             "Make mdview the default for Markdown files",
-            "",
+            glyph::CHECK,
         ));
     }
     items.extend([
@@ -110,7 +119,7 @@ pub fn recent_menu(ws: &Workspace, x: f32, y: f32, align_right: bool) -> Menu<Ac
     let any = !ws.recents().is_empty();
     items.push(
         Item::new(Act::Cmd(C::ManageRecent), "Manage recent files…")
-            .icon(glyph::RECENT)
+            .icon(glyph::SLIDERS)
             .sep(),
     );
     items.push(
@@ -125,8 +134,10 @@ pub fn tab_menu(ws: &Workspace, index: usize, x: f32, y: f32) -> Menu<Act> {
     let many = ws.tab_count() > 1;
     let items = vec![
         Item::new(Act::TabCmd(C::CloseTab, index), "Close tab").icon(glyph::CLOSE),
-        Item::new(Act::TabCmd(C::CloseOtherTabs, index), "Close other tabs").enabled(many),
-        Item::new(Act::TabCmd(C::CloseAllTabs, index), "Close all tabs"),
+        Item::new(Act::TabCmd(C::CloseOtherTabs, index), "Close other tabs")
+            .icon(glyph::CLOSE_OTHERS)
+            .enabled(many),
+        Item::new(Act::TabCmd(C::CloseAllTabs, index), "Close all tabs").icon(glyph::CLOSE_ALL),
         Item::new(Act::TabCmd(C::CopyFilePath, index), "Copy file path")
             .icon(glyph::COPY)
             .sep(),
