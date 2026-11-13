@@ -101,7 +101,7 @@ To change shared code: edit it there, push, and move the `rev` here. The move wa
 7,457,280 bytes. First-frame time and memory were re-measured on 2026-11-13 (section 9) and are
 unchanged. The user has not run the app since the move. Tests moved with the code: after the seven
 features of 2026-11-13 this workspace runs 366 (4 ignored) and the shared repository 156
-(3 ignored). The pinned shared commit is `b74e8cb`.
+(3 ignored). The pinned shared commit is `870d620` (2026-11-13: the icons are the shared crate's own drawings, the same on every system; `mdview.exe` is 8,241,664 bytes with it; one menu shot was looked at, the user has not seen it in a window, and the no-pixel-change baselines need rendering again).
 
 `target/` is git-ignored. Helper scripts that once lived there (`vm.py`, `seed-lock.py`,
 `cap.ps1`) are not committed; sections 9 and 12 say what they did.
