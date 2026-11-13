@@ -7,7 +7,6 @@ use crate::menu::Menu;
 use crate::textfield::TextField;
 use crate::tree::{FileTree, new_tree};
 use mdview_core::commands::CommandId;
-use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -176,16 +175,8 @@ pub enum Act {
     CopySource(SourceKind, String),
     Copy,
     SelectAll,
-    /// Toggle loading remote images in every document.
-    RemoteAlways,
-    /// Choose how wide the page's column of text may grow.
-    PageWidth(PageWidth),
     /// An editing command for the find box.
     Edit(EditAct),
-    /// Toggle ticking task boxes in every file without asking.
-    EditAlways,
-    /// Toggle playing animated images.
-    Animations,
 }
 
 impl Act {
@@ -345,6 +336,13 @@ impl Panes {
 }
 
 pub struct Ui {
+    /// The command palette, while open. Built when it opens, dropped when it closes.
+    pub palette: Option<crate::palette::PaletteState>,
+    /// The settings dialog, while open.
+    pub settings: Option<mdshared_ui::settings::Form>,
+    /// Raised by every event the palette or the settings dialog handles, so the overlay signature
+    /// changes and the frame is drawn again (neither says what changed inside).
+    pub overlay_tick: u64,
     pub panes: Panes,
     pub focus_mode: bool,
     pub tree: FileTree,
@@ -376,6 +374,9 @@ pub struct Ui {
 impl Ui {
     pub fn new() -> Ui {
         Ui {
+            palette: None,
+            settings: None,
+            overlay_tick: 0,
             panes: Panes {
                 files: true,
                 outline: true,
@@ -407,6 +408,11 @@ impl Ui {
             last_press: None,
             autoscroll_due: None,
         }
+    }
+
+    /// The palette or the settings dialog is open: it takes every key, pointer and wheel event.
+    pub fn modal(&self) -> bool {
+        self.palette.is_some() || self.settings.is_some()
     }
 
     pub fn popup_kind(&self) -> Option<PopupKind> {

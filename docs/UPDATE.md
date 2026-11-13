@@ -17,8 +17,8 @@ same day. See "What has run" at the end.
   starts the next time you open mdview." The running window stays on the old version.
 - **About mdview** holds the controls: **Check for updates** (looks now and always answers: the bar, "mdview x is the newest version." or "Could not look for a
   newer version."), which reads **Update to 0.2.0** when a version was found and its bar was
-  closed; and **Check at launch: on/off**. They are in About and not in the main menu because two
-  more rows did not fit the menu in the default 800 px window.
+  closed; and **Check at launch: on/off**. They are in About, and the same two are in **Settings**
+  (**Check for updates at launch** and **Check now**); they are not in the main menu.
 
 Settings (session file): `check_updates=0|1` (default 1) and `update_checked=<seconds since 1970>`.
 

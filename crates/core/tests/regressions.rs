@@ -1098,9 +1098,9 @@ fn command_table_matches_the_inventory() {
         [Shortcut::Keys("Ctrl+Shift+2")]
     );
     assert_eq!(keys(CommandId::FocusMode), [Shortcut::Keys("Ctrl+Shift+F")]);
-    assert_eq!(commands::menu_items(Menu::File).count(), 9);
+    assert_eq!(commands::menu_items(Menu::File).count(), 10);
     assert_eq!(commands::menu_items(Menu::Edit).count(), 4);
-    assert_eq!(commands::menu_items(Menu::View).count(), 7);
+    assert_eq!(commands::menu_items(Menu::View).count(), 8);
     assert_eq!(commands::menu_items(Menu::Theme).count(), 3);
     assert_eq!(commands::menu_items(Menu::Help).count(), 2);
     assert_eq!(commands::menu_items(Menu::TabContext).count(), 4);
@@ -2519,6 +2519,7 @@ fn command_table_matches_the_old_toolbar_and_view_menu() {
             ("FILES", false),
             ("ON THIS PAGE", false),
             ("Focus reading mode", true),
+            ("Command palette…", true),
         ]
     );
     let titles = [Menu::File, Menu::Edit, Menu::View, Menu::Help].map(|m| m.title().unwrap());
@@ -2537,6 +2538,7 @@ fn command_table_matches_the_old_toolbar_and_view_menu() {
             ("Clear recent files", false),
             ("Close tab", true),
             ("Close all tabs", false),
+            ("Settings…", true),
             ("Exit", true),
         ]
     );

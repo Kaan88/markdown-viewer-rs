@@ -23,6 +23,7 @@ pub enum ShotDialog {
     Shortcuts,
     Recent,
     Edit,
+    Settings,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -47,6 +48,8 @@ pub struct Args {
     pub scroll: Option<f32>,
     pub menu: Option<ShotMenu>,
     pub dialog: Option<ShotDialog>,
+    /// `--palette <query>`: the command palette open with this text (an empty one is `""`).
+    pub palette: Option<String>,
     /// Logical pointer position.
     pub hover: Option<(f32, f32)>,
     pub focus_mode: bool,
@@ -123,12 +126,14 @@ impl Args {
                         _ => None,
                     }
                 }
+                "--palette" => out.palette = value(&a),
                 "--dialog" => {
                     out.dialog = match value(&a).as_deref() {
                         Some("about") => Some(ShotDialog::About),
                         Some("shortcuts") => Some(ShotDialog::Shortcuts),
                         Some("recent") => Some(ShotDialog::Recent),
                         Some("edit") => Some(ShotDialog::Edit),
+                        Some("settings") => Some(ShotDialog::Settings),
                         _ => None,
                     }
                 }
@@ -171,6 +176,9 @@ mod tests {
         assert_eq!(a.dialog, Some(ShotDialog::About));
         assert_eq!(a.scroll, Some(300.0));
         assert_eq!(a.files_pane, Some(false));
+        let a = parse("--shot x.png --palette >zoom --dialog settings");
+        assert_eq!(a.palette.as_deref(), Some(">zoom"));
+        assert_eq!(a.dialog, Some(ShotDialog::Settings));
     }
 
     #[test]

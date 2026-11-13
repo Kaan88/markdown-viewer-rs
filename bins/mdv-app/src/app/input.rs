@@ -7,6 +7,10 @@ impl App {
 
     pub(super) fn pointer_moved(&mut self, x: f32, y: f32) {
         self.ui.mouse = (x, y);
+        if self.ui.modal() {
+            self.modal_pointer(x, y);
+            return;
+        }
         if let Some(drag) = self.ui.drag {
             self.drag_to(drag, x, y);
             self.redraw();
@@ -288,6 +292,23 @@ impl App {
         self.set_scroll(target, next);
     }
 
+    /// Counts this press with the last ones: 1, 2 or 3 for a single, double or triple click.
+    fn click_count(&mut self, x: f32, y: f32) -> u32 {
+        let now = Instant::now();
+        let clicks = match self.ui.last_press {
+            Some((t, (px, py), n))
+                if now - t < platform::double_click_time()
+                    && (px - x).abs() <= CLICK_SLOP
+                    && (py - y).abs() <= CLICK_SLOP =>
+            {
+                n % 3 + 1
+            }
+            _ => 1,
+        };
+        self.ui.last_press = Some((now, (x, y), clicks));
+        clicks
+    }
+
     pub(super) fn left_press(&mut self) {
         let (x, y) = self.ui.mouse;
         self.ui.tip = None;
@@ -296,6 +317,11 @@ impl App {
             if let Some(w) = &self.window {
                 let _ = w.drag_resize_window(dir);
             }
+            return;
+        }
+        if self.ui.modal() {
+            let clicks = self.click_count(x, y);
+            self.modal_press(clicks);
             return;
         }
         if let Some(p) = &self.ui.popup {
@@ -314,18 +340,7 @@ impl App {
         ) {
             self.ui.find_focused = false;
         }
-        let now = Instant::now();
-        let clicks = match self.ui.last_press {
-            Some((t, (px, py), n))
-                if now - t < platform::double_click_time()
-                    && (px - x).abs() <= CLICK_SLOP
-                    && (py - y).abs() <= CLICK_SLOP =>
-            {
-                n % 3 + 1
-            }
-            _ => 1,
-        };
-        self.ui.last_press = Some((now, (x, y), clicks));
+        let clicks = self.click_count(x, y);
         self.redraw();
         match hit {
             Hit::Backdrop => self.close_dialog(),
@@ -399,6 +414,10 @@ impl App {
     pub(super) fn left_release(&mut self) {
         let (x, y) = self.ui.mouse;
         self.ui.autoscroll_due = None;
+        if self.ui.modal() {
+            self.modal_release();
+            return;
+        }
         if let Some(drag) = self.ui.drag.take() {
             if matches!(drag, Drag::Splitter { .. }) {
                 let panes = &self.ui.panes;
@@ -438,7 +457,7 @@ impl App {
     pub(super) fn right_press(&mut self) {
         let (x, y) = self.ui.mouse;
         self.ui.tip = None;
-        if self.ui.dialog.is_some() {
+        if self.ui.dialog.is_some() || self.ui.modal() {
             return;
         }
         self.ui.popup = None;
@@ -474,7 +493,7 @@ impl App {
 
     /// The mouse's Back and Forward buttons, and Alt+Left and Alt+Right.
     pub(super) fn travel(&mut self, back: bool) {
-        if self.ui.dialog.is_some() {
+        if self.ui.dialog.is_some() || self.ui.modal() {
             return;
         }
         self.ui.popup = None;
@@ -489,7 +508,7 @@ impl App {
 
     pub(super) fn middle_press(&mut self) {
         let (x, y) = self.ui.mouse;
-        if self.ui.dialog.is_some() || self.ui.popup.is_some() {
+        if self.ui.dialog.is_some() || self.ui.popup.is_some() || self.ui.modal() {
             return;
         }
         if let Some(Hit::Tab(i) | Hit::TabClose(i)) = self.hit_at(x, y) {
@@ -505,6 +524,14 @@ impl App {
             MouseScrollDelta::LineDelta(_, dy) => (dy, None),
             MouseScrollDelta::PixelDelta(p) => (p.y as f32 / (48.0 * self.scale), Some(p.y as f32)),
         };
+        if self.ui.modal() {
+            let dy = match pixels {
+                Some(py) => -py / self.scale,
+                None => -notches * PANE_WHEEL,
+            };
+            self.modal_wheel(dy);
+            return;
+        }
         if let Some(p) = self.ui.popup.as_mut() {
             // Over a menu taller than its room the wheel scrolls it; anywhere else, and over a
             // menu that fits, it closes the menus, as it always did.
@@ -641,6 +668,11 @@ impl App {
         self.ui.tip = None;
         self.redraw();
 
+        // The palette and the settings dialog take the keyboard before anything else.
+        if self.ui.modal() {
+            self.modal_key(name, typed);
+            return;
+        }
         // A menu takes the keyboard.
         if let Some(p) = self.ui.popup.as_mut() {
             p.dwell = None;

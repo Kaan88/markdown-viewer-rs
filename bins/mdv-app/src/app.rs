@@ -45,6 +45,7 @@ use winit::window::{CursorIcon, ResizeDirection, Theme as WinTheme, Window, Wind
 
 mod commands;
 mod input;
+mod modal;
 #[cfg(test)]
 mod tests;
 
@@ -532,8 +533,15 @@ impl App {
                 bounds.push(s.rect().inset(-20.0));
             }
         }
-        if self.ui.dialog.is_some() {
+        if self.ui.dialog.is_some() || self.ui.settings.is_some() {
             bounds.push(Rect::new(0.0, 0.0, w, h));
+        }
+        if let Some(p) = self.ui.palette.as_mut() {
+            // The card's place is needed here, to redraw what it covers; drawing lays it out again.
+            let card = p
+                .palette
+                .layout(Rect::new(0.0, 0.0, w, h), crate::ui::TITLE_H);
+            bounds.push(card.inset(-20.0));
         }
         let osig = sig((
             bubbles
@@ -569,6 +577,12 @@ impl App {
                 .dialog
                 .as_ref()
                 .map(|_| (self.ui.hover, self.ui.pressed)),
+            // Neither the palette nor the settings dialog says what changed inside: every event
+            // they handled raised the tick; the caret's blink is the one thing that changes alone.
+            self.ui.modal().then_some((
+                self.ui.overlay_tick,
+                self.ui.palette.is_some().then_some(self.ui.caret_on),
+            )),
         ));
         let overlay_changed = osig != self.overlay_sig;
         self.overlay_sig = osig;
@@ -689,6 +703,15 @@ impl App {
                 }
                 for b in &bubbles {
                     b.draw(c.p, &pal);
+                }
+                // Last, over everything.
+                let window = Rect::new(0.0, 0.0, w, h);
+                if let Some(p) = self.ui.palette.as_mut() {
+                    p.palette
+                        .draw(c.p, &pal, window, crate::ui::TITLE_H, self.ui.caret_on);
+                }
+                if let Some(f) = self.ui.settings.as_mut() {
+                    f.draw(c.p, &pal, window, self.ui.caret_on);
                 }
             }
         }
@@ -893,6 +916,10 @@ impl App {
     // ---- hit testing ---------------------------------------------------------------------------
 
     fn hit_at(&self, x: f32, y: f32) -> Option<Hit> {
+        // The palette and the settings dialog do their own hit testing.
+        if self.ui.modal() {
+            return None;
+        }
         if self.ui.dialog.is_some() {
             return self
                 .overlay_hits
@@ -1276,9 +1303,13 @@ fn shot(mut app: App, path: &Path) -> i32 {
         Some(ShotDialog::Shortcuts) => app.open_dialog(DialogKind::Shortcuts),
         Some(ShotDialog::Recent) => app.open_dialog(DialogKind::Recent),
         Some(ShotDialog::Edit) => app.open_dialog(DialogKind::AllowEdit),
+        Some(ShotDialog::Settings) => app.open_settings(),
         None => {}
     }
-    if app.ui.dialog.is_some() || app.ui.popup.is_some() {
+    if let Some(query) = app.args.palette.clone() {
+        app.open_palette(&query);
+    }
+    if app.ui.dialog.is_some() || app.ui.popup.is_some() || app.ui.modal() {
         app.compose();
     }
     if let Some((x, y)) = app.args.hover {

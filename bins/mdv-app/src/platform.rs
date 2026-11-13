@@ -51,7 +51,7 @@ pub fn pick_files_async(
 #[cfg(not(windows))]
 pub const MIME_TYPES: &[&str] = mdshared_ui::desktop_entry::VIEWER_MIME_TYPES;
 
-/// Whether the main menu offers "Make mdview the default for Markdown files": only off Windows,
+/// Whether Settings offers "Make mdview the default for Markdown files": only off Windows,
 /// only from an AppImage (the one place that writes a desktop entry), and not once it is the
 /// default already.
 #[cfg(not(windows))]

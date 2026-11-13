@@ -27,6 +27,10 @@ pub enum CommandId {
     FocusMode,
     ShowShortcuts,
     About,
+    /// The command palette: tabs, recent files, commands and headings behind one search box.
+    CommandPalette,
+    /// The settings dialog.
+    Settings,
     NextTab,
     PreviousTab,
     Escape,
@@ -34,7 +38,7 @@ pub enum CommandId {
     CopyFilePath,
     ShowInFileManager,
     /// Linux: make mdview the default app for Markdown files. In no menu bar menu; the shell's
-    /// main menu offers it where it applies.
+    /// Settings (and its command palette) offer it where it applies.
     MakeDefault,
 }
 
@@ -161,6 +165,7 @@ pub const COMMANDS: &[Command] = &[
         "Close all tabs",
         &[K("Ctrl+Shift+W")],
     ),
+    sep(cmd(C::Settings, Menu::File, "Settings…", &[K("Ctrl+,")])),
     sep(cmd(C::Exit, Menu::File, "Exit", &[S(StandardKey::Quit)])),
     cmd(C::Find, Menu::Edit, "Find", &[K("Ctrl+F")]),
     cmd(C::FindNext, Menu::Edit, "Find next", &[K("F3")]),
@@ -226,6 +231,12 @@ pub const COMMANDS: &[Command] = &[
             &[K("Ctrl+Shift+F")],
         ),
         CommandStyle::Checkable,
+    )),
+    sep(cmd(
+        C::CommandPalette,
+        Menu::View,
+        "Command palette…",
+        &[K("Ctrl+P"), K("Ctrl+Shift+P")],
     )),
     cmd(C::ShowShortcuts, Menu::Help, "Keyboard shortcuts", &[]),
     cmd(C::About, Menu::Help, "About Markdown Viewer", &[]),

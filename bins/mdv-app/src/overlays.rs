@@ -6,7 +6,6 @@ use crate::gfx::{Face, Rect, mix};
 use crate::keys;
 use crate::menu::{Item, Menu};
 use crate::panes::{draw_scrollbar, scrollbar};
-use crate::platform;
 use crate::ui::{Act, Dialog, DialogKind, EditAct, Hit, Scroller, Ui};
 use crate::updater;
 use crate::workspace::{PageContext, Workspace};
@@ -16,7 +15,6 @@ use mdshared_ui::overlay::{
     draw_dialog_card, draw_keycaps,
 };
 use mdview_core::commands::{CommandId as C, shortcut_help, strings};
-use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
 
 // ---- menus -----------------------------------------------------------------------------------
@@ -27,22 +25,52 @@ fn cmd(id: C, label: &str, icon: &'static str) -> Item<Act> {
         .icon(icon)
 }
 
-/// The "⋯" menu: everything the bar does not show, in the Qt shell's order.
+/// The icon a command has wherever it is listed (the main menu, the command palette).
+pub fn command_icon(id: C) -> &'static str {
+    match id {
+        C::OpenFiles => glyph::OPEN,
+        C::OpenFolder | C::ShowInFileManager => glyph::FOLDER_OPEN,
+        C::Refresh => glyph::RELOAD,
+        C::OpenRecent => glyph::RECENT,
+        C::ManageRecent | C::Settings => glyph::SLIDERS,
+        C::ClearRecent => glyph::DELETE,
+        C::CloseTab | C::ClearSearch => glyph::CLOSE,
+        C::CloseAllTabs => glyph::CLOSE_ALL,
+        C::CloseOtherTabs => glyph::CLOSE_OTHERS,
+        C::Exit => glyph::POWER,
+        C::Find | C::CommandPalette => glyph::SEARCH,
+        C::FindNext | C::NextTab => glyph::FORWARD,
+        C::FindPrevious | C::PreviousTab => glyph::BACK,
+        C::Theme | C::ThemeSystem => glyph::SYSTEM,
+        C::ThemeLight => glyph::SUN,
+        C::ThemeDark => glyph::MOON,
+        C::ZoomIn => glyph::ZOOM,
+        C::ZoomOut => glyph::ZOOM_OUT,
+        C::ZoomReset => glyph::ZOOM_RESET,
+        C::ToggleFiles => glyph::SIDEBAR,
+        C::ToggleOutline => glyph::OUTLINE,
+        C::FocusMode => glyph::FULLSCREEN,
+        C::ShowShortcuts => glyph::KEYBOARD,
+        C::About => glyph::INFO,
+        C::CopyFilePath => glyph::COPY,
+        C::MakeDefault => glyph::CHECK,
+        C::Escape => "",
+    }
+}
+
+/// The "⋯" menu: what the bar does not show and people use while reading. Preferences are in
+/// Settings.
 pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
     let has_tab = ws.active().is_some();
-    let width = |choice: PageWidth, label: &str, icon: &'static str| {
-        Item::new(Act::PageWidth(choice), label)
-            .icon(icon)
-            .checked(ws.page_width() == choice)
-    };
-    let mut items = vec![
+    // What people use while reading; the preferences (page width, remote images, task boxes,
+    // animations, the default app) are in Settings.
+    let items = vec![
         cmd(C::OpenFiles, "Open files…", glyph::OPEN),
         cmd(C::OpenFolder, "Open folder…", glyph::FOLDER_OPEN),
         Item::new(Act::RecentMenu, "Open recent")
             .icon(glyph::RECENT)
             .hint("›")
             .enabled(!ws.recents().is_empty()),
-        cmd(C::ManageRecent, "Manage recent files…", glyph::SLIDERS),
         cmd(C::Refresh, "Reload", glyph::RELOAD)
             .sep()
             .enabled(has_tab),
@@ -62,31 +90,12 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
         cmd(C::ToggleOutline, "Outline pane", glyph::OUTLINE)
             .checked(ui.panes.outline && !ui.focus_mode),
         cmd(C::FocusMode, "Focus reading mode", glyph::FULLSCREEN).checked(ui.focus_mode),
-        Item::new(Act::RemoteAlways, "Always load remote images")
-            .icon(glyph::GLOBE)
-            .checked(ws.remote_always()),
-        Item::new(Act::EditAlways, "Tick task boxes without asking")
-            .icon(glyph::TASK)
-            .checked(ws.edit_always()),
-        Item::new(Act::Animations, "Play animated images")
-            .icon(glyph::ANIMATION)
-            .checked(ws.animations()),
-        width(PageWidth::Narrow, "Narrow page", glyph::PAGE_NARROW).sep(),
-        width(PageWidth::Wide, "Wide page", glyph::PAGE_WIDE),
-        width(PageWidth::Full, "Full-width page", glyph::PAGE_FULL),
+        cmd(C::CommandPalette, "Command palette…", glyph::SEARCH).sep(),
+        cmd(C::Settings, "Settings…", command_icon(C::Settings)),
         cmd(C::ShowShortcuts, "Keyboard shortcuts", glyph::KEYBOARD).sep(),
-    ];
-    if platform::can_offer_default_app() {
-        items.push(cmd(
-            C::MakeDefault,
-            "Make mdview the default for Markdown files",
-            glyph::CHECK,
-        ));
-    }
-    items.extend([
         cmd(C::About, "About mdview", glyph::INFO),
         cmd(C::Exit, "Exit", glyph::POWER).sep(),
-    ]);
+    ];
     Menu::new(items, x, y, true)
 }
 
@@ -378,7 +387,7 @@ pub fn draw_dialog(
                 x,
                 y + used + 8.0,
                 tw,
-                "\"Always allow\" stops asking, for every file. The main menu turns it off again.",
+                "\"Always allow\" stops asking, for every file. Settings turns it off again.",
                 pal.muted,
             );
             let ew = button_w(c.p, "Change this file");

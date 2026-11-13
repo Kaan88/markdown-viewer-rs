@@ -64,6 +64,20 @@ shot dialog-shortcuts --light --dialog shortcuts "$fx/showcase.md"
 shot dialog-recent --dark --dialog recent "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
 shot dialog-edit --light --dialog edit "$fx/showcase.md"
 
+shot dialog-settings-light --light --dialog settings "$fx/showcase.md"
+shot dialog-settings-dark --dark --dialog settings "$fx/showcase.md"
+shot dialog-settings-scale-150 --light --scale 1.5 --dialog settings "$fx/showcase.md"
+shot dialog-settings-760 --dark --size 760x800 --dialog settings "$fx/showcase.md"
+shot dialog-settings-640 --light --size 640x800 --dialog settings "$fx/showcase.md"
+
+# The command palette: tabs and recent files, commands by prefix, headings by prefix.
+shot palette-empty-light --light --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
+shot palette-empty-dark --dark --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
+shot palette-commands-light --light --palette ">zoom" "$fx/showcase.md"
+shot palette-commands-dark --dark --palette ">zoom" "$fx/showcase.md"
+shot palette-headings-light --light --palette "#" "$fx/showcase.md"
+shot palette-headings-dark --dark --palette "#" "$fx/showcase.md"
+
 # Panes, find, focus mode, tabs.
 shot files-pane --light --files --folder "$fx" "$fx/showcase.md"
 shot files-pane-dark --dark --files --folder "$fx/wiki" "$fx/linked.md"

@@ -3,6 +3,7 @@
 
 use super::*;
 use mdview_core::commands::CommandId;
+use mdview_core::session::PageWidth;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -503,4 +504,298 @@ fn menu_row_offsets_follow_the_shared_layout() {
     // Rows are 32 px under 5 px of padding; a separator adds 9 px before its row.
     assert_eq!(overlays::menu_row_offset(&items, 0), 5.0);
     assert_eq!(overlays::menu_row_offset(&items, 2), 5.0 + 64.0);
+}
+
+// ---- the command palette and the settings dialog -------------------------------------------------
+
+const CTRL: Mods = Mods {
+    ctrl: true,
+    shift: false,
+    alt: false,
+};
+
+/// The targets of the palette's listed entries, in order.
+fn listed(a: &App) -> Vec<crate::palette::Target> {
+    let p = a.ui.palette.as_ref().expect("the palette is open");
+    p.palette
+        .listed_ids()
+        .into_iter()
+        .filter_map(|id| p.target(id).cloned())
+        .collect()
+}
+
+#[test]
+fn nothing_of_either_is_built_until_it_opens() {
+    let a = app(&["linked.md"]);
+    assert!(a.ui.palette.is_none() && a.ui.settings.is_none());
+    assert!(!a.ui.modal());
+}
+
+#[test]
+fn ctrl_p_opens_the_palette_with_tabs_and_ctrl_p_or_escape_closes_it() {
+    use crate::palette::Target;
+    let mut a = app(&["linked.md", "math.md"]);
+    a.mods = CTRL;
+    key(&mut a, KeyName::Char('p'), Some("\u{10}"));
+    assert!(a.ui.palette.is_some());
+    assert_eq!(listed(&a), [Target::Tab(0), Target::Tab(1)]);
+    // The shortcut that opened it closes it; other shortcuts do nothing behind it.
+    key(&mut a, KeyName::Char('w'), Some("\u{17}"));
+    assert_eq!(a.ws.tab_count(), 2);
+    key(&mut a, KeyName::Char('p'), Some("\u{10}"));
+    assert!(a.ui.palette.is_none());
+    a.mods = Mods::default();
+    a.command(C::CommandPalette);
+    a.compose();
+    key(&mut a, KeyName::Escape, None);
+    assert!(a.ui.palette.is_none());
+}
+
+#[test]
+fn choosing_a_tab_switches_to_it() {
+    let mut a = app(&["linked.md", "math.md"]);
+    assert_eq!(a.ws.active(), Some(1));
+    a.command(C::CommandPalette);
+    a.compose();
+    key(&mut a, KeyName::Enter, None);
+    assert!(a.ui.palette.is_none());
+    assert_eq!(a.ws.active(), Some(0));
+}
+
+#[test]
+fn the_greater_than_prefix_lists_commands_and_enter_runs_one() {
+    use crate::palette::Target;
+    let mut a = app(&["showcase.md"]);
+    a.command(C::CommandPalette);
+    a.compose();
+    type_text(&mut a, ">zoom in");
+    assert_eq!(listed(&a).first(), Some(&Target::Cmd(C::ZoomIn)));
+    assert_eq!(a.ws.zoom(), 100);
+    key(&mut a, KeyName::Enter, None);
+    assert!(a.ui.palette.is_none());
+    assert_eq!(a.ws.zoom(), 110);
+}
+
+#[test]
+fn every_listed_command_has_an_icon_and_the_palette_is_not_among_them() {
+    use crate::palette::Target;
+    let a = app(&["showcase.md"]);
+    let state = crate::palette::PaletteState::open(&a.ws, ">");
+    let ids = state.palette.listed_ids();
+    assert!(ids.len() > 20);
+    for id in ids {
+        let Some(Target::Cmd(c)) = state.target(id) else {
+            panic!("a command source lists only commands");
+        };
+        assert_ne!(*c, C::CommandPalette);
+        assert!(!overlays::command_icon(*c).is_empty(), "{c:?}");
+    }
+}
+
+#[test]
+fn the_hash_prefix_lists_headings_and_enter_scrolls_to_one() {
+    use crate::palette::Target;
+    let mut a = app(&["showcase.md"]);
+    a.command(C::CommandPalette);
+    a.compose();
+    type_text(&mut a, "#");
+    let heads = listed(&a);
+    assert_eq!(heads.len(), a.ws.outline().len());
+    assert!(heads.iter().all(|t| matches!(t, Target::Heading(_))));
+    assert_eq!(a.ws.scroll(), 0.0);
+    key(&mut a, KeyName::End, None);
+    key(&mut a, KeyName::Enter, None);
+    assert!(a.ui.palette.is_none());
+    assert!(a.ws.scroll() > 0.0);
+}
+
+#[test]
+fn the_question_mark_lists_the_prefixes_and_a_row_puts_one_in_the_box() {
+    let mut a = app(&["showcase.md"]);
+    a.command(C::CommandPalette);
+    a.compose();
+    type_text(&mut a, "?");
+    assert_eq!(listed(&a).len(), 3);
+    key(&mut a, KeyName::Down, None);
+    key(&mut a, KeyName::Enter, None);
+    let p = a.ui.palette.as_ref().expect("still open");
+    assert_eq!(p.palette.query(), ">");
+    assert!(p.palette.len() > 20);
+}
+
+#[test]
+fn the_folders_files_join_the_list_once_something_is_typed() {
+    use crate::palette::Target;
+    let mut a = app(&["linked.md"]);
+    a.ws.set_folder(Some(fixture("wiki")));
+    a.ws.index_notes_now();
+    a.command(C::CommandPalette);
+    a.compose();
+    assert!(
+        !listed(&a).iter().any(|t| matches!(t, Target::File(_))),
+        "an empty query lists tabs and recent files only"
+    );
+    type_text(&mut a, "home");
+    let files: Vec<_> = listed(&a)
+        .into_iter()
+        .filter_map(|t| match t {
+            Target::File(p) => Some(p),
+            _ => None,
+        })
+        .collect();
+    assert!(files.iter().any(|p| p.ends_with("Home.md")), "{files:?}");
+    key(&mut a, KeyName::Enter, None);
+    assert!(a.ws.tabs().iter().any(|t| t.path().ends_with("Home.md")));
+}
+
+#[test]
+fn a_click_outside_the_palette_closes_it_and_the_page_gets_no_click() {
+    let mut a = app(&["showcase.md"]);
+    a.command(C::CommandPalette);
+    a.compose();
+    let card = a.ui.palette.as_ref().unwrap().palette.rect();
+    // Inside the card: nothing closes.
+    a.pointer_moved(card.cx(), card.y + 20.0);
+    a.left_press();
+    a.left_release();
+    assert!(a.ui.palette.is_some());
+    a.ui.last_press = None;
+    a.pointer_moved(5.0, 700.0);
+    a.left_press();
+    a.left_release();
+    assert!(a.ui.palette.is_none());
+}
+
+#[test]
+fn the_wheel_goes_to_the_palette_not_the_page() {
+    let mut a = app(&["showcase.md"]);
+    a.command(C::CommandPalette);
+    a.compose();
+    type_text(&mut a, ">");
+    a.pointer_moved(640.0, 300.0);
+    a.wheel(MouseScrollDelta::LineDelta(0.0, -3.0));
+    assert_eq!(a.ws.scroll(), 0.0);
+    assert!(a.ui.palette.as_ref().unwrap().palette.scroll() > 0.0);
+}
+
+#[test]
+fn settings_open_with_ctrl_comma_and_the_form_applies_each_change_at_once() {
+    use crate::settings as s;
+    use mdshared_ui::settings::Value;
+    let mut a = app(&["showcase.md"]);
+    a.mods = CTRL;
+    key(&mut a, KeyName::Char(','), Some(","));
+    a.mods = Mods::default();
+    assert!(a.ui.settings.is_some());
+    a.apply_setting(s::PAGE_WIDTH, Value::Choice(1));
+    assert_eq!(a.ws.page_width(), PageWidth::Wide);
+    a.apply_setting(s::TEXT_SIZE, Value::Number(130));
+    assert_eq!(a.ws.zoom(), 130);
+    a.apply_setting(s::THEME, Value::Choice(1));
+    assert_eq!(a.ws.theme_choice(), ThemeChoice::Light);
+    a.apply_setting(s::REMOTE_IMAGES, Value::Bool(true));
+    assert!(a.ws.remote_always());
+    a.apply_setting(s::TICK_BOXES, Value::Bool(true));
+    assert!(a.ws.edit_always());
+    a.apply_setting(s::ANIMATIONS, Value::Bool(false));
+    assert!(!a.ws.animations());
+    a.apply_setting(s::CHECK_AT_LAUNCH, Value::Bool(false));
+    assert!(!a.ws.checks_updates());
+    // Focus mode hides the panes, and the rows say so.
+    a.apply_setting(s::FOCUS_MODE, Value::Bool(true));
+    assert!(a.ui.focus_mode);
+    let form = a.ui.settings.as_ref().unwrap();
+    assert_eq!(form.value(s::FOCUS_MODE), Some(Value::Bool(true)));
+    assert_eq!(form.value(s::FILES_PANE), Some(Value::Bool(false)));
+    // Turning a pane on leaves focus mode.
+    a.apply_setting(s::FILES_PANE, Value::Bool(true));
+    assert!(!a.ui.focus_mode && a.ui.panes.files);
+    let form = a.ui.settings.as_ref().unwrap();
+    assert_eq!(form.value(s::FOCUS_MODE), Some(Value::Bool(false)));
+    a.apply_setting(s::OUTLINE_PANE, Value::Bool(false));
+    assert!(!a.ui.panes.outline);
+    key(&mut a, KeyName::Escape, None);
+    assert!(a.ui.settings.is_none());
+}
+
+#[test]
+fn the_settings_form_follows_the_apps_limits() {
+    use crate::settings as s;
+    use mdshared_ui::settings::Row;
+    let a = app(&["showcase.md"]);
+    let rows = s::rows(&a.ws, &a.ui);
+    let zoom = rows
+        .iter()
+        .find_map(|r| match r {
+            Row::Number {
+                min,
+                max,
+                step,
+                unit,
+                ..
+            } => Some((*min, *max, *step, unit.clone())),
+            _ => None,
+        })
+        .expect("the text size");
+    assert_eq!(zoom, (60, 250, 10, "%".to_string()));
+}
+
+#[test]
+fn settings_keep_the_page_keys_and_the_bar_button_working_after_they_close() {
+    let mut a = app(&["showcase.md"]);
+    a.command(C::Settings);
+    a.compose();
+    // A key the form does not use does not reach the page.
+    key(&mut a, KeyName::Char('+'), Some("+"));
+    a.mods = CTRL;
+    key(&mut a, KeyName::Char('='), Some("="));
+    a.mods = Mods::default();
+    assert_eq!(a.ws.zoom(), 100);
+    key(&mut a, KeyName::Escape, None);
+    a.compose();
+    click(&mut a, Hit::Bar(BarItem::PageWidth));
+    assert_eq!(a.ws.page_width(), PageWidth::Wide);
+}
+
+#[test]
+fn the_main_menu_holds_what_people_use_while_reading_and_fits_the_window() {
+    let mut a = app(&["showcase.md"]);
+    a.open_popup(PopupKind::Main);
+    a.compose();
+    let p = a.ui.popup.as_ref().expect("the menu");
+    let labels: Vec<_> = p.menu.items.iter().map(|i| i.label.as_str()).collect();
+    for gone in [
+        "Always load remote images",
+        "Tick task boxes without asking",
+        "Play animated images",
+        "Narrow page",
+        "Wide page",
+        "Full-width page",
+        "Manage recent files…",
+        "Make mdview the default for Markdown files",
+    ] {
+        assert!(!labels.contains(&gone), "{gone} moved to Settings");
+    }
+    for kept in [
+        "Open files…",
+        "Reload",
+        "Close tab",
+        "Zoom in",
+        "Files pane",
+        "Focus reading mode",
+        "Command palette…",
+        "Settings…",
+        "Keyboard shortcuts",
+        "About mdview",
+        "Exit",
+    ] {
+        assert!(labels.contains(&kept), "{kept}");
+    }
+    assert!(!p.menu.scrolls(), "it fits the default window");
+    // The menu's icons are the ones the palette shows for the same commands.
+    for item in &p.menu.items {
+        if let Act::Cmd(id) = item.id {
+            assert_eq!(item.icon, overlays::command_icon(id), "{}", item.label);
+        }
+    }
 }

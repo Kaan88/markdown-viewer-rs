@@ -157,21 +157,6 @@ impl App {
             Act::SelectAll => {
                 self.ws.select_all();
             }
-            Act::RemoteAlways => {
-                let on = !self.ws.remote_always();
-                self.ws.set_remote_always(on);
-            }
-            Act::PageWidth(width) => {
-                self.ws.set_page_width(width);
-            }
-            Act::EditAlways => {
-                let on = !self.ws.edit_always();
-                self.ws.set_edit_always(on);
-            }
-            Act::Animations => {
-                let on = !self.ws.animations();
-                self.ws.set_animations(on);
-            }
             Act::Edit(edit) => {
                 let f = &mut self.ui.find;
                 let changed = match edit {
@@ -523,6 +508,14 @@ impl App {
                     self.ws.set_status("Focus mode: press Escape to leave");
                 }
             }
+            C::CommandPalette => {
+                if self.ui.palette.is_some() {
+                    self.close_palette();
+                } else {
+                    self.open_palette("");
+                }
+            }
+            C::Settings => self.open_settings(),
             C::ShowShortcuts => self.open_dialog(DialogKind::Shortcuts),
             C::About => self.open_dialog(DialogKind::About),
             C::NextTab => {
@@ -714,8 +707,8 @@ impl App {
     pub(super) fn timers(&mut self, now: Instant) -> Option<Instant> {
         let mut next: Option<Instant> = None;
         let mut at = |t: Instant| next = Some(next.map_or(t, |n| n.min(t)));
-        // Caret blink, only while the find box has focus.
-        if self.ui.find_focused && self.window_focused() {
+        // Caret blink, only while the find box or the palette has focus.
+        if (self.ui.find_focused || self.ui.palette.is_some()) && self.window_focused() {
             if let Some(period) = platform::caret_blink_time() {
                 let due = *self.ui.caret_due.get_or_insert(now + period);
                 if now >= due {

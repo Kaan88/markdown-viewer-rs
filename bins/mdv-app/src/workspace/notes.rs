@@ -169,6 +169,21 @@ impl Workspace {
         }
     }
 
+    /// The Markdown files of the open folder as the note index lists them (paths and the path
+    /// below the folder, `/` between parts), at most `max`, in path order. The index is built on
+    /// its own thread, so this reads memory only; it is empty until the index is ready, and with
+    /// no folder open.
+    pub fn folder_files(&self, max: usize) -> Vec<(&Path, &str)> {
+        match &self.notes.index {
+            Some(index) => index
+                .notes()
+                .take(max)
+                .map(|n| (n.path.as_path(), n.rel.as_str()))
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
     /// Where the note part of a wiki-link written in `from` leads, looking at the disk now.
     fn resolve_note(&self, from: &Path, note: &str) -> Option<PathBuf> {
         let config = &self.notes.config;

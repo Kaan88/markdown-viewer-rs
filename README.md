@@ -92,6 +92,8 @@ the `.md` default.
 | Zoom in, out, reset | Ctrl++, Ctrl+-, Ctrl+0 |
 | Files pane, Outline pane | Ctrl+Shift+1, Ctrl+Shift+2 |
 | Focus reading mode | Ctrl+Shift+F |
+| Command palette | Ctrl+P, Ctrl+Shift+P |
+| Settings | Ctrl+, |
 | Back, forward | Alt+Left, Alt+Right |
 
 The full list is in the app under "Keyboard shortcuts".
