@@ -98,8 +98,9 @@ locked; that update fails cleanly and can be tried again once the old window is 
 2. `packaging\windows\build-installer.ps1 -Notes 'One line.'` builds the static executables and
    the installer, and fills `target\release-files\` with `mdview.exe`, `mdview-engine.exe`,
    `mdview-setup-<version>.exe` and `mdview-update.txt`, whose URLs point at tag `v<version>`.
-   A test (`the_release_script_writes_a_manifest_this_build_reads`) checks that manifest and the
-   two hashes when the folder exists.
+   A test (`the_release_scripts_write_a_manifest_this_build_reads`) checks that manifest and the
+   file hashes when the folder exists (also `target/dist-cross` and `target/release-files-all`;
+   it runs on Windows and Linux).
 3. Create the GitHub release with tag `v<version>` and upload those four files. It must be the
    latest release, not a pre-release, for `releases/latest/download/` to serve its manifest.
 
@@ -153,5 +154,95 @@ update replaces the one AppImage (`<name>.new` staged with mode 0755, the old on
 `.old`). A plain binary or a cargo build updates nothing. The transport is the system libcurl,
 loaded at run time; `mdview --check-update` reached GitHub from the 0.2.3 build on Linux ("nothing
 newer"). An update of a real AppImage, and a Linux release asset and manifest entry
-(`linux-x86_64.asset/url/sha256`), have not been made or run. The release test of this file
-(`the_release_script_writes_a_manifest_this_build_reads`) stays Windows-only.
+(`linux-x86_64.asset/url/sha256`), have not been made or run. The release test
+(`the_release_scripts_write_a_manifest_this_build_reads`) runs on both systems.
+
+## Releasing from Linux
+
+Added 2026-11-14. Both platforms' files can be built on a Linux PC with Docker, `appimagetool`,
+`wine`, and the Inno Setup folder from a Windows install. `build-installer.ps1` stays the way to
+build on Windows; the two make the same file names.
+
+### Commands
+
+```
+packaging/linux/build-appimage.sh                        # target/dist-linux/mdview-<ver>-linux-x86_64.AppImage
+packaging/windows-cross/build.sh --notes 'One line.'     # target/dist-cross/: both exes, the setup, the manifest
+packaging/write-manifest.sh --version V [--notes N] --out DIR \
+    --windows-exe DIR/mdview.exe --windows-engine DIR/mdview-engine.exe --linux DIR/<AppImage>
+packaging/release-all.sh --notes 'One line.'             # everything into target/release-files-all/
+packaging/release-all.sh --notes '...' --notes-file FILE --publish    # also: gh release create v<ver> ... --latest
+packaging/wine-compare.sh NATIVE_DIR CROSS_DIR           # tests/shots.sh under Wine with both builds, cmp the PNGs
+```
+
+`release-all.sh` refuses a dirty tree (changes under `docs/` excepted) and a HEAD no remote
+branch contains. `--notes` is the manifest's line (optional, as in the PowerShell script),
+`--notes-file` the GitHub release text. `--publish --dry-run` prints the `gh` command instead of
+running it. The release has five assets: the AppImage, `mdview.exe`, `mdview-engine.exe`, the
+setup and the manifest. The manifest carries the Windows entry with its engine keys and the Linux
+entry without any: the engine is inside the AppImage.
+
+### What is built how
+
+- **AppImage.** `packaging/linux/Dockerfile` (Ubuntu 20.04, glibc 2.31, rustup stable) builds
+  `cargo build --release --locked -p mdview -p mdview-engine` from the repository mounted
+  read-only. The script checks that `objdump -T` needs no glibc symbol newer than 2.31 (0.2.3:
+  2.30), assembles `AppDir` (`usr/bin/mdview` and `usr/bin/mdview-engine`, `mdview.desktop`,
+  `mdview.png`, `.DirIcon`, `AppRun` a symlink to `usr/bin/mdview`) and runs the host's
+  `appimagetool` with a pinned runtime (`--runtime-file`, so it never downloads one).
+  `SOURCE_DATE_EPOCH` is the commit time: two runs on one commit give the same AppImage (checked).
+  The viewer finds the engine as a sibling of its own executable, which inside the AppImage is
+  the file under the mount point, so `MDV_ENGINE` is not needed (checked: `--shot` of
+  `fixtures/diagrams.md` from the AppImage draws the diagrams; with `MDV_ENGINE` pointing at
+  nothing it shows "Could not be drawn" placeholders).
+  Nothing is bundled; the AppImage needs from the host libc, fontconfig, freetype, libX11,
+  libX11-xcb and libxcb (a bare `ubuntu:20.04` or `debian:11` container lacks the X11 ones, and
+  works once `libx11-6 libx11-xcb1 libxcb1 libfontconfig1 libfreetype6` are installed), plus
+  libcurl, wayland and the like loaded at run time if they are there.
+- **Windows exes.** `packaging/windows-cross/Dockerfile` (Ubuntu 24.04, rustup stable with the
+  `x86_64-pc-windows-msvc` target, `cargo-xwin` 0.23.1, clang, lld, llvm) runs
+  `cargo xwin build --release --locked --target x86_64-pc-windows-msvc -p mdview -p mdview-engine`
+  with `RUSTFLAGS='-C target-feature=+crt-static'`, as the PowerShell script does. `build.rs` uses
+  `rc.exe` when it finds one and otherwise `llvm-rc` (`MD_LLVM_RC`, else PATH), so the icon is
+  embedded (the script sets `MD_LLVM_RC=/usr/bin/llvm-rc`).
+- **Installer.** `ISCC.exe` from the copied Inno Setup folder runs under Wine on the same
+  `packaging\windows\mdview.iss`, in a scratch tree (`target/cross-installer`) laid out the way
+  the script expects its inputs.
+
+### Licence
+
+`cargo-xwin` downloads the MSVC C runtime and the Windows SDK from Microsoft at its first run.
+Using them means accepting Microsoft's licence (https://go.microsoft.com/fwlink/?LinkId=2086102).
+cargo-xwin 0.23.1 has no accept flag or variable: it accepts for you when it downloads, so a run
+of `packaging/windows-cross/build.sh` is that acceptance. Whoever runs it accepts the licence for
+themselves.
+
+### Caches
+
+`$MD_BUILD_CACHE`, default `~/.cache/md-build`: `mdview/cargo` (registry and git checkouts),
+`mdview/target-linux` and `mdview/target-win` (cargo target directories), `xwin` (the SDK and CRT,
+about 1.2 GB, shared with mdedit's tooling), `innosetup` (a copy of
+`/mnt/C/Program Files/Inno Setup 7`; override the source with `INNO_SETUP_DIR`), `wine-prefix` (the
+`WINEPREFIX` for ISCC and `wine-compare.sh`, with the Windows fonts copied into
+`drive_c/windows/Fonts`) and `runtime-x86_64-20251108` (the AppImage runtime, SHA-256 pinned in
+`build-appimage.sh`). The Docker images are `mdview-linux-build` and `mdview-windows-cross`. All of
+it can be deleted; the next run rebuilds it.
+
+### What the cross-built Windows files have and have not been checked for
+
+Checked (0.2.3, commit `abcaf87`'s code, on Linux): both exes import the same DLLs as the natively
+built ones in `target\release-files` (`mdview.exe` 18 DLLs, `mdview-engine.exe` 4: `+crt-static`
+holds, no `vcruntime140.dll`), `mdview.exe` has the same icon resources, and the sizes are within
+0.5% (8,404,992 against 8,377,856 for `mdview.exe`, 26,343,936 against 26,289,152 for the engine).
+Under Wine 11 with the same prefix and fonts, `tests/shots.sh` run with the native pair and with
+the cross pair gave 57 PNGs each, all byte-identical (diagrams and math included, so the engine
+works); `--check-update` of both answered "nothing newer".
+
+Not checked: any run on Windows. The cross exes are not byte-identical to the native ones (a
+different linker and resource compiler). The cross-built setup is about 11.75 MB against 11.60 MB
+for the native one because Wine's `UpdateResource` leaves Inno Setup's stock icons in `Setup.exe`
+when ISCC swaps in ours; it was not run, and every run makes a different file (Inno stamps the
+build time), unlike the exes and the AppImage.
+
+The shared pin on main has the Linux transport and the engine rule since 2026-11-14, so the
+two-platform manifest test applies on Linux too.
