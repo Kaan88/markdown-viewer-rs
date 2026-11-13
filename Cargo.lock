@@ -1688,7 +1688,7 @@ dependencies = [
 
 [[package]]
 name = "mdv-bench"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "mdview-core",
  "mdview-render",
@@ -1696,7 +1696,7 @@ dependencies = [
 
 [[package]]
 name = "mdview"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bytemuck",
  "mdshared-app",
@@ -1712,7 +1712,7 @@ dependencies = [
 
 [[package]]
 name = "mdview-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "mdshared-app",
  "memchr",
@@ -1724,7 +1724,7 @@ dependencies = [
 
 [[package]]
 name = "mdview-engine"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "mdview-engine-proto",
  "merman",
@@ -1737,11 +1737,11 @@ dependencies = [
 
 [[package]]
 name = "mdview-engine-proto"
-version = "0.2.0"
+version = "0.2.1"
 
 [[package]]
 name = "mdview-render"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "gif",
  "image-webp",
