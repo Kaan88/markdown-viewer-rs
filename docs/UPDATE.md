@@ -145,6 +145,13 @@ finds and exits, with no window.
 
 ## Linux
 
-Nothing. `Platform::LinuxX64` exists in the manifest grammar, `fetch_file` fails on the stub
-transport, and a running ELF binary can be replaced by rename as well, so the same flow should
-apply once there is a Linux build and a transport.
+Updating in place works only inside an AppImage (2026-11-14, shared `84de734`). `installed_files`
+returns the canonical `$APPIMAGE` when it is a file in a writable folder, with no engine: the
+engine is inside the AppImage (`usr/bin/mdview-engine` beside `usr/bin/mdview`, which
+`engine_path()` finds from `current_exe()`), so a Linux release lists no `engine.*` keys and the
+update replaces the one AppImage (`<name>.new` staged with mode 0755, the old one aside as
+`.old`). A plain binary or a cargo build updates nothing. The transport is the system libcurl,
+loaded at run time; `mdview --check-update` reached GitHub from the 0.2.3 build on Linux ("nothing
+newer"). An update of a real AppImage, and a Linux release asset and manifest entry
+(`linux-x86_64.asset/url/sha256`), have not been made or run. The release test of this file
+(`the_release_script_writes_a_manifest_this_build_reads`) stays Windows-only.

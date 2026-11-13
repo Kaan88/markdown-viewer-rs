@@ -79,6 +79,16 @@ pub enum Wake {
     Animation,
     /// An updater thread has an answer.
     Update(updater::Event),
+    /// A file or folder dialog, which runs on a helper thread off Windows, was closed.
+    #[cfg(not(windows))]
+    Dialog(DialogAnswer),
+}
+
+/// What a closed file dialog chose.
+#[cfg(not(windows))]
+pub enum DialogAnswer {
+    Files(Vec<PathBuf>),
+    Folder(Option<PathBuf>),
 }
 
 fn sig<T: Hash>(t: T) -> u64 {
@@ -106,6 +116,10 @@ struct App {
     window: Option<Rc<Window>>,
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
     proxy: Option<EventLoopProxy<Wake>>,
+    /// A file or folder dialog is open (off Windows, where it runs beside the window); a second
+    /// request is ignored until its answer arrives.
+    #[cfg(not(windows))]
+    dialog_open: bool,
     incoming: Option<Receiver<PathBuf>>,
     watcher: Option<FileWatcher>,
     /// The folders the watcher follows for the Files pane: the tree's root and expanded folders
@@ -174,6 +188,8 @@ impl App {
             window: None,
             surface: None,
             proxy: None,
+            #[cfg(not(windows))]
+            dialog_open: false,
             incoming: None,
             watcher: None,
             tree_dirs: Vec::new(),
@@ -821,7 +837,11 @@ impl App {
             return Duration::ZERO;
         };
         let t = Instant::now();
-        let whole = buffer.age() == 0;
+        // The back buffer holds the previous frame only when its age is 1. Age 0 is undefined
+        // contents; on Wayland softbuffer swaps two buffers (age 2 in steady state) and a
+        // resized buffer keeps its age, so any other age would present stale regions. On Windows
+        // the age is only 0 or 1, so this changes nothing there.
+        let whole = buffer.age() != 1;
         let clamp = |d: &(i32, i32, i32, i32)| {
             let x0 = d.0.clamp(0, w as i32) as usize;
             let x1 = d.2.clamp(0, w as i32) as usize;
@@ -988,6 +1008,12 @@ impl ApplicationHandler<Wake> for App {
             use winit::platform::windows::WindowAttributesExtWindows;
             attributes = attributes.with_undecorated_shadow(true);
         }
+        // Linux: the Wayland app id, X11 class and window icon; a no-op on Windows.
+        let attributes = mdshared_ui::window::identify(
+            attributes,
+            "mdview",
+            Some(include_bytes!("../../../assets/mdview.png")),
+        );
         let window = Rc::new(event_loop.create_window(attributes).expect("window"));
         stage(self.started, "window created");
         self.scale = window.scale_factor() as f32;
@@ -1323,6 +1349,15 @@ pub fn run() -> i32 {
     if let Some(path) = app.args.shot.clone() {
         return shot(app, &path);
     }
+    // Linux AppImage: the launcher entry and icon; does nothing elsewhere.
+    mdshared_ui::desktop_entry::ensure(mdshared_ui::desktop_entry::Spec {
+        name: "mdview",
+        display_name: "mdview",
+        comment: "Markdown viewer",
+        icon_png: include_bytes!("../../../assets/mdview.png"),
+        mime_types: mdshared_ui::desktop_entry::VIEWER_MIME_TYPES,
+        categories: &["Utility", "Viewer", "Office"],
+    });
     let event_loop = match EventLoop::<Wake>::with_user_event().build() {
         Ok(l) => l,
         Err(e) => {

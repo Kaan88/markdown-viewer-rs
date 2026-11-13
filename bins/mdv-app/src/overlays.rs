@@ -6,6 +6,7 @@ use crate::gfx::{Face, Rect, mix};
 use crate::keys;
 use crate::menu::{Item, Menu};
 use crate::panes::{draw_scrollbar, scrollbar};
+use crate::platform;
 use crate::ui::{Act, Dialog, DialogKind, EditAct, Hit, Scroller, Ui};
 use crate::updater;
 use crate::workspace::{PageContext, Workspace};
@@ -32,7 +33,7 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
     let width = |choice: PageWidth, label: &str| {
         Item::new(Act::PageWidth(choice), label).checked(ws.page_width() == choice)
     };
-    let items = vec![
+    let mut items = vec![
         cmd(C::OpenFiles, "Open files…", glyph::OPEN),
         cmd(C::OpenFolder, "Open folder…", glyph::FOLDER_OPEN),
         Item::new(Act::RecentMenu, "Open recent")
@@ -65,9 +66,18 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
         width(PageWidth::Wide, "Wide page"),
         width(PageWidth::Full, "Full-width page"),
         cmd(C::ShowShortcuts, "Keyboard shortcuts", glyph::KEYBOARD).sep(),
+    ];
+    if platform::can_offer_default_app() {
+        items.push(cmd(
+            C::MakeDefault,
+            "Make mdview the default for Markdown files",
+            "",
+        ));
+    }
+    items.extend([
         cmd(C::About, "About mdview", glyph::INFO),
         cmd(C::Exit, "Exit", glyph::POWER).sep(),
-    ];
+    ]);
     Menu::new(items, x, y, true)
 }
 

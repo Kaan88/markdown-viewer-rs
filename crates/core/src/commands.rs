@@ -33,6 +33,9 @@ pub enum CommandId {
     CloseOtherTabs,
     CopyFilePath,
     ShowInFileManager,
+    /// Linux: make mdview the default app for Markdown files. In no menu bar menu; the shell's
+    /// main menu offers it where it applies.
+    MakeDefault,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,6 +238,12 @@ pub const COMMANDS: &[Command] = &[
         SHOW_IN_FILE_MANAGER,
         &[],
     ),
+    cmd(
+        C::MakeDefault,
+        Menu::None,
+        "Make mdview the default for Markdown files",
+        &[],
+    ),
     cmd(C::NextTab, Menu::None, "Next tab", &[K("Ctrl+Tab")]),
     cmd(
         C::PreviousTab,
@@ -345,6 +354,8 @@ pub mod strings {
         "File was deleted or is unavailable. Showing the last loaded content.";
     pub const FILE_NOT_FOUND: &str =
         "File not found. Choose another file or remove this entry from Recent.";
+    pub const DEFAULT_APP_DONE: &str = "mdview is now the default for Markdown files";
+    pub const DEFAULT_APP_FAILED: &str = "Could not make mdview the default";
     pub const ONLY_MARKDOWN_LINKS: &str = "Only Markdown file links open inside the viewer.";
 
     pub const RECENT_EMPTY: &str = "No recent files";

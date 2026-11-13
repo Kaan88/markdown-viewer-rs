@@ -362,6 +362,20 @@ impl App {
             .or_else(|| self.ws.folder().map(Path::to_path_buf))
     }
 
+    /// Starts a file dialog on its helper thread through `start`, which is given a proxy for the
+    /// answer and says whether the dialog opened. The window keeps drawing meanwhile; a request
+    /// made while one is open is ignored. The answer comes back as `Wake::Dialog`.
+    #[cfg(not(windows))]
+    fn open_dialog_async(&mut self, start: impl FnOnce(EventLoopProxy<Wake>) -> bool) {
+        if self.dialog_open {
+            return;
+        }
+        let Some(proxy) = self.proxy.clone() else {
+            return;
+        };
+        self.dialog_open = start(proxy);
+    }
+
     pub(super) fn set_folder(&mut self, dir: PathBuf) {
         let dir = mdview_core::files::canonical_or_absolute(&dir);
         self.ws.set_folder(Some(dir.clone()));
@@ -378,11 +392,22 @@ impl App {
 
     pub(super) fn command(&mut self, id: C) {
         match id {
+            #[cfg(windows)]
             C::OpenFiles => {
                 for path in platform::pick_files(self.start_dir().as_deref()) {
                     let _ = self.ws.open(&path);
                 }
             }
+            #[cfg(not(windows))]
+            C::OpenFiles => {
+                let start = self.start_dir();
+                self.open_dialog_async(|proxy| {
+                    platform::pick_files_async(start.as_deref(), move |files| {
+                        let _ = proxy.send_event(Wake::Dialog(DialogAnswer::Files(files)));
+                    })
+                });
+            }
+            #[cfg(windows)]
             C::OpenFolder => {
                 let start = self
                     .ws
@@ -392,6 +417,26 @@ impl App {
                 if let Some(dir) = platform::pick_folder(start.as_deref()) {
                     self.set_folder(dir);
                 }
+            }
+            #[cfg(not(windows))]
+            C::OpenFolder => {
+                let start = self
+                    .ws
+                    .folder()
+                    .map(Path::to_path_buf)
+                    .or_else(|| self.start_dir());
+                self.open_dialog_async(|proxy| {
+                    platform::pick_folder_async(start.as_deref(), move |dir| {
+                        let _ = proxy.send_event(Wake::Dialog(DialogAnswer::Folder(dir)));
+                    })
+                });
+            }
+            C::MakeDefault => {
+                let result = platform::make_mdview_default();
+                self.ws.set_status(match result {
+                    Ok(()) => mdview_core::commands::strings::DEFAULT_APP_DONE,
+                    Err(_) => mdview_core::commands::strings::DEFAULT_APP_FAILED,
+                });
             }
             C::Refresh => {
                 self.ws.reload();
@@ -582,6 +627,19 @@ impl App {
             }
             Wake::Update(updater::Event::Installed(result)) => {
                 self.ws.update_finished(result);
+            }
+            #[cfg(not(windows))]
+            Wake::Dialog(answer) => {
+                self.dialog_open = false;
+                match answer {
+                    DialogAnswer::Files(files) => {
+                        for path in files {
+                            let _ = self.ws.open(&path);
+                        }
+                    }
+                    DialogAnswer::Folder(Some(dir)) => self.set_folder(dir),
+                    DialogAnswer::Folder(None) => {}
+                }
             }
         }
         self.redraw();

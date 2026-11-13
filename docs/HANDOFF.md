@@ -797,7 +797,46 @@ and the showcase's two decodes separately.
 
 ## 12. Linux: what exists for the KDE run
 
-Nothing of the new shell has been built on Linux. PLAN D lists the work: Wayland file drops,
+**2026-11-14, Linux pass (shared `84de734`, branch `feat/linux`; the version stays 0.2.3).** The new shell now
+builds and runs on CachyOS, KDE Wayland, cargo 1.99 (`CARGO_TARGET_DIR` off the repo). Changed, all under
+`cfg(not(windows))` except where noted:
+
+- Repaint: `present` copies the damaged rows only when `buffer.age() == 1`; any other age (0, or
+  2 in Wayland's two-buffer swap, or a resized buffer that keeps its age) copies and presents the
+  whole frame. Windows only reports 0 or 1, so it is unchanged there.
+- File dialogs: Open files and Open folder use `platform::pick_files_async` / `pick_folder_async`;
+  the helper thread's `done` posts `Wake::Dialog`, handled on the UI thread. `App::dialog_open`
+  ignores a second request while one is open. Windows keeps the blocking calls.
+- Fonts: the page's `sans`/`mono` family strings name `Noto Color Emoji` before the generic off
+  Windows (`crates/render/src/theme.rs`, `SANS`/`MONO`). Chrome text and the page use
+  `shared_fonts()`, which applies the shared fallback families.
+- Window identity: `window::identify(.., "mdview", assets/mdview.png)` on the attributes and
+  `desktop_entry::ensure` once before the event loop (a no-op outside an AppImage and on Windows).
+  The command `MakeDefault` ("Make mdview the default for Markdown files", no key, in no menu-bar
+  menu) is in the main menu only off Windows, only when `$APPIMAGE` names a file, and not once
+  `is_default` is true; its toast says the result.
+- Updates: nothing in the viewer assumes an engine file; the shared `installed_files` returns the
+  AppImage with no engine and a Linux release lists no `engine.*` keys. `engine_path()` looks at
+  `current_exe().parent()` first, which inside a mounted AppImage is `usr/bin`, where
+  `mdview-engine` sits beside `mdview`.
+- `bins/mdv-app/src/updater.rs`: the `use mdview_core::update` of the tests moved into the
+  Windows-only test (it was an unused import, a clippy error, off Windows).
+- Left alone: `shows_animations` is `true` off Windows (no portal setting is read);
+  double click on the title row already maximises through `toggle_maximized` (shared code, not
+  tried in a Linux window); the Windows-only test of the release manifest.
+
+Run on Linux: `cargo test --release --workspace` (371 pass, 4 ignored; the goldens skip off
+Windows), clippy `-D warnings` and `fmt --check` clean, all 57 `tests/shots.sh` states byte-identical to
+before the change (none has an emoji or the new item; an emoji fixture was rendered separately and
+looked at: colour emoji in body, list, inline code, fenced code and table), `mdview --check-update`
+("nothing newer", a 404 manifest URL gives `Status(404)`), the app started three times from a
+fixture: first frame 78-85 ms, idle about 1 % CPU. **Not run**: any Windows build, a driven
+window (clicks, resize, dialogs, drag, the repaint fix itself), an AppImage, the default-app command, the
+desktop entry, a remote image visible in a window (a real window with `--load-remote` refined twice
+and sent one engine job for an https SVG badge, so the download arrived; the pixels were not
+looked at), GNOME or X11.
+
+Earlier note (2026-11-12), now out of date: nothing of the new shell had been built on Linux. PLAN D lists the work: Wayland file drops,
 portal dialogs (rfd is already configured with `xdg-portal`), an icon font to replace Segoe
 Fluent Icons, and a build of `mdshared-fetch`'s stub (remote images will fail there until a
 transport is written; `stub.rs` describes the intended approach). PLAN's "Verification" section
@@ -888,7 +927,8 @@ testing on other machines (there is one PC). The editor is a second project (PLA
   `app/input.rs` `wheel` scrolls the menu under the pointer when it is taller than its room (else
   closes the menus as before); `open_submenu` subtracts the parent's scroll; `--menu main-end` and
   two shots, `menu-tall-main` and `menu-tall-main-end` (1000x520), in `tests/shots.sh` (now 57;
-  `MDVIEW_EXE` overrides the exe, for a build outside `targetelease`). **The installer's last page
+  `MDVIEW_EXE` overrides the exe, for a build outside `target
+elease`). **The installer's last page
   no longer asks about default apps** (changed in `fc6e825`, after 0.2.2). **Shots:** 55 before and
   after (both with `mdview-engine.exe` beside the exe: without it the math, diagrams and images shots differ for that reason alone): 49 byte-identical; six differ (`hover-menu`, `menu-cascade-dark`, `menu-cascade-light`,
   `menu-main-dark`, `menu-main-light`, `scale-150-menu`), and only in the menu's area: at the

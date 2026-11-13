@@ -54,13 +54,13 @@ pub fn record_version(version: &Version) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mdview_core::update;
 
     /// `build-installer.ps1` writes the manifest of a release; when it has run, what it wrote
     /// must read as an installable release of this very version.
     #[cfg(windows)]
     #[test]
     fn the_release_script_writes_a_manifest_this_build_reads() {
+        use mdview_core::update;
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/release-files/mdview-update.txt");
         let Ok(bytes) = std::fs::read(&path) else {

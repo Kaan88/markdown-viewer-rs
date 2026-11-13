@@ -67,6 +67,20 @@ impl Theme {
     }
 }
 
+/// The page's sans-serif and monospace family lists. Off Windows the colour emoji family comes
+/// before the generic: an emoji cluster takes the first listed font that has the character, and
+/// the generic can resolve to a font with a monochrome (or tall, boxed) glyph for it.
+const SANS: &str = if cfg!(windows) {
+    "Segoe UI, Noto Sans, Cantarell, DejaVu Sans, sans-serif"
+} else {
+    "Segoe UI, Noto Sans, Cantarell, DejaVu Sans, Noto Color Emoji, sans-serif"
+};
+const MONO: &str = if cfg!(windows) {
+    "Consolas, Cascadia Mono, Noto Sans Mono, DejaVu Sans Mono, monospace"
+} else {
+    "Consolas, Cascadia Mono, Noto Sans Mono, DejaVu Sans Mono, Noto Color Emoji, monospace"
+};
+
 pub const LIGHT: Theme = Theme {
     name: "light",
     bg: [0xfb, 0xfb, 0xfb],
@@ -80,8 +94,8 @@ pub const LIGHT: Theme = Theme {
     tint: [0xee, 0xf4, 0xfb],
     kw: [0x8a, 0x2b, 0xb0],
     string: [0x0f, 0x6e, 0x3c],
-    sans: "Segoe UI, Noto Sans, Cantarell, DejaVu Sans, sans-serif",
-    mono: "Consolas, Cascadia Mono, Noto Sans Mono, DejaVu Sans Mono, monospace",
+    sans: SANS,
+    mono: MONO,
     body_size: 16.0,
     body_line_height: 1.6,
     margin: 40.0,
@@ -101,8 +115,8 @@ pub const DARK: Theme = Theme {
     tint: [0x24, 0x30, 0x3a],
     kw: [0xd2, 0xa8, 0xff],
     string: [0x8b, 0xd6, 0x9c],
-    sans: "Segoe UI, Noto Sans, Cantarell, DejaVu Sans, sans-serif",
-    mono: "Consolas, Cascadia Mono, Noto Sans Mono, DejaVu Sans Mono, monospace",
+    sans: SANS,
+    mono: MONO,
     body_size: 16.0,
     body_line_height: 1.6,
     margin: 40.0,
