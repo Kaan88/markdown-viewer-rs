@@ -144,7 +144,7 @@ document with SVG, math or Mermaid.
 | `--shot out.png` | Draw one frame of the state the other flags describe, write it, exit. No window |
 | `--size WxH`, `--scale f` | Shot size and device scale |
 | `--files`/`--no-files`, `--outline`/`--no-outline`, `--focus-mode` | Panes and focus mode |
-| `--find q`, `--scroll px`, `--hover x,y` | Find query, scroll offset, pointer position |
+| `--find q`, `--scroll px`, `--hover x,y` | Find query, scroll offset, pointer position. `--scroll` also applies to a real window's first document |
 | `--menu main\|recent\|tab\|page`, `--dialog about\|shortcuts\|recent` | Open a popup or dialog in the shot |
 | `--scroll-steps n` | Open a real window, wait until the page is refined, scroll n wheel steps, log timings, exit |
 | `--update-bar available\|installing\|installed` | Show the update bar at that stage with a made-up version, for a shot |
@@ -237,8 +237,9 @@ Maximized, the client rectangle equals the monitor work area, so the taskbar sta
 
 **Idle.** The loop waits for events and sets a timer only for something pending: caret blink in
 the find box, tooltip delay (500 ms), toast expiry, drag auto-scroll (16 ms), the idle-tab check
-(every 30 s; tabs left 60 s ago drop their document), saving the size 800 ms after a resize, and
-page refinement (4 ms slices while there is more). A refined, idle window costs no CPU.
+(every 30 s; tabs left 60 s ago drop their document), saving the size 800 ms after a resize,
+page refinement (4 ms slices while there is more), and the next frame of an animated image that is
+on screen. A refined, idle window with no animation in view costs no CPU.
 
 **Differences from the Qt shell** (all noted in `workspace.rs`): restored tabs load when first
 shown and inactive tabs drop their layout; the reading position survives reload, resize and zoom
@@ -515,10 +516,43 @@ reload or a tab switch re-reads and re-renders nothing. Pixels are capped at 64 
 (`IMAGE_CACHE_BYTES`) with LRU eviction that never drops what the current frame uses. File SVGs are
 rasterized by the engine at the device scale (`KIND_SVG_AT`).
 
-**Images.** PNG, JPEG, GIF (first frame only) and WebP decode in-process; SVG goes to the engine.
+**Images.** PNG, JPEG, GIF and WebP decode in-process; SVG goes to the engine.
 Limits 12 MiB and 24 Mpx. `<picture>` light/dark sources follow the theme; `<img width height>`
 are honoured and reserve the box while loading. Below half size an image is area-averaged
 (`56c61a3`), at half size and up bilinear.
+
+**Animated GIF and WebP (2026-11-13).** The image decoder still draws the first frame, on the
+window's thread, as before. Everything after it is `crates/render/src/anim.rs`: a `Player` per
+file walks it forward one frame at a time on one worker thread (`mdview-anim`, started by the
+first image that may animate, asleep in `recv` otherwise), keeping only the composited canvas, so
+memory does not grow with the frame count; a loop starts the decoder over. GIF disposal (keep,
+background as transparent, previous), transparency, interlace, local palettes, frames clipped to
+the canvas, the Netscape loop count (none: once; n: n repeats; 0: for ever) and WebP's loop count
+are honoured; a delay of 10 ms or less plays as 100 ms. The store (`layout/store.rs`) holds the
+frame on screen in the entry's slot and the one decoded ahead beside it;
+`DocumentRenderer::animate(now)` (`layout/animate.rs`) swaps in what is due among the images the
+kept frame shows, records their rows, and returns when to come back; the next `view_frame` paints
+only those rows (`band`, `shift` 0). The renderer has no timer: the shell's `timers()` calls
+`Workspace::animate`, sets `WaitUntil` for the time returned, and the worker's wake
+(`Wake::Animation`) covers a frame still being decoded. The shell does not call it while the window
+is hidden, minimised or reported occluded, and an image outside the viewport or in another tab is
+never advanced, so none of those ask for a wake. A frame advance draws and presents only the
+image's rows of the page region (`page_band` in `App::compose`), unless a menu, dialog or toast
+lies over them. An animation shown below half its size gets its frames already scaled to its box by
+the worker (`anim::fit`, opaque frames of endless loops only) and they are copied in; when a whole
+loop of them fits `MAX_ANIMATION_KEPT_BYTES` (32 MiB) it is kept and plays with no decoder at all.
+Limits (`crates/core/src/limits.rs`): 10,000 frames and a 4 M pixel canvas (over either: first
+frame only), and 64 MiB (`ANIMATION_BYTES`) for all players and kept frames together; past it,
+animations off screen give theirs up and start from their first frame when shown again (a local
+file is read again, a remote image is asked of the shell again), and one that still does not fit
+stays still. Animation is off in the renderer until `set_animation(true)`: tests, goldens, the
+bench and `--shot` never animate. The shell turns it on when there is a window, the session's
+`animations` is not 0 ("Play animated images" in the main menu) and Windows' "Animation effects"
+(`SPI_GETCLIENTAREAANIMATION`, read at start and when the window gains focus) is on. Measured on
+the PC, release build, 1280x800 at scale 1, CPU time over 10 s: a 160x120 GIF at 10 frames a second
+on screen 141 to 188 ms (1.4 to 1.9 % of one core, 0.5 ms of painting per frame, 125 rows
+presented); the same page scrolled past it 0 ms; minimised 0 ms; a 1920x1080 GIF shown 700 px wide
+266 ms (922 ms before frames were scaled on the worker and kept). The user has not looked at it.
 
 **Math** (RaTeX through the engine): inline `$...$` is one image atom rendered at twice the text
 size and halved, sitting on the baseline the engine reports; `$$...$$` and fenced `math` are
@@ -711,7 +745,11 @@ window, 4 s after launch. First frame with `--no-session`: showcase 85-94 ms ove
 
 - Ruby annotations sit over the first line of their base only, at half size.
 - `<figure>` has no side margin.
-- GIF shows its first frame only (no animation, so idle CPU stays zero).
+- An animated image over 10,000 frames or 4 M pixels shows its first frame only. A window covered
+  by another one goes on animating (winit reports no occlusion there); minimised, it stops. An
+  animated image in a footnote does not move. After a zoom or resize an animation shown small may
+  show an older frame for one frame time, and one that had given up its decoder starts from its
+  first frame.
 - `architecture-beta` diagrams keep their source; `wardley` and `info` are off too.
 - Text in packet and C4 diagrams is small.
 - Math and diagrams are images: no selection geometry, no equation numbering. Their source can be

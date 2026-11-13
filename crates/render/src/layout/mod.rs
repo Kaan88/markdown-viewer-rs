@@ -7,11 +7,12 @@
 //! [`relayout`] measures blocks and corrects the layout in place around the viewport's anchor,
 //! [`estimate`] guesses heights without shaping, [`refine`] measures the rest in idle slices,
 //! [`frame`] draws the scroll frame, [`hit`] and [`selection`] the caret geometry, [`store`] keeps
-//! every raster across layouts, [`pager`] the layout walk and text emission, [`inline`] the
+//! every raster across layouts, [`animate`] moves animated images in the kept frame, [`pager`] the layout walk and text emission, [`inline`] the
 //! model-to-runs conversion, [`paint`] the paint list and raster, and [`prose`], [`containers`],
 //! [`table`] and [`media`] the block kinds, and [`floats`] the floated images that reach across
 //! blocks and the state that lets a block beside one be laid out on its own.
 
+mod animate;
 mod containers;
 mod estimate;
 mod floats;
@@ -29,6 +30,7 @@ mod selection;
 mod store;
 mod table;
 
+pub use animate::AnimationTick;
 pub use page::PageLayout;
 pub use relayout::{Jump, RemoteState};
 pub use store::ImageStats;

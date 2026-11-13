@@ -168,6 +168,10 @@ impl App {
                 let on = !self.ws.edit_always();
                 self.ws.set_edit_always(on);
             }
+            Act::Animations => {
+                let on = !self.ws.animations();
+                self.ws.set_animations(on);
+            }
             Act::Edit(edit) => {
                 let f = &mut self.ui.find;
                 let changed = match edit {
@@ -520,6 +524,9 @@ impl App {
                     );
                 }
             }
+            // A decoded frame is waiting: `timers` puts it up when it is due, and asks for a
+            // frame only if something on screen changed.
+            Wake::Animation => return,
             Wake::Update(updater::Event::Checked { manual, result }) => {
                 self.ws.update_checked(unix_now(), manual, result);
             }
@@ -650,6 +657,21 @@ impl App {
                 at(due);
             }
         }
+        // Animated images, only while the window can be seen. A window that is minimised or
+        // covered asks for nothing, so its animations stand still and cost nothing.
+        if self.shows_page() {
+            let tick = self.ws.animate(now);
+            if let Some((a, b)) = tick.rows {
+                self.anim_rows = Some(match self.anim_rows {
+                    Some((c, d)) => (a.min(c), b.max(d)),
+                    None => (a, b),
+                });
+                self.wants_frame = true;
+            }
+            if let Some(due) = tick.next {
+                at(due.max(now));
+            }
+        }
         let active = self.ws.active();
         let unloadable = self
             .ws
@@ -668,6 +690,16 @@ impl App {
             self.idle_due = None;
         }
         next
+    }
+
+    /// Whether the window is on screen: created, shown, not minimised and not fully covered.
+    pub(super) fn shows_page(&self) -> bool {
+        !self.first
+            && !self.occluded
+            && self
+                .window
+                .as_ref()
+                .is_some_and(|w| w.is_minimized() != Some(true) && w.is_visible() != Some(false))
     }
 
     pub(super) fn window_focused(&self) -> bool {

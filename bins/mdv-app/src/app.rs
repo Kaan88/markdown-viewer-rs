@@ -75,6 +75,8 @@ pub enum Wake {
     Images,
     /// The note index (wiki-links, backlinks) was built or refreshed.
     Notes,
+    /// The animation thread has a frame ready.
+    Animation,
     /// An updater thread has an answer.
     Update(updater::Event),
 }
@@ -144,6 +146,13 @@ struct App {
     toast_until: Option<Instant>,
     size_save_due: Option<Instant>,
     idle_due: Option<Instant>,
+    /// Rows of the page viewport (device px, first and one past the last) where an animated
+    /// image went to its next frame since the last frame was drawn.
+    anim_rows: Option<(u32, u32)>,
+    /// A partial page draw found more changed than its rows; the page is drawn whole next.
+    page_again: bool,
+    /// The system says the window is completely covered.
+    occluded: bool,
     /// `--scroll-steps`: steps left and the frame times taken.
     steps: Option<u32>,
     step_times: Vec<FrameTimes>,
@@ -196,6 +205,9 @@ impl App {
             toast_until: None,
             size_save_due: None,
             idle_due: None,
+            anim_rows: None,
+            page_again: false,
+            occluded: false,
             step_times: Vec::new(),
             trace,
             wheel_rest: 0.0,
@@ -458,7 +470,7 @@ impl App {
                 dirty[r.index()] = true;
             }
         }
-        if self.ws.take_dirty() {
+        if self.ws.take_dirty() || std::mem::take(&mut self.page_again) {
             dirty[Region::Page.index()] = true;
         }
         for r in REGIONS {
@@ -529,6 +541,29 @@ impl App {
         self.overlay_sig = osig;
         let mut under: Vec<Rect> = bounds.clone();
         under.extend(self.overlay_bounds.iter().copied());
+        // An animated image's next frame and nothing else: only its rows of the page are drawn
+        // and presented, unless an overlay lies over them (then the page goes the usual way).
+        let mut page_band: Option<(Rect, (u32, u32))> = None;
+        if let Some((a, b)) = self.anim_rows.take()
+            && !dirty[Region::Page.index()]
+            && self.areas.region(Region::Page).is_some()
+            && self.ws.active().is_some()
+        {
+            let vr = page::viewport(&self.ws, self.areas.page);
+            let y0 = (vr.y * self.scale).round();
+            // A device row to spare on each side, against rounding back and forth.
+            let band = Rect::new(
+                vr.x,
+                (y0 + a as f32 - 1.0) / self.scale,
+                vr.w,
+                (b.saturating_sub(a) as f32 + 2.0) / self.scale,
+            );
+            if under.iter().any(|u| overlaps(*u, band)) {
+                dirty[Region::Page.index()] = true;
+            } else {
+                page_band = Some((band, (a, b)));
+            }
+        }
         let touches = |r: Region, dirty: &[bool; 5]| dirty[r.index()];
         let any_under_dirty = REGIONS.iter().any(|&r| {
             touches(r, &dirty)
@@ -559,19 +594,27 @@ impl App {
         let maximized = self.maximized;
         let (hover, pressed) = (self.ui.hover, self.ui.pressed);
         let mut damage = Vec::new();
+        // The page rows a draw of an animation's next frame is limited to.
+        let mut partial: Option<(u32, u32)> = None;
         {
             let mut p = Painter::new(&mut self.screen, &mut self.gfx, self.scale);
             for r in REGIONS {
-                if !dirty[r.index()] {
+                let band = page_band.filter(|_| r.index() == Region::Page.index());
+                if !dirty[r.index()] && band.is_none() {
                     continue;
                 }
                 let Some(rect) = self.areas.region(r) else {
                     continue;
                 };
-                damage.push(p.dev_rect(rect));
+                // The whole region, or only the rows an animation changed. Hits are recorded
+                // for the whole region either way.
+                let band = band.filter(|_| !dirty[r.index()]);
+                let clip = band.map_or(rect, |(clip, _)| clip);
+                partial = band.map(|(_, rows)| rows);
+                damage.push(p.dev_rect(clip));
                 let hits = &mut self.hits[r.index()];
                 hits.clear();
-                let old = p.clip(rect);
+                let old = p.clip(clip);
                 let mut c = Ctx {
                     p: &mut p,
                     pal: &pal,
@@ -611,6 +654,14 @@ impl App {
                     b.draw(c.p, &pal);
                 }
             }
+        }
+        // A partial draw trusted that only those rows of the page changed. If the page's frame
+        // says otherwise (something else moved in between), the page is drawn whole next.
+        if let Some((a, b)) = partial
+            && !self.ws.frame_changed_within(a, b)
+        {
+            self.page_again = true;
+            self.wants_frame = true;
         }
         // Painting may have settled a jump; that is already on screen.
         self.ws.take_dirty();
@@ -927,6 +978,11 @@ impl ApplicationHandler<Wake> for App {
         stage(self.started, "surface");
         self.draw();
         stage(self.started, "first draw returned");
+        // `--scroll` in a window too, so a check can start with the page scrolled.
+        if let Some(px) = self.args.scroll {
+            self.ws.scroll_to(px * self.scale);
+            self.redraw();
+        }
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, wake: Wake) {
@@ -986,7 +1042,14 @@ impl ApplicationHandler<Wake> for App {
                 self.full = true;
                 self.redraw();
             }
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = occluded;
+            }
             WindowEvent::Focused(focused) => {
+                if focused {
+                    // The one place the system's "animation effects" setting is read again.
+                    self.ws.set_system_animations(platform::shows_animations());
+                }
                 if focused && self.ui.tree.refresh() {
                     self.redraw();
                 }
@@ -1250,6 +1313,12 @@ pub fn run() -> i32 {
     let p = proxy.clone();
     app.ws.set_notes_wake(move || {
         let _ = p.send_event(Wake::Notes);
+    });
+    // Animated images play only in a window: `--shot` renders above never get here.
+    let p = proxy.clone();
+    app.ws.set_system_animations(platform::shows_animations());
+    app.ws.set_animation_wake(move || {
+        let _ = p.send_event(Wake::Animation);
     });
     app.proxy = Some(proxy);
     app.updates_at_launch();

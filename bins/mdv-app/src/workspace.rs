@@ -432,6 +432,10 @@ pub struct Workspace {
     updates: Updates,
     /// The note index and the active document's backlinks (`workspace/notes.rs`).
     notes: notes::Notes,
+    /// Animated images may play: there is a window to wake (never in a `--shot` render or a
+    /// test), and the system shows animations.
+    animation_wake: bool,
+    system_animations: bool,
 }
 
 impl Workspace {
@@ -471,6 +475,8 @@ impl Workspace {
             pending_task: None,
             updates: Updates::default(),
             notes: notes::Notes::new(),
+            animation_wake: false,
+            system_animations: true,
         };
         for path in ws.session.tabs.clone() {
             let path = canonical_or_absolute(&path);
@@ -1159,6 +1165,68 @@ impl Workspace {
         }
         self.dirty = true;
         true
+    }
+
+    // ---- animated images -------------------------------------------------------------------
+
+    /// Sets what runs (on the decoding thread) when an animation frame is ready; it must only
+    /// post a message that makes the window call [`animate`](Self::animate). Until this is
+    /// called nothing animates.
+    pub fn set_animation_wake(&mut self, wake: impl Fn() + Send + Sync + 'static) {
+        self.renderer.set_animation_wake(wake);
+        self.animation_wake = true;
+        self.sync_animation();
+    }
+
+    /// Whether the reader lets animated images play.
+    pub fn animations(&self) -> bool {
+        self.session.animations
+    }
+
+    pub fn set_animations(&mut self, on: bool) {
+        if self.session.animations == on {
+            return;
+        }
+        self.session.animations = on;
+        self.sync_animation();
+        self.persist();
+    }
+
+    /// Records whether the system shows animations; when it does not, images stay still.
+    pub fn set_system_animations(&mut self, on: bool) {
+        if self.system_animations != on {
+            self.system_animations = on;
+            self.sync_animation();
+        }
+    }
+
+    fn sync_animation(&mut self) {
+        let on = self.animation_wake && self.session.animations && self.system_animations;
+        self.renderer.set_animation(on);
+        self.dirty = true;
+    }
+
+    /// Puts up the animation frames due at `now` on the page being shown. The window draws the
+    /// rows it reports and comes back at the time it gives (or at the wake).
+    pub fn animate(&mut self, now: Instant) -> mdview_render::AnimationTick {
+        if self.layout().is_none() {
+            return mdview_render::AnimationTick::default();
+        }
+        let tick = self.renderer.animate(now);
+        self.adopt();
+        // An animation starting again may have asked for its remote bytes.
+        self.pump_remote();
+        tick
+    }
+
+    /// Whether the page frame drawn last changed nothing outside rows `first..end` and did not
+    /// move, which is what a draw limited to those rows relies on.
+    pub fn frame_changed_within(&self, first: u32, end: u32) -> bool {
+        self.renderer.frame().is_some_and(|f| {
+            f.shift == 0
+                && f.band
+                    .is_some_and(|(at, rows)| rows == 0 || (at >= first && at + rows <= end))
+        })
     }
 
     // ---- task boxes --------------------------------------------------------------------------

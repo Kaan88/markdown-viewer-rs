@@ -60,6 +60,7 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
         cmd(C::FocusMode, "Focus reading mode", glyph::FULLSCREEN).checked(ui.focus_mode),
         Item::new(Act::RemoteAlways, "Always load remote images").checked(ws.remote_always()),
         Item::new(Act::EditAlways, "Tick task boxes without asking").checked(ws.edit_always()),
+        Item::new(Act::Animations, "Play animated images").checked(ws.animations()),
         width(PageWidth::Narrow, "Narrow page").sep(),
         width(PageWidth::Wide, "Wide page"),
         width(PageWidth::Full, "Full-width page"),

@@ -46,6 +46,22 @@ pub fn notes_config() -> mdshared_app::notes::Config {
         max_links_per_file: NOTES_MAX_LINKS_PER_FILE,
     }
 }
+/// Animated GIF and WebP. An image over the frame or pixel limit shows its first frame only.
+pub const MAX_ANIMATION_FRAMES: u32 = 10_000;
+/// The largest canvas that animates (2560 x 1440 fits), also the largest single frame of one.
+pub const MAX_ANIMATION_PIXELS: u64 = 4_000_000;
+/// What all playing animations together may hold beyond the frame on screen: their file bytes,
+/// the decoder's canvas, its saved copy for "restore to previous" and the frame decoded ahead.
+/// Past it, animations off screen give theirs up (and start again when shown); one that still
+/// does not fit stays on the frame it shows.
+pub const ANIMATION_BYTES: u64 = 64 * 1024 * 1024;
+/// The most one looping animation may keep of its frames at the size it is shown (see the image
+/// store): with a whole loop kept, playing it needs no decoder. Counted in `ANIMATION_BYTES`.
+pub const MAX_ANIMATION_KEPT_BYTES: u64 = 32 * 1024 * 1024;
+/// A frame delay this short or shorter is played as `ANIMATION_DEFAULT_DELAY_MS`, as browsers
+/// do, so a file of zero delays cannot spin the window.
+pub const ANIMATION_FAST_DELAY_MS: u32 = 10;
+pub const ANIMATION_DEFAULT_DELAY_MS: u32 = 100;
 
 pub const FIND_CAP: usize = 10_000;
 /// Character comparisons find may spend per byte of text before it stops and reports itself capped.
