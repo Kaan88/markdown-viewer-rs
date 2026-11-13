@@ -742,7 +742,9 @@ impl Workspace {
         match read_stable(&path) {
             Ok(loaded) => {
                 let mut tab = Tab::unloaded(path.clone());
-                let document = parse_bytes(&loaded.bytes);
+                let folder_open = self.session.folder.is_some();
+                let document =
+                    notes::parse_document(&self.notes, folder_open, &path, &loaded.bytes);
                 tab.keep = self.remembered(&path, &document);
                 tab.set_document(document, loaded.stamp);
                 self.tabs.push(tab);
@@ -941,7 +943,9 @@ impl Workspace {
         }
         match read_stable(&tab.path) {
             Ok(loaded) => {
-                let document = parse_bytes(&loaded.bytes);
+                let folder_open = self.session.folder.is_some();
+                let document =
+                    notes::parse_document(&self.notes, folder_open, &tab.path, &loaded.bytes);
                 // A tab restored from the session, or one whose document was dropped while it
                 // was idle: where the reader left the file is among the session's places.
                 let place = self.session.places.get(&tab.path);
@@ -1108,7 +1112,8 @@ impl Workspace {
         let active = self.active == Some(index);
         let height = self.viewport.map_or(0.0, |v| v.height as f32);
         tab.drop_view(self.renderer.page_layout(), height);
-        let document = parse_bytes(&loaded.bytes);
+        let folder_open = self.session.folder.is_some();
+        let document = notes::parse_document(&self.notes, folder_open, &tab.path, &loaded.bytes);
         let mut current = None;
         if let Some(old) = tab.doc.as_ref() {
             let remap = Remap::new(old, &document);

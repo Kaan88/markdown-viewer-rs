@@ -119,16 +119,10 @@ const WRAPPER: &str = "looks the same: an inline tag alone in an HTML block wrap
 
 const IMPLIED_CELL: &str = "code directly in a <tr> gets an implied cell, since the model promises rows hold only cells; a browser moves it before the table";
 
-const WIKI: &str =
-    "deliberate: [[x]] is a wiki-link to the note x, before any reference definition is looked at";
-
 const COMMONMARK_EXCEPTIONS: &[(usize, &str)] = &[
     (148, PRE_BLANK),
     (167, WRAPPER),
     (191, IMPLIED_CELL),
-    (548, WIKI),
-    (559, WIKI),
-    (590, WIKI),
     (602, BARE_URL),
     (608, BARE_URL),
     (611, BARE_URL),
@@ -138,9 +132,6 @@ const GFM_EXCEPTIONS: &[(usize, &str)] = &[
     (118, PRE_BLANK),
     (137, WRAPPER),
     (160, IMPLIED_CELL),
-    (556, WIKI),
-    (567, WIKI),
-    (598, WIKI),
     (610, BARE_URL),
     (616, BARE_URL),
     (619, BARE_URL),

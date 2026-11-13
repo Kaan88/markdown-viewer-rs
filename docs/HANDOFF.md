@@ -100,7 +100,7 @@ To change shared code: edit it there, push, and move the `rev` here. The move wa
 `--shot` renders compared byte for byte before and after; `mdview.exe` went from 7,439,872 to
 7,457,280 bytes. First-frame time and memory were re-measured on 2026-11-13 (section 9) and are
 unchanged. The user has not run the app since the move. Tests moved with the code: this workspace now runs
-305 (4 ignored) with the wiki-link work below, the shared repository 119 (3 ignored) before
+308 (4 ignored) with the wiki-link work below, the shared repository 119 (3 ignored) before
 its `feat/wiki` branch, which adds 19 to `mdshared-app` (39 to 58).
 
 `target/` is git-ignored. Helper scripts that once lived there (`vm.py`, `seed-lock.py`,
@@ -367,18 +367,29 @@ against the shared branch `feat/wiki`; **the pinned `rev` does not have `mdshare
 and `wikilink` yet**, so this builds only with the shared branch merged and the `rev` moved (or
 with a `--config patch` to a checkout of it). The user has not looked at any of it.
 
-- *Parsing.* pulldown-cmark's `ENABLE_WIKILINKS` (`parse.rs`, `wiki_link`): `LinkInfo.wiki`
-  marks the link, `dest` is `Note#Heading`. The shared `wikilink::parse_target` splits it.
-  Three spec examples per suite became listed exceptions (`[[x]]` beside a reference
-  definition). `![[pic.png]]` is an image; any other embed stays text.
+- *Parsing.* The viewer's own pass over finished text runs (`find_wiki` and `rewrite_run` in
+  `parse.rs`, called from `flush_run` beside the bare-URL pass), not pulldown-cmark's
+  `ENABLE_WIKILINKS`: that option was tried first and took `[[1]](url)`, `[[2]][ref]` and
+  `[[x]]` with a definition away from CommonMark, which ordinary READMEs use. The pass sees
+  only what the Markdown parser left as plain text, so those keep their meaning and the spec
+  suites have no wiki exceptions. `LinkInfo.wiki` marks the link, `dest` is `Note#Heading`;
+  the shared `wikilink::parse_target` splits it. A label with markup in it is several runs,
+  so that link stays text. Embeds (`![[x]]`) stay text.
+- *Who decides.* `parse_wiki(src, &mut |note| WikiAs)`: the application answers per note name
+  `Link`, `Missing` or `Text`; plain `parse` answers `Text` for all. The workspace
+  (`notes::Decider`) answers `Link` for a note it finds, and for one it does not, `Missing`
+  with a folder open and `Text` without: **a file read with no folder open shows an unfound
+  `[[name]]` as written, not as a link.** `Document::wiki_text` keeps the names left as text.
 - *Resolution* (`mdshared_app::notes`, `workspace/notes.rs`): see the COVERAGE row. Following
   a link goes through `Workspace::open_wiki` and then the same `open_markdown` as a Markdown
   link; `link_destination` gives a wiki-link as `wiki:Note#Heading`, which `open_link` takes.
   The hover hint (`link_hint`) is the resolved path, or "No note named X".
-- *Missing notes.* `LinkInfo.missing` is set by the workspace (`check_wiki_links`, before each
-  layout check, only when the notes generation changed) and drawn by the renderer: muted,
-  dashed underline (`Style::broken`; the run is marked with an underline size, which nothing
-  else sets).
+- *Missing notes.* `LinkInfo.missing` is drawn by the renderer: muted, dashed underline
+  (`Style::broken`; the run is marked with an underline size, which nothing else sets).
+  `check_wiki_links` (before each layout check, only when the notes generation changed) asks
+  again for every link and every name left as text: a changed `missing` is a relayout; text
+  that should be a link, or the reverse, makes `parse_again` read and parse the file again
+  silently, keeping the reading position and open `<details>` (the selection is dropped).
 - *The index.* Only with a folder open in the Files pane (shown or not). `notes::Indexer`
   builds it on its own thread, within `limits::NOTES_*` (20,000 files, 2 MiB read per file,
   256 MiB in total, 16 folder levels, 200,000 directory entries, 2,000 links per file),
@@ -396,8 +407,9 @@ with a `--config patch` to a checkout of it). The user has not looked at any of 
   line, one entry per link; absent when there are none. A click opens the file with the link
   selected. Wiki-links and relative Markdown links (and reference definitions) count.
 - *Not done.* Outline rows have no keyboard navigation, so backlink rows have none either. A
-  note created in a folder nobody watches (no folder open) keeps its link drawn missing until
-  the document is read again; a click still finds it. A new folder below the open one is seen
+  note created beside a document while no folder is open (nobody watches that folder) leaves
+  its `[[name]]` as text until the document is read again or another wake comes. With no
+  folder open `[[#Heading]]` is text too, since the parser decides before headings are known. A new folder below the open one is seen
   at the next wake, not by itself. `[[Note#^block]]` opens the note at its top. Idle CPU with
   the indexer thread was not measured, only reasoned (it blocks on a channel). Nothing was run
   in a real window: tests and `--shot` only. `fixtures/wiki/` is the test folder.

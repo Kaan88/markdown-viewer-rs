@@ -21,5 +21,5 @@ pub mod tasks;
 pub mod update;
 pub mod watch;
 
-pub use model::{Document, parse_bytes};
-pub use parse::parse;
+pub use model::{Document, parse_bytes, parse_bytes_wiki};
+pub use parse::{parse, parse_wiki};

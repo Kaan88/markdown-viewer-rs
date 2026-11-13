@@ -3,7 +3,7 @@
 mod common;
 
 use mdview_core::commands::{self, CommandId, CommandStyle, Menu, Shortcut, ToolbarItem, strings};
-use mdview_core::files::{self, FileStamp, LoadError, tab_labels};
+use mdview_core::files::{self, FileStamp, LoadError};
 use mdview_core::find::{find, find_in_text, find_visible};
 use mdview_core::limits::*;
 use mdview_core::links::{ImageSource, LinkAction, classify_image, classify_link};
@@ -3118,6 +3118,11 @@ fn find_searches_a_diagram_the_renderer_could_not_draw() {
 
 // Wiki-links
 
+/// Parses with every `[[note]]` answered the same way.
+fn parse_notes(src: &str, all: WikiAs) -> Document {
+    mdview_core::parse_wiki(src, &mut |_| all)
+}
+
 fn wiki_links(d: &Document) -> Vec<(String, String)> {
     d.spans
         .iter()
@@ -3130,12 +3135,16 @@ fn wiki_links(d: &Document) -> Vec<(String, String)> {
         .collect()
 }
 
+fn pair(a: &str, b: &str) -> (String, String) {
+    (a.to_string(), b.to_string())
+}
+
 #[test]
 fn wiki_links_parse_in_every_form() {
-    let d = parse(
+    let d = parse_notes(
         "[[Note]] [[Note|shown text]] [[Note#Heading]] [[Note#Heading|text]] [[#Heading]] [[folder/Note]] [[ Spaced |x]]",
+        WikiAs::Link,
     );
-    let pair = |a: &str, b: &str| (a.to_string(), b.to_string());
     assert_eq!(
         wiki_links(&d),
         [
@@ -3150,15 +3159,39 @@ fn wiki_links_parse_in_every_form() {
     );
     assert_eq!(
         d.text,
-        "Note shown text Note > Heading text Heading folder/Note x
-"
+        "Note shown text Note > Heading text Heading folder/Note x\n"
     );
     assert!(d.links.iter().all(|l| l.wiki && !l.missing));
-    // The label is Markdown; an empty one falls back to the note's name.
-    let d = parse("[[Note|some *bold* words]] [[Other|]]");
-    assert_eq!(d.text.trim_end(), "some bold words Other");
-    assert_eq!(spans_of(&d, SpanKind::Emphasis), ["bold"]);
-    assert_eq!(wiki_links(&d).len(), 2);
+    assert!(d.wiki_text.is_empty());
+    // An empty label falls back to the note's name. A label with markup in it is not one text
+    // run, so that link stays as written.
+    let d = parse_notes("[[Other|]] [[Note|some *bold* words]]", WikiAs::Link);
+    assert_eq!(d.text.trim_end(), "Other [[Note|some bold words]]");
+    assert_eq!(wiki_links(&d), [pair("Other", "Other")]);
+}
+
+#[test]
+fn the_application_decides_what_each_note_name_becomes() {
+    let src = "[[Here]] [[Gone|label]] [[Never#h]] [[#Top]] [[Never]]";
+    let d = mdview_core::parse_wiki(src, &mut |note| match note {
+        "Here" => WikiAs::Link,
+        "Gone" => WikiAs::Missing,
+        _ => WikiAs::Text,
+    });
+    assert_eq!(
+        d.text.trim_end(),
+        "Here label [[Never#h]] [[#Top]] [[Never]]"
+    );
+    let flags: Vec<(bool, bool)> = d.links.iter().map(|l| (l.wiki, l.missing)).collect();
+    assert_eq!(flags, [(true, false), (true, true)]);
+    // What stayed text is remembered by note name, so the application can look again.
+    let kept: Vec<&str> = d.wiki_text.iter().map(|&s| d.str(s)).collect();
+    assert_eq!(kept, ["Never", "", "Never"]);
+    // Plain `parse` knows no notes: everything stays as written.
+    let d = parse(src);
+    assert_eq!(d.text.trim_end(), src);
+    assert!(d.links.is_empty());
+    assert_eq!(d.wiki_text.len(), 5);
 }
 
 #[test]
@@ -3168,84 +3201,190 @@ fn wiki_links_are_not_made_in_code_or_from_broken_brackets() {
         "```\n[[Note]]\n```",
         "    [[Note]]",
         "\\[[Note]]",
+        "[\\[Note]]",
+        "[[Note\\]]",
+        "[[Note]\\]",
         "[[]]",
         "[[|label]]",
         "[[#]]",
         "[[a[b]]",
         "[[Note]",
         "[Note]]",
+        "[[No\\\nte]]",
+        "![[Note]]",
+        "![[pic.png]]",
+        "[[https://example.com/a]]",
+        "<a href=x>[[Note]]</a>",
+        "[see [[Note]]](x.md)",
+        "$[[Note]]$",
     ] {
-        let d = parse(src);
+        let d = parse_notes(src, WikiAs::Link);
         assert_eq!(d.links.iter().filter(|l| l.wiki).count(), 0, "{src:?}");
+        // Nothing but wiki-links is different from a parse that knows no notes.
+        let plain = parse(src);
+        assert_eq!((&d.text, &d.spans), (&plain.text, &plain.spans), "{src:?}");
     }
-    // What is refused stays on the page as written, and a web address is still linked.
+    // A third bracket outside is just a bracket.
+    let d = parse_notes("[[[Note]]] and [[a]]b]]", WikiAs::Link);
+    assert_eq!(d.text.trim_end(), "[Note] and ab]]");
+    assert_eq!(wiki_links(&d), [pair("Note", "Note"), pair("a", "a")]);
+    // A soft line break inside the brackets is a space in the name.
     assert_eq!(
-        parse("[[a[b]] and [[|x]]").text.trim_end(),
-        "[[a[b]] and [[|x]]"
+        wiki_links(&parse_notes("[[Long\nname]]", WikiAs::Link)),
+        [pair("Long name", "Long name")]
     );
-    let d = parse("[[https://example.com/a]]");
-    assert_eq!(d.text.trim_end(), "[[https://example.com/a]]");
-    // The bare-URL pass links it exactly as it did before wiki-links existed.
-    assert_eq!(links(&d).len(), 1);
-    assert!(links(&d)[0].1.starts_with("https://example.com/a"));
-    assert!(!d.links[0].wiki);
-    // An embedded note is left as text; an embedded picture is an image.
-    let d = parse("![[Note]] and ![[pic.png]]");
-    assert_eq!(d.text.trim_end(), "![[Note]] and");
-    assert_eq!(d.images.len(), 1);
-    assert_eq!(d.str(d.images[0].src), "pic.png");
-    assert!(d.links.is_empty());
 }
 
 #[test]
 fn wiki_links_in_a_table_need_the_bar_escaped() {
-    let d =
-        parse("| a | b |\n|---|---|\n| [[Note\\|shown]] | [[Other]] |\n| [[Note|split]] | x |\n");
+    let d = parse_notes(
+        "| a | b |\n|---|---|\n| [[Note\\|shown]] | [[Other]] |\n| [[Note|split]] | x |\n",
+        WikiAs::Link,
+    );
     assert_eq!(
         wiki_links(&d),
-        [
-            ("shown".to_string(), "Note".to_string()),
-            ("Other".to_string(), "Other".to_string())
-        ]
+        [pair("shown", "Note"), pair("Other", "Other")]
     );
     // An unescaped bar ends the cell, as it does on GitHub: both halves stay text.
     assert!(d.text.contains("[[Note") && d.text.contains("split]]"));
     // Outside a table the escaped bar means the same.
     assert_eq!(
-        wiki_links(&parse("[[Note\\|shown]]")),
-        [("shown".to_string(), "Note".to_string())]
+        wiki_links(&parse_notes("[[Note\\|shown]]", WikiAs::Link)),
+        [pair("shown", "Note")]
     );
+}
+
+/// The document a review of the first wiki-link pass was rendered from: ordinary Markdown that
+/// happens to hold double brackets. Whatever the application answers, CommonMark's own meaning
+/// of a line is kept.
+const ORDINARY: &str = "\
+Citation style: see [[1]](https://example.com/one) and [[2]][two].
+
+Array type `int[[3]]` in code, and plain [[not a note]] text. C++ attr: [[nodiscard]] int f();
+
+A ref link [x] and [[x]]. Collapsed [[2]][] and [[x]][].
+
+[two]: https://example.com/two
+[x]: https://example.com/x
+[[2]]: https://example.com/bracketed
+";
+
+#[test]
+fn double_brackets_with_a_commonmark_meaning_keep_it() {
+    let plain = parse(ORDINARY);
+    assert_eq!(
+        links(&plain),
+        [
+            pair("[1]", "https://example.com/one"),
+            pair("[2]", "https://example.com/two"),
+            pair("x", "https://example.com/x"),
+            pair("x", "https://example.com/x"),
+            pair("x", "https://example.com/x"),
+            // Not a definition (a label holds no bracket), so its address is a bare URL.
+            pair(
+                "https://example.com/bracketed",
+                "https://example.com/bracketed"
+            ),
+        ]
+    );
+    assert_eq!(
+        plain.text,
+        "Citation style: see [1] and [2].\n\
+         Array type int[[3]] in code, and plain [[not a note]] text. C++ attr: [[nodiscard]] int f();\n\
+         A ref link x and [x]. Collapsed [[2]][] and [x][].\n\
+         [[2]]: https://example.com/bracketed\n"
+    );
+    // With notes, as with a folder open: the two that mean nothing to CommonMark become
+    // links to missing notes, and every other line is exactly as it was.
+    for all in [WikiAs::Missing, WikiAs::Link] {
+        let d = parse_notes(ORDINARY, all);
+        assert_eq!(
+            wiki_links(&d),
+            [
+                pair("not a note", "not a note"),
+                pair("nodiscard", "nodiscard"),
+                pair("2", "2"),
+                pair("2", "2"),
+            ],
+            "{all:?}"
+        );
+        let other: Vec<(String, String)> = links(&d)
+            .into_iter()
+            .filter(|l| !l.1.starts_with("not") && l.1 != "nodiscard" && l.1 != "2")
+            .collect();
+        assert_eq!(other, links(&plain), "{all:?}");
+        assert!(d.text.contains("int[[3]] in code"));
+        assert!(d.text.starts_with("Citation style: see [1] and [2].\n"));
+        assert!(d.text.contains("A ref link x and [x]."));
+        assert_eq!(
+            d.links.iter().filter(|l| l.missing).count(),
+            if all == WikiAs::Missing { 4 } else { 0 }
+        );
+    }
+    // Without notes, as with no folder open, the parse is the plain one.
+    let d = parse_notes(ORDINARY, WikiAs::Text);
+    assert_eq!((&d.text, &d.spans), (&plain.text, &plain.spans));
 }
 
 #[test]
 fn wiki_links_keep_other_syntax_working() {
     // A heading's anchor comes from the text shown.
-    let d = parse("# See [[Note|the note]]\n");
+    let d = parse_notes("# See [[Note|the note]]\n", WikiAs::Link);
     assert_eq!(d.str(d.headings[0].slug), "see-the-note");
-    // Ordinary and reference links are untouched.
-    let d = parse("[a](b.md) [c][d] [[e]]\n\n[d]: f.md\n");
-    assert_eq!(
-        d.links.iter().map(|l| l.wiki).collect::<Vec<_>>(),
-        [false, false, true]
+    assert_eq!(d.str(d.headings[0].title), "See the note");
+    // Left as text, the heading is GitHub's.
+    let d = parse("# See [[Note|the note]]\n");
+    assert_eq!(d.str(d.headings[0].slug), "see-notethe-note");
+    // Bare URLs around a wiki-link are still linked, at their new places.
+    let d = parse_notes(
+        "www.example.com then [[Note|n]] then https://example.org/x and `code`",
+        WikiAs::Link,
     );
-    // A line break inside the brackets is a space in the name.
     assert_eq!(
-        wiki_links(&parse("[[Long\nname]]")),
-        [("Long name".to_string(), "Long name".to_string())]
+        links(&d),
+        [
+            pair("www.example.com", "http://www.example.com"),
+            pair("n", "Note"),
+            pair("https://example.org/x", "https://example.org/x"),
+        ]
     );
+    assert_eq!(
+        d.text.trim_end(),
+        "www.example.com then n then https://example.org/x and code"
+    );
+    // Inside emphasis the link nests in it.
+    let d = parse_notes("*see [[Note]] here*", WikiAs::Missing);
+    assert_eq!(spans_of(&d, SpanKind::Emphasis), ["see Note here"]);
+    assert_eq!(wiki_links(&d), [pair("Note", "Note")]);
 }
 
 #[test]
 fn a_hundred_thousand_wiki_openers_parse_quickly() {
-    for unit in ["[[", "[[a]]", "[[a|", "![[", "[[a|b]] ", "[[#"] {
+    for unit in [
+        "[[", "[[a]]", "[[a|", "![[", "[[a|b]] ", "[[#", "\\[[[a]]", "[[a]](", "[[a]][",
+    ] {
         let src = unit.repeat(100_000);
         let started = Instant::now();
-        let d = parse(&src);
+        let d = parse_notes(&src, WikiAs::Missing);
         assert!(
             started.elapsed() < Duration::from_secs(2),
             "{unit:?}: {:?}",
             started.elapsed()
         );
         assert!(d.links.len() <= 100_000);
+        check_text_ranges(&d);
+    }
+}
+
+/// Every span lies inside the text, on character boundaries, in order of its start.
+fn check_text_ranges(d: &Document) {
+    let mut last = 0;
+    for s in &d.spans {
+        assert!(s.start <= s.end && s.end as usize <= d.text.len());
+        assert!(
+            d.text.is_char_boundary(s.start as usize) && d.text.is_char_boundary(s.end as usize)
+        );
+        assert!(s.start >= last);
+        last = s.start;
     }
 }
