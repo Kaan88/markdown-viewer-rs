@@ -1,9 +1,11 @@
-//! Saved state: open tabs, recent files, folder, theme, zoom and opaque shell layout.
+//! Saved state: open tabs, recent files, the place left in each file, folder, theme, zoom and
+//! opaque shell layout.
 
 use mdshared_app::settings::{self, decode_path, encode_path, escape, unescape};
 use std::io;
 use std::path::{Path, PathBuf};
 
+pub use mdshared_app::places::{MAX_PLACES, Places};
 pub use mdshared_app::recents::{MAX_RECENT, RecentEntry, Recents};
 
 /// The application name: the data folder, the settings section and the hand-over greeting.
@@ -106,6 +108,10 @@ pub struct Session {
     /// When the last look for a newer version finished, in seconds since the Unix epoch; 0 for
     /// never.
     pub update_checked: u64,
+    /// Where the reader was in each file left, for the `MAX_PLACES` files used last: one `place`
+    /// line per file, most recent first. The position is the shell's text
+    /// (`place::ReadingPlace::to_setting`); the session stores it and never reads it.
+    pub places: Places,
 }
 
 impl Default for Session {
@@ -124,6 +130,7 @@ impl Default for Session {
             edit_tasks: false,
             check_updates: true,
             update_checked: 0,
+            places: Places::default(),
         }
     }
 }
@@ -154,6 +161,7 @@ impl Session {
                 "edit_tasks" => s.edit_tasks = value.trim() == "1",
                 "check_updates" => s.check_updates = value.trim() != "0",
                 "update_checked" => s.update_checked = value.trim().parse().unwrap_or(0),
+                "place" => _ = s.places.read(value),
                 _ => {}
             }
         }
@@ -187,6 +195,7 @@ impl Session {
         line("edit_tasks", if self.edit_tasks { "1" } else { "0" });
         line("check_updates", if self.check_updates { "1" } else { "0" });
         line("update_checked", &self.update_checked.to_string());
+        self.places.write(&mut out, "place");
         out.finish()
     }
 
@@ -321,6 +330,24 @@ mod window_state_tests {
             };
             assert_eq!(Session::parse(&s.serialize()).page_width, width);
         }
+    }
+
+    #[test]
+    fn places_round_trip_after_the_other_keys() {
+        let mut s = Session::default();
+        s.tabs.push("a.md".into());
+        s.places.set("dir/b|c.md", "1 4 12.5 90 abc 2 some-heading");
+        s.places.set("a.md", "1 0 3 9 1 0 ");
+        let text = s.serialize();
+        assert_eq!(text.lines().filter(|l| l.starts_with("place=")).count(), 2);
+        let again = Session::parse(&text);
+        assert_eq!(again, s);
+        assert_eq!(
+            again.places.get(std::path::Path::new("dir/b|c.md")),
+            Some("1 4 12.5 90 abc 2 some-heading")
+        );
+        // A file from before the key existed has none.
+        assert!(Session::parse("[mdview]\nzoom=120\n").places.is_empty());
     }
 
     #[test]

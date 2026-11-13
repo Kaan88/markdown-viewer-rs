@@ -239,7 +239,8 @@ page refinement (4 ms slices while there is more). A refined, idle window costs 
 
 **Differences from the Qt shell** (all noted in `workspace.rs`): restored tabs load when first
 shown and inactive tabs drop their layout; the reading position survives reload, resize and zoom
-as block plus offset; find re-runs after a reload; double click selects a word and triple click a
+as block plus offset (and closing the file, see "The place left in each file"); find re-runs
+after a reload; double click selects a word and triple click a
 block; status messages are toasts (no status bar); the outline highlights the current heading; the
 empty state lists recent files; the page text and the chrome follow the display's subpixel order.
 
@@ -291,6 +292,42 @@ the Files pane is open (`App::watch_tree`, `FileWatcher::set_folders` in `mdshar
 created, removed or renamed directly in one of them wakes the shell, which re-reads the tree.
 Content changes wake only for open files, as before. `MDVIEW_TRACE=1` prints a line per wake. Run
 in a real window with that trace; the user has not looked at it.
+
+**The place left in each file (2026-11-13).** A file opened again starts where the reader left it,
+by any route (`Workspace::open` and the lazy `load` of a restored tab), in this run or a later
+one. The session holds one line per file for the 300 files used last (`MAX_PLACES`), most recent
+first: `place=<position>|<path>`. The bounded store and its lines are `mdshared_app::places`
+(shared with the editor, position opaque); the position is the viewer's
+`mdview_core::place::ReadingPlace`, written as
+`1 <block> <offset> <blocks> <hash> <below> <heading>`: the top-level block at the top of the
+window, the offset into it in logical px, the document's block count, FNV-1a of the block's text,
+and the slug of the last heading above with the number of top-level blocks between. No pixels, so
+window size, zoom and theme do not matter. Found again in this order: same block with the same
+text; a block with that text (nearest, within the same heading's section first); the same count
+below the same heading; the same index if the block count is the same; the same share of the way
+down; the top. Places are noted when a tab is left or closed and for the showing tab whenever the
+session is saved (never on a scroll step), and written by the session's own atomic save, so a
+crash loses what was scrolled since the last save. A file left at its top has no line. A link's
+fragment, Back/Forward and `--scroll` are applied after the place and win. Removing a Recent
+entry forgets its place; Clear recent forgets all. With `--no-session` nothing is read or
+written; places still work inside the run. There is no setting to turn it off. Not seen in a
+window by the user yet.
+
+**Live reload keeps the place (2026-11-13).** `reload_tab` (F5 and the watcher) no longer uses
+core's `remap_scroll` (still there, with its tests; it compares from both ends only, so a change
+on each side of the reader moved the page). `mdview_core::place::Remap` compares the top-level
+blocks of the two versions by kind and text: unchanged start and end first, then, in the changed
+middle, blocks whose text occurs once in both versions are landmarks (longest run in the same
+order) and the search starts over between the two landmarks around the block. The block at the
+top of the window stays where it was with its offset; an edited block is the one between the same
+neighbours (offset held a line short of its new height); a removed block gives way to the one
+that followed; a wholly different text keeps the share of the way down. Open `<details>` stay
+open by `details_keys`; the selection stays if both ends are in unchanged blocks and its text is
+the same; the find runs again and the same match stays current if it survived. **At the end:** a
+page that was scrolled and showed its end shows the end of the new text (a log being appended is
+followed, as in a terminal); scrolled up by any amount, the content stays still and the new text
+arrives below. A page shorter than the window stays at its top. One layout and one frame per
+reload. Not seen in a window by the user yet.
 
 **Updates (2026-11-13).** `updater.rs` and the "updates" part of `workspace.rs`; the bar is drawn
 by `page::draw_update_bar` above the remote-image bar, and the About dialog has the "Check for
@@ -639,8 +676,9 @@ Items 1 and 2 are done and item 3 is built but waits for a first release; item 4
    0.1.0, bump the version, publish the next release with the four files the script writes, and
    watch the installed copy update itself. `docs/UPDATE.md` has the steps and what has and has
    not run.
-4. Features, in the user's order: remember the scroll position per file; live reload that keeps
-   the reader's place; animated GIFs; content-sized tables; the missing highlight languages
+4. Features, in the user's order: remember the scroll position per file and live reload that
+   keeps the reader's place (both built 2026-11-13 on a branch against `mdshared-app`'s
+   `feat/places`, tested headless, not yet looked at in a window; see section 2); animated GIFs; content-sized tables; the missing highlight languages
    (Kotlin, Swift, PowerShell, Dockerfile); a true float across blocks; wiki-links and backlinks.
 
 The editor and the shared code have their own repositories since 2026-11-12, holding plans only:

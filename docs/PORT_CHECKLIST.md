@@ -539,11 +539,12 @@ approved it, but no row was recorded as a hand check then.
 | Outline: nesting, click scrolls | done; the current heading is highlighted as the page scrolls | code |
 | File watching and reload, deleted-file handling | done: OS watcher (`mdview_core::watch`); a deleted file keeps its text and reloads when it returns | test (`a_deleted_file_keeps_its_text_and_reloads_when_it_returns`); live watching built, not hand-checked |
 | Background tabs reload on change | done for loaded tabs (`check_changed`); unloaded tabs read the file when shown | code |
-| Scroll preservation on reload | done (core `remap_scroll`, block plus offset) | test |
+| Scroll preservation on reload | done, by content (core `place::Remap`): edits above and below, an edited or removed block, a page at its end follows the end; selection, find and open details kept | test (the `live_reload_*` tests in `workspace.rs`); not hand-checked |
+| Reading position per file (not in the original) | done: the session's `place` lines (core `place::ReadingPlace`, shared `mdshared_app::places`), 300 files | test (`a_file_opens_where_it_was_left`, `places_are_saved_with_the_session_and_survive_another_window_and_an_edit`); not hand-checked |
 | Link following (fragments, local Markdown, http/mailto, others ignored) | done | test (`links_scroll_open_tabs_hand_out_urls_and_refuse`); opening URLs built, not hand-checked |
 | Details toggle | done (view state, no reload, reading position kept) | test (`a_details_toggle_above_keeps_the_reading_position`) |
 | Images: limits, schemes | done (renderer + engine); **differs, kept** (decided 2026-11-12): remote images load only after the reader allows them (per-document bar, "Always load remote images" setting) | test (`remote_images_wait_for_the_reader`); bar buttons built, not hand-checked |
-| Settings: tabs, active, recent, folder, theme, zoom | done, plus window size and position, open panes and their widths, `remote_images`, `page_width` and `edit_tasks` | test (`session_round_trip`, core `position_and_pane_widths_round_trip_beside_the_older_keys`) |
+| Settings: tabs, active, recent, folder, theme, zoom | done, plus window size and position, open panes and their widths, `remote_images`, `page_width`, `edit_tasks` and the `place` lines | test (`session_round_trip`, core `position_and_pane_widths_round_trip_beside_the_older_keys`) |
 | Single instance | done (core `single::forward` before the window, `listen_waking`) | code; built, not hand-checked |
 
 **Open items from this table:** every hand check (PLAN A3) and a run on Linux (nothing above has

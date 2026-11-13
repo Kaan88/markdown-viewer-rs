@@ -28,6 +28,7 @@ use mdview_core::commands::strings;
 use mdview_core::files::{FileStamp, canonical_or_absolute, read_stable, stamp, tab_labels};
 use mdview_core::links::{LinkAction, classify_link};
 use mdview_core::model::{NONE, ScrollPos};
+use mdview_core::place::{Fit, ReadingPlace, Remap};
 use mdview_core::session::{self, PageWidth, RecentEntry, Recents, Session};
 use mdview_core::{Document, parse_bytes, tasks};
 use mdview_render::{
@@ -54,6 +55,8 @@ const PAGE_SHARE: f32 = 0.9;
 const WORDS_PER_MINUTE: usize = 230;
 /// At most this many find marks are drawn per frame (only visible matches are considered).
 const MAX_MARKS: usize = 1000;
+/// A row below any page, in device px: asking for it shows the page's end.
+const PAST_END: f32 = 1.0e9;
 
 /// Counts for the active document, computed once per load.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -234,6 +237,14 @@ pub struct Tab {
     /// logical px. Taken whenever a layout is dropped, so tab switches, resizes, zoom, theme and
     /// reloads keep the reader where they were.
     keep: Option<ScrollPos>,
+    /// The block `keep` names was edited while the reader was in it: the offset is held inside
+    /// the block's new height when it is applied.
+    keep_inside: bool,
+    /// The layout last dropped showed the end of the page (and not also its top).
+    at_end: bool,
+    /// The file was read again while the page showed its end: the next frame shows the end of
+    /// the new text. See [`Workspace::reload_tab`].
+    follow_end: bool,
     reveal: Option<Reveal>,
     /// Two offsets into `Document::text`, anchor first.
     selection: Option<(u32, u32)>,
@@ -270,6 +281,9 @@ impl Tab {
             stats: DocStats::default(),
             scroll: 0.0,
             keep: None,
+            keep_inside: false,
+            at_end: false,
+            follow_end: false,
             reveal: None,
             selection: None,
             details: HashMap::new(),
@@ -307,18 +321,34 @@ impl Tab {
         self.doc.as_ref()
     }
 
-    /// Records the reading position from the current layout (the renderer's, which is this tab's
-    /// while it has a view), then drops the view.
-    fn drop_view(&mut self, layout: Option<&PageLayout>) {
-        if let (Some(view), Some(_), Some(layout)) = (self.view.take(), self.doc.as_ref(), layout)
-            && self.keep.is_none()
-            && let Some(span) = layout.block_at(self.scroll)
-        {
-            self.keep = Some(ScrollPos {
-                block: span.block,
-                offset: (self.scroll - span.y) / view.options.scale.max(0.01),
-            });
+    /// The reading position: taken from `layout` while the tab has a view (the renderer's
+    /// layout is this tab's then), otherwise the one kept when the view was dropped.
+    fn position(&self, layout: Option<&PageLayout>) -> Option<ScrollPos> {
+        match (self.view.as_ref(), self.doc.as_ref(), layout, self.keep) {
+            (Some(view), Some(_), Some(layout), None) => {
+                let span = layout.block_at(self.scroll)?;
+                Some(ScrollPos {
+                    block: span.block,
+                    offset: (self.scroll - span.y) / view.options.scale.max(0.01),
+                })
+            }
+            (.., keep) => keep,
         }
+    }
+
+    /// Records the reading position from the current layout (the renderer's, which is this tab's
+    /// while it has a view) and whether a viewport of `height` px showed the page's end, then
+    /// drops the view.
+    fn drop_view(&mut self, layout: Option<&PageLayout>, height: f32) {
+        if self.view.is_none() {
+            return;
+        }
+        if let (Some(_), Some(layout)) = (self.doc.as_ref(), layout) {
+            self.keep = self.position(Some(layout));
+            let max = layout.total_height() - height;
+            self.at_end = self.scroll > 0.0 && self.scroll >= max - 1.0;
+        }
+        self.view = None;
     }
 }
 
@@ -452,10 +482,11 @@ impl Workspace {
         Workspace::new(session::default_settings_path())
     }
 
-    /// Writes tabs, the active tab, Recent, folder, theme and zoom (plus panes and window size as
-    /// last set). Does nothing without a session path. Called after every open, close, move and
-    /// setting change; call it once more on exit.
+    /// Writes tabs, the active tab, Recent, the place left in each file, folder, theme and zoom
+    /// (plus panes and window size as last set). Does nothing without a session path. Called
+    /// after every open, close, move and setting change; call it once more on exit.
     pub fn save_session(&mut self) -> std::io::Result<()> {
+        self.note_active_place();
         let Some(path) = self.session_path.as_deref() else {
             return Ok(());
         };
@@ -681,7 +712,8 @@ impl Workspace {
     }
 
     /// Opens `path` in a new tab and shows it, or shows the tab that already has it. Adds it to
-    /// Recent either way. A file that cannot be read sets the status and opens nothing.
+    /// Recent either way. A file the reader has had open before starts where they left it. A
+    /// file that cannot be read sets the status and opens nothing.
     pub fn open(&mut self, path: &Path) -> Result<usize, String> {
         let path = canonical_or_absolute(path);
         if let Some(index) = self.tabs.iter().position(|t| same_file(&t.path, &path)) {
@@ -693,7 +725,9 @@ impl Workspace {
         match read_stable(&path) {
             Ok(loaded) => {
                 let mut tab = Tab::unloaded(path.clone());
-                tab.set_document(parse_bytes(&loaded.bytes), loaded.stamp);
+                let document = parse_bytes(&loaded.bytes);
+                tab.keep = self.remembered(&path, &document);
+                tab.set_document(document, loaded.stamp);
                 self.tabs.push(tab);
                 self.recents.add(path);
                 self.relabel();
@@ -734,9 +768,13 @@ impl Workspace {
         if index >= self.tabs.len() || self.active == Some(index) {
             return false;
         }
-        if let Some(old) = self.active.and_then(|i| self.tabs.get_mut(i)) {
-            old.drop_view(self.renderer.page_layout());
+        let height = self.viewport_height();
+        if let Some(left) = self.active
+            && let Some(old) = self.tabs.get_mut(left)
+        {
+            old.drop_view(self.renderer.page_layout(), height);
             old.left_at = Some(Instant::now());
+            self.note_place(left);
         }
         self.active = Some(index);
         self.load(index);
@@ -760,6 +798,7 @@ impl Workspace {
         if index >= self.tabs.len() {
             return false;
         }
+        self.note_place(index);
         self.tabs.remove(index);
         match self.active {
             Some(current) if current == index => self.active = None,
@@ -787,6 +826,7 @@ impl Workspace {
         if keep >= self.tabs.len() || self.tabs.len() == 1 {
             return false;
         }
+        self.note_active_place();
         let was_active = self.active == Some(keep);
         let tab = self.tabs.swap_remove(keep);
         self.tabs.clear();
@@ -807,6 +847,7 @@ impl Workspace {
         if self.tabs.is_empty() {
             return false;
         }
+        self.note_active_place();
         self.tabs.clear();
         self.active = None;
         self.relabel();
@@ -883,8 +924,15 @@ impl Workspace {
         }
         match read_stable(&tab.path) {
             Ok(loaded) => {
+                let document = parse_bytes(&loaded.bytes);
+                // A tab restored from the session, or one whose document was dropped while it
+                // was idle: where the reader left the file is among the session's places.
+                let place = self.session.places.get(&tab.path);
+                if let Some(place) = place.and_then(ReadingPlace::from_setting) {
+                    tab.keep = Some(place.resolve(&document));
+                }
                 tab.missing = false;
-                tab.set_document(parse_bytes(&loaded.bytes), loaded.stamp);
+                tab.set_document(document, loaded.stamp);
             }
             Err(e) => {
                 let now = stamp(&tab.path);
@@ -919,6 +967,47 @@ impl Workspace {
             }
         }
         count
+    }
+
+    // ---- the place left in each file ---------------------------------------------------------
+
+    /// Notes where the reader is in tab `index`, so the file opens there next time. The places
+    /// live in the session and are written with it; nothing is written here. A tab that has not
+    /// been laid out says nothing new and keeps what is known; a file read at its top needs no
+    /// entry and loses the one it had.
+    fn note_place(&mut self, index: usize) {
+        let Some(tab) = self.tabs.get(index) else {
+            return;
+        };
+        if tab.missing {
+            return;
+        }
+        let layout = (self.active == Some(index))
+            .then(|| self.renderer.page_layout())
+            .flatten();
+        let (Some(doc), Some(pos)) = (tab.doc.as_ref(), tab.position(layout)) else {
+            return;
+        };
+        match ReadingPlace::of(doc, pos).filter(|place| !place.is_top()) {
+            Some(place) => self
+                .session
+                .places
+                .set(tab.path.clone(), place.to_setting()),
+            None => _ = self.session.places.remove(&tab.path),
+        }
+    }
+
+    fn note_active_place(&mut self) {
+        if let Some(index) = self.active {
+            self.note_place(index);
+        }
+    }
+
+    /// Where the reader left `path`, found again in `doc` as the file is now. A fragment, a
+    /// Back or Forward step and an explicit scroll are applied after it and so win.
+    fn remembered(&self, path: &Path, doc: &Document) -> Option<ScrollPos> {
+        let place = ReadingPlace::from_setting(self.session.places.get(path)?)?;
+        Some(place.resolve(doc))
     }
 
     // ---- reloading ---------------------------------------------------------------------------
@@ -960,9 +1049,19 @@ impl Workspace {
         changed
     }
 
-    /// Re-reads tab `index`. The scroll position goes through `Document::remap_scroll`, so an edit
-    /// above the reading position does not move the text the reader was looking at. A file that
-    /// cannot be read keeps its content.
+    /// Re-reads tab `index`. A file that cannot be read keeps its content.
+    ///
+    /// The reader's place is kept by content (`place::Remap`): the block at the top of the
+    /// window is found in the new text, whatever was added, removed or changed above or below
+    /// it, and stays where it was with the same offset into it. If that block was edited, the
+    /// block now standing between the same neighbours takes its place (the offset held inside
+    /// its new height); if it is gone, the block that followed it does. Open `<details>` stay
+    /// open by their summaries, a selection stays if its text is still there, and the find
+    /// runs again with the same match current if that match survived.
+    ///
+    /// One exception: a page that showed its end (and was scrolled at all) shows the end of the
+    /// new text, as a terminal does, so a growing log is followed. Scrolling up by any amount
+    /// goes back to keeping the content still.
     fn reload_tab(&mut self, index: usize, manual: bool) -> bool {
         let Some(tab) = self.tabs.get_mut(index) else {
             return false;
@@ -990,22 +1089,57 @@ impl Workspace {
             }
         };
         let active = self.active == Some(index);
-        tab.drop_view(self.renderer.page_layout());
+        let height = self.viewport.map_or(0.0, |v| v.height as f32);
+        tab.drop_view(self.renderer.page_layout(), height);
         let document = parse_bytes(&loaded.bytes);
-        if let (Some(old), Some(pos)) = (tab.doc.as_ref(), tab.keep) {
-            tab.keep = Some(document.remap_scroll(old, pos));
+        let mut current = None;
+        if let Some(old) = tab.doc.as_ref() {
+            let remap = Remap::new(old, &document);
+            if let Some(pos) = tab.keep {
+                let (pos, fit) = remap.scroll(pos);
+                tab.keep = Some(pos);
+                tab.keep_inside = fit == Fit::Edited;
+            }
+            tab.selection = tab.selection.and_then(|(anchor, focus)| {
+                let (from, to) = remap.range(anchor.min(focus), anchor.max(focus))?;
+                Some(if anchor <= focus {
+                    (from, to)
+                } else {
+                    (to, from)
+                })
+            });
+            let hit = self.find.hits.get(self.find.current).filter(|_| active);
+            current = hit.and_then(|&(from, to)| remap.range(from, to));
+            let (was, now) = (old.details_keys(), document.details_keys());
+            tab.details = tab
+                .details
+                .iter()
+                .filter_map(|(block, &open)| {
+                    let key = was.iter().find(|(b, _)| b == block)?.1;
+                    let block = now.iter().find(|(_, k)| *k == key)?.0;
+                    Some((block, open))
+                })
+                .collect();
         }
+        tab.follow_end = tab.at_end;
         tab.set_document(document, loaded.stamp);
         tab.missing = false;
-        tab.selection = None;
-        tab.details.clear();
         let blocks = tab.stats.blocks;
         let name = file_name(&tab.path);
         if active {
             self.renderer.clear_details();
+            if let Some(doc) = tab.doc.as_ref() {
+                for (&block, &open) in &tab.details {
+                    self.renderer.set_details(doc, block, open);
+                }
+            }
             self.press = None;
             // The Qt shell cleared find on reload; running it again keeps the find box honest.
             self.refind();
+            let hits = &self.find.hits;
+            if let Some(at) = current.and_then(|c| hits.iter().position(|&hit| hit == c)) {
+                self.find.current = at;
+            }
         }
         if manual {
             self.message(&format!("Refreshed {name}: {blocks} blocks"));
@@ -1145,13 +1279,17 @@ impl Workspace {
         self.open(path)
     }
 
+    /// Takes `path` off Recent and forgets where the reader was in it.
     pub fn remove_recent(&mut self, path: &Path) {
         self.recents.remove(path);
+        self.session.places.remove(path);
         self.persist();
     }
 
+    /// Empties Recent and forgets where the reader was in every file but the one showing.
     pub fn clear_recents(&mut self) {
         self.recents.clear();
+        self.session.places.clear();
         self.persist();
         self.message(strings::RECENT_CLEARED);
     }
@@ -1318,9 +1456,16 @@ impl Workspace {
         let background = view.options.theme.bg;
         // The frame measures what it shows first, which may correct the layout above the top; it
         // keeps the anchored content still and reports the top it drew.
+        // A page that is to show its end asks for a row past it: the frame then measures what
+        // the end shows and stops there, however far out the estimates were.
+        let wanted = if std::mem::take(&mut tab.follow_end) {
+            PAST_END
+        } else {
+            tab.scroll
+        };
         let top = self
             .renderer
-            .view_frame(doc, &view.options, tab.scroll, height)
+            .view_frame(doc, &view.options, wanted, height)
             .top;
         tab.scroll = top;
         self.adopt();
@@ -1581,7 +1726,7 @@ impl Workspace {
                 && v.options.theme.reading_width == theme.reading_width
         });
         if !fresh {
-            tab.drop_view(self.renderer.page_layout());
+            tab.drop_view(self.renderer.page_layout(), viewport.height as f32);
             let Some(doc) = tab.doc.as_ref() else {
                 return false;
             };
@@ -1614,6 +1759,27 @@ impl Workspace {
         // is exact while the rest of the page is still estimated.
         let mut moved = !fresh;
         let renderer = &mut self.renderer;
+        if !fresh && (tab.follow_end || tab.reveal.is_some()) {
+            // The end of the page, or what is to be revealed, is where this layout starts.
+            tab.follow_end &= tab.reveal.is_none();
+            tab.keep_inside = false;
+            if tab.follow_end {
+                tab.keep = None;
+            }
+        }
+        if !fresh
+            && std::mem::take(&mut tab.keep_inside)
+            && let Some(pos) = tab.keep.as_mut()
+        {
+            // The block was edited under the reader. Bringing it to the top measures it; the
+            // offset into it then stays inside what is left of it, a line short of its end.
+            renderer.jump_to(doc, &view.options, Jump::Block(pos.block), 0.0, height);
+            let spans = renderer.page_layout().map_or(&[][..], PageLayout::blocks);
+            if let Some(span) = spans.iter().find(|span| span.block == pos.block) {
+                let room = span.height / view.options.scale.max(0.01) - LINE_STEP;
+                pos.offset = pos.offset.min(room.max(0.0));
+            }
+        }
         let mut jump = |target: Jump, margin: f32, scroll: &mut f32, moved: &mut bool| {
             if let Some(top) = renderer.jump_to(doc, &view.options, target, margin, height) {
                 *scroll = top.round();
@@ -1650,6 +1816,11 @@ impl Workspace {
                 }
             }
             None => {}
+        }
+        if !fresh && tab.follow_end {
+            // Clamped to the estimated end below; `paint` settles on the real one.
+            tab.scroll = PAST_END;
+            moved = true;
         }
         let Some(total) = self.renderer.page_layout().map(PageLayout::total_height) else {
             return false;
@@ -1691,6 +1862,7 @@ impl Workspace {
             return false;
         };
         tab.keep = None;
+        tab.follow_end = false;
         let y = if y.is_nan() { 0.0 } else { y };
         let next = if laid_out {
             y.clamp(0.0, max).round()
@@ -1768,6 +1940,7 @@ impl Workspace {
             return false;
         };
         tab.keep = None;
+        tab.follow_end = false;
         tab.scroll = top.round();
         self.dirty = true;
         self.adopt();
@@ -2847,6 +3020,407 @@ mod tests {
         ws.paint(800, 600, 1.0).unwrap();
         let zoomed = y_of(&ws);
         assert!((ws.scroll() - zoomed).abs() <= 2.0);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Where the block holding `needle` is on screen: device px below the viewport's top.
+    fn on_screen(ws: &Workspace, needle: &str) -> f32 {
+        let doc = ws.active_document().unwrap();
+        let at = doc.text.find(needle).expect("needle in the document");
+        let block = doc.block_at(at as u32).unwrap();
+        ws.layout().unwrap().y_of(doc, block).unwrap() - ws.scroll()
+    }
+
+    /// Draws, measures everything, and draws again.
+    fn settle(ws: &mut Workspace) {
+        ws.paint(800, 600, 1.0).unwrap();
+        while ws.refine(Duration::from_millis(50)) {}
+        ws.paint(800, 600, 1.0).unwrap();
+    }
+
+    /// Puts the top of the viewport `into` px below the top of the block holding `needle`.
+    fn read_at(ws: &mut Workspace, needle: &str, into: f32) {
+        settle(ws);
+        let y = on_screen(ws, needle) + ws.scroll();
+        ws.scroll_to(y + into);
+        settle(ws);
+        assert!((on_screen(ws, needle) + into).abs() <= 1.0);
+    }
+
+    /// The file changed on disk: the watcher's wake, then one frame. The block holding `needle`
+    /// must be where it was in that first frame, and still there once everything is measured.
+    fn changes_under(ws: &mut Workspace, path: &Path, text: &str, needle: &str) {
+        let before = on_screen(ws, needle);
+        std::fs::write(path, text).unwrap();
+        assert!(ws.check_changed(), "the change was seen");
+        ws.paint(800, 600, 1.0).unwrap();
+        let first = on_screen(ws, needle);
+        assert!(
+            (first - before).abs() <= 1.0,
+            "{needle:?} was at {before} and the first frame has it at {first}"
+        );
+        settle(ws);
+        let settled = on_screen(ws, needle);
+        assert!(
+            (settled - before).abs() <= 1.0,
+            "{needle:?} was at {before} and ends at {settled}"
+        );
+    }
+
+    fn numbered(prefix: &str, range: std::ops::Range<usize>) -> String {
+        range
+            .map(|i| format!("{prefix} paragraph number {i} with some words.\n\n"))
+            .collect()
+    }
+
+    #[test]
+    fn live_reload_keeps_the_content_still_when_text_is_added_or_removed_above() {
+        let dir = temp_dir("live-above");
+        let body = numbered("Body", 0..200);
+        let path = write(&dir, "doc.md", &format!("# Title\n\n{body}last line\n"));
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        let needle = "Body paragraph number 100 ";
+        read_at(&mut ws, needle, 7.0);
+
+        // Inserted above, with the first and the last block changed too, so neither end of the
+        // file is what it was.
+        let inserted = numbered("Inserted", 0..10);
+        let text = format!("# Another title\n\n{inserted}{body}a different last line\n");
+        changes_under(&mut ws, &path, &text, needle);
+        // Removed above (and the inserted ones with them).
+        let rest = numbered("Body", 60..200);
+        let text = format!("# Another title\n\n{rest}a different last line\n");
+        changes_under(&mut ws, &path, &text, needle);
+        // Added below only.
+        let text = format!("# Another title\n\n{rest}more\n\nand more\n");
+        changes_under(&mut ws, &path, &text, needle);
+        // A hidden tab is read again too and is in place when it is shown.
+        let other = write(&dir, "other.md", "# Other\n");
+        let before = on_screen(&ws, needle);
+        ws.open(&other).unwrap();
+        std::fs::write(&path, format!("# Title\n\n{inserted}{rest}end\n")).unwrap();
+        assert!(ws.check_changed());
+        ws.activate(0);
+        settle(&mut ws);
+        assert!((on_screen(&ws, needle) - before).abs() <= 1.0);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_reload_stays_in_a_block_that_was_edited() {
+        let dir = temp_dir("live-edited");
+        let (above, below) = (numbered("Above", 0..80), numbered("Below", 0..80));
+        let tall = |word: &str| {
+            let lines: String = (0..60)
+                .map(|i| format!("Tall sentence {i} says {word}. "))
+                .collect();
+            format!("{lines}\n\n")
+        };
+        let path = write(&dir, "doc.md", &format!("{above}{}{below}", tall("one")));
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        read_at(&mut ws, "Tall sentence 0 ", 150.0);
+
+        // A word changes in the block being read and five blocks appear above it: the same
+        // offset into the block.
+        let inserted = numbered("Inserted", 0..5);
+        let text = format!("{inserted}{above}{}{below}", tall("two"));
+        changes_under(&mut ws, &path, &text, "Tall sentence 0 ");
+        // The block shrinks to one line: the reader stays on it, not somewhere below it.
+        let text = format!("{inserted}{above}Tall sentence 0 is all that is left.\n\n{below}");
+        std::fs::write(&path, text).unwrap();
+        assert!(ws.check_changed());
+        settle(&mut ws);
+        let top = on_screen(&ws, "Tall sentence 0 ");
+        let next = on_screen(&ws, "Below paragraph number 0 ");
+        assert!(
+            top <= 0.0 && next > 0.0,
+            "block at {top}, the next at {next}"
+        );
+        // The block goes: what followed it is at the top.
+        std::fs::write(&path, format!("{inserted}{above}{below}")).unwrap();
+        assert!(ws.check_changed());
+        settle(&mut ws);
+        assert!(on_screen(&ws, "Below paragraph number 0 ").abs() <= 1.0);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_reload_of_a_different_text_keeps_the_share_of_the_way_down() {
+        let dir = temp_dir("live-replaced");
+        let path = write(&dir, "doc.md", &numbered("Old", 0..200));
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        read_at(&mut ws, "Old paragraph number 100 ", 5.0);
+
+        std::fs::write(&path, numbered("New", 0..50)).unwrap();
+        assert!(ws.check_changed());
+        settle(&mut ws);
+        let top = ws.layout().unwrap().block_at(ws.scroll()).unwrap().block;
+        assert_eq!(top, 25, "half way down the new text");
+        assert!(on_screen(&ws, "New paragraph number 25 ").abs() <= 1.0);
+        // Nothing left: the top, and the next change is taken from there.
+        std::fs::write(&path, "").unwrap();
+        assert!(ws.check_changed());
+        ws.paint(800, 600, 1.0).unwrap();
+        assert_eq!(ws.scroll(), 0.0);
+        std::fs::write(&path, numbered("Again", 0..100)).unwrap();
+        assert!(ws.check_changed());
+        settle(&mut ws);
+        assert_eq!(ws.scroll(), 0.0);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_reload_follows_the_end_only_for_a_reader_at_the_end() {
+        let dir = temp_dir("live-end");
+        let path = write(&dir, "log.md", &numbered("Line", 0..100));
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        ws.scroll_end();
+        settle(&mut ws);
+        let at_end = |ws: &Workspace| (ws.scroll() - ws.max_scroll()).abs() < 1.0;
+        assert!(at_end(&ws));
+        let end = ws.max_scroll();
+
+        // At the end: the appended text is shown, in the first frame.
+        std::fs::write(&path, numbered("Line", 0..130)).unwrap();
+        assert!(ws.check_changed());
+        ws.paint(800, 600, 1.0).unwrap();
+        assert!(ws.max_scroll() > end + 300.0, "the page grew");
+        assert!(at_end(&ws), "and its end is showing");
+        let last = on_screen(&ws, "Line paragraph number 129 ");
+        assert!(last > 0.0 && last < 600.0, "the last line is on screen");
+        settle(&mut ws);
+        assert!(at_end(&ws));
+
+        // Scrolled up a little: the content stays and the new text arrives below, unseen.
+        ws.scroll_by(-200.0);
+        settle(&mut ws);
+        changes_under(
+            &mut ws,
+            &path,
+            &numbered("Line", 0..160),
+            "Line paragraph number 125 ",
+        );
+        assert!(ws.scroll() < ws.max_scroll() - 300.0);
+
+        // A page shorter than the window is at its top as much as at its end: it stays there.
+        let short = write(&dir, "short.md", "# Short\n\none\n");
+        ws.open(&short).unwrap();
+        settle(&mut ws);
+        std::fs::write(&short, format!("# Short\n\n{}", numbered("Line", 0..80))).unwrap();
+        assert!(ws.check_changed());
+        settle(&mut ws);
+        assert_eq!(ws.scroll(), 0.0);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_reload_keeps_the_find_and_the_selection_whose_text_survives() {
+        let dir = temp_dir("live-find");
+        let text = |extra: &str, middle: &str| {
+            format!(
+                "{extra}{}first needle here\n\n{}{middle}{}third needle here\n\n{}",
+                numbered("A", 0..40),
+                numbered("B", 0..40),
+                numbered("C", 0..40),
+                numbered("D", 0..40),
+            )
+        };
+        let path = write(&dir, "doc.md", &text("", "second needle here\n\n"));
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        assert!(ws.find_set("needle"));
+        assert!(ws.find_next());
+        settle(&mut ws);
+        assert_eq!((ws.find_counts().current, ws.find_counts().total), (2, 3));
+        let select = |ws: &mut Workspace, words: &str| {
+            let at = ws.active_document().unwrap().text.find(words).unwrap() as u32;
+            // Focus before anchor, as after a drag upwards.
+            ws.tabs[0].selection = Some((at + words.len() as u32, at));
+        };
+        select(&mut ws, "second needle");
+
+        // A match appears above, with more text: the same match is current, the same words are
+        // selected, and nothing moves on screen.
+        let more = format!("a new needle\n\n{}", numbered("New", 0..7));
+        let changed = text(&more, "second needle here\n\n");
+        changes_under(&mut ws, &path, &changed, "second needle");
+        assert_eq!((ws.find_counts().current, ws.find_counts().total), (3, 4));
+        assert_eq!(ws.selected_text().as_deref(), Some("second needle"));
+        let (anchor, focus) = ws.tabs[0].selection.unwrap();
+        assert!(anchor > focus, "the selection keeps its direction");
+        assert_eq!(ws.find_query(), "needle");
+
+        // The selected words are edited away, and the current match with them: the selection
+        // goes, the find stays, counted again, with a current match that exists.
+        std::fs::write(&path, text(&more, "second thread here\n\n")).unwrap();
+        assert!(ws.check_changed());
+        settle(&mut ws);
+        assert_eq!(ws.selection(), None);
+        let counts = ws.find_counts();
+        assert_eq!(counts.total, 3);
+        assert!((1..=3).contains(&counts.current));
+        // No match left at all.
+        std::fs::write(&path, numbered("Plain", 0..30)).unwrap();
+        assert!(ws.check_changed());
+        settle(&mut ws);
+        assert_eq!((ws.find_counts().current, ws.find_counts().total), (0, 0));
+        assert_eq!(ws.find_query(), "needle");
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_reload_keeps_open_details_open() {
+        let dir = temp_dir("live-details");
+        let details = "<details><summary>More</summary>\n\nhidden words\n\n</details>\n\n";
+        let body = numbered("Body", 0..60);
+        let path = write(&dir, "doc.md", &format!("# Title\n\n{details}{body}"));
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        let block = {
+            let doc = ws.active_document().unwrap();
+            doc.details_keys()[0].0
+        };
+        assert!(ws.toggle_details(block));
+        read_at(&mut ws, "Body paragraph number 30 ", 3.0);
+        let text = format!("# Title\n\nnew\n\nnew too\n\n{details}{body}");
+        changes_under(&mut ws, &path, &text, "Body paragraph number 30 ");
+        let doc = ws.active_document().unwrap();
+        let block = doc.details_keys()[0].0;
+        assert!(ws.renderer.details_open(doc, block), "still open");
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn chapters() -> String {
+        let mut text = String::from("# Title\n\n");
+        for chapter in 0..10 {
+            text.push_str(&format!("## Chapter {chapter}\n\n"));
+            text.push_str(&numbered(&format!("Chapter {chapter}"), 0..20));
+        }
+        text
+    }
+
+    #[test]
+    fn a_file_opens_where_it_was_left() {
+        let dir = temp_dir("places");
+        let path = write(&dir, "doc.md", &chapters());
+        let other = write(&dir, "other.md", "# Other\n\n[there](doc.md#chapter-2)\n");
+        let needle = "Chapter 6 paragraph number 7 ";
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        read_at(&mut ws, needle, 5.0);
+
+        // Closed and opened again in the same run.
+        assert!(ws.close(0));
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        assert!((on_screen(&ws, needle) + 5.0).abs() <= 1.0);
+        // A link's fragment wins over the place.
+        ws.open(&other).unwrap();
+        assert!(ws.close(0));
+        assert_eq!(ws.open_link("doc.md#chapter-2"), LinkOutcome::OpenedTab(1));
+        settle(&mut ws);
+        assert!((on_screen(&ws, "Chapter 2") - JUMP_MARGIN).abs() <= 1.0);
+        // So does Back: it returns to where the jump was made, not to where the file was left.
+        read_at(&mut ws, "Chapter 4 paragraph number 3 ", 0.0);
+        assert_eq!(ws.open_link("other.md"), LinkOutcome::OpenedTab(0));
+        ws.activate(1);
+        read_at(&mut ws, "Chapter 8 paragraph number 1 ", 0.0);
+        assert!(ws.close(1));
+        assert!(ws.go_back());
+        settle(&mut ws);
+        assert!(on_screen(&ws, "Chapter 4 paragraph number 3 ").abs() <= 1.0);
+        // And an explicit scroll, as `--scroll` makes after opening.
+        assert!(ws.close(1));
+        ws.open(&path).unwrap();
+        ws.scroll_to(40.0);
+        settle(&mut ws);
+        assert_eq!(ws.scroll(), 40.0);
+        // A file left at its top has no entry, and Clear recent forgets the rest.
+        ws.scroll_home();
+        assert!(ws.close(1));
+        assert_eq!(ws.session.places.get(&path), None);
+        ws.open(&path).unwrap();
+        read_at(&mut ws, needle, 5.0);
+        ws.activate(0);
+        assert!(ws.session.places.get(&path).is_some());
+        ws.clear_recents();
+        assert!(
+            ws.session.places.is_empty(),
+            "the tab showing is at its top"
+        );
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn places_are_saved_with_the_session_and_survive_another_window_and_an_edit() {
+        let dir = temp_dir("places-session");
+        let text = chapters();
+        let path = write(&dir, "doc.md", &text);
+        let settings = dir.join("settings.ini");
+        let needle = "Chapter 6 paragraph number 7 ";
+        {
+            let mut ws = Workspace::new(Some(settings.clone()));
+            ws.set_viewport(800, 600, 1.0);
+            ws.open(&path).unwrap();
+            read_at(&mut ws, needle, 5.0);
+            let saved = std::fs::read_to_string(&settings).unwrap();
+            assert!(!saved.contains("place="), "scrolling writes nothing");
+            assert!(ws.close(0));
+        }
+        let saved = std::fs::read_to_string(&settings).unwrap();
+        assert_eq!(saved.lines().filter(|l| l.starts_with("place=")).count(), 1);
+        // Another run: a wider window on a denser display, zoomed, in the dark theme.
+        let draw = |ws: &mut Workspace| {
+            ws.paint(1100, 700, 1.25).unwrap();
+            while ws.refine(Duration::from_millis(50)) {}
+            ws.paint(1100, 700, 1.25).unwrap();
+        };
+        {
+            let mut ws = Workspace::new(Some(settings.clone()));
+            assert_eq!(ws.tab_count(), 0);
+            ws.set_zoom(130);
+            ws.set_theme_choice(ThemeChoice::Dark);
+            ws.open(&path).unwrap();
+            draw(&mut ws);
+            // Five logical px into the block, at 1.25 times 130%.
+            let into = 5.0 * 1.25 * 1.3;
+            assert!((on_screen(&ws, needle) + into).abs() <= 1.5);
+            // Left open this time; the exit's save notes where the tab is.
+            let y = on_screen(&ws, "Chapter 3 paragraph number 9 ") + ws.scroll();
+            ws.scroll_to(y);
+            draw(&mut ws);
+            ws.save_session().unwrap();
+        }
+        // The file is edited before the next run: text above, and the block itself.
+        let edited = text
+            .replace(
+                "# Title\n\n",
+                "# Title\n\nAn introduction.\n\nIn two blocks.\n\n",
+            )
+            .replace(
+                "Chapter 3 paragraph number 9 with",
+                "Chapter 3 paragraph number 9 now with",
+            );
+        std::fs::write(&path, edited).unwrap();
+        {
+            // The tab comes back with the session and is read when shown.
+            let mut ws = Workspace::new(Some(settings.clone()));
+            assert_eq!(ws.tab_count(), 1);
+            draw(&mut ws);
+            assert!(on_screen(&ws, "Chapter 3 paragraph number 9 ").abs() <= 1.5);
+        }
+        // Without a session nothing is read.
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        assert_eq!(ws.scroll(), 0.0);
         _ = std::fs::remove_dir_all(&dir);
     }
 
