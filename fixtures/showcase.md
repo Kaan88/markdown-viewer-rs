@@ -17,7 +17,7 @@ A comfortable desktop home for your README files. **Bold**, *italic*, ~~struck t
 - [ ] Try your own README
 
 > [!NOTE]
-> Documents refresh when saved by another editor.
+> Documents refresh when saved by another editor, and keep your place.
 
 ```rust
 fn main() {
@@ -38,6 +38,32 @@ fn main() {
 </details>
 
 An unavailable image should not block reading: ![Missing image](assets/missing.png)
+
+## Floats, animation and notes
+
+<img src="assets/tall.png" alt="A tall picture" width="120" align="right">
+
+A picture with `align="right"` stands at the side, and what follows runs beside it until its bottom is passed: this paragraph and the list under it.
+
+- An animated GIF plays in the window: <img src="assets/anim.gif" alt="Animated squares" width="20" height="20">
+- A file opens where you left it, and a reload keeps your place.
+- `[[linked]]` is a wiki-link to a note beside this file: [[linked]], or with other words, [[linked|the second page]].
+
+```kotlin
+data class Note(val name: String, val links: List<String> = emptyList()) // Kotlin
+```
+
+```powershell
+Get-ChildItem -Filter *.md | Where-Object { $_.Length -gt 1KB }  # PowerShell
+```
+
+A table is as wide as its content, like the one at the top; Swift and Dockerfile blocks are coloured too:
+
+```dockerfile
+FROM rust:1.80 AS build
+COPY . /src
+RUN cargo build --release
+```
 
 ## Mathematics
 

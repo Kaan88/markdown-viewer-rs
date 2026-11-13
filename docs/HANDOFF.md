@@ -100,7 +100,7 @@ To change shared code: edit it there, push, and move the `rev` here. The move wa
 `--shot` renders compared byte for byte before and after; `mdview.exe` went from 7,439,872 to
 7,457,280 bytes. First-frame time and memory were re-measured on 2026-11-13 (section 9) and are
 unchanged. The user has not run the app since the move. Tests moved with the code: after the seven
-features of 2026-11-13 this workspace runs 365 (4 ignored) and the shared repository 156
+features of 2026-11-13 this workspace runs 366 (4 ignored) and the shared repository 156
 (3 ignored). The pinned shared commit is `b74e8cb`.
 
 `target/` is git-ignored. Helper scripts that once lived there (`vm.py`, `seed-lock.py`,
@@ -713,6 +713,26 @@ window, 4 s after launch. First frame with `--no-session`: showcase 85-94 ms ove
 1 MiB document 79-105 ms over three, refined after 0.66-0.93 s. Real launches of the showcase
 (three): 82-84 ms. All inside the ranges above.
 
+**v0.2.0, re-measured (2026-11-13).** The static `target\dist` build of `f247e70` (the released
+files), run from `target\dist\release` with `--no-session`, a default 1280x800 window, memory
+read 4 s after launch. `mdview.exe` 8,166,912 bytes (was 7,579,648), engine 26,289,152,
+installer 11,566,301. The showcase as it was before it gained its floats section: private
+24.3-24.7 MiB (working set 42.3-42.7), first frame shown after 73-91 ms over five runs. The
+showcase as it is now (a floated picture, an animated GIF, three more code blocks): private
+25.0-25.5 MiB (working set 43.2-43.7), first frame shown after 75-77 ms in four runs and 107 ms
+in one. A 1 MiB document (generated anew: 1,049,159 bytes of headings, paragraphs, lists, code
+and small tables, so not the file of the rows above): private 27.1-27.3 MiB, first frame after
+84-87 ms, refined after 0.36-0.42 s. Launch is no slower than before the seven features and memory is within 1 MiB; the exe is 0.59 MB larger.
+Real launches with the session were not timed this time (they rewrite the user's settings).
+Idle CPU with an animation on screen was measured by the worker that built it, not again here:
+about 1.5 % of a core for a small GIF, none with it off screen or the window minimised.
+
+**The showcase (2026-11-13)** has a section "Floats, animation and notes" showing a floated
+picture, an animated GIF, wiki-links to `linked.md`, and Kotlin, PowerShell and Dockerfile
+blocks. Its four goldens were re-blessed. Because a floated run is measured with its images,
+refining the showcase now decodes two images; `lazy.rs` checks "loads nothing" on `images.md`
+and the showcase's two decodes separately.
+
 ## 10. What has and has not run
 
 **Ran** (Windows PC):
@@ -749,8 +769,6 @@ window, 4 s after launch. First frame with `--no-session`: showcase 85-94 ms ove
 - No snap-layouts flyout on the maximize button. The system accent colour is not used.
 - Maximized memory is three full-window bitmaps.
 - Icons need Segoe Fluent Icons or Segoe MDL2 Assets (Windows only).
-- The update has never installed anything from a real release: v0.1.0 is the first, so there
-  is nothing newer yet (`docs/UPDATE.md`, "What has run").
 
 **Renderer and engine:**
 
@@ -826,13 +844,11 @@ Items 1 and 2 are done and item 3 is built but waits for a first release; item 4
 2. **Go through `docs/PORT_CHECKLIST.md`:** done 2026-11-13. The Files tree now follows its
    folder live; the pane-widths row was stale (they are saved); the other differing rows are kept
    on purpose and say why. Still open there: the hand checks and Linux.
-3. **A simple automatic update:** built 2026-11-13, not yet proven. The look at launch, the bar,
-   the download, hash check and in-place swap of both executables are in and tested with a
-   stand-in transport; `build-installer.ps1` now also writes the release's files and manifest.
-   v0.1.0 is published and a look against it answers "nothing newer". What is left: install
-   0.1.0, bump the version, publish the next release with the four files the script writes, and
-   watch the installed copy update itself. `docs/UPDATE.md` has the steps and what has and has
-   not run.
+3. **A simple automatic update: done and working** (2026-11-13). The look at launch, the bar,
+   the download, hash check and in-place swap of both executables; `build-installer.ps1` writes
+   a release's files and manifest. v0.1.0 and v0.2.0 are published; the published 0.1.0 build
+   answers "0.2.0 is available", and the user marked the update as working. The mechanism lives
+   in the shared repository. `docs/UPDATE.md` has the steps and what has run.
 4. Features: all seven were built on 2026-11-13 by parallel workers, reviewed and merged:
    the scroll position per file and live reload that keeps the reader's place (section 2);
    animated GIF and WebP; content-sized tables; highlighting for Kotlin, Swift, PowerShell and

@@ -3,8 +3,8 @@
 mdview updates itself in place: it looks for a newer version, asks, downloads the two executables,
 checks their hashes and swaps them in. Built 2026-11-13 after the user chose "at launch, then ask"
 and "both exes, swapped in place". v0.1.0, the first release, was published the same day, so a look finds
-its manifest; **no update has been installed from a real release yet**, because there is nothing
-newer than 0.1.0. See "What has run" at the end.
+its manifest. v0.2.0 followed on 2026-11-13, and **the user marked the update as working** the
+same day. See "What has run" at the end.
 
 ## What the reader sees
 
@@ -120,10 +120,14 @@ finds and exits, with no window.
   GitHub's redirect and read, answer "nothing newer". The two published executables, downloaded
   with curl, match the hashes in the published manifest.
 - `--shot` renders of the bar in its three stages and of the About dialog, looked at by Claude.
-
-**Not run:** an update from a real release, start to finish (the download of the real files by mdview's own transport, the
-swap of the running installed exe, the registry entry, the clean-up on the next launch); the bar
-and the About buttons by hand in a window. The user has not looked at any of it.
+- After v0.2.0 was published: the published manifest says 0.2.0; the two published executables
+  match its hashes; the published 0.1.0 `mdview.exe`, downloaded and run with `--check-update`,
+  answers "mdview 0.2.0 is available" with both addresses; the 0.2.0 build answers "nothing
+  newer".
+- **The update itself: working, on the user's word (2026-11-13).** Claude did not watch it; the
+  user said to mark it as working after 0.2.0 was out. Which of the steps the user saw (the bar,
+  the download, the swap, the version in Windows' list of installed apps, the clean-up of
+  `.old` on the next launch) is not recorded.
 
 ## Linux
 

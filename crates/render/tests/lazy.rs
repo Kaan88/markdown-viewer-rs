@@ -154,7 +154,7 @@ fn shown_and_refined_converges_to_the_eager_layout_and_pixels() {
 
 #[test]
 fn layout_and_refinement_load_nothing() {
-    let doc = fixture("showcase.md");
+    let doc = fixture("images.md");
     let options = options(780.0, 1.0);
     let mut renderer = DocumentRenderer::new();
     renderer.layout(&doc, &options);
@@ -164,6 +164,21 @@ fn layout_and_refinement_load_nothing() {
     assert!(renderer.take_remote_requests().is_empty());
     renderer.view_frame(&doc, &options, 0.0, 900.0);
     assert!(renderer.image_stats().decodes + renderer.image_stats().engine_jobs > 0);
+}
+
+/// The showcase floats one image: refinement decodes it and the small image in the list beside
+/// it (a floated run is measured with its images, since its blocks are
+/// measured against their sizes), and still starts no engine job and asks for nothing remote.
+#[test]
+fn refinement_loads_only_the_floated_run_of_the_showcase() {
+    let doc = fixture("showcase.md");
+    let options = options(780.0, 1.0);
+    let mut renderer = DocumentRenderer::new();
+    renderer.layout(&doc, &options);
+    refine_all(&mut renderer, &doc, &options);
+    let stats = renderer.image_stats();
+    assert_eq!((stats.decodes, stats.engine_jobs), (2, 0));
+    assert!(renderer.take_remote_requests().is_empty());
 }
 
 /// A jump measures the viewport it lands on, so the target sits exactly `margin` below the top
