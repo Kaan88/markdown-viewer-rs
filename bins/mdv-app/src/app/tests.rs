@@ -332,3 +332,32 @@ fn about_holds_the_update_setting() {
     click(&mut a, Hit::DlgButton(1));
     assert!(a.ui.dialog.is_none());
 }
+
+#[test]
+fn the_backlinks_list_shows_only_with_backlinks_and_a_click_opens_the_linking_file() {
+    // No folder open: nothing is indexed, so the outline has no Backlinks list.
+    let mut a = app(&["wiki/Home.md"]);
+    assert!(a.hit_rect(Hit::OutlineRow(0)).is_some());
+    assert!(a.hit_rect(Hit::BacklinkRow(0)).is_none());
+
+    a.set_folder(fixture("wiki"));
+    a.ws.index_notes_now();
+    a.compose();
+    // Four notes link to Home; the list sits under the outline's two headings.
+    let first = rect(&a, Hit::BacklinkRow(0));
+    assert!(first.y > rect(&a, Hit::OutlineRow(1)).bottom());
+    assert!(a.hit_rect(Hit::BacklinkRow(3)).is_some());
+    assert!(a.hit_rect(Hit::BacklinkRow(4)).is_none());
+
+    click(&mut a, Hit::BacklinkRow(2));
+    let active = a.ws.active_tab().unwrap().path().to_path_buf();
+    assert!(active.ends_with("Recipes.md"), "{active:?}");
+    assert!(
+        a.ws.has_selection(),
+        "the link is selected in the opened file"
+    );
+    // The list is now that of Recipes: six mentions in Home (the embed counts) and one in Plan.
+    assert_eq!(a.ws.backlinks().len(), 7);
+    assert!(a.hit_rect(Hit::BacklinkRow(6)).is_some());
+    assert!(a.hit_rect(Hit::BacklinkRow(7)).is_none());
+}

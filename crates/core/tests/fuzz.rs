@@ -688,6 +688,10 @@ fn pathological_inputs_stay_linear() {
         ("closers in one paragraph", "a</div></li></td> "),
         ("unmatched emphasis closers", "a* b_ "),
         ("unmatched brackets", "]"),
+        ("wiki openers", "[["),
+        ("wiki links", "[[a]]"),
+        ("wiki labels", "[[a|"),
+        ("wiki embeds", "![[a]] "),
         ("duplicate headings", "# a\n"),
         ("carried tags", "<b>\n\nx\n\n"),
         (

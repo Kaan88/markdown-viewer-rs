@@ -18,6 +18,8 @@ pub(super) struct Style {
     pub(super) kbd: bool,
     pub(super) math: bool,
     pub(super) link: bool,
+    /// A wiki-link whose note was not found: muted, with a dashed underline.
+    pub(super) broken: bool,
     pub(super) muted: bool,
     pub(super) accent: bool,
     pub(super) small: bool,
@@ -390,7 +392,14 @@ impl<'a, 'b> Pager<'a, 'b> {
                 SpanKind::Sup => style.sup = true,
                 SpanKind::Mark => style.mark = true,
                 SpanKind::Small => style.small = true,
-                SpanKind::Link(_) => style.link = true,
+                SpanKind::Link(index) => {
+                    style.link = true;
+                    style.broken = self
+                        .doc
+                        .links
+                        .get(*index as usize)
+                        .is_some_and(|l| l.missing);
+                }
                 SpanKind::Math { display: false, .. } => style.math = true,
                 _ => {}
             }

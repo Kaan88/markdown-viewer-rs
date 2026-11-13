@@ -17,6 +17,36 @@ pub const MAX_SVG_HEIGHT: u32 = 12000;
 pub const IMAGE_CACHE_BYTES: u64 = 64 * 1024 * 1024;
 pub const IMAGE_TIMEOUT_MS: u32 = 10_000;
 
+/// The note index (wiki-link resolution and backlinks) over the Files pane's folder. The walk
+/// goes level by level and stops at the first limit it meets, so the deepest files are the ones
+/// left out. A file over `NOTES_MAX_FILE_BYTES` is still listed, and links to it resolve; its own
+/// links are not read.
+pub const NOTES_MAX_FILES: usize = 20_000;
+pub const NOTES_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+pub const NOTES_MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
+pub const NOTES_MAX_DEPTH: usize = 16;
+/// Directory entries of any kind looked at before the walk stops.
+pub const NOTES_MAX_ENTRIES: usize = 200_000;
+pub const NOTES_MAX_LINKS_PER_FILE: usize = 2_000;
+/// Backlinks listed for one document.
+pub const BACKLINKS_SHOWN: usize = 200;
+
+/// What the note index may read, with the viewer's Markdown extensions.
+pub fn notes_config() -> mdshared_app::notes::Config {
+    mdshared_app::notes::Config {
+        extensions: crate::links::MARKDOWN_EXTENSIONS
+            .iter()
+            .map(|e| e.to_string())
+            .collect(),
+        max_files: NOTES_MAX_FILES,
+        max_file_bytes: NOTES_MAX_FILE_BYTES,
+        max_total_bytes: NOTES_MAX_TOTAL_BYTES,
+        max_depth: NOTES_MAX_DEPTH,
+        max_entries: NOTES_MAX_ENTRIES,
+        max_links_per_file: NOTES_MAX_LINKS_PER_FILE,
+    }
+}
+
 pub const FIND_CAP: usize = 10_000;
 /// Character comparisons find may spend per byte of text before it stops and reports itself capped.
 /// A query this long or shorter can never reach that, so its results are always exact. Only a longer

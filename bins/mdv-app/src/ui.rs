@@ -95,6 +95,8 @@ pub enum Hit {
     FilesFolder,
     FilesOpenFolder,
     OutlineRow(usize),
+    /// An entry of the Backlinks list under the outline.
+    BacklinkRow(usize),
     Splitter(Side),
     ScrollBar(Scroller),
     Page,
@@ -127,7 +129,7 @@ impl Hit {
             Hit::Splitter(Side::Files) | Hit::ScrollBar(Scroller::Pane(Side::Files)) => {
                 Region::Files
             }
-            Hit::OutlineRow(_) => Region::Outline,
+            Hit::OutlineRow(_) | Hit::BacklinkRow(_) => Region::Outline,
             Hit::Splitter(Side::Outline) | Hit::ScrollBar(Scroller::Pane(Side::Outline)) => {
                 Region::Outline
             }

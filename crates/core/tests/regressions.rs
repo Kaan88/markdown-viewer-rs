@@ -3115,3 +3115,137 @@ fn find_searches_a_diagram_the_renderer_could_not_draw() {
     let found = mdview_core::find::find_shown(&d, "needle", |_| true, &shown);
     assert_eq!(found.hits.len(), 1);
 }
+
+// Wiki-links
+
+fn wiki_links(d: &Document) -> Vec<(String, String)> {
+    d.spans
+        .iter()
+        .filter_map(|s| match s.kind {
+            SpanKind::Link(l) if d.links[l as usize].wiki => {
+                Some((span_text(d, s), d.str(d.links[l as usize].dest).to_string()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn wiki_links_parse_in_every_form() {
+    let d = parse(
+        "[[Note]] [[Note|shown text]] [[Note#Heading]] [[Note#Heading|text]] [[#Heading]] [[folder/Note]] [[ Spaced |x]]",
+    );
+    let pair = |a: &str, b: &str| (a.to_string(), b.to_string());
+    assert_eq!(
+        wiki_links(&d),
+        [
+            pair("Note", "Note"),
+            pair("shown text", "Note"),
+            pair("Note > Heading", "Note#Heading"),
+            pair("text", "Note#Heading"),
+            pair("Heading", "#Heading"),
+            pair("folder/Note", "folder/Note"),
+            pair("x", "Spaced"),
+        ]
+    );
+    assert_eq!(
+        d.text,
+        "Note shown text Note > Heading text Heading folder/Note x
+"
+    );
+    assert!(d.links.iter().all(|l| l.wiki && !l.missing));
+    // The label is Markdown; an empty one falls back to the note's name.
+    let d = parse("[[Note|some *bold* words]] [[Other|]]");
+    assert_eq!(d.text.trim_end(), "some bold words Other");
+    assert_eq!(spans_of(&d, SpanKind::Emphasis), ["bold"]);
+    assert_eq!(wiki_links(&d).len(), 2);
+}
+
+#[test]
+fn wiki_links_are_not_made_in_code_or_from_broken_brackets() {
+    for src in [
+        "`[[Note]]`",
+        "```\n[[Note]]\n```",
+        "    [[Note]]",
+        "\\[[Note]]",
+        "[[]]",
+        "[[|label]]",
+        "[[#]]",
+        "[[a[b]]",
+        "[[Note]",
+        "[Note]]",
+    ] {
+        let d = parse(src);
+        assert_eq!(d.links.iter().filter(|l| l.wiki).count(), 0, "{src:?}");
+    }
+    // What is refused stays on the page as written, and a web address is still linked.
+    assert_eq!(
+        parse("[[a[b]] and [[|x]]").text.trim_end(),
+        "[[a[b]] and [[|x]]"
+    );
+    let d = parse("[[https://example.com/a]]");
+    assert_eq!(d.text.trim_end(), "[[https://example.com/a]]");
+    // The bare-URL pass links it exactly as it did before wiki-links existed.
+    assert_eq!(links(&d).len(), 1);
+    assert!(links(&d)[0].1.starts_with("https://example.com/a"));
+    assert!(!d.links[0].wiki);
+    // An embedded note is left as text; an embedded picture is an image.
+    let d = parse("![[Note]] and ![[pic.png]]");
+    assert_eq!(d.text.trim_end(), "![[Note]] and");
+    assert_eq!(d.images.len(), 1);
+    assert_eq!(d.str(d.images[0].src), "pic.png");
+    assert!(d.links.is_empty());
+}
+
+#[test]
+fn wiki_links_in_a_table_need_the_bar_escaped() {
+    let d =
+        parse("| a | b |\n|---|---|\n| [[Note\\|shown]] | [[Other]] |\n| [[Note|split]] | x |\n");
+    assert_eq!(
+        wiki_links(&d),
+        [
+            ("shown".to_string(), "Note".to_string()),
+            ("Other".to_string(), "Other".to_string())
+        ]
+    );
+    // An unescaped bar ends the cell, as it does on GitHub: both halves stay text.
+    assert!(d.text.contains("[[Note") && d.text.contains("split]]"));
+    // Outside a table the escaped bar means the same.
+    assert_eq!(
+        wiki_links(&parse("[[Note\\|shown]]")),
+        [("shown".to_string(), "Note".to_string())]
+    );
+}
+
+#[test]
+fn wiki_links_keep_other_syntax_working() {
+    // A heading's anchor comes from the text shown.
+    let d = parse("# See [[Note|the note]]\n");
+    assert_eq!(d.str(d.headings[0].slug), "see-the-note");
+    // Ordinary and reference links are untouched.
+    let d = parse("[a](b.md) [c][d] [[e]]\n\n[d]: f.md\n");
+    assert_eq!(
+        d.links.iter().map(|l| l.wiki).collect::<Vec<_>>(),
+        [false, false, true]
+    );
+    // A line break inside the brackets is a space in the name.
+    assert_eq!(
+        wiki_links(&parse("[[Long\nname]]")),
+        [("Long name".to_string(), "Long name".to_string())]
+    );
+}
+
+#[test]
+fn a_hundred_thousand_wiki_openers_parse_quickly() {
+    for unit in ["[[", "[[a]]", "[[a|", "![[", "[[a|b]] ", "[[#"] {
+        let src = unit.repeat(100_000);
+        let started = Instant::now();
+        let d = parse(&src);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{unit:?}: {:?}",
+            started.elapsed()
+        );
+        assert!(d.links.len() <= 100_000);
+    }
+}
