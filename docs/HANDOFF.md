@@ -913,6 +913,85 @@ testing on other machines (there is one PC). The editor is a second project (PLA
 
 ## 14. History
 
+- **2026-11-14, command palette, settings dialog, window shadow (0.2.3 still, not published; shared
+  `d6e6cf1`, branch `feat/linux`, pinned in `bins/mdv-app`, `crates/core`, `crates/render`).**
+  Built by an agent without the owner; the owner has not looked at any of it. Run headless on
+  Linux (CachyOS, KDE Wayland): the tests (385 pass, 4 ignored; 371 before), clippy, fmt, 67 `--shot`
+  renders and one real window for a few seconds (the shadow, one screenshot). **Not run: anything
+  interactive** (typing into the palette, clicking in the settings dialog, the wheel, the keys
+  Ctrl+P / Ctrl+Shift+P / Ctrl+, in a real window), nothing on Windows, no installed copy (so the
+  Updates actions were not pressed). Nothing counts as working on Windows until it has run there.
+  - **Window shadow.** `Shadow::attach(&window)` after `create_window`, kept in `App::shadow`;
+    `update(scale, active, maximized)` on `ScaleFactorChanged`, `Focused` and `Resized` (a
+    maximise arrives as a resize). A no-op off Linux and without KWin's protocol. Seen: the
+    pixels around the window darken by 5 to 7 grey levels over about 30 px on the dark desktop.
+  - **Command palette** (`palette.rs` sources, `app/modal.rs` hosting, `ui.rs` state). Command
+    `CommandPalette`, **Ctrl+P and Ctrl+Shift+P** (both were free; same behaviour, it does not
+    open on ">" for the second), in View of the table and in the main menu. Sources by prefix: no
+    prefix, the open tabs ("Open tabs"), the recent files ("Recent", those already open left out)
+    and, once the box has text, the Markdown files of the open folder ("Files", relative paths, at
+    most 5,000, those already listed left out); `>` the commands (core's table, labels as the main
+    menu words them, shortcuts as hints, icons from `overlays::command_icon`, grouped by the
+    table's menu, one that cannot run now greyed as the main menu does; not listed: the theme
+    cycle, Open recent, Escape, the palette itself); `#` the headings (the Outline's data);
+    `?` the three prefixes (choosing one puts it in the box). **Where the folder's files come
+    from:** the note index (`Workspace::folder_files`), which the wiki-link feature already builds
+    on its own thread within the `NOTES_*` limits; the palette reads memory only and never walks
+    a folder. No index yet (folder just opened) or no folder: none are listed. Nothing is
+    allocated until the palette opens (`Ui::palette` is `None`); idle CPU was 0 ticks over 5 s
+    with it closed. While it is open the caret blink timer runs, as for the find box.
+    Hosting: drawn last; every key, pointer and wheel event goes to it; **keys it does not use
+    are dropped, except Ctrl+P, which closes it** (a file shortcut acting on the page behind an
+    open list would surprise); Chosen closes it first, then runs; Submitted does nothing.
+    `--palette <query>` (always takes a value; `""` for empty) for shots.
+  - **Settings dialog** (`settings.rs` rows, `app/modal.rs` hosting). Command `Settings`,
+    **Ctrl+,**, in File of the table and in the main menu (glyph SLIDERS). Rows as asked; every
+    change goes through the setter the menu used, so it applies and saves at once. Panes and
+    Focus mode follow each other (a pane on leaves focus mode). **Decisions:** the Updates
+    section is always shown, because the About dialog shows its two buttons always (a copy that
+    cannot update itself says so when asked); its action reads "Check now", or the About
+    label ("Update to x") when a version is waiting; **Check now and Make default close the
+    dialog**, as About's buttons do, so the answer (bar or toast) is not under the dimmed
+    backdrop; the System section shows only where the main menu showed the default-app item (an
+    AppImage that is not the default yet), so it does not show in a cargo build. **Not added:**
+    a "Page font" option does not exist; adding it would need a session key, a font list (system
+    fonts through `shared_fonts`) and a picker (the form has choice and text rows only, so a
+    dropdown of installed families or a text box), and the page's `SANS` family string in
+    `crates/render/src/theme.rs` made a parameter of the renderer, with every layout cache keyed
+    on it. Not done here (no new rendering options).
+  - **Main menu** now: Open files, Open folder, Open recent, Reload, Close tab, Close all tabs,
+    Zoom in, Zoom out, Reset zoom, Files pane, Outline pane, Focus reading mode, Command palette,
+    Settings, Keyboard shortcuts, About, Exit: 606 px tall (from 713), so it no longer needs to
+    scroll at 1280x800 (`menu-main-*` shots). Gone from it (in Settings now): Always load remote
+    images, Tick task boxes without asking, Play animated images, the three page widths, the
+    default-app item, and the top-level Manage recent files (it stays in Open recent). The bar's
+    page-width button and every shortcut work as before; `Act::{RemoteAlways, PageWidth,
+    EditAlways, Animations}` are gone. The core tests that count commands per menu: File 9 to 10
+    (Settings…), View 7 to 8 (Command palette…).
+  - **Shots:** `tests/shots.sh` now renders 68. Compared with a build of the commit before:
+    nothing without a menu changed except `dialog-shortcuts` (three more rows: Settings and the
+    two palette keys) and `dialog-edit` (its text says "Settings turns it off again"); the menu
+    shots changed because the menu did (`menu-main-*`, `menu-cascade-*`, `hover-menu`,
+    `scale-150-menu`, `menu-tall-main`, `menu-tall-main-end`). New: `dialog-settings-{light,dark,
+    scale-150,760,640}` and `palette-{empty,commands,headings}-{light,dark}`. At 760 px wide the
+    form still has its category list (the card is 728, the list shows from 700); it goes to one
+    column below that (the 640 shot). The form's card is at most 640 px tall, so at 800 the
+    Updates rows are below the fold and scroll. **Trap:** a baseline made with only `mdview`
+    copied out of `target/` differs in six shots (no `mdview-engine` beside it).
+  - **Size question** (nothing changed): the root `Cargo.toml` has one per-package entry,
+    `[profile.release.package.mdview-engine] opt-level = "s"`, added in `df984c5` (2026-11-07,
+    "engine: render SVG out of process") with the comment "the engine is a separate process that
+    starts on demand; code size matters more than its speed" (PLAN says the same). It covers only
+    that package's own code, not resvg, merman or RaTeX, which stay at 3. On Linux: `mdview-engine`
+    24,828,192 bytes with it, 25,575,528 without (+3%); `mdview` 13,027,968 either way (it does
+    not link the engine). First frame of `mdview` (5 runs, `MDVIEW_STARTUP_TRACE`, showcase):
+    71.8 to 91.5 ms with, 71.8 to 79.6 ms without, typical 73 to 74 either way; the engine is
+    not started for the first frame, so none is expected. Not measured: engine job time (a
+    diagram's render) and anything on Windows. The decision is the owner's and needs a Windows
+    measurement.
+  - First frame before and after this work (showcase, 6 interleaved runs): 70.5 to 74.9 ms
+    before, 71.7 to 77.4 after: unchanged.
+
 - **2026-11-13, 0.2.3 (not published).** Menus taller than the window scroll and stay below the
   title row. Found in a real window 665 to 760 logical px tall: the main menu rose to the top edge
   over the caption buttons and its last rows ("Keyboard shortcuts", "About", "Exit") were cut off
@@ -926,7 +1005,7 @@ testing on other machines (there is one PC). The editor is a second project (PLA
   pre-placement and the draw (they must use the same room) and the scroll in the overlay signature;
   `app/input.rs` `wheel` scrolls the menu under the pointer when it is taller than its room (else
   closes the menus as before); `open_submenu` subtracts the parent's scroll; `--menu main-end` and
-  two shots, `menu-tall-main` and `menu-tall-main-end` (1000x520), in `tests/shots.sh` (now 57;
+  two shots, `menu-tall-main` and `menu-tall-main-end` (1000x520), in `tests/shots.sh` (then 57, now 68;
   `MDVIEW_EXE` overrides the exe, for a build outside `target
 elease`). **The installer's last page
   no longer asks about default apps** (changed in `fc6e825`, after 0.2.2). **Shots:** 55 before and
