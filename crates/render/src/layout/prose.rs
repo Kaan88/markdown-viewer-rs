@@ -1,11 +1,10 @@
 //! Text blocks: paragraphs, tight list text (`Plain`), headings, and the drawn task checkbox.
 
 use super::hit::TaskBox;
-use super::inline::ImageBox;
-use super::pager::{Pager, Txt, Wrap};
+use super::pager::{Pager, Txt};
 use super::paint::Paint;
 use crate::theme::Color;
-use mdview_core::model::{Align, ImageAlign};
+use mdview_core::model::Align;
 use parley::{Alignment, AlignmentOptions};
 
 impl<'a, 'b> Pager<'a, 'b> {
@@ -83,100 +82,60 @@ impl<'a, 'b> Pager<'a, 'b> {
             0.0
         };
         self.mark_dir(&mut inline, b);
-        // `<img align="left|right">`: the first such image leaves the line and floats at that
-        // side of the paragraph. The lines beside it are shorter, and the rest run under it.
-        let gap = self.px(16.0);
-        let side: Option<ImageBox> = inline
-            .boxes
-            .iter()
-            .position(|image| {
-                matches!(image.align, ImageAlign::Left | ImageAlign::Right)
-                    && image.math.is_none()
-                    && image.width + gap + self.px(120.0) <= width - indent
-            })
-            .map(|at| inline.boxes.remove(at));
-        if side.is_some() {
-            inline.trim_start();
+        let align = if align == Align::None {
+            self.inherited_align(b)
+        } else {
+            align
+        };
+        // `<img align="left|right">` leaves the line and floats; the lines beside it, and beside
+        // any float still open from an earlier block, are shorter (`floats.rs`).
+        let line = self.theme.body_size * self.theme.body_line_height * self.scale;
+        let (text_left, text_width, floated) = self.begin_text(
+            b,
+            &mut inline,
+            left + indent,
+            width - indent,
+            line,
+            align,
+            true,
+        );
+        let has_text = !inline.text.trim().is_empty() || !inline.boxes.is_empty();
+        if floated && !has_text && task.is_none() {
+            // Only the image: it stands at the side and the next block starts level with it.
+            self.wrap = None;
+            return;
         }
-        self.wrap = side.map(|image| {
-            let beside = image.width + gap;
-            Wrap {
-                height: image.height + self.px(4.0),
-                narrow: width - indent - beside,
-                shift: if image.align == ImageAlign::Left {
-                    beside
-                } else {
-                    0.0
-                },
-            }
-        });
         let txt = Txt {
             size: self.theme.body_size,
             line_height: self.theme.body_line_height,
             weight: 400.0,
             mono: false,
             color,
-            max: Some(width - indent),
+            max: Some(text_width),
         };
         let mut layout = self.text_layout(&inline, &txt);
         self.wrap = None;
-        let align = if align == Align::None {
-            self.inherited_align(b)
-        } else {
-            align
-        };
         if align == Align::Justify {
             // Every line but the last is stretched to the column; carets follow the layout.
             layout.align(Alignment::Justify, AlignmentOptions::default());
         }
         self.apply_dir(&mut layout, b, align);
-        let has_text = !inline.text.trim().is_empty() || !inline.boxes.is_empty();
-        let mut height = if has_text || task.is_some() {
+        let height = if has_text || task.is_some() {
             layout.height().round()
         } else {
             0.0
         }
-        .max(if task.is_some() {
-            self.theme.body_size * self.theme.body_line_height * self.scale
-        } else {
-            0.0
-        });
-        if let Some(image) = side {
-            let x = if image.align == ImageAlign::Left {
-                left + indent
-            } else {
-                left + width - image.width
-            };
-            self.paints.push(if image.reserved {
-                Paint::Rect {
-                    x,
-                    y: self.y,
-                    w: image.width,
-                    h: image.height,
-                    radius: self.px(3.0),
-                    color: self.theme.code_bg,
-                }
-            } else {
-                Paint::Image {
-                    index: image.id,
-                    x,
-                    y: self.y,
-                    w: image.width,
-                    h: image.height,
-                }
-            });
-            height = height.max(image.height.round());
-        }
-        let x = self.aligned_x(left + indent, width - indent, &layout, align);
+        .max(if task.is_some() { line } else { 0.0 });
+        let x = self.aligned_x(text_left, text_width, &layout, align);
         let baseline = layout
             .lines()
             .next()
             .map_or(height * 0.78, |line| line.metrics().baseline);
         if let Some(checked) = task {
-            self.draw_checkbox(b, left, self.y + baseline, checked);
+            self.draw_checkbox(b, text_left - indent, self.y + baseline, checked);
         }
         let size = txt.size;
-        if !inline.text.trim().is_empty() || !inline.boxes.is_empty() {
+        if has_text {
             self.emit(&inline, layout, x, self.y, size);
         }
         self.y += height + self.px(16.0);
@@ -194,32 +153,47 @@ impl<'a, 'b> Pager<'a, 'b> {
         } else {
             0.0
         };
+        let align = self.inherited_align(b);
+        let line = self.theme.body_size * self.theme.body_line_height * self.scale;
+        let (text_left, text_width, floated) = self.begin_text(
+            b,
+            &mut inline,
+            left + indent,
+            width - indent,
+            line,
+            align,
+            true,
+        );
+        let has_text = !inline.text.trim().is_empty() || !inline.boxes.is_empty();
+        if floated && !has_text && task.is_none() {
+            self.wrap = None;
+            return;
+        }
         let txt = Txt {
             size: self.theme.body_size,
             line_height: self.theme.body_line_height,
             weight: 400.0,
             mono: false,
             color,
-            max: Some(width - indent),
+            max: Some(text_width),
         };
         let mut layout = self.text_layout(&inline, &txt);
-        let align = self.inherited_align(b);
+        self.wrap = None;
         self.apply_dir(&mut layout, b, align);
-        let height = layout.height().round().max(if task.is_some() {
-            self.theme.body_size * self.theme.body_line_height * self.scale
-        } else {
-            0.0
-        });
+        let height = layout
+            .height()
+            .round()
+            .max(if task.is_some() { line } else { 0.0 });
         let baseline = layout
             .lines()
             .next()
             .map_or(height * 0.78, |line| line.metrics().baseline);
         if let Some(checked) = task {
-            self.draw_checkbox(b, left, self.y + baseline, checked);
+            self.draw_checkbox(b, text_left - indent, self.y + baseline, checked);
         }
         let size = txt.size;
-        if !inline.text.trim().is_empty() || !inline.boxes.is_empty() {
-            let x = self.aligned_x(left + indent, width - indent, &layout, align);
+        if has_text {
+            let x = self.aligned_x(text_left, text_width, &layout, align);
             self.emit(&inline, layout, x, self.y, size);
         }
         self.y += height + self.px(4.0);
@@ -240,6 +214,10 @@ impl<'a, 'b> Pager<'a, 'b> {
         }
         self.mark_dir(&mut inline, b);
         self.y += self.px(top);
+        // Beside a float a heading wraps like a paragraph. An image floated inside a heading
+        // stays in its line.
+        let line = size * 1.25 * self.scale;
+        let (left, width, _) = self.begin_text(b, &mut inline, left, width, line, align, false);
         let txt = Txt {
             size,
             line_height: 1.25,
@@ -249,6 +227,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             max: Some(width),
         };
         let mut layout = self.text_layout(&inline, &txt);
+        self.wrap = None;
         self.apply_dir(&mut layout, b, align);
         let x = self.aligned_x(left, width, &layout, align);
         let height = layout.height().round();

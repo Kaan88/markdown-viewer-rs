@@ -90,6 +90,8 @@ pub(super) struct ImageBox {
     pub(super) reserved: bool,
     /// `<img align>`: where the box sits against its line, or at which side of its paragraph.
     pub(super) align: ImageAlign,
+    /// Where the image is in `Document::text`.
+    pub(super) doc: u32,
 }
 
 impl Inline {
@@ -427,6 +429,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                             math: Some((at, end)),
                             reserved: false,
                             align: ImageAlign::None,
+                            doc: at,
                         });
                         return;
                     }
@@ -479,6 +482,7 @@ impl<'a, 'b> Pager<'a, 'b> {
                         math: None,
                         reserved,
                         align: info.align,
+                        doc: at,
                     });
                     return;
                 }

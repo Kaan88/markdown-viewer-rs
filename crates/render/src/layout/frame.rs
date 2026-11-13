@@ -2,6 +2,7 @@
 //! on screen and paints only the band that came into view, reporting `band`/`shift` to the shell.
 //! [`DocumentRenderer::view`] draws a fresh viewport bitmap the same way, for tests.
 
+use super::floats::FloatBook;
 use super::pager::Pager;
 use super::paint::CachedBlock;
 use super::{DocumentRenderer, Frame, Options, PageLayout, Slice};
@@ -94,7 +95,7 @@ impl DocumentRenderer {
         let frame_top = top;
         // Blocks can reach past the band, so draw the band on its own bitmap and copy it in;
         // otherwise the overlap would be blended twice.
-        collect(page, &self.cache, &mut pager, band.0, band.1);
+        collect(page, &self.cache, &self.floats, &mut pager, band.0, band.1);
         let stats = if band.1 + 0.5 >= rows as f32 && (band.0 - frame_top).abs() < 0.5 {
             let frame = self.frame.as_mut().expect("frame");
             pager.draw(&mut frame.bitmap, frame_top, &mut self.engine)
@@ -140,7 +141,7 @@ impl DocumentRenderer {
             &mut self.store,
             &self.details,
         );
-        collect(page, &self.cache, &mut pager, top, height);
+        collect(page, &self.cache, &self.floats, &mut pager, top, height);
         pager.finish_slice(top, height, total_height, &mut self.engine)
     }
 }
@@ -160,13 +161,13 @@ fn frame_span(page: &PageLayout, top: f32, rows: f32) -> (usize, usize) {
 fn collect(
     page: &PageLayout,
     cache: &HashMap<u32, CachedBlock>,
+    floats: &FloatBook,
     pager: &mut Pager,
     top: f32,
     height: f32,
 ) {
     let bottom = top + height;
-    let mut index = page.first_below(top);
-    while index < page.len() && page.spans[index].y < bottom {
+    let mut queue = |index: usize| {
         let span = page.spans[index];
         if let Some(cached) = cache.get(&span.block) {
             let origin = span.y - cached.phase;
@@ -176,6 +177,15 @@ fn collect(
                 paint
             }));
         }
+    };
+    let mut index = page.first_below(top);
+    // A floated image is painted by the block that holds it and can hang below that block: the
+    // blocks above whose floats are open here come first, as they do on the page.
+    for owner in floats.owners(index.min(page.len())) {
+        queue(owner);
+    }
+    while index < page.len() && page.spans[index].y < bottom {
+        queue(index);
         index += 1;
     }
     let foot = &page.foot;

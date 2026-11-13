@@ -9,10 +9,12 @@
 //! [`frame`] draws the scroll frame, [`hit`] and [`selection`] the caret geometry, [`store`] keeps
 //! every raster across layouts, [`pager`] the layout walk and text emission, [`inline`] the
 //! model-to-runs conversion, [`paint`] the paint list and raster, and [`prose`], [`containers`],
-//! [`table`] and [`media`] the block kinds.
+//! [`table`] and [`media`] the block kinds, and [`floats`] the floated images that reach across
+//! blocks and the state that lets a block beside one be laid out on its own.
 
 mod containers;
 mod estimate;
+mod floats;
 mod frame;
 mod hit;
 mod inline;
@@ -229,6 +231,8 @@ pub struct DocumentRenderer {
     /// laid out so far, and how many times that list has changed.
     undrawn: Vec<(u32, u32)>,
     undrawn_changes: u64,
+    /// Which blocks can start a float and what each measured block leaves open for the next.
+    floats: floats::FloatBook,
 }
 
 impl Default for DocumentRenderer {
@@ -254,6 +258,7 @@ impl DocumentRenderer {
             metrics: None,
             undrawn: Vec::new(),
             undrawn_changes: 0,
+            floats: floats::FloatBook::default(),
         }
     }
 

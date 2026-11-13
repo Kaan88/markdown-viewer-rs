@@ -9,6 +9,10 @@
 //! have is measured with a typical box in its place and left [`Measure::Provisional`]. It
 //! becomes exact (loaded and laid out with everything it draws) when it is first shown.
 //!
+//! The one exception is a floated run: a block that holds a floated image, and the blocks beside
+//! a float, are measured with everything loaded, because a stand-in there would make every block
+//! after it a guess (`floats.rs`). A document without floated images loads nothing.
+//!
 //! So when refinement is done, every block is exact or provisional, and the layout matches an
 //! eager one ([`DocumentRenderer::layout_exact`]) except for the provisional blocks; scrolling
 //! through the page makes those exact too, after which the two agree byte for byte.
@@ -76,7 +80,8 @@ impl DocumentRenderer {
                 break;
             }
         }
-        self.settle();
+        // A measured block that changed the floats it leaves open sends the next one back.
+        self.correct_pending(doc);
         self.estimating()
     }
 

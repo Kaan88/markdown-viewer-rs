@@ -2,7 +2,8 @@
 //! the block tree, dispatches each block kind, builds parley layouts from [`Inline`] runs and
 //! emits their glyphs, chips, decorations and inline images.
 
-use super::hit::{LineGeom, SourceBox, TaskBox};
+use super::floats::{Float, band};
+use super::hit::{FloatBox, LineGeom, SourceBox, TaskBox};
 use super::inline::{ImageBox, Inline, RubyNote, Style};
 use super::paint::Paint;
 use super::store::{Found, ImageStore};
@@ -28,13 +29,14 @@ pub(super) struct Txt {
     pub(super) max: Option<f32>,
 }
 
-/// Lines that start above `height` are `narrow` wide and start `shift` in from the left, which
-/// is how text runs beside a floated image and then under it. Device px.
+/// Where the text being laid out starts on the page (`x`, `y`) and its nominal line height, so
+/// each line can be broken against the floats open in its rows: shorter beside a floated image,
+/// the full width under it. Device px.
 #[derive(Clone, Copy)]
 pub(super) struct Wrap {
-    pub(super) height: f32,
-    pub(super) narrow: f32,
-    pub(super) shift: f32,
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) line: f32,
 }
 
 pub(super) struct Pager<'a, 'b> {
@@ -53,6 +55,7 @@ pub(super) struct Pager<'a, 'b> {
     /// The formulas and diagrams of the block being laid out, kept like `hits`.
     pub(super) sources: Vec<SourceBox>,
     pub(super) tasks: Vec<TaskBox>,
+    pub(super) float_boxes: Vec<FloatBox>,
     /// Whether to keep hit geometry; a measuring pass does not need it.
     pub(super) record: bool,
     /// The measured y of each footnote entry, built by the height pass.
@@ -72,8 +75,12 @@ pub(super) struct Pager<'a, 'b> {
     /// Document ranges of formulas and diagrams the engine could not draw, whose source the page
     /// shows instead. Find needs them: it skips source that a picture stands for.
     pub(super) undrawn: Vec<(u32, u32)>,
-    /// Set around one `text_layout` call: the text's first lines run beside an image.
+    /// Set around one `text_layout` call: the text's lines are broken against the open floats.
     pub(super) wrap: Option<Wrap>,
+    /// The floated images the layout has not passed yet, in page rows (`floats.rs`).
+    pub(super) floats: Vec<Float>,
+    /// The first of `floats` that the container being laid out opened itself.
+    pub(super) float_base: usize,
     /// Text may break inside a word that is wider than its line, as a table cell's must when
     /// its column is narrower than the word.
     pub(super) break_words: bool,
@@ -122,6 +129,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             hits: Vec::new(),
             sources: Vec::new(),
             tasks: Vec::new(),
+            float_boxes: Vec::new(),
             record,
             notes: Vec::new(),
             fonts,
@@ -133,6 +141,8 @@ impl<'a, 'b> Pager<'a, 'b> {
             used: Vec::new(),
             undrawn: Vec::new(),
             wrap: None,
+            floats: Vec::new(),
+            float_base: 0,
             break_words: false,
             details,
         }
@@ -174,19 +184,38 @@ impl<'a, 'b> Pager<'a, 'b> {
         depth: usize,
     ) {
         let children: Vec<u32> = self.doc.children(parent).collect();
+        // A container keeps the floats that start in it: it grows to hold them.
+        let bounds = parent != NONE && self.bounds_floats(parent);
+        let (mark, base) = (self.floats.len(), self.float_base);
+        if bounds {
+            self.float_base = mark;
+        }
+        let last = children.last().copied();
         for b in children {
             if self.y > self.max_y {
-                return;
+                break;
             }
             let y0 = self.y;
             self.block(b, left, width, color, depth);
             if depth == 0 {
+                // Top-level blocks hand their open floats on exactly as the block-by-block
+                // layout does (`relayout.rs`), and the last one holds what is still open.
+                if Some(b) == last {
+                    self.end_floats(0);
+                } else if !self.floats.is_empty() {
+                    let open = self.floats_out();
+                    self.floats_in(&open);
+                }
                 self.blocks.push(BlockBox {
                     block: b,
                     y: y0,
                     height: self.y - y0,
                 });
             }
+        }
+        if bounds {
+            self.end_floats(mark);
+            self.float_base = base;
         }
     }
 
@@ -198,8 +227,14 @@ impl<'a, 'b> Pager<'a, 'b> {
             BlockKind::Heading { level, align, .. } => {
                 self.heading(b, left, width, level, align);
             }
-            BlockKind::BlockQuote => self.quote(b, left, width, None, color, depth),
-            BlockKind::Alert(alert) => self.quote(b, left, width, Some(alert), color, depth),
+            BlockKind::BlockQuote => {
+                let (left, width) = self.beside(left, width);
+                self.quote(b, left, width, None, color, depth);
+            }
+            BlockKind::Alert(alert) => {
+                let (left, width) = self.beside(left, width);
+                self.quote(b, left, width, Some(alert), color, depth);
+            }
             BlockKind::List { start } => self.list(b, left, width, color, depth, start),
             BlockKind::ListItem { .. } => self.blocks(b, left, width, color, depth + 1),
             BlockKind::CodeBlock { lang } => {
@@ -208,9 +243,12 @@ impl<'a, 'b> Pager<'a, 'b> {
                 } else {
                     Some(self.doc.str(lang).to_string())
                 };
+                let (left, width) = self.beside(left, width);
                 self.code_block(b, left, width, label, None);
             }
             BlockKind::Diagram { lang, .. } => {
+                // A picture as wide as it can be: below any float, not squeezed beside it.
+                self.clear_floats(left, width);
                 let label = if self.doc.str(lang).is_empty() {
                     "diagram".to_string()
                 } else {
@@ -222,12 +260,19 @@ impl<'a, 'b> Pager<'a, 'b> {
                 }
             }
             BlockKind::Math { .. } => {
+                self.clear_floats(left, width);
                 if !self.math_block(b, left, width) {
                     let why = self.fallback_reason(b);
                     self.code_block(b, left, width, Some("math".to_string()), Some(why));
                 }
             }
             BlockKind::ThematicBreak => {
+                // Beside a float the rule spans what the float leaves, as on GitHub.
+                let rows = self.px(8.0) + self.hair();
+                if self.beside_rows(left, width, rows).1 < self.px(40.0).min(width) {
+                    self.clear_floats(left, width);
+                }
+                let (left, width) = self.beside_rows(left, width, rows);
                 self.y += self.px(8.0);
                 let h = self.hair();
                 // `<hr width>`: narrower than the column, at the left unless `align` says so.
@@ -254,12 +299,19 @@ impl<'a, 'b> Pager<'a, 'b> {
                 });
                 self.y += h + self.px(16.0);
             }
-            BlockKind::Table => self.table(b, left, width),
+            BlockKind::Table => {
+                // A table keeps its width: it starts below any float.
+                self.clear_floats(left, width);
+                self.table(b, left, width);
+            }
             BlockKind::TableRow { .. } | BlockKind::TableCell { .. } => {
                 // Only reached outside a table, which the model's shape promise rules out.
                 self.blocks(b, left, width, color, depth + 1);
             }
-            BlockKind::Details { .. } => self.details(b, left, width, color, depth),
+            BlockKind::Details { .. } => {
+                let (left, width) = self.beside(left, width);
+                self.details(b, left, width, color, depth);
+            }
             BlockKind::Summary => {}
             BlockKind::FootnoteDefinition { .. } => {
                 // Moved to the end list; never drawn in flow.
@@ -465,12 +517,9 @@ impl<'a, 'b> Pager<'a, 'b> {
             (Some(wrap), Some(full)) => {
                 let mut breaker = layout.break_lines();
                 loop {
-                    let beside = (breaker.committed_y() as f32) < wrap.height;
-                    let (max, x) = if beside {
-                        (wrap.narrow, wrap.shift)
-                    } else {
-                        (full, 0.0)
-                    };
+                    let y = wrap.y + breaker.committed_y() as f32;
+                    let (lo, hi) = band(&self.floats, wrap.x, wrap.x + full, y, y + wrap.line);
+                    let (max, x) = ((hi - lo).max(1.0), lo - wrap.x);
                     let state = breaker.state_mut();
                     state.set_layout_max_advance(max);
                     state.set_line_max_advance(max);
@@ -708,8 +757,9 @@ impl<'a, 'b> Pager<'a, 'b> {
                     x,
                     y,
                     end: line.text_range().end,
-                    x0: x + metrics.offset,
-                    x1: x + metrics.offset + metrics.advance,
+                    shift: metrics.inline_min_coord,
+                    x0: x + metrics.inline_min_coord + metrics.offset,
+                    x1: x + metrics.inline_min_coord + metrics.offset + metrics.advance,
                     doc_start,
                     doc_end: inline.doc_at(line.text_range().end).unwrap_or(doc_start),
                 });
@@ -792,15 +842,18 @@ impl<'a, 'b> Pager<'a, 'b> {
                 continue;
             };
             let metrics = *first.line().metrics();
-            let start = first.visual_offset().unwrap_or(0.0);
+            // A line beside a float at the left starts `inline_min_coord` in, which the
+            // cluster offsets leave out.
+            let shift = metrics.inline_min_coord;
+            let start = shift + first.visual_offset().unwrap_or(0.0);
             let last = inline.text[..note.base.end]
                 .char_indices()
                 .next_back()
                 .and_then(|(at, _)| Cluster::from_byte_index(&layout, at))
                 .filter(|c| c.path().line_index() == first.path().line_index());
             // A base that wraps is centred over its part on the first line.
-            let end = last.map_or(metrics.offset + metrics.advance, |c| {
-                c.visual_offset().unwrap_or(start) + c.advance()
+            let end = last.map_or(shift + metrics.offset + metrics.advance, |c| {
+                c.visual_offset().map_or(start, |offset| shift + offset) + c.advance()
             });
             let brush = first.style().brush;
             notes.push((

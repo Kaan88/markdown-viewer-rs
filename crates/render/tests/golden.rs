@@ -1,4 +1,5 @@
-//! Pixel comparison against the approved showcase images in `tests/golden/`.
+//! Pixel comparison against the approved showcase images in `tests/golden/`, and against the
+//! renders of `fixtures/floats.md` kept there.
 //!
 //! The goldens use this host's system fonts (Segoe UI, Consolas), so they are compared only on
 //! Windows; elsewhere the test passes with a note until the renderer bundles its fonts. Rendering
@@ -35,8 +36,8 @@ fn read_rgb(path: &Path) -> (u32, u32, Vec<u8>) {
     (info.width, info.height, buf)
 }
 
-fn check(name: &str, theme: Theme, scale: f32) {
-    let showcase = root().join("fixtures/showcase.md");
+fn check(fixture: &str, name: &str, theme: Theme, scale: f32) {
+    let showcase = root().join(format!("fixtures/{fixture}.md"));
     let doc = mdview_core::parse_bytes(&std::fs::read(&showcase).unwrap());
     let rendered = render(
         &doc,
@@ -48,7 +49,7 @@ fn check(name: &str, theme: Theme, scale: f32) {
             base_dir: showcase.parent().map(Path::to_path_buf),
         },
     );
-    let golden = root().join(format!("tests/golden/showcase-{name}.png"));
+    let golden = root().join(format!("tests/golden/{fixture}-{name}.png"));
     if std::env::var_os("MDV_BLESS").is_some() {
         rendered.bitmap.write_png(&golden).unwrap();
         return;
@@ -81,7 +82,7 @@ fn check(name: &str, theme: Theme, scale: f32) {
     }
     let share = different as f64 / (width as f64 * height as f64);
     if different > MAX_DIFFERENT {
-        let out = root().join(format!("target/golden-actual-{name}.png"));
+        let out = root().join(format!("target/golden-actual-{fixture}-{name}.png"));
         _ = bitmap.write_png(&out);
         panic!(
             "{name}: {different} pixels ({:.3}%) differ, first at {first:?}; actual written to {}",
@@ -103,6 +104,18 @@ fn showcase_matches_the_goldens() {
         ("dark@1.0", DARK, 1.0),
         ("dark@1.5", DARK, 1.5),
     ] {
-        check(name, theme, scale);
+        check("showcase", name, theme, scale);
     }
+}
+
+/// `fixtures/floats.md`: floated images with paragraphs, a heading, lists, a quote, code, a table
+/// and a rule beside or below them, a float inside a list item and one at the end of the page.
+#[test]
+fn floats_match_the_golden() {
+    if !cfg!(windows) {
+        eprintln!("golden comparison skipped: the goldens use Windows system fonts");
+        return;
+    }
+    check("floats", "light@1.0", LIGHT, 1.0);
+    check("floats", "dark@1.5", DARK, 1.5);
 }
