@@ -182,6 +182,8 @@ pub enum Act {
     Edit(EditAct),
     /// Toggle ticking task boxes in every file without asking.
     EditAlways,
+    /// Toggle playing animated images.
+    Animations,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

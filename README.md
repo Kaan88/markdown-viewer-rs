@@ -54,7 +54,7 @@ it is not code-signed. It has been built and run on one PC. Linux is planned and
 not done for this shell.
 
 Known gaps are listed in [docs/HANDOFF.md](docs/HANDOFF.md), section 11. The larger ones: tables
-always fill the page column, GIFs show their first frame, and Kotlin, Swift, PowerShell and
+always fill the page column, and Kotlin, Swift, PowerShell and
 Dockerfile blocks are not highlighted.
 
 ## Build

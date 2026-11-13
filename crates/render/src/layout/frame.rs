@@ -31,8 +31,13 @@ impl DocumentRenderer {
         let top = self.settle_view(doc, height).round();
         self.set_top(top);
         let stale = std::mem::take(&mut self.view.stale);
-        let background = options.theme.bg;
         let rows = height.ceil().max(1.0) as u32;
+        // Rows an animated image changed, cut to this viewport.
+        let repaint = self.view.repaint.take().and_then(|(y0, y1)| {
+            let (a, b) = (y0.max(top).floor(), y1.min(top + rows as f32).ceil());
+            (b > a).then_some((a, b - a))
+        });
+        let background = options.theme.bg;
         let page = self.page.as_ref().expect("laid out");
         let mut pager = Pager::new(
             doc,
@@ -48,7 +53,11 @@ impl DocumentRenderer {
             .frame
             .as_ref()
             .is_some_and(|frame| frame.bitmap.width == width && frame.bitmap.height == rows);
-        if same_size && !stale && self.frame.as_ref().is_some_and(|f| f.top == top) {
+        if same_size
+            && !stale
+            && repaint.is_none()
+            && self.frame.as_ref().is_some_and(|f| f.top == top)
+        {
             // Nothing changed, so there is nothing for the caller to send again.
             let frame = self.frame.as_mut().expect("frame");
             frame.band = Some((0, 0));
@@ -62,7 +71,11 @@ impl DocumentRenderer {
         if same_size {
             let frame = self.frame.as_mut().expect("frame");
             let dy = frame.top as i64 - top as i64;
-            if !stale && dy.unsigned_abs() < rows as u64 {
+            if let (false, 0, Some(changed)) = (stale, dy, repaint) {
+                // Nothing moved; only an animated image went to its next frame.
+                band = changed;
+                whole = false;
+            } else if !stale && repaint.is_none() && dy.unsigned_abs() < rows as u64 {
                 shift_rows(&mut frame.bitmap, dy as i32);
                 // `dy` is old top minus new top: positive when the view scrolled up and the newly
                 // exposed rows are at the top, negative when it scrolled down and they are at the

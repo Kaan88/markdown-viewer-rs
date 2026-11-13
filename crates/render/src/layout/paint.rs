@@ -79,6 +79,31 @@ impl CachedBlock {
     }
 }
 
+/// Copies an opaque image the size of its box to `(left, top)`: an animation frame the worker
+/// already scaled, so putting it up is a row copy and not a filter.
+fn copy_opaque(frame: &mut Bitmap, image: &crate::image::DecodedImage, left: i32, top: i32) {
+    let (width, height) = (image.width as i32, image.height as i32);
+    let (c0, c1) = ((-left).max(0), (frame.width as i32 - left).min(width));
+    let (r0, r1) = ((-top).max(0), (frame.height as i32 - top).min(height));
+    if c0 >= c1 || r0 >= r1 || image.rgba.len() < (width * height * 4) as usize {
+        return;
+    }
+    let count = (c1 - c0) as usize * 4;
+    for row in r0..r1 {
+        let from = ((row * width + c0) * 4) as usize;
+        let to = (((top + row) * frame.width as i32 + left + c0) * 4) as usize;
+        let source = &image.rgba[from..from + count];
+        let target = &mut frame.pixels[to..to + count];
+        // RGBA to the bitmap's BGRA.
+        for (out, pixel) in target.chunks_exact_mut(4).zip(source.chunks_exact(4)) {
+            out[0] = pixel[2];
+            out[1] = pixel[1];
+            out[2] = pixel[0];
+            out[3] = 255;
+        }
+    }
+}
+
 impl<'a, 'b> Pager<'a, 'b> {
     pub(super) fn finish(mut self, engine: &mut TextEngine) -> Rendered {
         let content_height = self.y + self.px(24.0);
@@ -139,11 +164,15 @@ impl<'a, 'b> Pager<'a, 'b> {
                 } => frame.line((a.0, a.1 - shift), (b.0, b.1 - shift), thickness, color),
                 Paint::Text { layout, x, y } => engine.draw_layout(frame, &layout, x, y - shift),
                 Paint::Image { index, x, y, w, h } => {
-                    if let Some(image) = self.store.pixels(index) {
+                    if let Some((image, fitted)) = self.store.pixels_at(index, w, h) {
                         // Snapped to a page row before the shift: the bitmap rounds half away
                         // from zero, so an image whose top sits on a half row above a band's
                         // first row would otherwise land a row off from the whole-page draw.
                         let y = y.round() - shift;
+                        if fitted {
+                            copy_opaque(frame, &image, x.round() as i32, y.round() as i32);
+                            continue;
+                        }
                         frame.image(&image.rgba, image.width, image.height, x, y, w, h);
                     }
                 }

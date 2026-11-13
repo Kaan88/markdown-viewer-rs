@@ -2,11 +2,11 @@
 
 Each supported raster format, drawn from a real file.
 
-A GIF with a transparent offset first frame (only the first frame is shown of an animated one):
+A GIF with a transparent offset frame (a single frame, so it stays still):
 
 ![GIF with transparency](assets/offset.gif)
 
-An animated GIF shows its first frame, red:
+An animated GIF, red first; in a window it plays, in a `--shot` render it stays on its first frame:
 
 ![Animated GIF](assets/anim.gif)
 
@@ -16,7 +16,7 @@ A lossy WebP, a gradient:
 
 A lossless WebP with alpha, inline in a sentence ![lossless WebP](assets/alpha.webp) so the edges show against the page.
 
-An animated WebP shows its first frame, yellow:
+An animated WebP, yellow first:
 
 ![Animated WebP](assets/anim.webp)
 

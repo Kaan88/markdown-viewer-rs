@@ -1,6 +1,6 @@
-//! Decodes the images a document points at. PNG, JPEG, GIF and WebP in-process (GIF and animated
-//! WebP show their first frame only, so nothing animates and idle CPU stays zero; the format
-//! comes from the magic bytes, never the extension); SVG through
+//! Decodes the images a document points at. PNG, JPEG, GIF and WebP in-process (the first frame
+//! of an animated GIF or WebP; the frames after it are `crate::anim`'s, and only when a shell
+//! turns animation on; the format comes from the magic bytes, never the extension); SVG through
 //! `mdview-engine`, so its rasterizer and fonts never live in the viewer.
 //!
 //! The plan caps an image at 12 MiB on disk and 24 M pixels once decoded, so a document cannot make

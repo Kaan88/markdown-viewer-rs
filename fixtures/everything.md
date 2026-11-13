@@ -284,7 +284,7 @@ ___
 
 A PNG, inline with text ![badge](assets/badge.png) and an SVG ![badge](assets/badge.svg).
 
-A GIF (first frame) ![gif](assets/anim.gif), a lossy WebP ![webp](assets/lossy.webp) and a WebP
+A GIF (animated in a window) ![gif](assets/anim.gif), a lossy WebP ![webp](assets/lossy.webp) and a WebP
 with transparency ![alpha](assets/alpha.webp).
 
 A sized HTML image: <img src="assets/badge.png" width="120" alt="A badge at 120 px">

@@ -38,6 +38,8 @@ pub(super) struct ViewState {
     pub(super) shift: f32,
     /// A correction reached what the kept frame shows; the next frame is drawn whole.
     pub(super) stale: bool,
+    /// Page rows where an animated image changed frame since the kept frame was drawn.
+    pub(super) repaint: Option<(f32, f32)>,
     /// Blocks a toggle or an arrival invalidated, measured again by the next call that has the
     /// document (a frame, a jump, a hit test, a selection) wherever they are, so a correction is
     /// never left waiting for the block to scroll into view.
@@ -489,6 +491,9 @@ impl DocumentRenderer {
             None => Slot::Failed,
         };
         let (id, changed) = self.store.set_remote(url.trim(), slot, density);
+        if changed && let Some(bytes) = bytes {
+            self.store.offer(id, std::borrow::Cow::Borrowed(bytes));
+        }
         changed && self.reflow_users(id)
     }
 
