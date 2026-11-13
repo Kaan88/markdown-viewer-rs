@@ -2099,8 +2099,7 @@ impl<'a> Builder<'a> {
     }
 
     fn html_tokens(&mut self, html: &str) {
-        let mut tk = Tokenizer::new(html);
-        while let Some(tok) = tk.next() {
+        for tok in Tokenizer::new(html) {
             if self.pre_open {
                 self.pre_token(tok);
                 continue;

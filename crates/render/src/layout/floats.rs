@@ -335,6 +335,7 @@ impl<'a, 'b> Pager<'a, 'b> {
     ///   free column at its first line instead, so it is centred in what the floats leave.
     ///
     /// Returns the column to lay the text out in, and whether an image was floated.
+    #[allow(clippy::too_many_arguments)] // one call site; the arguments are its context
     pub(super) fn begin_text(
         &mut self,
         block: u32,

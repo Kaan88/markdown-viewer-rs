@@ -97,7 +97,12 @@ fn copy_opaque(frame: &mut Bitmap, image: &crate::image::DecodedImage, left: i32
         let source = &image.rgba[from..from + count];
         let target = &mut frame.pixels[to..to + count];
         // RGBA to the bitmap's BGRA.
-        for (out, pixel) in target.chunks_exact_mut(4).zip(source.chunks_exact(4)) {
+        for (out, pixel) in target
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(source.as_chunks::<4>().0)
+        {
             out[0] = pixel[2];
             out[1] = pixel[1];
             out[2] = pixel[0];

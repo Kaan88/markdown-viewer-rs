@@ -74,7 +74,7 @@ pub fn markers(bytes: &[u8]) -> Vec<Marker> {
                 }
             }
             None => {
-                let opener = [b'`', b'~'].into_iter().find(|&c| run(c) >= 3);
+                let opener = (*b"`~").into_iter().find(|&c| run(c) >= 3);
                 if let Some(c) = opener {
                     fence = Some((c, run(c)));
                 } else if let Some(at) = marker_in(line) {

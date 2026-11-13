@@ -145,7 +145,9 @@ fn a_declared_size_reserves_the_box_and_remote_urls_are_reported() {
         .unwrap()
         .bitmap
         .pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[2] > 180 && p[0] < 80 && p[1] < 80)
         .count();
     assert!(reds > 40 * 30 / 2, "the 40x30 box shows the image: {reds}");

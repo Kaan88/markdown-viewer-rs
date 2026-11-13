@@ -596,11 +596,13 @@ mod tests {
         // #0369a1, the bar's fill, somewhere inside the left edge.
         let blue = image
             .rgba
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[2] > 140 && p[0] < 40 && p[1] > 80)
             .count();
         assert!(blue > 1000, "blue pixels: {blue}");
-        assert!(image.rgba.chunks_exact(4).any(|p| p[3] > 0));
+        assert!(image.rgba.as_chunks::<4>().0.iter().any(|p| p[3] > 0));
     }
 
     #[test]
@@ -673,7 +675,13 @@ mod tests {
                 image.width,
                 image.height
             );
-            let inked = image.rgba.chunks_exact(4).filter(|p| p[3] > 0).count();
+            let inked = image
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|p| p[3] > 0)
+                .count();
             assert!(inked > 100, "{name}: {inked} inked pixels");
         }
     }
@@ -739,7 +747,13 @@ mod tests {
                     image.width,
                     image.height
                 );
-                let inked = image.rgba.chunks_exact(4).filter(|p| p[3] > 0).count();
+                let inked = image
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .filter(|p| p[3] > 0)
+                    .count();
                 assert!(inked > 500, "{name}: {inked} inked pixels");
                 // Loose bound: the target is 300 ms on a quiet machine; a busy test run needs room.
                 assert!(
@@ -832,7 +846,13 @@ mod tests {
             image = (image.width, image.height)
         );
         assert!(image.baseline > 0 && image.baseline < image.height);
-        let inked = image.rgba.chunks_exact(4).filter(|p| p[3] > 0).count();
+        let inked = image
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|p| p[3] > 0)
+            .count();
         assert!(inked > 200, "inked pixels: {inked}");
         assert_eq!(
             image.rgba.len(),
@@ -854,7 +874,9 @@ mod tests {
         .expect("the fraction renders");
         let red = image
             .rgba
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[0] > 180 && p[1] < 80 && p[2] < 80 && p[3] > 0)
             .count();
         assert!(red > 100, "red pixels: {red}");
@@ -888,7 +910,9 @@ mod tests {
             render_svg(BADGE.as_bytes(), 24_000_000, &options()).expect("the badge renders");
         let white = image
             .rgba
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[0] > 180 && p[1] > 180 && p[2] > 180 && p[3] > 0)
             .count();
         assert!(white > 100, "white text pixels: {white}");

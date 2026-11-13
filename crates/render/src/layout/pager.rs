@@ -392,9 +392,9 @@ impl<'a, 'b> Pager<'a, 'b> {
             .iter()
             .map(|image| self.box_size(image, txt))
             .collect();
-        let mut builder =
-            self.layouts
-                .ranged_builder(&mut self.fonts, &inline.text, self.scale, true);
+        let mut builder = self
+            .layouts
+            .ranged_builder(self.fonts, &inline.text, self.scale, true);
         let family = if txt.mono {
             self.theme.mono
         } else {

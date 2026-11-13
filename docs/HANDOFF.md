@@ -20,7 +20,7 @@ page's own text path. Windows first. The user approved its look by using the run
 2026-11-11 (PLAN roadmap step A2). It has never been built or run on Linux.
 
 **What ships.** `mdview` is the only shell. Its installer is `packaging/windows/mdview.iss` (built
-by `build-installer.ps1`, section 8). **v0.1.0 and v0.2.0 (the seven features of section 13, item 4) were published on GitHub on 2026-11-13**; v0.1.0 from
+by `build-installer.ps1`, section 8). **v0.1.0 and v0.2.0 (the seven features of section 13, item 4) were published on GitHub on 2026-11-13, and 0.2.2 is the latest (section 14)**; v0.1.0 from
 `5cbd354`, as the latest release, with the installer, the two executables and `mdview-update.txt`
 (the earlier v0.1.0 pre-release, which carried the Qt installer, was deleted with its tag on
 2026-11-12). The installer from that release has not been downloaded and run. Nothing is packaged
@@ -49,7 +49,9 @@ Runtime dependency, Windows only, and hand-trimmed generated bindings.
   two executables in place. A setting turns the look off. `docs/UPDATE.md`.
 - No bundled fonts (2026-11-08), so the golden compare runs on Windows only.
 - An editor is a second project, not a mode of mdview (PLAN section E).
-- The installer never takes the `.md` default; it registers and offers Windows' Default apps page.
+- The installer never takes the `.md` default; it registers mdview as a handler, so Windows' Default apps
+  page lists it. Its last page offers only "Launch mdview" (the "Choose mdview as the default app"
+  checkbox was removed on 2026-11-13 as a redundant question, as in the editor's installer).
 - Linux is low priority until the Windows shell has replaced Qt.
 
 **Plan phases.** 0 spikes, 1 core, 2 headless renderer, 4 engine: closed. 3 (Qt parity) and 5
@@ -154,6 +156,11 @@ document with SVG, math or Mermaid.
 target/release/mdview.exe --no-session --shot out.png --dark --size 1280x800 --menu main fixtures/showcase.md
 target/release/mdview.exe --no-session --shot out.png --light --load-remote fixtures/remote.md
 ```
+
+The no-pixel-change check is `tests/shots.sh <folder>` (55 `--shot` states: both themes, every
+`--menu` and `--dialog`, the empty state, panes, find, focus mode, page widths, scales, hovers).
+Run it into one folder before a change and into another after, then `cmp` every PNG; also run
+the workspace tests (they include the goldens) and `cargo fmt --check`.
 
 `MDVIEW_STARTUP_TRACE=1` prints the first-frame and page-refined times with image decode and
 engine job counts; `MDVIEW_TRACE=1` prints per-frame timings (layout, paint, compose, copy,
@@ -673,8 +680,9 @@ job killed at 5003.9 ms and the next started in 13.4 ms.
 `mdview-engine.exe` and `mdview.ico`, its own AppId. The "assoc" task (on) registers the ProgId
 `mdview.Markdown`, `OpenWithProgids` for `.md .markdown .mdown .mkd`, `Applications\mdview.exe`,
 and a registered application (`Software\mdview\Capabilities` and `RegisteredApplications`); it never
-writes an extension's default value. The last page offers (unchecked) to open
-`ms-settings:defaultapps?registeredAppUser=mdview`. Optional desktop shortcut.
+writes an extension's default value. The last page offers only "Launch mdview" (an unchecked
+entry that opened `ms-settings:defaultapps?registeredAppUser=mdview` was removed on 2026-11-13;
+the script was not compiled after that edit). Optional desktop shortcut.
 
 ## 9. Measurements (2026-11-12, the Windows PC, release build)
 
@@ -758,7 +766,7 @@ and the showcase's two decodes separately.
   open dialogs, a DPI or system-theme change at runtime, a second monitor.
 - A Qt first-frame comparison: the Qt `--measure` run hung and was killed.
 - A scrolling comparison on the 1 MiB document against Qt.
-- The installer's wizard pages, an upgrade over an older version, the Default apps page link.
+- The installer's wizard pages and an upgrade over an older version (not re-checked).
 - Anything on Linux or KDE for the new shell; the Linux dependency features in `Cargo.toml` are
   untested.
 
@@ -834,41 +842,49 @@ needs a small `mime/packages` XML. The package itself has never been installed w
 
 ## 13. What to do next
 
-The user used the new shell with `fixtures/everything.md` on 2026-11-12 and approved it
-("it looks beautiful and everything seems to work"); the three things they raised (cursor, back and
-forward, window position and pane widths) are fixed. They then set this list, in this order.
-Items 1 and 2 are done and item 3 is built but waits for a first release; item 4 is not started.
+The user set a list on 2026-11-12; everything on it is done: Qt retired (2026-11-13), the port
+checklist gone through, automatic updates built and working (0.2.2 is the latest release), and
+the seven features built, released as 0.2.0 and approved ("changes approved", 2026-11-13).
+What is open:
 
-1. **Retire Qt:** done 2026-11-13 (section 1). The Qt Linux packaging went to the archive branch
-   with it, which the list did not name: it could only build the removed crate.
-2. **Go through `docs/PORT_CHECKLIST.md`:** done 2026-11-13. The Files tree now follows its
-   folder live; the pane-widths row was stale (they are saved); the other differing rows are kept
-   on purpose and say why. Still open there: the hand checks and Linux.
-3. **A simple automatic update: done and working** (2026-11-13). The look at launch, the bar,
-   the download, hash check and in-place swap of both executables; `build-installer.ps1` writes
-   a release's files and manifest. v0.1.0 and v0.2.0 are published; the published 0.1.0 build
-   answers "0.2.0 is available", and the user marked the update as working. The mechanism lives
-   in the shared repository. `docs/UPDATE.md` has the steps and what has run.
-4. Features: all seven were built on 2026-11-13 by parallel workers, reviewed and merged:
-   the scroll position per file and live reload that keeps the reader's place (section 2);
-   animated GIF and WebP; content-sized tables; highlighting for Kotlin, Swift, PowerShell and
-   Dockerfile (line scanners in `mdshared-highlight`); floats across blocks (section 5);
-   wiki-links and backlinks. All are tested headless and rendered with `--shot`, released as
-   v0.2.0, and **approved by the user on 2026-11-13** ("changes approved"; the notes elsewhere
-   in this file that say the user has not looked at one of them predate that). Left open by
-   the workers:
-   a table never stands beside a float even when it would fit; `[[Note|a *b* c]]` (markup in a
-   label) and `![[embed]]` stay text; a window fully covered by another keeps animating;
-   the main menu, with "Play animated images" added, just fits a window 800 px high.
-
-The editor and the shared code have their own repositories since 2026-11-12, holding plans only:
-`Kaan88/markdown-editor-rs` and `Kaan88/markdown-shared-rs` (PLAN section E, item 4). The user
-asked for the plans and said not to start.
+1. **Hand checks** of what only a person can see (the list in section 10, "Not run or not
+   done", and the open rows of `docs/PORT_CHECKLIST.md`). The user approved the look of the
+   shell on 2026-11-11/12 and the seven features on 2026-11-13; whether they have since checked
+   the 0.2.1 and 0.2.2 changes (update look at every launch, cascade submenus) by hand was not
+   re-checked.
+2. **Move the shared `main`.** mdview pins commit `24865c5` of `markdown-shared-rs`, on the branch
+   `chore/finalize` (on top of `1c3710a`, branch `fix/update-look-every-launch`). A push to the
+   shared `main` is refused from the PC; the owner moves it, then the `rev`s here
+   (`bins/mdv-app`, `crates/core`, `crates/render`) can name commits on `main`.
+3. **Linux** is set aside by the user (see the end of this section) and has never been built
+   for the new shell.
+4. Left open by the workers of the seven features: a table never stands beside a float even
+   when it would fit; `[[Note|a *b* c]]` (markup in a label) and `![[embed]]` stay text; a
+   window fully covered by another keeps animating; the main menu, with "Play animated
+   images" added, just fits a window 800 px high (not re-checked).
+5. The no-pixel-change check is now `tests/shots.sh` (55 states, deterministic, pinned to
+   scale 1.0 except the shots that ask for another). Before a change to the renderer, the
+   shell or the shared pin run it into one folder, after it into another, and `cmp` every
+   file.
+6. The editor and the shared code have their own repositories (`Kaan88/markdown-editor-rs`,
+   `Kaan88/markdown-shared-rs`); the editor's plan is built to its end.
 
 Set aside by the user for now: crash reporting, accessibility, non-Latin input methods, Linux,
 testing on other machines (there is one PC). The editor is a second project (PLAN section E).
 
 ## 14. History
+
+- **2026-11-13, clean-up (no release).** Headless: the shared pin moved to `24865c5` (clippy
+  clean, and `menu::row_span`, which replaced the three mirrored menu constants in
+  `overlays::menu_row_offset`). `cargo clippy --release --workspace --all-targets -- -D warnings`
+  now passes: `chunks_exact(N)` became `as_chunks::<N>()`, two collapsible or loop-shaped
+  statements were rewritten, struct literals replace field assignments in two tests, one
+  `#[allow(clippy::too_many_arguments)]` on `begin_text`, and `can_go_back` / `can_go_forward`
+  (Back and Forward exist; only the tests ask for the queries, added with them in `ac5563c`)
+  carry `#[allow(dead_code)]`. The installer lost its "Choose mdview as the default app" entry.
+  `tests/shots.sh` was added. Checked: 55 shots rendered before and after, byte-identical;
+  371 tests pass with `--release`; fmt clean. Not run: the installer script was not compiled (no
+  way found to check it without writing an output file), no window was opened.
 
 - **2026-11-13, 0.2.2.** Two changes. The look for a newer version now runs at every launch (the
   shared `check_due` no longer compares with a day; a look earlier the same day used to suppress

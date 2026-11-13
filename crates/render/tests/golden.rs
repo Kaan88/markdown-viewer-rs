@@ -64,8 +64,10 @@ fn check(fixture: &str, name: &str, theme: Theme, scale: f32) {
     let mut first = None;
     for (i, (actual, expected)) in bitmap
         .pixels
-        .chunks_exact(4)
-        .zip(expected.chunks_exact(3))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(expected.as_chunks::<3>().0.iter())
         .enumerate()
     {
         // The bitmap is BGRA, the PNG RGB.

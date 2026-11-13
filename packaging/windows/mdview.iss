@@ -57,7 +57,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 ; Checked by default. Windows does not let an installer take the default handler for an extension
 ; (the per-user choice is protected), so mdview registers as a handler and as an application in
-; Settings > Default apps; the last page offers to open that page so the user can pick it.
+; Settings > Default apps, where the user can pick it.
 Name: "assoc"; Description: "Register mdview for Markdown files (.md, .markdown, .mdown, .mkd)"; GroupDescription: "File types:"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
@@ -103,5 +103,3 @@ Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueNa
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch mdview"; Flags: nowait postinstall skipifsilent
-; Opens Settings at mdview's Default apps page, where it can be made the default for .md files.
-Filename: "ms-settings:defaultapps?registeredAppUser={#AppName}"; Description: "Choose mdview as the default app for Markdown files"; Flags: shellexec nowait postinstall skipifsilent unchecked; Tasks: assoc

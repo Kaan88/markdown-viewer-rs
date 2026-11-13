@@ -316,7 +316,7 @@ mod tests {
             image.height
         );
         assert!(
-            image.rgba.chunks_exact(4).any(|p| p[3] > 0),
+            image.rgba.as_chunks::<4>().0.iter().any(|p| p[3] > 0),
             "the raster has ink"
         );
     }
@@ -332,7 +332,7 @@ mod tests {
             .expect("the diagram renders");
         assert!(image.width > 100 && image.height > 30);
         assert!(
-            image.rgba.chunks_exact(4).any(|p| p[3] > 0),
+            image.rgba.as_chunks::<4>().0.iter().any(|p| p[3] > 0),
             "the raster has ink"
         );
     }

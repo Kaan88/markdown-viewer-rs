@@ -34,15 +34,17 @@ pub fn replace(text: &str) -> Cow<'_, str> {
             {
                 end += 1;
             }
-            if end > start && end < bytes.len() && bytes[end] == b':' {
-                if let Some(emoji) = lookup(&text[start..end]) {
-                    let buf = out.get_or_insert_with(String::new);
-                    buf.push_str(&text[last..i]);
-                    buf.push_str(emoji);
-                    last = end + 1;
-                    i = end + 1;
-                    continue;
-                }
+            if end > start
+                && end < bytes.len()
+                && bytes[end] == b':'
+                && let Some(emoji) = lookup(&text[start..end])
+            {
+                let buf = out.get_or_insert_with(String::new);
+                buf.push_str(&text[last..i]);
+                buf.push_str(emoji);
+                last = end + 1;
+                i = end + 1;
+                continue;
             }
         }
         i += 1;

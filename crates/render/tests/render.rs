@@ -67,7 +67,9 @@ fn a_table_cell_draws_its_inline_image() {
     let blue = rendered
         .bitmap
         .pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         // The frame is BGRA.
         .filter(|p| p[0] > 140 && p[2] < 40 && p[1] > 80)
         .count();
@@ -82,7 +84,9 @@ fn a_checked_task_box_draws_in_the_accent_colour() {
     let drawn = rendered
         .bitmap
         .pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .any(|p| p[0] == accent[2] && p[1] == accent[1] && p[2] == accent[0]);
     assert!(drawn, "the checked box is filled with the accent colour");
 }
@@ -124,7 +128,9 @@ fn an_empty_document_is_just_background() {
         rendered
             .bitmap
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .all(|p| p[0] == LIGHT.bg[2] && p[1] == LIGHT.bg[1] && p[2] == LIGHT.bg[0])
     );
 }
@@ -168,7 +174,9 @@ fn an_html_image_honours_its_width_and_height() {
         let view = renderer.view(&doc, &options, 0.0, 400.0);
         view.bitmap
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[2] > 180 && p[0] < 80 && p[1] < 80)
             .count() as f32
     };
@@ -208,7 +216,9 @@ fn a_picture_uses_the_source_for_the_colour_scheme() {
         let view = renderer.view(&doc, &options, 0.0, 300.0);
         view.bitmap
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[2] > 180 && p[0] < 80 && p[1] < 80)
             .count()
     };
@@ -279,7 +289,9 @@ fn a_png_on_disk_is_drawn_inline() {
     let red = rendered
         .bitmap
         .pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[2] > 180 && p[0] < 80 && p[1] < 80)
         .count();
     assert!(red > 1000, "red pixels: {red}");
@@ -310,7 +322,9 @@ fn a_cached_frame_still_draws_its_images() {
     let second = renderer.view(&doc, &options, 0.0, 300.0);
     let red = |pixels: &[u8]| {
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[2] > 180 && p[0] < 80 && p[1] < 80)
             .count()
     };
@@ -723,7 +737,9 @@ fn a_missing_image_falls_back_to_the_placeholder() {
     let ink = rendered
         .bitmap
         .pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[0] != LIGHT.bg[2] || p[1] != LIGHT.bg[1] || p[2] != LIGHT.bg[0])
         .count();
     assert!(ink > 100, "placeholder pixels: {ink}");
@@ -957,7 +973,7 @@ fn a_figure_with_a_local_image_draws_it_above_its_caption() {
     let frame = renderer.view_frame(&doc, &options, 0.0, 400.0);
     // The badge is blue, centred over the caption, and entirely above it.
     let (mut left, mut right, mut bottom) = (u32::MAX, 0, 0);
-    for (i, p) in frame.bitmap.pixels.chunks_exact(4).enumerate() {
+    for (i, p) in frame.bitmap.pixels.as_chunks::<4>().0.iter().enumerate() {
         if p[0] > 140 && p[2] < 40 && p[1] > 80 {
             let (x, y) = (i as u32 % frame.bitmap.width, i as u32 / frame.bitmap.width);
             left = left.min(x);
@@ -1056,7 +1072,7 @@ fn page(markdown: &str) -> mdview_render::Rendered {
 fn ink_columns(r: &mdview_render::Rendered) -> (usize, usize) {
     let width = r.bitmap.width as usize;
     let mut span = (usize::MAX, 0);
-    for (i, p) in r.bitmap.pixels.chunks_exact(4).enumerate() {
+    for (i, p) in r.bitmap.pixels.as_chunks::<4>().0.iter().enumerate() {
         if p[1] < 0x80 {
             span = (span.0.min(i % width), span.1.max(i % width));
         }
@@ -1067,7 +1083,9 @@ fn ink_columns(r: &mdview_render::Rendered) -> (usize, usize) {
 fn count(r: &mdview_render::Rendered, bgr: [u8; 3]) -> usize {
     r.bitmap
         .pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[..3] == bgr)
         .count()
 }
@@ -1095,7 +1113,9 @@ fn sub_and_superscript_leave_the_baseline() {
         let ink: Vec<usize> = r
             .bitmap
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .enumerate()
             .filter(|(_, p)| p[1] < 0x80)
             .map(|(i, _)| i / width)
@@ -1215,7 +1235,7 @@ fn table_attributes_are_honoured() {
     let columns_of = |r: &mdview_render::Rendered| {
         let width = r.bitmap.width as usize;
         let mut span = (usize::MAX, 0);
-        for (i, p) in r.bitmap.pixels.chunks_exact(4).enumerate() {
+        for (i, p) in r.bitmap.pixels.as_chunks::<4>().0.iter().enumerate() {
             if p[..3] == border {
                 span = (span.0.min(i % width), span.1.max(i % width));
             }
@@ -1242,7 +1262,9 @@ fn table_attributes_are_honoured() {
         let width = r.bitmap.width as usize;
         r.bitmap
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .position(|p| p[1] < 0x60)
             .map(|i| i / width)
             .unwrap()
@@ -1268,7 +1290,9 @@ fn table_attributes_are_honoured() {
         // The x of the `b`, the last ink on the row.
         r.bitmap
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .enumerate()
             .filter(|(_, p)| p[1] < 0x60)
             .map(|(i, _)| i % width)
@@ -1289,11 +1313,20 @@ fn table_attributes_are_honoured() {
         let top = captioned
             .bitmap
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .position(|p| p[..3] == border)
             .unwrap()
             / width;
-        for (i, p) in captioned.bitmap.pixels.chunks_exact(4).enumerate() {
+        for (i, p) in captioned
+            .bitmap
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .enumerate()
+        {
             if i / width < top && p[1] < 0x60 {
                 span = (span.0.min(i % width), span.1.max(i % width));
             }
@@ -1345,7 +1378,7 @@ fn an_aligned_image_stands_beside_its_text() {
         let width = r.bitmap.width as usize;
         // Columns with a run of badge blue; subpixel text leaves the odd blue pixel too.
         let mut per_column = vec![0u32; width];
-        for (i, p) in r.bitmap.pixels.chunks_exact(4).enumerate() {
+        for (i, p) in r.bitmap.pixels.as_chunks::<4>().0.iter().enumerate() {
             if p[0] > 140 && p[2] < 40 && p[1] > 80 {
                 per_column[i % width] += 1;
             }
@@ -1377,7 +1410,9 @@ fn a_block_that_cannot_be_drawn_says_why() {
         let width = r.bitmap.width as usize;
         r.bitmap
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .enumerate()
             .filter(|(i, p)| i % width > 400 && p[1] < 0xc0)
             .count()
@@ -1434,7 +1469,7 @@ fn border_columns(r: &mdview_render::Rendered) -> (usize, usize) {
     let border = [LIGHT.border[2], LIGHT.border[1], LIGHT.border[0]];
     let width = r.bitmap.width as usize;
     let mut span = (usize::MAX, 0);
-    for (i, p) in r.bitmap.pixels.chunks_exact(4).enumerate() {
+    for (i, p) in r.bitmap.pixels.as_chunks::<4>().0.iter().enumerate() {
         if p[..3] == border {
             span = (span.0.min(i % width), span.1.max(i % width));
         }

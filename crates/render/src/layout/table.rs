@@ -106,13 +106,11 @@ impl<'a, 'b> Pager<'a, 'b> {
                 }
                 let colspan = colspan.min(MAX_COLUMNS - col);
                 let rowspan = rowspan.min(row_count - r);
-                for rr in r..r + rowspan {
-                    if taken[rr].len() < col + colspan {
-                        taken[rr].resize(col + colspan, false);
+                for row in taken.iter_mut().skip(r).take(rowspan) {
+                    if row.len() < col + colspan {
+                        row.resize(col + colspan, false);
                     }
-                    for c in col..col + colspan {
-                        taken[rr][c] = true;
-                    }
+                    row[col..col + colspan].fill(true);
                 }
                 columns = columns.max(col + colspan);
                 if rowspan == 1

@@ -231,7 +231,7 @@ fn a_second_float_stands_beside_the_first_or_below_it() {
         // Rows and columns holding the panel's border colour.
         let width = r.bitmap.width as usize;
         let mut rows = Vec::new();
-        for (i, p) in r.bitmap.pixels.chunks_exact(4).enumerate() {
+        for (i, p) in r.bitmap.pixels.as_chunks::<4>().0.iter().enumerate() {
             if (p[2], p[1], p[0]) == (40, 90, 160) {
                 rows.push((i / width, i % width));
             }

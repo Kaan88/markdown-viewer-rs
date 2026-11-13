@@ -310,7 +310,9 @@ mod tests {
         let blue = frame
             .bitmap
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[..3] == [255, 0, 0])
             .count();
         assert_eq!(blue, 64);

@@ -580,10 +580,14 @@ impl Workspace {
         self.forward.clear();
     }
 
+    // Queries for Back and Forward (the mouse buttons call `go_back` and `go_forward` directly);
+    // only the tests ask for now, and a button that greys out would too.
+    #[allow(dead_code)]
     pub fn can_go_back(&self) -> bool {
         !self.back.is_empty()
     }
 
+    #[allow(dead_code)] // see `can_go_back`
     pub fn can_go_forward(&self) -> bool {
         !self.forward.is_empty()
     }
@@ -3042,9 +3046,11 @@ mod tests {
         let a = write(&dir, "a.md", "# A\n\ntext\n");
         let b = write(&dir, "b.md", "# B\n\ntext\n");
         let settings = dir.join("settings.ini");
-        let mut saved = Session::default();
-        saved.tabs = vec![a.clone(), b.clone(), dir.join("gone.md")];
-        saved.active = 1;
+        let saved = Session {
+            tabs: vec![a.clone(), b.clone(), dir.join("gone.md")],
+            active: 1,
+            ..Default::default()
+        };
         saved.save(&settings).unwrap();
 
         let mut ws = Workspace::new(Some(settings));
@@ -3950,7 +3956,7 @@ A line of text here.
         std::fs::remove_file(&a).unwrap();
         assert!(ws.recent_entries()[1].missing);
         assert!(ws.open_recent(&a).is_err());
-        assert_eq!(ws.recents(), [b.clone()]);
+        assert_eq!(ws.recents(), std::slice::from_ref(&b));
         ws.remove_recent(&b);
         assert!(ws.recents().is_empty());
         ws.open(&b).unwrap();

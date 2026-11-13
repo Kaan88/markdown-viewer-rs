@@ -108,11 +108,15 @@ fn decode_png(bytes: &[u8]) -> Option<DecodedImage> {
     let rgba = match frame.color_type {
         png::ColorType::Rgba => data.to_vec(),
         png::ColorType::Rgb => data
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
             .collect(),
         png::ColorType::GrayscaleAlpha => data
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|pixel| [pixel[0], pixel[0], pixel[0], pixel[1]])
             .collect(),
         png::ColorType::Grayscale => data
@@ -144,7 +148,9 @@ fn decode_jpeg(bytes: &[u8]) -> Option<DecodedImage> {
         pixels
     } else if pixels.len() == count * 3 {
         pixels
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
             .collect()
     } else if pixels.len() == count {
@@ -236,7 +242,9 @@ fn decode_webp(bytes: &[u8]) -> Option<DecodedImage> {
         buffer
     } else {
         buffer
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
             .collect()
     };

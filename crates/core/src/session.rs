@@ -423,8 +423,10 @@ mod window_state_tests {
             )
             .animations
         );
-        let mut s = Session::default();
-        s.animations = false;
+        let mut s = Session {
+            animations: false,
+            ..Default::default()
+        };
         assert!(!Session::parse(&s.serialize()).animations);
         s.animations = true;
         assert!(Session::parse(&s.serialize()).animations);

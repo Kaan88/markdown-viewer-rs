@@ -55,7 +55,12 @@ fn fit(mut step: Step, size: Option<(u32, u32)>) -> Step {
         || height == 0
         || width > step.width
         || height > step.height
-        || step.rgba.chunks_exact(4).any(|pixel| pixel[3] != 255)
+        || step
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 255)
     {
         return step;
     }
@@ -71,7 +76,7 @@ fn fit(mut step: Step, size: Option<(u32, u32)>) -> Step {
     );
     // BGRA to straight RGBA, opaque.
     let mut rgba = bitmap.pixels;
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0.iter_mut() {
         pixel.swap(0, 2);
         pixel[3] = 255;
     }
@@ -326,7 +331,7 @@ impl GifPlayer {
             let line = &self.indices[row * frame_w..row * frame_w + area.width];
             let at = ((area.top + row) * width + area.left) * 4;
             let out = &mut self.canvas[at..at + area.width * 4];
-            for (pixel, &index) in out.chunks_exact_mut(4).zip(line) {
+            for (pixel, &index) in out.as_chunks_mut::<4>().0.iter_mut().zip(line) {
                 if Some(index) == transparent {
                     continue;
                 }
@@ -459,7 +464,9 @@ impl WebpPlayer {
             self.buffer.clone()
         } else {
             self.buffer
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
                 .collect()
         };
@@ -704,7 +711,7 @@ mod tests {
                 // The loop starts from an empty canvas; the last frame's 30 ms come first.
                 let first = player.next().expect("first frame again");
                 assert_eq!(first.after, ms(30));
-                assert!(first.rgba.chunks_exact(4).all(|p| p == RED));
+                assert!(first.rgba.as_chunks::<4>().0.iter().all(|p| *p == RED));
             }
             let second = player.next().expect("second frame");
             assert_eq!((second.width, second.height), (4, 4));
