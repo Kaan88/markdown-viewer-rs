@@ -128,6 +128,12 @@ finds and exits, with no window.
   user said to mark it as working after 0.2.0 was out. Which of the steps the user saw (the bar,
   the download, the swap, the version in Windows' list of installed apps, the clean-up of
   `.old` on the next launch) is not recorded.
+- After v0.2.1 was published (2026-11-13): the published manifest, read through
+  `releases/latest/download/`, says 0.2.1 with both URLs at tag v0.2.1; the `mdview.exe` and
+  `mdview-engine.exe` downloaded from those URLs match the two hashes in it; the four assets are
+  `mdview.exe` 8363520 bytes, `mdview-engine.exe` 26289152, `mdview-setup-0.2.1.exe` 11592884 and
+  `mdview-update.txt` 524. `mdview --check-update` run from the 0.2.1 build answers "nothing
+  newer" with exit code 0. An install of 0.2.0 being offered and installing 0.2.1 was not tried.
 
 ## Linux
 
