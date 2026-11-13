@@ -269,21 +269,71 @@ impl App {
             self.ui.popup = None;
             return;
         }
-        // From the main menu, Recent replaces it in place.
-        let (x, y, right) = match (&self.ui.popup, kind) {
-            (Some(p), PopupKind::Recent) if p.kind == PopupKind::Main => {
-                let r = p.menu.rect();
-                (r.right(), r.y, true)
+        // From the main menu, Recent opens beside it and the main menu stays.
+        if kind == PopupKind::Recent
+            && let Some(p) = self.ui.popup.as_mut()
+            && p.kind == PopupKind::Main
+        {
+            // Asked by name, not by the pointer: highlight the item it belongs to.
+            if let Some(i) = p
+                .menu
+                .items
+                .iter()
+                .position(|it| it.id.is_submenu() && it.enabled)
+            {
+                p.menu.hover = Some(i);
             }
-            _ => self.popup_anchor(kind),
-        };
+            self.open_submenu(false);
+            return;
+        }
+        let (x, y, right) = self.popup_anchor(kind);
         let menu = match kind {
             PopupKind::Main => overlays::main_menu(&self.ws, &self.ui, x, y),
             PopupKind::Recent => overlays::recent_menu(&self.ws, x, y, right),
             _ => return,
         };
-        self.ui.popup = Some(Popup { kind, menu });
+        self.ui.popup = Some(Popup::new(kind, menu));
         self.ui.tip = None;
+    }
+
+    /// Opens the submenu of the highlighted item of the open menu beside that item. `keyboard`
+    /// also highlights its first row, so the arrow keys carry on inside it.
+    pub(super) fn open_submenu(&mut self, keyboard: bool) {
+        let (w, _) = self.logical();
+        let Some(p) = self.ui.popup.as_mut() else {
+            return;
+        };
+        p.dwell = None;
+        let Some(i) = p.menu.hover.filter(|&i| p.menu.items[i].id.is_submenu()) else {
+            return;
+        };
+        let parent = p.menu.rect();
+        let row_y = parent.y + overlays::menu_row_offset(&p.menu.items, i);
+        // Beside the item, on the right unless the window has no room there.
+        let room = w - parent.right();
+        let left = room < 420.0 && parent.x > room;
+        let (x, right) = if left {
+            (parent.x + 4.0, true)
+        } else {
+            (parent.right() - 4.0, false)
+        };
+        let mut menu = overlays::recent_menu(&self.ws, x, row_y - 5.0, right);
+        if keyboard {
+            menu.step(true);
+        }
+        p.sub = Some(menu);
+        self.ui.tip = None;
+    }
+
+    /// What choosing a menu item does: a submenu item opens its submenu and keeps the menus,
+    /// anything else closes them and acts.
+    pub(super) fn choose(&mut self, act: Act, keyboard: bool) {
+        if act.is_submenu() {
+            self.open_submenu(keyboard);
+        } else {
+            self.ui.popup = None;
+            self.act(act);
+        }
     }
 
     pub(super) fn open_dialog(&mut self, kind: DialogKind) {
@@ -619,6 +669,17 @@ impl App {
             }
         } else {
             self.ui.caret_due = None;
+        }
+        // The pointer resting on a submenu item: open it when the dwell is up. Nothing is
+        // scheduled when no menu is open, because the dwell lives in the popup.
+        let dwell = self.ui.popup.as_ref().and_then(|p| p.dwell);
+        if let Some((_, due)) = dwell {
+            if now >= due {
+                self.open_submenu(false);
+                self.wants_frame = true;
+            } else {
+                at(due);
+            }
         }
         if let Some(tip) = self.ui.tip.as_mut().filter(|t| !t.shown) {
             if now >= tip.due {

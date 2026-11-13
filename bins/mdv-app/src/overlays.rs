@@ -71,6 +71,21 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
     Menu::new(items, x, y, true)
 }
 
+/// How far below the top of a placed menu the row of item `index` starts. Mirrors the shared
+/// menu's layout (5 px padding, 32 px rows, 9 px before a separator), which only a submenu's
+/// anchor needs.
+pub fn menu_row_offset(items: &[Item<Act>], index: usize) -> f32 {
+    5.0 + items
+        .iter()
+        .take(index + 1)
+        .enumerate()
+        .map(|(i, it)| {
+            let sep = if it.separator_before { 9.0 } else { 0.0 };
+            if i == index { sep } else { sep + 32.0 }
+        })
+        .sum::<f32>()
+}
+
 pub fn recent_menu(ws: &Workspace, x: f32, y: f32, align_right: bool) -> Menu<Act> {
     let mut items: Vec<Item<Act>> = Vec::new();
     let entries = ws.recent_entries();

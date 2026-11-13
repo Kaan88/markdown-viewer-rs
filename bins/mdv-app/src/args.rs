@@ -8,6 +8,8 @@ use std::path::PathBuf;
 pub enum ShotMenu {
     Main,
     Recent,
+    /// The main menu with its Open recent submenu beside it.
+    Cascade,
     Tab,
     Page,
     Find,
@@ -111,6 +113,7 @@ impl Args {
                     out.menu = match value(&a).as_deref() {
                         Some("main") => Some(ShotMenu::Main),
                         Some("recent") => Some(ShotMenu::Recent),
+                        Some("cascade") => Some(ShotMenu::Cascade),
                         Some("tab") => Some(ShotMenu::Tab),
                         Some("page") => Some(ShotMenu::Page),
                         Some("find") => Some(ShotMenu::Find),

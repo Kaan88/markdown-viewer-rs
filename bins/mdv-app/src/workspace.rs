@@ -2539,8 +2539,8 @@ impl Workspace {
     }
 
     /// True when a launch at `now` (seconds since the Unix epoch) should look for a newer
-    /// version: the setting is on, there is a session to remember the answer in, and the last
-    /// look was a day ago or more.
+    /// version: the setting is on and there is a session to remember the answer in. Every
+    /// launch looks; an earlier look the same day does not hold it back.
     pub fn update_check_due(&self, now: u64) -> bool {
         updater::check_due(
             self.session.check_updates,
@@ -4132,7 +4132,7 @@ A line of text here.
     fn an_update_is_offered_installed_and_remembered() {
         let dir = temp_dir("update");
         let settings = dir.join("settings.ini");
-        let day = mdshared_app::updater::CHECK_EVERY;
+        let day = 86_400u64;
         let mut ws = Workspace::new(Some(settings.clone()));
         assert!(ws.checks_updates());
         assert!(ws.update_check_due(10 * day), "never looked before");
@@ -4143,8 +4143,9 @@ A line of text here.
         ws.update_checked(10 * day, false, Err("Timeout".into()));
         assert_eq!(ws.update_bar(), None);
         assert!(ws.status_line().is_none());
-        assert!(!ws.update_check_due(10 * day + day - 1), "once a day");
-        assert!(ws.update_check_due(11 * day));
+        // A look earlier the same day, manual or automatic, does not hold back the next launch.
+        assert!(ws.update_check_due(10 * day + 60), "every launch looks");
+        assert!(ws.update_check_due(10 * day), "even at the same second");
         // One the reader asked for answers.
         ws.update_checked(10 * day, true, Ok(None));
         assert!(ws.status_line().is_some_and(|s| s.text.contains("newest")));

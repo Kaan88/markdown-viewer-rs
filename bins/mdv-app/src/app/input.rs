@@ -13,15 +13,44 @@ impl App {
             return;
         }
         let edge = self.edge_at(x, y);
-        let in_menu = self
-            .ui
-            .popup
-            .as_ref()
-            .is_some_and(|p| p.menu.contains(x, y));
-        if let Some(p) = self.ui.popup.as_mut()
-            && p.menu.pointer(x, y)
-        {
-            self.wants_frame = true;
+        let in_menu = self.ui.popup.as_ref().is_some_and(|p| p.contains(x, y));
+        if let Some(p) = self.ui.popup.as_mut() {
+            if p.sub.as_ref().is_some_and(|s| s.contains(x, y)) {
+                // On the submenu the parent keeps its highlight on the item it came from.
+                if let Some(s) = p.sub.as_mut()
+                    && s.pointer(x, y)
+                {
+                    self.wants_frame = true;
+                }
+                p.dwell = None;
+            } else {
+                if p.menu.pointer(x, y) {
+                    self.wants_frame = true;
+                }
+                if let Some(s) = p.sub.as_mut()
+                    && s.pointer(x, y)
+                {
+                    self.wants_frame = true;
+                }
+                match p.menu.hover {
+                    // Resting on an item with a submenu: it opens after the dwell, unless
+                    // it is open already.
+                    Some(i) if p.menu.items[i].id.is_submenu() => {
+                        if p.sub.is_none() && p.dwell.map(|d| d.0) != Some(i) {
+                            p.dwell = Some((i, Instant::now() + crate::ui::SUBMENU_DWELL));
+                        }
+                    }
+                    // Another item closes the submenu. Between items, or off the menu, the
+                    // submenu stays so the pointer can travel to it.
+                    Some(_) => {
+                        p.dwell = None;
+                        if p.sub.take().is_some() {
+                            self.wants_frame = true;
+                        }
+                    }
+                    None => p.dwell = None,
+                }
+            }
         }
         let hit = if edge.is_some() || in_menu {
             None
@@ -270,7 +299,7 @@ impl App {
             return;
         }
         if let Some(p) = &self.ui.popup {
-            if p.menu.contains(x, y) {
+            if p.contains(x, y) {
                 return;
             }
             self.ui.popup = None;
@@ -384,12 +413,16 @@ impl App {
             return;
         }
         if let Some(p) = &self.ui.popup
-            && p.menu.contains(x, y)
+            && p.contains(x, y)
         {
-            let act = p.menu.chosen();
+            let on_sub = p.sub.as_ref().is_some_and(|s| s.contains(x, y));
+            let act = if on_sub {
+                p.sub.as_ref().and_then(|s| s.chosen())
+            } else {
+                p.menu.chosen()
+            };
             if let Some(act) = act {
-                self.ui.popup = None;
-                self.act(act);
+                self.choose(act, false);
             }
             self.redraw();
             return;
@@ -411,33 +444,28 @@ impl App {
         self.ui.popup = None;
         match self.hit_at(x, y) {
             Some(Hit::Tab(i) | Hit::TabClose(i)) => {
-                self.ui.popup = Some(Popup {
-                    kind: PopupKind::Tab(i),
-                    menu: overlays::tab_menu(&self.ws, i, x, y + 2.0),
-                });
+                self.ui.popup = Some(Popup::new(
+                    PopupKind::Tab(i),
+                    overlays::tab_menu(&self.ws, i, x, y + 2.0),
+                ));
             }
             Some(Hit::Page) => {
                 let (_, px, py) = self.page_point(x, y);
                 let ctx = self.ws.context_at(px, py);
-                self.ui.popup = Some(Popup {
-                    kind: PopupKind::Page,
-                    menu: overlays::page_menu(&ctx, x + 2.0, y + 2.0),
-                });
+                self.ui.popup = Some(Popup::new(
+                    PopupKind::Page,
+                    overlays::page_menu(&ctx, x + 2.0, y + 2.0),
+                ));
             }
             Some(Hit::Find | Hit::FindClear) => {
                 // The box takes the focus and keeps its selection, so Cut and Copy act on it.
                 self.ui.find_focused = true;
                 self.caret_reset();
                 let find = &self.ui.find;
-                self.ui.popup = Some(Popup {
-                    kind: PopupKind::Find,
-                    menu: overlays::find_menu(
-                        !find.is_empty(),
-                        find.has_selection(),
-                        x + 2.0,
-                        y + 2.0,
-                    ),
-                });
+                self.ui.popup = Some(Popup::new(
+                    PopupKind::Find,
+                    overlays::find_menu(!find.is_empty(), find.has_selection(), x + 2.0, y + 2.0),
+                ));
             }
             _ => {}
         }
@@ -593,13 +621,31 @@ impl App {
 
         // A menu takes the keyboard.
         if let Some(p) = self.ui.popup.as_mut() {
+            p.dwell = None;
+            // With a submenu open the keys go to it; Escape and Left close only the submenu.
+            if let Some(s) = p.sub.as_mut() {
+                match name {
+                    KeyName::Up => s.step(false),
+                    KeyName::Down | KeyName::Tab => s.step(true),
+                    KeyName::Enter | KeyName::Space => {
+                        if let Some(act) = s.chosen() {
+                            self.choose(act, true);
+                        }
+                    }
+                    KeyName::Escape | KeyName::Left => p.sub = None,
+                    _ => {}
+                }
+                return;
+            }
             match name {
                 KeyName::Up => p.menu.step(false),
                 KeyName::Down | KeyName::Tab => p.menu.step(true),
-                KeyName::Enter | KeyName::Space => {
-                    if let Some(act) = p.menu.chosen() {
-                        self.ui.popup = None;
-                        self.act(act);
+                KeyName::Enter | KeyName::Space | KeyName::Right => {
+                    let arrow = name == KeyName::Right;
+                    if let Some(act) = p.menu.chosen()
+                        && (!arrow || act.is_submenu())
+                    {
+                        self.choose(act, true);
                     }
                 }
                 KeyName::Escape => self.ui.popup = None,

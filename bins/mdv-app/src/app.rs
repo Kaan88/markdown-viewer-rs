@@ -498,12 +498,18 @@ impl App {
             }
             if let Some(popup) = self.ui.popup.as_mut() {
                 popup.menu.place(&mut p, w, h);
+                if let Some(s) = popup.sub.as_mut() {
+                    s.place(&mut p, w, h);
+                }
             }
         }
         self.toast_until = self.ws.status(now).and(self.ws.status_expires());
         let mut bounds: Vec<Rect> = bubbles.iter().map(Bubble::bounds).collect();
         if let Some(popup) = &self.ui.popup {
             bounds.push(popup.menu.rect().inset(-20.0));
+            if let Some(s) = &popup.sub {
+                bounds.push(s.rect().inset(-20.0));
+            }
         }
         if self.ui.dialog.is_some() {
             bounds.push(Rect::new(0.0, 0.0, w, h));
@@ -520,10 +526,14 @@ impl App {
                     )
                 })
                 .collect::<Vec<_>>(),
-            self.ui
-                .popup
-                .as_ref()
-                .map(|p| (p.kind, p.menu.hover, p.menu.items.len())),
+            self.ui.popup.as_ref().map(|p| {
+                (
+                    p.kind,
+                    p.menu.hover,
+                    p.menu.items.len(),
+                    p.sub.as_ref().map(|s| (s.hover, s.items.len())),
+                )
+            }),
             self.ui.dialog.as_ref().map(|d| {
                 (
                     d.kind,
@@ -649,6 +659,9 @@ impl App {
                 }
                 if let Some(popup) = self.ui.popup.as_mut() {
                     popup.menu.draw(c.p, &pal, w, h);
+                    if let Some(s) = popup.sub.as_mut() {
+                        s.draw(c.p, &pal, w, h);
+                    }
                 }
                 for b in &bubbles {
                     b.draw(c.p, &pal);
@@ -1174,6 +1187,11 @@ fn shot(mut app: App, path: &Path) -> i32 {
     match app.args.menu {
         Some(ShotMenu::Main) => app.open_popup(PopupKind::Main),
         Some(ShotMenu::Recent) => app.open_popup(PopupKind::Recent),
+        Some(ShotMenu::Cascade) => {
+            app.open_popup(PopupKind::Main);
+            app.compose();
+            app.open_popup(PopupKind::Recent);
+        }
         Some(ShotMenu::Tab) => {
             if let Some(r) = app.hit_rect(Hit::Tab(0)) {
                 app.ui.mouse = (r.x + 30.0, r.cy());
@@ -1209,6 +1227,9 @@ fn shot(mut app: App, path: &Path) -> i32 {
         }
         if let Some(p) = app.ui.popup.as_mut() {
             p.menu.pointer(x, y);
+            if let Some(s) = p.sub.as_mut() {
+                s.pointer(x, y);
+            }
         }
     }
     app.full = true;

@@ -45,7 +45,7 @@ Runtime dependency, Windows only, and hand-trimmed generated bindings.
 - The user approves the interface by looking at it. Screenshots and tests do not stand in for that.
 - Remote images are off until the reader allows them, per document, with an "always" setting.
 - Updates (2026-11-13, replacing "manual only" of 2026-11-10): mdview looks for a newer version
-  at launch, at most once a day, and asks before it downloads anything; it then replaces its own
+  at every launch (changed in 0.2.2; it was once a day), and asks before it downloads anything; it then replaces its own
   two executables in place. A setting turns the look off. `docs/UPDATE.md`.
 - No bundled fonts (2026-11-08), so the golden compare runs on Windows only.
 - An editor is a second project, not a mode of mdview (PLAN section E).
@@ -101,7 +101,7 @@ To change shared code: edit it there, push, and move the `rev` here. The move wa
 7,457,280 bytes. First-frame time and memory were re-measured on 2026-11-13 (section 9) and are
 unchanged. The user has not run the app since the move. Tests moved with the code: after the seven
 features of 2026-11-13 this workspace runs 366 (4 ignored) and the shared repository 156
-(3 ignored). The pinned shared commit is `870d620` (2026-11-13: the icons are the shared crate's own drawings, the same on every system; `mdview.exe` is 8,241,664 bytes with it; one menu shot was looked at, the user has not seen it in a window, and the no-pixel-change baselines need rendering again).
+(3 ignored). The pinned shared commit is `1c3710a` (2026-11-13, shared branch `fix/update-look-every-launch`; the shared `main` was not moved, so the pin is a commit on a branch). It carries the launch look at every launch and the new code-colouring scanners (TypeScript, Dart, Zig, SCSS, Less, INI, CMake) on top of `870d620` (the shared icons). `mdview.exe` is 8,378,368 bytes with it (static build).
 
 `target/` is git-ignored. Helper scripts that once lived there (`vm.py`, `seed-lock.py`,
 `cap.ps1`) are not committed; sections 9 and 12 say what they did.
@@ -145,7 +145,7 @@ document with SVG, math or Mermaid.
 | `--size WxH`, `--scale f` | Shot size and device scale |
 | `--files`/`--no-files`, `--outline`/`--no-outline`, `--focus-mode` | Panes and focus mode |
 | `--find q`, `--scroll px`, `--hover x,y` | Find query, scroll offset, pointer position. `--scroll` also applies to a real window's first document |
-| `--menu main\|recent\|tab\|page`, `--dialog about\|shortcuts\|recent` | Open a popup or dialog in the shot |
+| `--menu main\|recent\|cascade\|tab\|page\|find`, `--dialog about\|shortcuts\|recent` | Open a popup or dialog in the shot |
 | `--scroll-steps n` | Open a real window, wait until the page is refined, scroll n wheel steps, log timings, exit |
 | `--update-bar available\|installing\|installed` | Show the update bar at that stage with a made-up version, for a shot |
 | `--check-update` | Look for a newer version as the app would, print the answer, exit. No window |
@@ -870,6 +870,19 @@ testing on other machines (there is one PC). The editor is a second project (PLA
 
 ## 14. History
 
+- **2026-11-13, 0.2.2.** Two changes. The look for a newer version now runs at every launch (the
+  shared `check_due` no longer compares with a day; a look earlier the same day used to suppress
+  it, which is why the owner's manual check found 0.2.1 and the launch did not). Submenus open when
+  the pointer rests on their item for 300 ms, as a cascade: the parent menu stays and the submenu
+  stands beside it (`Popup::sub`, `Popup::dwell`, `App::open_submenu`). A click opens it at once,
+  another parent item closes it, Escape or Left closes only it, Right or Enter on the item opens it,
+  a click outside closes both; `--menu cascade` shows it in a shot. "Open recent" is the only item
+  with a submenu. Ran: build, the whole test suite, fmt, clippy (one warning that was already
+  there), shots of the menus in both themes, a real launch with the settings file's
+  `update_checked` set a minute back (it moved to now), and the hover in a real window (cursor
+  moved with SetCursorPos: nothing at 100 ms, the submenu at 700 ms, gone on another item).
+  Copies of 0.2.1 and older still look once a day. Not run: the installer, an update from 0.2.1
+  by the app itself, the hover on a second monitor or at another scale.
 - **2026-11-13.** Qt shell retired to the `qt-archive` branch with its installer and Linux
   packaging; `mdview` is the only shell. Numbers re-measured after the shared crates. Port
   checklist gone through; the Files tree follows its folder live. In-place updates built

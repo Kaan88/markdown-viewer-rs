@@ -10,7 +10,7 @@ use mdview_core::commands::CommandId;
 use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub use mdshared_ui::chrome::{BAR_H, TITLE_H};
 pub const PANE_MIN: f32 = 160.0;
@@ -168,7 +168,7 @@ pub enum Act {
     /// A tab context menu command for this tab.
     TabCmd(CommandId, usize),
     Recent(PathBuf),
-    /// Replace the open menu by the Recent menu.
+    /// Open the Recent menu beside the item.
     RecentMenu,
     OpenLink(String),
     CopyLink(String),
@@ -186,6 +186,13 @@ pub enum Act {
     EditAlways,
     /// Toggle playing animated images.
     Animations,
+}
+
+impl Act {
+    /// Whether the item leads to a submenu (the ones drawn with a "›").
+    pub fn is_submenu(&self) -> bool {
+        matches!(self, Act::RecentMenu)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,6 +216,29 @@ pub enum PopupKind {
 pub struct Popup {
     pub kind: PopupKind,
     pub menu: Menu<Act>,
+    /// The submenu opened beside one of this menu's items; the menu stays visible under it.
+    pub sub: Option<Menu<Act>>,
+    /// The submenu item the pointer rests on and when its submenu opens by itself.
+    pub dwell: Option<(usize, Instant)>,
+}
+
+/// How long the pointer rests on an item that leads to a submenu before it opens, as in Windows.
+pub const SUBMENU_DWELL: Duration = Duration::from_millis(300);
+
+impl Popup {
+    pub fn new(kind: PopupKind, menu: Menu<Act>) -> Popup {
+        Popup {
+            kind,
+            menu,
+            sub: None,
+            dwell: None,
+        }
+    }
+
+    /// Whether the point is on the menu or on its open submenu.
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        self.menu.contains(x, y) || self.sub.as_ref().is_some_and(|s| s.contains(x, y))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
