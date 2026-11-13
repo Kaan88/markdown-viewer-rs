@@ -1586,7 +1586,7 @@ dependencies = [
 [[package]]
 name = "mdshared-app"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=f92f90fcdd841ceadde52edf23377d8e50968275#f92f90fcdd841ceadde52edf23377d8e50968275"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=b74e8cbb81ee3f01bfc6c2db9f48253dc1f4cf10#b74e8cbb81ee3f01bfc6c2db9f48253dc1f4cf10"
 dependencies = [
  "notify",
 ]
@@ -1594,7 +1594,7 @@ dependencies = [
 [[package]]
 name = "mdshared-fetch"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=f92f90fcdd841ceadde52edf23377d8e50968275#f92f90fcdd841ceadde52edf23377d8e50968275"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=b74e8cbb81ee3f01bfc6c2db9f48253dc1f4cf10#b74e8cbb81ee3f01bfc6c2db9f48253dc1f4cf10"
 dependencies = [
  "windows-sys 0.59.0",
 ]
@@ -1602,7 +1602,7 @@ dependencies = [
 [[package]]
 name = "mdshared-highlight"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=f92f90fcdd841ceadde52edf23377d8e50968275#f92f90fcdd841ceadde52edf23377d8e50968275"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=b74e8cbb81ee3f01bfc6c2db9f48253dc1f4cf10#b74e8cbb81ee3f01bfc6c2db9f48253dc1f4cf10"
 dependencies = [
  "syntect",
 ]
@@ -1610,7 +1610,7 @@ dependencies = [
 [[package]]
 name = "mdshared-text"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=f92f90fcdd841ceadde52edf23377d8e50968275#f92f90fcdd841ceadde52edf23377d8e50968275"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=b74e8cbb81ee3f01bfc6c2db9f48253dc1f4cf10#b74e8cbb81ee3f01bfc6c2db9f48253dc1f4cf10"
 dependencies = [
  "parley",
  "png",
@@ -1620,7 +1620,7 @@ dependencies = [
 [[package]]
 name = "mdshared-ui"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=f92f90fcdd841ceadde52edf23377d8e50968275#f92f90fcdd841ceadde52edf23377d8e50968275"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=b74e8cbb81ee3f01bfc6c2db9f48253dc1f4cf10#b74e8cbb81ee3f01bfc6c2db9f48253dc1f4cf10"
 dependencies = [
  "mdshared-app",
  "mdshared-text",
