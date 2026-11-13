@@ -171,6 +171,7 @@ mdv-bench.exe --input spikes/parser/data/generated_1mib.md --out target/tmp/b.pn
 `--resize <width>`, `--zoom <factor>`, `--details` and `--error` add phases.
 
 **Goldens.** `crates/render/tests/golden.rs` compares the four `tests/golden/showcase-{light,dark}@{1.0,1.5}.png`
+and, for `fixtures/tables.md`, `tables-light@1.0.png` and `tables-dark@1.5.png`,
 on Windows only (system fonts). After an intended visual change, re-bless them and look at the
 difference before committing:
 
@@ -178,7 +179,7 @@ difference before committing:
 $env:MDV_BLESS = 1; cargo test --release -p mdview-render --test golden; Remove-Item Env:MDV_BLESS
 ```
 
-A failing compare writes `target/golden-actual-<name>.png`. The engine must be built, or SVG, math
+A failing compare writes `target/golden-actual-<fixture>-<name>.png`. The engine must be built, or SVG, math
 and diagrams render as placeholders.
 
 **crates.io** was unreachable from the PC for a while (`SEC_E_NO_CREDENTIALS`) and worked again from
@@ -265,8 +266,37 @@ it after a report with wide tables read badly in the narrow column.
 **Table columns (2026-11-12).** A table too wide for the page no longer shrinks every column by
 one factor, which made short columns narrower than their longest word so text ran into the next
 column. Each column keeps its longest word (parley's min-content width) and the room left goes to
-the columns in proportion to what they would still wrap; when even the longest words do not fit,
-the columns shrink together and words break inside their cells (`break_words` in the pager).
+the columns in proportion to what they would still wrap.
+
+**Content-sized tables (2026-11-13).** Tables follow a browser's automatic layout
+(`layout/table.rs`; the arithmetic is in `content_width` and `column_widths`, which have unit
+tests and which `estimate.rs` calls too). Every column has a narrowest width (longest word plus
+padding) and a widest (longest line plus padding).
+
+- A table is as wide as its widest columns together, so a small table is small and stands at the
+  left; before, every table was stretched to the column. `align` on the table, or on a `<div>`,
+  `<center>` or `<figure>` around it, centres it or puts it at the right.
+- Wider than the room it has, it takes that room and each column gets its narrowest width plus a
+  share of what is left in proportion to (widest − narrowest), as before.
+- When the narrowest widths do not fit, only the widest columns are cut, to one common width, and
+  their words break (`break_words` in the pager); columns under that width keep their words
+  whole. Before, all columns shrank by one factor and a short word next to a long path was
+  broken too. There is still no sideways scrolling.
+- `<table width>` is the table's width (not under its longest words, not over the column); spare
+  room goes to the unstated columns in proportion to their widest. A cell's px `width` replaces
+  its column's widest width; a % is a share of the table, and a table with no width grows until
+  the share holds. Percent columns are served first, then px, then the rest.
+- A `colspan` cell adds what it lacks to its columns in proportion to their widest widths,
+  narrower spans first; before, it was split evenly.
+- A `<caption>` is centred on the table, not on the column, and wraps only at the column's
+  width (a browser wraps it at the table's).
+- The height estimate gives a cell that fits its column one line. It used to count two for the
+  longest cell of each column, so a table of short cells was estimated about 50% too tall.
+- `hit_test` picks, among lines at the same height, the one the point is in or nearest to. It
+  took the first, so a click in any cell but the first of its row answered with the end of the
+  first cell's text, and links there were not found (`a_click_in_a_table_lands_on_the_text_of_its_cell`).
+- `fixtures/tables.md` shows each case and has two goldens. The look has not been approved by
+  the user yet.
 
 **Find box menu and Show in Explorer (2026-11-12).** A right click in the find box opens Cut, Copy,
 Paste and Select all (`overlays::find_menu`, `Act::Edit`); `--menu find` shows it in a shot. "Show in
@@ -640,7 +670,8 @@ Items 1 and 2 are done and item 3 is built but waits for a first release; item 4
    watch the installed copy update itself. `docs/UPDATE.md` has the steps and what has and has
    not run.
 4. Features, in the user's order: remember the scroll position per file; live reload that keeps
-   the reader's place; animated GIFs; content-sized tables; the missing highlight languages
+   the reader's place; animated GIFs; content-sized tables (done 2026-11-13, look not yet
+   approved); the missing highlight languages
    (Kotlin, Swift, PowerShell, Dockerfile); a true float across blocks; wiki-links and backlinks.
 
 The editor and the shared code have their own repositories since 2026-11-12, holding plans only:

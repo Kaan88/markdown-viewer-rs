@@ -55,7 +55,11 @@ drawn both ways.
 
 **Pixel test.** The four `showcase-*.png` images are a baseline: `crates/render/tests/golden.rs`
 renders the showcase at the same four settings and fails when more than 64 pixels differ by more than
-24 in any channel, writing the actual image to `target/golden-actual-<name>.png`. Rendering is
+24 in any channel, writing the actual image to `target/golden-actual-<fixture>-<name>.png`.
+`tables-light@1.0.png` and `tables-dark@1.5.png` are the same for `fixtures/tables.md` (table
+widths: narrow, wrapping, spans, stated widths, in a list and a quote), written by the test's
+`MDV_BLESS=1` run on 2026-11-13 when tables became content-sized; that change also narrowed the one
+table in the four showcase images, which were blessed again. Rendering is
 deterministic, so with nothing changed no pixel differs. A red/blue subpixel swap changes 29,677
 pixels; the gantt axis fix of 2026-11-08 changed 646 (one band of rows at the chart) and was blessed.
 Limits:

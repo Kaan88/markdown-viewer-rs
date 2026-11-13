@@ -18,7 +18,8 @@ use super::inline::{Inline, Style};
 use super::media::{GUESS_DIAGRAM, GUESS_IMAGE, GUESS_MATH};
 use super::pager::{Pager, Txt};
 use super::store::Found;
-use mdview_core::model::{BlockKind, Footnote, NONE, SpanKind};
+use super::table::{Column, Stated, column_widths, content_width};
+use mdview_core::model::{BlockKind, Footnote, Length, NONE, SpanKind};
 
 /// Lines are rarely filled to the edge: a word that does not fit moves down whole.
 const FILL: f32 = 0.92;
@@ -293,8 +294,8 @@ impl<'a, 'b> Pager<'a, 'b> {
         h * (avail / w.max(1.0)).min(1.0)
     }
 
-    /// Rows of the cells' wrapped text, with columns sized by their longest cell as the table
-    /// layout does, narrowed towards their longest word when they do not fit.
+    /// Rows of the cells' wrapped text, with the columns between their longest word and their
+    /// longest cell as the table layout sizes them.
     fn estimate_table(&mut self, m: &Metrics, b: u32, width: f32) -> f32 {
         let pad_x = self.px(13.0);
         let pad_y = self.px(8.0);
@@ -323,32 +324,36 @@ impl<'a, 'b> Pager<'a, 'b> {
         if columns == 0 {
             return 0.0;
         }
-        let mut natural = vec![0f32; columns];
-        let mut minimal = vec![0f32; columns];
+        let mut asks = vec![
+            Column {
+                min: 2.0 * pad_x,
+                max: 2.0 * pad_x,
+                stated: Stated::Auto,
+            };
+            columns
+        ];
         for row in &rows {
             for (c, &(chars, word)) in row.iter().enumerate().take(columns) {
-                natural[c] = natural[c].max(chars as f32 * advance);
-                minimal[c] = minimal[c].max(word as f32 * advance);
+                asks[c].max = asks[c].max.max(chars as f32 * advance + 2.0 * pad_x);
+                asks[c].min = asks[c].min.max(word as f32 * advance + 2.0 * pad_x);
             }
         }
-        let available = width - 2.0 * hr;
-        let columns_pad = 2.0 * pad_x * columns as f32;
-        let total: f32 = natural.iter().sum::<f32>() + columns_pad;
-        let min_total: f32 = minimal.iter().sum::<f32>() + columns_pad;
-        // The same three cases as the table layout: everything fits, the longest words fit,
-        // or the words themselves must break.
-        let text_width: Vec<f32> = (0..columns)
-            .map(|c| {
-                let w = if total <= available {
-                    natural[c]
-                } else if min_total <= available {
-                    let share = (available - min_total) / (total - min_total);
-                    minimal[c] + (natural[c] - minimal[c]) * share
-                } else {
-                    (minimal[c] + 2.0 * pad_x) * available / min_total - 2.0 * pad_x
+        // The table's width and its columns' as the layout shares them out, from these guesses
+        // at the text widths; widths stated on cells are left out.
+        let min_total: f32 = asks.iter().map(|ask| ask.min).sum();
+        let inner = match self.doc.attrs_of(b).and_then(|a| a.width) {
+            Some(asked) => {
+                let asked = match asked {
+                    Length::Px(px) => self.px(px as f32),
+                    Length::Percent(p) => width * f32::from(p) / 100.0,
                 };
-                w.max(1.0)
-            })
+                asked.max(min_total + 2.0 * hr).min(width) - 2.0 * hr
+            }
+            None => content_width(&asks, width - 2.0 * hr),
+        };
+        let text_width: Vec<f32> = column_widths(&asks, inner)
+            .into_iter()
+            .map(|w| (w - 2.0 * pad_x).max(1.0))
             .collect();
         let line = (15.0 * 1.45 * self.scale).round();
         let mut height = hr;
@@ -358,9 +363,14 @@ impl<'a, 'b> Pager<'a, 'b> {
                 .enumerate()
                 .take(columns)
                 .map(|(c, &(chars, _))| {
-                    (chars as f32 * advance / (text_width[c] * FILL))
-                        .ceil()
-                        .max(1.0)
+                    let text = chars as f32 * advance;
+                    // A cell that fits its column is one line; one that wraps leaves its
+                    // lines a little short of the edge.
+                    if text <= text_width[c] + 0.5 {
+                        1.0
+                    } else {
+                        (text / (text_width[c] * FILL)).ceil()
+                    }
                 })
                 .fold(1.0f32, f32::max);
             height += (lines * line).max(line) + 2.0 * pad_y + hr;

@@ -1222,8 +1222,10 @@ fn table_attributes_are_honoured() {
         }
         span
     };
-    // `width` narrows the table and `align` centres it.
-    let full = columns_of(&page("<table><tr><td>a</td><td>b</td></tr></table>\n"));
+    // `width` sets the table's width and `align` centres it.
+    let full = columns_of(&page(
+        "<table width=\"100%\"><tr><td>a</td><td>b</td></tr></table>\n",
+    ));
     assert_eq!(full, (40, 739));
     let half = columns_of(&page(
         "<table width=\"50%\" align=\"center\"><tr><td>a</td><td>b</td></tr></table>\n",
@@ -1254,9 +1256,9 @@ fn table_attributes_are_honoured() {
     );
 
     // A row's `align` reaches its cells, and a cell's `width` sets its column.
-    let left = ink_columns(&page("<table><tr><td>a</td></tr></table>\n")).0;
+    let left = ink_columns(&page("<table width=\"100%\"><tr><td>a</td></tr></table>\n")).0;
     let right = ink_columns(&page(
-        "<table><tr align=\"right\"><td>a</td></tr></table>\n",
+        "<table width=\"100%\"><tr align=\"right\"><td>a</td></tr></table>\n",
     ))
     .0;
     assert!(right > left + 500, "{left} {right}");
@@ -1273,13 +1275,14 @@ fn table_attributes_are_honoured() {
             .max()
             .unwrap()
     };
-    let even = second("<table><tr><td>a</td><td>b</td></tr></table>\n");
-    let wide = second("<table><tr><td width=\"80%\">a</td><td>b</td></tr></table>\n");
+    let even = second("<table width=\"100%\"><tr><td>a</td><td>b</td></tr></table>\n");
+    let wide =
+        second("<table width=\"100%\"><tr><td width=\"80%\">a</td><td>b</td></tr></table>\n");
     assert!(wide > even + 150, "{even} {wide}");
 
     // A caption is centred above the grid, not a row inside it.
-    let captioned = page("<table><caption>Cap</caption><tr><td>a</td></tr></table>\n");
-    let (first, last) = {
+    let caption_ink = |markdown: &str| {
+        let captioned = page(markdown);
         let width = captioned.bitmap.width as usize;
         let mut span = (usize::MAX, 0);
         // Ink above the table's top border only.
@@ -1295,12 +1298,29 @@ fn table_attributes_are_honoured() {
                 span = (span.0.min(i % width), span.1.max(i % width));
             }
         }
-        span
+        (span, columns_of(&captioned))
     };
+    let ((first, last), _) =
+        caption_ink("<table width=\"100%\"><caption>Cap</caption><tr><td>a</td></tr></table>\n");
     assert!(
         ((first + last) as i32 / 2 - 390).abs() < 4,
         "{first}..{last}"
     );
+    // Over a table narrower than the column it is centred on the table,
+    let ((first, last), (left, right)) = caption_ink(
+        "<table><caption>Cap</caption><tr><td>a cell wider than its caption</td></tr></table>\n",
+    );
+    assert!(right < 400, "{right}");
+    assert!(
+        ((first + last) as i32 - (left + right) as i32).abs() < 8,
+        "{first}..{last} over {left}..{right}"
+    );
+    // and one wider than its table starts at the column's edge, on one line.
+    let ((first, last), (_, right)) = caption_ink(
+        "<table><caption>A caption wider than its table</caption><tr><td>a</td></tr></table>\n",
+    );
+    assert!((40..44).contains(&first), "{first}");
+    assert!(last > right + 100, "{last} past {right}");
 }
 
 #[test]
@@ -1407,4 +1427,148 @@ fn text_runs_beside_a_floated_image_and_then_under_it() {
         .unwrap();
     assert!(first_lines < 540, "beside the image: {first_lines}");
     assert!(last_lines > 640, "under the image: {last_lines}");
+}
+
+/// The first and last column holding the table border's colour.
+fn border_columns(r: &mdview_render::Rendered) -> (usize, usize) {
+    let border = [LIGHT.border[2], LIGHT.border[1], LIGHT.border[0]];
+    let width = r.bitmap.width as usize;
+    let mut span = (usize::MAX, 0);
+    for (i, p) in r.bitmap.pixels.chunks_exact(4).enumerate() {
+        if p[..3] == border {
+            span = (span.0.min(i % width), span.1.max(i % width));
+        }
+    }
+    span
+}
+
+#[test]
+fn a_table_is_as_wide_as_its_content() {
+    let width_of = |markdown: &str| {
+        let (first, last) = border_columns(&page(markdown));
+        (first, last + 1 - first)
+    };
+    // A small table stays small, at the left of the column.
+    let small = "| Key | Value |\n| --- | ---: |\n| a | 1 |\n| bb | 22 |\n";
+    let (left, small_width) = width_of(small);
+    assert_eq!(left, 40);
+    assert!((80..200).contains(&small_width), "{small_width}");
+    // One line longer than the page takes the page's width, no more.
+    let long = "word ".repeat(60);
+    let wide = format!("| Key | Value |\n| --- | --- |\n| a | {long} |\n");
+    assert_eq!(width_of(&wide), (40, 700));
+    // `align`, on the table or on a `<div>` around it, places a table narrower than the page.
+    let cells = "<tr><td>one</td><td>two</td></tr>";
+    let (plain_left, plain_width) = width_of(&format!("<table>{cells}</table>\n"));
+    assert_eq!(plain_left, 40);
+    for centred in [
+        format!("<table align=\"center\">{cells}</table>\n"),
+        format!("<div align=\"center\">\n<table>{cells}</table>\n</div>\n"),
+    ] {
+        let (left, width) = width_of(&centred);
+        assert_eq!(width, plain_width, "{centred}");
+        assert!(
+            (left as i32 * 2 + width as i32 - 780).abs() <= 2,
+            "{centred}: {left} {width}"
+        );
+    }
+    let (left, width) = width_of(&format!("<table align=\"right\">{cells}</table>\n"));
+    assert_eq!(left + width, 740);
+    // A cell across two columns widens them when it needs more than they hold.
+    let spanning = format!(
+        "<table>{cells}<tr><td colspan=\"2\">a cell that is wider than both columns</td></tr></table>\n"
+    );
+    let (_, spanning_width) = width_of(&spanning);
+    assert!(
+        spanning_width > plain_width + 100 && spanning_width < 400,
+        "{plain_width} {spanning_width}"
+    );
+}
+
+#[test]
+fn table_columns_follow_their_content_and_stated_widths() {
+    let options = Options::light();
+    let x_of = |markdown: &str, word: &str| {
+        let doc = mdview_core::parse(markdown);
+        let mut renderer = DocumentRenderer::new();
+        renderer.layout_exact(&doc, &options);
+        let rects = rects_of(&mut renderer, &doc, &options, word);
+        (rects[0].x, rects.len())
+    };
+    // The first cell's text starts after the margin, the border and the cell padding.
+    let start = 40.0 + 1.0 + 13.0;
+    // A column stated in px is that wide, whatever it holds.
+    let stated = "<table><tr><td width=\"200\">a</td><td>next</td></tr></table>\n";
+    assert_eq!(x_of(stated, "next").0, start + 200.0);
+    // A column stated in percent is that share of a table grown to make it so.
+    let half = "<table><tr><td width=\"50%\">a</td><td>the rest of it</td></tr></table>\n";
+    let rest = x_of(half, "the rest").0;
+    let free = x_of(
+        "<table><tr><td>a</td><td>the rest of it</td></tr></table>\n",
+        "the rest",
+    )
+    .0;
+    assert!(rest > free + 50.0, "{free} {rest}");
+    let (first, last) = border_columns(&page(half));
+    let inner = (last + 1 - first - 2) as f32;
+    assert!(
+        (rest - start - inner / 2.0).abs() <= 1.0,
+        "{rest} in {inner}"
+    );
+    // Too wide for the page: the short column keeps its word and the long one wraps.
+    let long = "several words that go on ".repeat(8);
+    let wrapping = format!("| Name | Text |\n| --- | --- |\n| identifier | {long} |\n");
+    assert_eq!(x_of(&wrapping, "identifier").1, 1);
+    assert!(x_of(&wrapping, "several words").0 < 200.0);
+    // Words too long to stand side by side: the long one breaks, the short one stays whole.
+    let hash = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".repeat(2);
+    let breaking = format!("| Hash | Note |\n| --- | --- |\n| {hash} | unchanged |\n");
+    assert_eq!(x_of(&breaking, "unchanged").1, 1);
+    assert!(x_of(&breaking, &hash).1 > 1);
+    assert_eq!(border_columns(&page(&breaking)), (40, 739));
+}
+
+#[test]
+fn a_click_in_a_table_lands_on_the_text_of_its_cell() {
+    // Cells of one row share their rows of pixels, so the column decides which one was meant.
+    let rows = "<tr><td>first</td><td>second</td></tr><tr><td>third</td><td>fourth</td></tr>";
+    for (table, centred) in [
+        (format!("<table width=\"100%\">{rows}</table>\n"), false),
+        (format!("<table align=\"center\">{rows}</table>\n"), true),
+    ] {
+        let doc = mdview_core::parse(&table);
+        let options = Options::light();
+        let mut renderer = DocumentRenderer::new();
+        renderer.layout(&doc, &options);
+        renderer.view_frame(&doc, &options, 0.0, 400.0);
+        for word in ["first", "second", "third", "fourth"] {
+            let at = doc.text.find(word).unwrap() as u32;
+            let rect = rects_of(&mut renderer, &doc, &options, word)[0];
+            // A centred table is in the middle of the page, and the highlight is where it is.
+            assert!(
+                !centred || (rect.x > 300.0 && rect.x + rect.w < 480.0),
+                "{word}: {rect:?}"
+            );
+            let hit = renderer
+                .hit_test(&doc, &options, rect.x + 1.0, rect.y + rect.h / 2.0)
+                .expect("a click in the cell");
+            assert_eq!(hit.offset, at, "{word} in {table}");
+            assert!(hit.on_text, "{word} in {table}");
+        }
+    }
+}
+
+#[test]
+fn the_tables_fixture_keeps_its_tables_inside_what_holds_them() {
+    // A narrow table, a wrapping one, spans, stated widths, tables in a list and a quote, and
+    // a word that must break: every table starts where its container does and none passes the
+    // right edge of the column.
+    let doc = fixture("tables.md");
+    for width in [780.0, 420.0] {
+        let rendered = render(&doc, &narrow(width));
+        let (first, last) = border_columns(&rendered);
+        assert_eq!(first, 40, "{width}");
+        assert!(last < width as usize - 40, "{width}: {last}");
+        assert!(rendered.content_height > 1000.0, "{width}");
+    }
 }
