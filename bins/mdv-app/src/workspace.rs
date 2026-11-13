@@ -1722,7 +1722,7 @@ impl Workspace {
         if self.check_wiki_links() {
             // A link that was missing is there now, or the reverse: it is drawn differently.
             let tab = &mut self.tabs[index];
-            tab.drop_view(self.renderer.page_layout());
+            tab.drop_view(self.renderer.page_layout(), viewport.height as f32);
         }
         let mut theme = self.theme();
         // Narrow is the theme's own reading width; the others let the column grow.

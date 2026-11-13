@@ -86,3 +86,6 @@ which writes the same four `showcase-*.png` files under `target/goldens/`. `--in
 `--width`, `--scale`, `--theme` and `--max-height` render one page; `--width` with `--viewport`,
 `--scroll` and `--repeat` measures scroll frames instead (see `docs/HANDOFF.md`, section 6).
 
+`floats-light@1.0.png` and `floats-dark@1.5.png` are `fixtures/floats.md` (floated images with the
+blocks after them beside or below), rendered by the golden test with `MDV_BLESS=1` and compared
+by it like the showcase images. The user has not reviewed them.

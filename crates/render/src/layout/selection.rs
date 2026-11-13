@@ -40,7 +40,7 @@ impl DocumentRenderer {
                 self.measure(doc, index, true, true);
             }
         }
-        self.settle();
+        self.correct_pending(doc);
         let Some(page) = self.page.as_ref() else {
             return Vec::new();
         };
@@ -92,5 +92,5 @@ fn x_at(line: &LineGeom, offset: u32) -> f32 {
     let Some(cluster) = Cluster::from_byte_index(&line.layout, at) else {
         return line.x0;
     };
-    line.x + cluster.visual_offset().unwrap_or(0.0)
+    line.x + line.shift + cluster.visual_offset().unwrap_or(0.0)
 }

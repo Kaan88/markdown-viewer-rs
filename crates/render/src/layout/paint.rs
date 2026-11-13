@@ -1,7 +1,7 @@
 //! The paint list a layout pass produces, the per-block cache entry that keeps it between frames,
 //! and the raster step that draws a paint list into a bitmap.
 
-use super::hit::{LineGeom, SourceBox, TaskBox};
+use super::hit::{FloatBox, LineGeom, SourceBox, TaskBox};
 use super::pager::Pager;
 use super::{Rendered, Slice};
 use crate::bitmap::Bitmap;
@@ -69,6 +69,8 @@ pub(super) struct CachedBlock {
     pub(super) sources: Vec<SourceBox>,
     /// The task-list boxes drawn in the block.
     pub(super) tasks: Vec<TaskBox>,
+    /// The floated images the block draws.
+    pub(super) floats: Vec<FloatBox>,
     pub(super) phase: f32,
 }
 

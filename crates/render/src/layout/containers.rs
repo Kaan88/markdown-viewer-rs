@@ -114,6 +114,17 @@ impl<'a, 'b> Pager<'a, 'b> {
             if self.y > self.max_y {
                 return;
             }
+            // Beside a float at the left the whole item moves over, marker and all; its lines
+            // are shortened one by one like any text. With no room for a line, it starts below.
+            let (left, width) = if self.floats.is_empty() {
+                (left, width)
+            } else {
+                let line = self.px(self.theme.body_size * self.theme.body_line_height);
+                let need = self.px(super::floats::MIN_TEXT);
+                self.clear_narrow(left + indent, width - indent, line, need);
+                let (lo, _) = self.beside_rows(left, width, line);
+                (lo, width - (lo - left))
+            };
             let task = matches!(
                 self.doc.blocks[item as usize].kind,
                 BlockKind::ListItem { task: true }
@@ -267,15 +278,19 @@ impl<'a, 'b> Pager<'a, 'b> {
             self.y += height + self.px(4.0);
         }
         if open {
+            let (mark, base) = (self.floats.len(), self.float_base);
+            self.float_base = mark;
             for child in children {
                 if Some(child) == summary {
                     continue;
                 }
                 if self.y > self.max_y {
-                    return;
+                    break;
                 }
                 self.block(child, left, width, color, depth + 1);
             }
+            self.end_floats(mark);
+            self.float_base = base;
             self.y += self.px(12.0);
         }
     }

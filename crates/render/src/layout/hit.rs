@@ -20,6 +20,9 @@ pub(super) struct LineGeom {
     pub(super) source: Rc<Inline>,
     pub(super) x: f32,
     pub(super) y: f32,
+    /// How far in from the layout's left edge the line starts: not zero beside a float at the
+    /// left. Cluster offsets are measured from there.
+    pub(super) shift: f32,
     /// The line's inline byte range.
     pub(super) end: usize,
     /// The line's x range: start and end of the text, in page coordinates.
@@ -72,6 +75,25 @@ impl TaskBox {
     }
 }
 
+/// Where a floated image is drawn, relative to its block like the lines. It can reach below the
+/// block, over the rows of the blocks beside it.
+#[derive(Clone, Copy)]
+pub(super) struct FloatBox {
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) w: f32,
+    pub(super) h: f32,
+    /// The leaf block the image was written in, and its offset in `Document::text`.
+    pub(super) block: u32,
+    pub(super) at: u32,
+}
+
+impl FloatBox {
+    pub(super) fn shift(&mut self, dy: f32) {
+        self.y += dy;
+    }
+}
+
 impl DocumentRenderer {
     /// What is at page position `x, y`: the document offset, plus a link or footnote reference when
     /// the point is over one. Lays out the one block that was hit if the frame has not painted it
@@ -82,7 +104,10 @@ impl DocumentRenderer {
         let index = self.page.as_ref()?.index_at(y)?;
         if !self.ready(index) {
             self.measure(doc, index, true, true);
-            self.settle();
+            self.correct_pending(doc);
+        }
+        if let Some(hit) = self.float_hit(doc, index, x, y) {
+            return Some(hit);
         }
         let span = self.page.as_ref()?.spans[index];
         let cached = self.cache.get(&span.block)?;
@@ -172,6 +197,47 @@ impl DocumentRenderer {
             }
         }
         Some(hit)
+    }
+}
+
+impl DocumentRenderer {
+    /// A point on a floated image: the image's own block and position, and the link it sits in.
+    /// The image can hang over the rows of the blocks after its own, so the blocks whose floats
+    /// are open at block `index` are asked as well as that block.
+    fn float_hit(&mut self, doc: &Document, index: usize, x: f32, y: f32) -> Option<Hit> {
+        let mut owners = self.floats.owners(index);
+        owners.push(index);
+        for &owner in &owners {
+            if !self.ready(owner) {
+                self.measure(doc, owner, true, true);
+            }
+        }
+        self.correct_pending(doc);
+        let page = self.page.as_ref()?;
+        for owner in owners {
+            let span = *page.spans.get(owner)?;
+            let Some(cached) = self.cache.get(&span.block) else {
+                continue;
+            };
+            let local = y - (span.y - cached.phase);
+            let found = cached
+                .floats
+                .iter()
+                .find(|b| x >= b.x && x <= b.x + b.w && local >= b.y && local <= b.y + b.h);
+            if let Some(found) = found {
+                return Some(Hit {
+                    block: span.block,
+                    offset: found.at,
+                    link: super::floats::link_of_image(doc, found.block, found.at),
+                    footnote: None,
+                    details: None,
+                    task: None,
+                    source: None,
+                    on_text: false,
+                });
+            }
+        }
+        None
     }
 }
 

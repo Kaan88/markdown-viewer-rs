@@ -9,6 +9,7 @@
 //! its `top` moves); any other correction that reaches what it shows marks it stale, and the next
 //! frame is drawn whole with `band = None` rather than with a shift that would be wrong.
 
+use super::floats::{Float, FloatBook};
 use super::page::{Measure, top_level};
 use super::pager::Pager;
 use super::paint::CachedBlock;
@@ -105,6 +106,7 @@ impl DocumentRenderer {
                 height: 0.0,
             })
             .collect();
+        self.floats = FloatBook::new(doc, doc.children(NONE));
         let mut page = PageLayout::new(doc, options, spans, (36.0 * scale).round());
         if !doc.footnotes.iter().any(|f| f.number > 0 && f.defined) {
             let count = page.len();
@@ -121,6 +123,7 @@ impl DocumentRenderer {
         self.cache.clear();
         self.frame = None;
         self.uses.clear();
+        self.floats = FloatBook::default();
         if !self.undrawn.is_empty() {
             self.undrawn.clear();
             self.undrawn_changes += 1;
@@ -147,6 +150,9 @@ impl DocumentRenderer {
     /// height. `allow` lets the pass decode and run engine jobs; `keep` caches the paints and caret
     /// geometry for frames and hit tests, relative to the whole row above the top (see
     /// [`CachedBlock`]). True when the height changed.
+    ///
+    /// A block beside a floated image needs the floats the block before it left open, so the
+    /// blocks that decide that are measured first if they have not been (`floats_before`).
     pub(super) fn measure(
         &mut self,
         doc: &Document,
@@ -154,10 +160,75 @@ impl DocumentRenderer {
         allow: bool,
         keep: bool,
     ) -> bool {
+        let open = self.floats_before(doc, index);
+        self.measure_with(doc, index, open.as_deref().unwrap_or(&[]), allow, keep)
+    }
+
+    /// The floats open at the top of block `index`: what the block before it leaves.
+    ///
+    /// With no block before it that holds a floated image there are none, and nothing is looked
+    /// up. Otherwise the nearest measured block before it knows; the unmeasured blocks between
+    /// them pass floats on only by being laid out, so when that block left some open they are
+    /// measured in order until the floats are closed. When nothing back to the last block with a
+    /// floated image is measured, the walk starts at that block, whose own top is found the same
+    /// way. Every layout order walks the same blocks from the same starting state, so the answer
+    /// is the same in every order.
+    fn floats_before(&mut self, doc: &Document, index: usize) -> Option<Rc<[Float]>> {
+        if self.floats.none_before(index) {
+            return None;
+        }
+        let page = self.page.as_ref()?;
+        if index >= page.len() {
+            // The last block holds whatever is still open, so the footnote list starts clear.
+            return None;
+        }
+        // Back to where the state is known: a measured block, or the start of the first run.
+        let mut from = index;
+        let mut open = None;
+        while let Some(starter) = self.floats.starter_before(from) {
+            let known = (starter..from)
+                .rev()
+                .find(|&k| page.measure_at(k) != Measure::Estimated);
+            if let Some(known) = known {
+                open = self.floats.out(known);
+                from = known + 1;
+                break;
+            }
+            from = starter;
+        }
+        // Forward from there. Where nothing is open, nothing changes until the next block that
+        // can start a float, so the blocks between stay as they are.
+        let mut at = from;
+        while at < index {
+            if open.is_none() && !self.floats.is_starter(at) {
+                at = self.floats.starter_from(at).map_or(index, |s| s.min(index));
+                continue;
+            }
+            self.measure_with(doc, at, open.as_deref().unwrap_or(&[]), true, false);
+            open = self.floats.out(at);
+            at += 1;
+        }
+        open
+    }
+
+    /// Lays out block `index` below a block that left `open` and records its height and the
+    /// floats it leaves open in turn. When those change, the next block is measured again.
+    fn measure_with(
+        &mut self,
+        doc: &Document,
+        index: usize,
+        open: &[Float],
+        allow: bool,
+        keep: bool,
+    ) -> bool {
         let (Some(page), Some(options)) = (self.page.as_ref(), self.options.as_ref()) else {
             return false;
         };
         let block = page.spans.get(index).map(|span| span.block);
+        let last = index + 1 == page.len();
+        // A block of a floated run is laid out with everything it draws: a stand-in for an
+        // image would make the blocks after it guesses too.
+        let allow = allow || !open.is_empty() || self.floats.is_starter(index);
         let top = page.y_at(index);
         let base = top.floor();
         let mut pager = Pager::new(
@@ -172,12 +243,22 @@ impl DocumentRenderer {
         pager.allow = allow;
         pager.max_y = f32::MAX;
         pager.y = top;
+        pager.floats_in(open);
         match block {
             Some(block) => {
                 let (left, width, color) = (pager.left, pager.content_width(), pager.theme.text);
                 pager.block(block, left, width, color, 0);
+                if last {
+                    pager.end_floats(0);
+                }
             }
             None => pager.footnotes(),
+        }
+        let mut left_open = pager.floats_out();
+        for float in &mut left_open {
+            if float.owner == u32::MAX {
+                float.owner = index as u32;
+            }
         }
         let height = pager.y - top;
         let measure = if pager.provisional {
@@ -192,6 +273,7 @@ impl DocumentRenderer {
         let mut lines = std::mem::take(&mut pager.hits);
         let mut sources = std::mem::take(&mut pager.sources);
         let mut tasks = std::mem::take(&mut pager.tasks);
+        let mut floats = std::mem::take(&mut pager.float_boxes);
         drop(pager);
         match block {
             Some(block) if keep => {
@@ -199,6 +281,7 @@ impl DocumentRenderer {
                 lines.iter_mut().for_each(|line| line.shift(-base));
                 sources.iter_mut().for_each(|source| source.shift(-base));
                 tasks.iter_mut().for_each(|task| task.shift(-base));
+                floats.iter_mut().for_each(|float| float.shift(-base));
                 let phase = top - base;
                 self.cache.insert(
                     block,
@@ -207,6 +290,7 @@ impl DocumentRenderer {
                         lines,
                         sources,
                         tasks,
+                        floats,
                         phase,
                     },
                 );
@@ -230,7 +314,12 @@ impl DocumentRenderer {
                 users.push(index as u32);
             }
         }
-        self.correct(index, height, measure)
+        let changed = self.correct(index, height, measure);
+        if block.is_some() && self.floats.set_out(index, left_open) && !last {
+            // The next block was laid out beside other floats, or beside none.
+            self.invalidate(index + 1);
+        }
+        changed
     }
 
     /// Records a block's new height, noting what that does to the kept frame.
@@ -260,8 +349,10 @@ impl DocumentRenderer {
         }
         let height = page.height_at(index);
         page.set(index, height, Measure::Estimated);
+        // The kept frame shows the block, or a floated image of it that hangs into the frame.
         if let Some((first, last)) = self.view.span
-            && (first..=last).contains(&index)
+            && ((first..=last).contains(&index)
+                || (index < first && self.floats.owners(first).contains(&index)))
         {
             self.view.stale = true;
         }
@@ -270,11 +361,18 @@ impl DocumentRenderer {
         }
     }
 
-    /// Measures the blocks invalidated since the last call and rebuilds positions.
+    /// Measures the blocks invalidated since the last call and rebuilds positions. A block whose
+    /// open floats changed invalidates the one after it, so this goes on until nothing is left.
     pub(super) fn correct_pending(&mut self, doc: &Document) {
-        for index in std::mem::take(&mut self.view.pending) {
-            if !self.ready(index) {
-                self.measure(doc, index, true, true);
+        while !self.view.pending.is_empty() {
+            for index in std::mem::take(&mut self.view.pending) {
+                let estimated = self
+                    .page
+                    .as_ref()
+                    .is_some_and(|page| page.measure_at(index) == Measure::Estimated);
+                if estimated {
+                    self.measure(doc, index, true, true);
+                }
             }
         }
         self.settle();
@@ -353,9 +451,8 @@ impl DocumentRenderer {
     /// Measures every block the viewport of `height` rows at the anchor shows, keeping the anchor,
     /// until nothing on screen is left to measure. Returns the clamped top.
     pub(super) fn settle_view(&mut self, doc: &Document, height: f32) -> f32 {
-        self.correct_pending(doc);
         loop {
-            self.settle();
+            self.correct_pending(doc);
             let Some(page) = self.page.as_ref() else {
                 return 0.0;
             };
@@ -363,8 +460,14 @@ impl DocumentRenderer {
             let top = self.anchor_top().clamp(0.0, max);
             let bottom = top + height;
             let count = page.len();
-            let mut need = Vec::new();
             let mut index = page.first_below(top);
+            // The blocks whose floated images hang into the viewport from above are drawn too.
+            let mut need: Vec<usize> = self
+                .floats
+                .owners(index)
+                .into_iter()
+                .filter(|&owner| !self.ready(owner))
+                .collect();
             while index <= count && page.y_at(index) < bottom {
                 if !self.ready(index) {
                     need.push(index);
@@ -409,7 +512,7 @@ impl DocumentRenderer {
                 let index = self.page.as_ref()?.index_of(top)?;
                 if !self.ready(index) {
                     self.measure(doc, index, true, true);
-                    self.settle();
+                    self.correct_pending(doc);
                 }
                 let span = self.page.as_ref()?.spans[index];
                 let cached = self.cache.get(&span.block)?;
@@ -431,7 +534,7 @@ impl DocumentRenderer {
                 if !self.ready(count) {
                     self.measure(doc, count, true, true);
                 }
-                self.settle();
+                self.correct_pending(doc);
                 let page = self.page.as_ref()?;
                 let (_, y) = page.foot.notes.iter().find(|(n, _)| *n == number)?;
                 Anchor {

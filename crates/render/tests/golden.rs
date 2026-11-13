@@ -1,4 +1,4 @@
-//! Pixel comparison against the approved showcase and tables images in `tests/golden/`.
+//! Pixel comparison against the approved showcase, tables and floats images in `tests/golden/`.
 //!
 //! The goldens use this host's system fonts (Segoe UI, Consolas), so they are compared only on
 //! Windows; elsewhere the test passes with a note until the renderer bundles its fonts. Rendering
@@ -108,4 +108,16 @@ fn fixtures_match_the_goldens() {
     // Table widths: narrow, wrapping, spans, stated widths, inside a list and a quote.
     check("tables", "light@1.0", LIGHT, 1.0);
     check("tables", "dark@1.5", DARK, 1.5);
+}
+
+/// `fixtures/floats.md`: floated images with paragraphs, a heading, lists, a quote, code, a table
+/// and a rule beside or below them, a float inside a list item and one at the end of the page.
+#[test]
+fn floats_match_the_golden() {
+    if !cfg!(windows) {
+        eprintln!("golden comparison skipped: the goldens use Windows system fonts");
+        return;
+    }
+    check("floats", "light@1.0", LIGHT, 1.0);
+    check("floats", "dark@1.5", DARK, 1.5);
 }

@@ -173,6 +173,7 @@ mdv-bench.exe --input spikes/parser/data/generated_1mib.md --out target/tmp/b.pn
 
 **Goldens.** `crates/render/tests/golden.rs` compares the four `tests/golden/showcase-{light,dark}@{1.0,1.5}.png`
 and, for `fixtures/tables.md`, `tables-light@1.0.png` and `tables-dark@1.5.png`,
+and two renders of `fixtures/floats.md` (`floats-light@1.0.png`, `floats-dark@1.5.png`)
 on Windows only (system fonts). After an intended visual change, re-bless them and look at the
 difference before committing:
 
@@ -422,7 +423,8 @@ has.
 
 Headless: no window system, BGRA bitmaps, parley 0.12 for layout, swash for raster. The layout
 code is split into `crates/render/src/layout/` (`page`, `relayout`, `estimate`, `refine`, `frame`,
-`hit`, `selection`, `store`, `pager`, `inline`, `paint`, `prose`, `containers`, `table`, `media`);
+`hit`, `selection`, `store`, `pager`, `inline`, `paint`, `prose`, `containers`, `table`, `media`,
+`floats`);
 the module doc in `layout/mod.rs` names each.
 
 **`DocumentRenderer`** holds the font and layout contexts, the glyph cache (4 MB), the per-block
@@ -455,6 +457,41 @@ does not jump; a correction above the viewport moves `top()` instead. A block wi
 formula or diagram the store lacks is laid out with a typical box and stays provisional until
 shown; refinement never loads anything. A `<details>` toggle or an arrived image re-measures only
 the blocks that use it.
+
+**Floats across blocks (`layout/floats.rs`).** `<img align="left|right">` floats, and the blocks
+after its paragraph run beside it until its bottom is passed (`docs/COVERAGE.md` says which kinds
+wrap, narrow or start below). This is the one place where a block's layout depends on the blocks
+before it, so it is designed around the lazy layout:
+
+- What a top-level block hands to the next is its *float state*: the floats still open at its
+  bottom edge, relative to that edge, on whole rows. A block's layout is a function of the
+  document, the options, the image store and the state of the block before it, and of nothing
+  else. The one-pass page (`Pager::blocks`) and the block-by-block layout (`measure_with`) pass
+  floats on through the same two functions (`floats_out`, `floats_in`).
+- `FloatBook` (in the renderer, rebuilt per layout) lists the *starters*, the top-level blocks
+  that hold a floated image, found from the model without layout, and keeps the state of every
+  measured block that leaves one. With no starter before a block nothing is looked up: a
+  document without floated images pays one comparison per measured block.
+- `floats_before` finds the state for a block measured out of order: the nearest measured block
+  before it, or, when nothing back to the last starter is measured, that starter and the blocks
+  after it, measured in order until its floats close (unmeasured blocks with nothing open are
+  skipped). Every order walks the same chain, so jumps, restores and refinement agree with a
+  top-down layout byte for byte (`crates/render/tests/floats.rs` scrambles the order).
+- A float's size is the image's: decoded, or its declared `width` and `height` while a remote
+  one loads. Blocks of a floated run are always measured with loading allowed, **so refinement
+  decodes the images of floated runs** (and only those); a stand-in there would make every later
+  block a guess. A remote image with no declared size is alt text until it arrives.
+- When a block's state changes (an image arrived, a `<details>` beside a float was toggled), the
+  next block is invalidated, and so on until a state comes out unchanged; `correct_pending`
+  loops until nothing is pending.
+- A floated image is painted by the block that holds it and can hang below it: a frame, a band
+  and a hit test also take the owners of the floats open at their first block
+  (`FloatBook::owners`), and a change to such an owner makes the kept frame stale.
+- Lines beside a float at the left start at parley's `inline_min_coord`, which cluster offsets
+  leave out; `LineGeom::shift` carries it for selection and find rectangles.
+
+Not done: `<br clear>`, narrowing tables. A document with very many floated images pays for
+the runs before a jump target once (they are measured, with their images decoded).
 
 **The frame delta is the contract.** `Frame { bitmap, top, stats, band, shift }`: `band` is the
 rows painted this time (`None` means the whole frame is new: first frame, resize, zoom or theme
