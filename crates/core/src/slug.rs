@@ -33,6 +33,12 @@ impl Slugger {
     }
 }
 
+/// The anchor a heading with this text gets when no earlier heading has the same one: what a
+/// wiki-link's `#Heading` is looked up by.
+pub fn slug_of(title: &str) -> String {
+    slug_base(title)
+}
+
 /// Lowercases, turns each space into `-`, and drops everything but word characters and `-`. So a
 /// newline or tab goes away instead of becoming `-`. Lowercasing one character at a time avoids
 /// `str::to_lowercase`'s final-sigma rule, which GitHub does not apply.

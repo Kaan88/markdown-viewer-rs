@@ -68,6 +68,9 @@ impl App {
                     self.ws.outline_jump(block);
                 }
             }
+            Hit::BacklinkRow(i) => {
+                self.ws.open_backlink(i);
+            }
             Hit::EmptyOpen => self.command(C::OpenFiles),
             Hit::RemoteLoad => self.ws.allow_remote(false),
             Hit::RemoteAlways => self.ws.allow_remote(true),
@@ -134,7 +137,11 @@ impl App {
                 self.link_outcome(outcome);
             }
             Act::CopyLink(dest) => {
-                if platform::set_clipboard_text(&dest) {
+                // A wiki-link's address is its target as written.
+                let dest = dest
+                    .strip_prefix(crate::workspace::WIKI_SCHEME)
+                    .unwrap_or(&dest);
+                if platform::set_clipboard_text(dest) {
                     self.ws.set_status("Link address copied");
                 }
             }
@@ -334,6 +341,7 @@ impl App {
             }
             C::Refresh => {
                 self.ws.reload();
+                self.ws.notes_changed();
                 self.ui.tree.refresh();
             }
             C::OpenRecent => self.open_popup(PopupKind::Recent),
@@ -484,6 +492,7 @@ impl App {
                     w.woken();
                 }
                 self.ws.check_changed();
+                self.ws.notes_changed();
                 let changed = self.ui.tree.refresh();
                 if self.trace {
                     let rows = self.ui.tree.rows().len();
@@ -494,6 +503,22 @@ impl App {
             }
             Wake::Images => {
                 self.ws.remote_completed();
+            }
+            Wake::Notes => {
+                let taken = self.ws.notes_ready();
+                if self.trace
+                    && taken
+                    && let Some(stats) = self.ws.notes_stats()
+                {
+                    eprintln!(
+                        "mdview: note index ready: {} files, {} links, {} read, {} kept, cut short: {}",
+                        stats.files,
+                        stats.links,
+                        stats.read_files,
+                        stats.reused_files,
+                        stats.truncated
+                    );
+                }
             }
             Wake::Update(updater::Event::Checked { manual, result }) => {
                 self.ws.update_checked(unix_now(), manual, result);

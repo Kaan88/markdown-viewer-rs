@@ -243,8 +243,25 @@ pub struct Span {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LinkInfo {
+    /// For a wiki-link, what stood before the `|`: `Note`, `Note#Heading`, `#Heading`.
     pub dest: StrRef,
     pub title: StrRef,
+    /// Written as `[[target]]`: `dest` names a note, not a URL.
+    pub wiki: bool,
+    /// A wiki-link whose note was not found. The parser leaves this false; the application sets
+    /// it once it has looked, and the renderer draws such a link muted with a dashed underline.
+    pub missing: bool,
+}
+
+impl LinkInfo {
+    pub fn new(dest: StrRef, title: StrRef) -> LinkInfo {
+        LinkInfo {
+            dest,
+            title,
+            wiki: false,
+            missing: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

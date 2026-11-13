@@ -62,6 +62,9 @@ const WHEEL_LINES: f32 = 2.0;
 const PANE_WHEEL: f32 = 90.0;
 /// Pointer travel that still counts as the same spot for a double click.
 const CLICK_SLOP: f32 = 4.0;
+/// The watcher follows the indexed notes of the open folder up to this many, so a note saved
+/// anywhere in it refreshes the backlinks. A larger folder is refreshed by the other wakes only.
+const WATCHED_NOTES: usize = 5_000;
 
 pub enum Wake {
     /// The single-instance listener queued paths.
@@ -70,6 +73,8 @@ pub enum Wake {
     Files,
     /// A remote image finished downloading.
     Images,
+    /// The note index (wiki-links, backlinks) was built or refreshed.
+    Notes,
     /// An updater thread has an answer.
     Update(updater::Event),
 }
@@ -233,6 +238,10 @@ impl App {
         for f in &a.files {
             let _ = self.ws.open(f);
         }
+        if a.shot.is_some() {
+            // A shot has no event loop to wait for the indexer in.
+            self.ws.index_notes_now();
+        }
         if let Some(q) = &a.find {
             self.ui.find.set_text(q);
             self.ws.find_set(q);
@@ -352,10 +361,17 @@ impl App {
                         ..
                     })
                 );
+                let backlinks: Vec<(&str, &str)> = self
+                    .ws
+                    .backlinks()
+                    .iter()
+                    .map(|b| (b.shown.as_str(), b.context.as_str()))
+                    .collect();
                 sig((
                     common,
                     self.ws.active(),
                     titles,
+                    backlinks,
                     self.ws.current_heading(),
                     ui.panes.outline_scroll.to_bits(),
                     drag,
@@ -421,6 +437,7 @@ impl App {
         if vw > 0 && vh > 0 {
             self.ws.prepare(vw, vh, self.scale);
         }
+        self.ws.update_backlinks();
         let current = self.ws.current_heading();
         if current != self.last_heading {
             self.last_heading = current;
@@ -1045,7 +1062,11 @@ impl ApplicationHandler<Wake> for App {
         if self.ws.take_watch_changed()
             && let Some(w) = self.watcher.as_mut()
         {
-            w.set_files(self.ws.watched_paths());
+            w.set_files(
+                self.ws
+                    .watched_paths()
+                    .chain(self.ws.note_files(WATCHED_NOTES)),
+            );
         }
         self.watch_tree();
         let refining = self.refine_slice();
@@ -1225,6 +1246,10 @@ pub fn run() -> i32 {
     let p = proxy.clone();
     app.ws.set_remote_wake(move || {
         let _ = p.send_event(Wake::Images);
+    });
+    let p = proxy.clone();
+    app.ws.set_notes_wake(move || {
+        let _ = p.send_event(Wake::Notes);
     });
     app.proxy = Some(proxy);
     app.updates_at_launch();

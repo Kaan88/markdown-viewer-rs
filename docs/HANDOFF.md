@@ -100,7 +100,8 @@ To change shared code: edit it there, push, and move the `rev` here. The move wa
 `--shot` renders compared byte for byte before and after; `mdview.exe` went from 7,439,872 to
 7,457,280 bytes. First-frame time and memory were re-measured on 2026-11-13 (section 9) and are
 unchanged. The user has not run the app since the move. Tests moved with the code: this workspace now runs
-293 (4 ignored), the shared repository 119 (3 ignored).
+305 (4 ignored) with the wiki-link work below, the shared repository 119 (3 ignored) before
+its `feat/wiki` branch, which adds 19 to `mdshared-app` (39 to 58).
 
 `target/` is git-ignored. Helper scripts that once lived there (`vm.py`, `seed-lock.py`,
 `cap.ps1`) are not committed; sections 9 and 12 say what they did.
@@ -291,6 +292,46 @@ the Files pane is open (`App::watch_tree`, `FileWatcher::set_folders` in `mdshar
 created, removed or renamed directly in one of them wakes the shell, which re-reads the tree.
 Content changes wake only for open files, as before. `MDVIEW_TRACE=1` prints a line per wake. Run
 in a real window with that trace; the user has not looked at it.
+
+**Wiki-links and backlinks (2026-11-13).** Built on branch `worktree-agent-a1f968c45b7d0f5ce`
+against the shared branch `feat/wiki`; **the pinned `rev` does not have `mdshared_app::notes`
+and `wikilink` yet**, so this builds only with the shared branch merged and the `rev` moved (or
+with a `--config patch` to a checkout of it). The user has not looked at any of it.
+
+- *Parsing.* pulldown-cmark's `ENABLE_WIKILINKS` (`parse.rs`, `wiki_link`): `LinkInfo.wiki`
+  marks the link, `dest` is `Note#Heading`. The shared `wikilink::parse_target` splits it.
+  Three spec examples per suite became listed exceptions (`[[x]]` beside a reference
+  definition). `![[pic.png]]` is an image; any other embed stays text.
+- *Resolution* (`mdshared_app::notes`, `workspace/notes.rs`): see the COVERAGE row. Following
+  a link goes through `Workspace::open_wiki` and then the same `open_markdown` as a Markdown
+  link; `link_destination` gives a wiki-link as `wiki:Note#Heading`, which `open_link` takes.
+  The hover hint (`link_hint`) is the resolved path, or "No note named X".
+- *Missing notes.* `LinkInfo.missing` is set by the workspace (`check_wiki_links`, before each
+  layout check, only when the notes generation changed) and drawn by the renderer: muted,
+  dashed underline (`Style::broken`; the run is marked with an underline size, which nothing
+  else sets).
+- *The index.* Only with a folder open in the Files pane (shown or not). `notes::Indexer`
+  builds it on its own thread, within `limits::NOTES_*` (20,000 files, 2 MiB read per file,
+  256 MiB in total, 16 folder levels, 200,000 directory entries, 2,000 links per file),
+  skipping what the Files tree skips, never following links to folders. A light scanner
+  (`wikilink::scan`) reads the files, not the parser. Without a folder nothing is walked: the
+  document's own folder is listed once per read. Measured in the shared crate's test on the
+  PC, release: 2,000 notes (566 KB, 20,000 links) in 127 ms, an unchanged rebuild 3.8 ms, one
+  note's backlinks 0.19 ms.
+- *Keeping it current.* `Wake::Files` and F5 call `notes_changed`, which walks again off
+  thread and reads only files whose size or time changed; the result arrives as `Wake::Notes`.
+  The watcher is given the indexed notes too (up to `WATCHED_NOTES`, 5,000), so a save anywhere
+  in the folder wakes. Nothing polls. `MDVIEW_TRACE=1` prints a line per new index.
+- *Backlinks* are a list under the outline in the Outline pane (`panes::draw_outline`,
+  `Hit::BacklinkRow`): a hairline, "Backlinks n", then the linking file's name over the link's
+  line, one entry per link; absent when there are none. A click opens the file with the link
+  selected. Wiki-links and relative Markdown links (and reference definitions) count.
+- *Not done.* Outline rows have no keyboard navigation, so backlink rows have none either. A
+  note created in a folder nobody watches (no folder open) keeps its link drawn missing until
+  the document is read again; a click still finds it. A new folder below the open one is seen
+  at the next wake, not by itself. `[[Note#^block]]` opens the note at its top. Idle CPU with
+  the indexer thread was not measured, only reasoned (it blocks on a channel). Nothing was run
+  in a real window: tests and `--shot` only. `fixtures/wiki/` is the test folder.
 
 **Updates (2026-11-13).** `updater.rs` and the "updates" part of `workspace.rs`; the bar is drawn
 by `page::draw_update_bar` above the remote-image bar, and the About dialog has the "Check for

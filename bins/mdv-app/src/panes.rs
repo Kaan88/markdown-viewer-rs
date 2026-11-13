@@ -176,6 +176,11 @@ pub fn draw_files(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
     edge(c, r, Side::Files, dragging);
 }
 
+/// The Backlinks list under the outline: its header (a hairline, then the title with the
+/// count) and one two-line entry per link (the linking file's name, then the link's line).
+const BACKLINKS_HEAD: f32 = 40.0;
+const BACKLINK_ROW: f32 = 46.0;
+
 /// Row text: a step quieter than headings and the selected row.
 fn mixed_text(pal: &Palette) -> crate::gfx::Rgb {
     crate::gfx::mix(pal.text, pal.muted, 0.35)
@@ -186,7 +191,15 @@ pub fn draw_outline(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
     pane_head(c, r, strings::OUTLINE_DOCK);
     let list = Rect::new(r.x, r.y + HEAD, r.w, (r.h - HEAD).max(0.0));
     let entries = ws.outline();
-    ui.panes.outline_content = entries.len() as f32 * ROW + 8.0;
+    let backlinks = ws.backlinks();
+    // The outline's rows (or its one line saying there are none), then the backlinks.
+    let outline_h = (entries.len().max(1)) as f32 * ROW;
+    let backlinks_h = if backlinks.is_empty() {
+        0.0
+    } else {
+        BACKLINKS_HEAD + backlinks.len() as f32 * BACKLINK_ROW
+    };
+    ui.panes.outline_content = outline_h + backlinks_h + 8.0;
     ui.panes.outline_view = list.h;
     ui.panes.outline_scroll = ui
         .panes
@@ -237,6 +250,37 @@ pub fn draw_outline(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
         };
         c.p.text(face, 13.0, x, rr.cy(), title, color, rr.right() - x - 8.0);
         c.hit(hit, rr);
+    }
+    if !backlinks.is_empty() {
+        let top = list.y + outline_h - scroll;
+        c.p.fill(Rect::new(r.x + 16.0, top + 10.0, r.w - 32.0, 1.0), pal.line);
+        let label = format!("Backlinks  {}", backlinks.len());
+        c.p.text(
+            Face::Semibold,
+            12.0,
+            r.x + 16.0,
+            top + 10.0 + (BACKLINKS_HEAD - 10.0) / 2.0,
+            &label,
+            pal.muted,
+            r.w - 32.0,
+        );
+        for (i, b) in backlinks.iter().enumerate() {
+            let y = top + BACKLINKS_HEAD + i as f32 * BACKLINK_ROW;
+            if y + BACKLINK_ROW < list.y {
+                continue;
+            }
+            if y > list.bottom() {
+                break;
+            }
+            let rr = Rect::new(r.x + 6.0, y, r.w - 12.0, BACKLINK_ROW - 2.0);
+            let hit = Hit::BacklinkRow(i);
+            row_fill(c, rr, hit, false);
+            let x = r.x + 18.0;
+            let width = rr.right() - x - 8.0;
+            c.p.text(Face::Ui, 13.0, x, y + 14.0, &b.shown, pal.text, width);
+            c.p.text(Face::Ui, 12.0, x, y + 32.0, &b.context, pal.muted, width);
+            c.hit(hit, rr);
+        }
     }
     c.p.restore(old);
     let thumb_hit = Hit::ScrollBar(Scroller::Pane(Side::Outline));

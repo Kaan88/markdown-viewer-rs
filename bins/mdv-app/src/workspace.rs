@@ -39,6 +39,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod notes;
+pub use notes::WIKI_SCHEME;
+
 /// The View menu's theme choice; `System` follows the desktop.
 pub use mdview_core::session::Theme as ThemeChoice;
 
@@ -246,6 +249,8 @@ pub struct Tab {
     remote: Remote,
     /// The reader allowed ticking task boxes in this file, until the tab closes.
     edit_allowed: bool,
+    /// The notes generation the document's wiki-links were last looked up at; 0 for never.
+    links_checked: u64,
 }
 
 /// What a tab decided about its document's remote images.
@@ -277,12 +282,14 @@ impl Tab {
             left_at: None,
             remote: Remote::default(),
             edit_allowed: false,
+            links_checked: 0,
         }
     }
 
     fn set_document(&mut self, doc: Document, stamp: FileStamp) {
         self.stats = DocStats::of(&doc);
         self.remote.count = remote_images(&doc);
+        self.links_checked = 0;
         self.doc = Some(doc);
         self.stamp = stamp;
     }
@@ -393,6 +400,8 @@ pub struct Workspace {
     pending_task: Option<u32>,
     /// A newer version found, being installed, or installed, and whether its bar is closed.
     updates: Updates,
+    /// The note index and the active document's backlinks (`workspace/notes.rs`).
+    notes: notes::Notes,
 }
 
 impl Workspace {
@@ -431,6 +440,7 @@ impl Workspace {
             held: Vec::new(),
             pending_task: None,
             updates: Updates::default(),
+            notes: notes::Notes::new(),
         };
         for path in ws.session.tabs.clone() {
             let path = canonical_or_absolute(&path);
@@ -611,6 +621,7 @@ impl Workspace {
     pub fn set_folder(&mut self, folder: Option<PathBuf>) {
         self.session.folder = folder;
         self.persist();
+        self.notes_folder_changed();
     }
 
     // ---- redraw and watcher signals ----------------------------------------------------------
@@ -1563,6 +1574,11 @@ impl Workspace {
             return false;
         };
         self.load(index);
+        if self.check_wiki_links() {
+            // A link that was missing is there now, or the reverse: it is drawn differently.
+            let tab = &mut self.tabs[index];
+            tab.drop_view(self.renderer.page_layout());
+        }
         let mut theme = self.theme();
         // Narrow is the theme's own reading width; the others let the column grow.
         match self.session.page_width {
@@ -1797,7 +1813,7 @@ impl Workspace {
             return Hover::default();
         };
         Hover {
-            link: hit.link.and_then(|i| self.link_destination(i)),
+            link: hit.link.and_then(|i| self.link_hint(i)),
             pointing: hit.link.is_some()
                 || hit.footnote.is_some()
                 || hit.details.is_some()
@@ -1827,12 +1843,18 @@ impl Workspace {
         }
     }
 
-    /// The destination of link `index` in the active document, as written.
+    /// The destination of link `index` in the active document, as written; a wiki-link's
+    /// target after [`WIKI_SCHEME`], which [`open_link`](Self::open_link) understands.
     pub fn link_destination(&self, index: u32) -> Option<String> {
         let doc = self.active_document()?;
-        doc.links
-            .get(index as usize)
-            .map(|l| doc.str(l.dest).to_string())
+        doc.links.get(index as usize).map(|l| {
+            let dest = doc.str(l.dest);
+            if l.wiki {
+                format!("{WIKI_SCHEME}{dest}")
+            } else {
+                dest.to_string()
+            }
+        })
     }
 
     /// A button went down at `x, y`. `clicks` is 1 for a click, 2 for a double click (selects a
@@ -1961,6 +1983,9 @@ impl Workspace {
     }
 
     fn open_link_from_here(&mut self, destination: &str) -> LinkOutcome {
+        if let Some(target) = destination.strip_prefix(WIKI_SCHEME) {
+            return self.open_wiki(target);
+        }
         let doc_dir = self
             .active_tab()
             .and_then(|t| t.path.parent().map(Path::to_path_buf))
@@ -1968,28 +1993,29 @@ impl Workspace {
         match classify_link(destination, &doc_dir) {
             LinkAction::Fragment(fragment) => self.jump_fragment(&fragment),
             LinkAction::External(url) => LinkOutcome::OpenUrl(url),
-            LinkAction::OpenMarkdown { path, fragment } => {
-                if !path.is_file() {
-                    return LinkOutcome::Refused(
-                        self.refuse(format!("not a file: {}", path.display())),
-                    );
-                }
-                match self.open(&path) {
-                    Ok(index) => {
-                        if let Some(fragment) = fragment {
-                            self.tabs[index].reveal = Some(Reveal::Anchor(fragment));
-                            self.ensure_layout();
-                        }
-                        self.dirty = true;
-                        LinkOutcome::OpenedTab(index)
-                    }
-                    Err(e) => LinkOutcome::Refused(e),
-                }
-            }
+            LinkAction::OpenMarkdown { path, fragment } => self.open_markdown(&path, fragment),
             LinkAction::OtherLocalFile(_) => {
                 LinkOutcome::Refused(self.refuse(strings::ONLY_MARKDOWN_LINKS.to_string()))
             }
             LinkAction::Ignored => LinkOutcome::Ignored,
+        }
+    }
+
+    /// Opens a Markdown file a link named, or switches to its tab, then goes to the fragment.
+    fn open_markdown(&mut self, path: &Path, fragment: Option<String>) -> LinkOutcome {
+        if !path.is_file() {
+            return LinkOutcome::Refused(self.refuse(format!("not a file: {}", path.display())));
+        }
+        match self.open(path) {
+            Ok(index) => {
+                if let Some(fragment) = fragment {
+                    self.tabs[index].reveal = Some(Reveal::Anchor(fragment));
+                    self.ensure_layout();
+                }
+                self.dirty = true;
+                LinkOutcome::OpenedTab(index)
+            }
+            Err(e) => LinkOutcome::Refused(e),
         }
     }
 

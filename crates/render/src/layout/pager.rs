@@ -81,6 +81,9 @@ pub(super) struct Pager<'a, 'b> {
     pub(super) details: &'b HashMap<u32, bool>,
 }
 
+/// The underline size given to a broken wiki-link's run. Nothing else sets one, so a run that
+/// has a size is one to underline with dashes; the value itself is not used.
+const DASHED_UNDERLINE: f32 = 1.0;
 /// Marks an inline box that reserves space for an image without pixels.
 const RESERVED: u64 = 1 << 32;
 /// Marks a zero-width box that only makes its line taller, to leave room for a ruby annotation.
@@ -375,15 +378,25 @@ impl<'a, 'b> Pager<'a, 'b> {
                     range.clone(),
                 );
             }
-            if style.muted {
+            if style.muted || style.broken {
                 builder.push(StyleProperty::Brush(brush(self.theme.muted)), range.clone());
+            }
+            if style.broken {
+                // No size of its own is ever asked for elsewhere, so this one marks the run for
+                // the dashed underline drawn below.
+                builder.push(
+                    StyleProperty::UnderlineSize(Some(DASHED_UNDERLINE)),
+                    range.clone(),
+                );
             }
             if let Some(color) = style.color {
                 builder.push(StyleProperty::Brush(brush(color)), range.clone());
             }
             if style.sub || style.sup || style.mark {
                 // Last, so it keeps whichever colour the run ended up with.
-                let color = style.color.unwrap_or(if style.link || style.accent {
+                let color = style.color.unwrap_or(if style.broken {
+                    self.theme.muted
+                } else if style.link || style.accent {
                     self.theme.accent
                 } else if style.muted {
                     self.theme.muted
@@ -757,7 +770,30 @@ impl<'a, 'b> Pager<'a, 'b> {
                 let baseline = baseline + crate::text::baseline_shift(color, dev);
                 let color = [color[0], color[1], color[2]];
                 let thickness = (dev * 0.065).round().max(1.0);
-                if run_style.underline.is_some() {
+                let dashed = run_style
+                    .underline
+                    .as_ref()
+                    .is_some_and(|u| u.size.is_some());
+                if dashed {
+                    // Dashes on a grid of the page, so neighbouring runs of one link line up.
+                    let (dash, period) =
+                        (self.px(3.0).round().max(2.0), self.px(5.0).round().max(3.0));
+                    let mut x = (gx / period).floor() * period;
+                    while x < gx + advance {
+                        let (from, to) = (x.max(gx), (x + dash).min(gx + advance));
+                        if to > from {
+                            decos.push(Paint::Rect {
+                                x: from,
+                                y: (baseline + dev * 0.13).round(),
+                                w: to - from,
+                                h: thickness,
+                                radius: 0.0,
+                                color,
+                            });
+                        }
+                        x += period;
+                    }
+                } else if run_style.underline.is_some() {
                     decos.push(Paint::Rect {
                         x: gx,
                         y: (baseline + dev * 0.13).round(),
