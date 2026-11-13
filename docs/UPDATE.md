@@ -8,15 +8,14 @@ same day. See "What has run" at the end.
 
 ## What the reader sees
 
-- **At launch**, at most once a day, an installed mdview fetches a small manifest from GitHub on a
+- **At launch**, every launch (0.2.2; 0.2.1 and older looked at most once a day), an installed mdview fetches a small manifest from GitHub on a
   background thread. A failure is silent. Nothing else is sent or fetched.
 - If the manifest names a newer version, a bar appears over the page: "mdview 0.2.0 is available."
   with the release's one line of notes, an **Update** button and a close button. Nothing downloads
   until Update is pressed.
 - While it downloads, the bar says so and has no buttons. Then: "mdview 0.2.0 is installed. It
   starts the next time you open mdview." The running window stays on the old version.
-- **About mdview** holds the controls: **Check for updates** (looks now, ignoring the once-a-day
-  limit, and always answers: the bar, "mdview x is the newest version." or "Could not look for a
+- **About mdview** holds the controls: **Check for updates** (looks now and always answers: the bar, "mdview x is the newest version." or "Could not look for a
   newer version."), which reads **Update to 0.2.0** when a version was found and its bar was
   closed; and **Check at launch: on/off**. They are in About and not in the main menu because two
   more rows did not fit the menu in the default 800 px window.
@@ -134,6 +133,15 @@ finds and exits, with no window.
   `mdview.exe` 8363520 bytes, `mdview-engine.exe` 26289152, `mdview-setup-0.2.1.exe` 11592884 and
   `mdview-update.txt` 524. `mdview --check-update` run from the 0.2.1 build answers "nothing
   newer" with exit code 0. An install of 0.2.0 being offered and installing 0.2.1 was not tried.
+
+- After v0.2.2 was published (2026-11-13): the live manifest says 0.2.2; the two downloaded
+  executables match its hashes; `mdview --check-update` from the 0.2.2 build answers "nothing
+  newer" and from the published 0.2.1 build "mdview 0.2.2 is available" with both addresses. A
+  launch of the 0.2.2 build (copied out of `target`, own settings file through `MDVIEW_SETTINGS`)
+  with `update_checked` one minute old looked at once: the value moved to now. The same launch
+  of the published 0.2.1 build left it unchanged, as it should: copies of 0.2.1 and older still
+  look once a day, so they find 0.2.2 at launch only when their day is up, or by the manual
+  check. An install of 0.2.1 updating itself to 0.2.2 was not tried.
 
 ## Linux
 

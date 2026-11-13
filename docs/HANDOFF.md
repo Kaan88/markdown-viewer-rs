@@ -881,7 +881,7 @@ testing on other machines (there is one PC). The editor is a second project (PLA
   there), shots of the menus in both themes, a real launch with the settings file's
   `update_checked` set a minute back (it moved to now), and the hover in a real window (cursor
   moved with SetCursorPos: nothing at 100 ms, the submenu at 700 ms, gone on another item).
-  Copies of 0.2.1 and older still look once a day. Not run: the installer, an update from 0.2.1
+  Published as v0.2.2 from `ccf48f8`: https://github.com/Kaan88/markdown-viewer-rs/releases/tag/v0.2.2. Copies of 0.2.1 and older still look once a day. Not run: the installer, an update from 0.2.1
   by the app itself, the hover on a second monitor or at another scale.
 - **2026-11-13.** Qt shell retired to the `qt-archive` branch with its installer and Linux
   packaging; `mdview` is the only shell. Numbers re-measured after the shared crates. Port
