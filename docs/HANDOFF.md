@@ -99,9 +99,9 @@ their old paths, so `crate::gfx::Painter`, `mdview_render::TextEngine` and the l
 To change shared code: edit it there, push, and move the `rev` here. The move was checked with 43
 `--shot` renders compared byte for byte before and after; `mdview.exe` went from 7,439,872 to
 7,457,280 bytes. First-frame time and memory were re-measured on 2026-11-13 (section 9) and are
-unchanged. The user has not run the app since the move. Tests moved with the code: this workspace now runs
-308 (4 ignored) with the wiki-link work below, the shared repository 119 (3 ignored) before
-its `feat/wiki` branch, which adds 19 to `mdshared-app` (39 to 58).
+unchanged. The user has not run the app since the move. Tests moved with the code: after the seven
+features of 2026-11-13 this workspace runs 365 (4 ignored) and the shared repository 156
+(3 ignored). The pinned shared commit is `b74e8cb`.
 
 `target/` is git-ignored. Helper scripts that once lived there (`vm.py`, `seed-lock.py`,
 `cap.ps1`) are not committed; sections 9 and 12 say what they did.
@@ -362,10 +362,9 @@ followed, as in a terminal); scrolled up by any amount, the content stays still 
 arrives below. A page shorter than the window stays at its top. One layout and one frame per
 reload. Not seen in a window by the user yet.
 
-**Wiki-links and backlinks (2026-11-13).** Built on branch `worktree-agent-a1f968c45b7d0f5ce`
-against the shared branch `feat/wiki`; **the pinned `rev` does not have `mdshared_app::notes`
-and `wikilink` yet**, so this builds only with the shared branch merged and the `rev` moved (or
-with a `--config patch` to a checkout of it). The user has not looked at any of it.
+**Wiki-links and backlinks (2026-11-13).** The neutral parts (`mdshared_app::notes` and
+`wikilink`) are in the shared repository at the pinned `rev`. The user has not looked at any
+of it.
 
 - *Parsing.* The viewer's own pass over finished text runs (`find_wiki` and `rewrite_run` in
   `parse.rs`, called from `flush_run` beside the bare-URL pass), not pulldown-cmark's
@@ -834,10 +833,15 @@ Items 1 and 2 are done and item 3 is built but waits for a first release; item 4
    0.1.0, bump the version, publish the next release with the four files the script writes, and
    watch the installed copy update itself. `docs/UPDATE.md` has the steps and what has and has
    not run.
-4. Features, in the user's order: remember the scroll position per file and live reload that
-   keeps the reader's place (both built 2026-11-13 on a branch against `mdshared-app`'s
-   `feat/places`, tested headless, not yet looked at in a window; see section 2); animated GIFs; content-sized tables; the missing highlight languages
-   (Kotlin, Swift, PowerShell, Dockerfile); a true float across blocks; wiki-links and backlinks.
+4. Features: all seven were built on 2026-11-13 by parallel workers, reviewed and merged:
+   the scroll position per file and live reload that keeps the reader's place (section 2);
+   animated GIF and WebP; content-sized tables; highlighting for Kotlin, Swift, PowerShell and
+   Dockerfile (line scanners in `mdshared-highlight`); floats across blocks (section 5);
+   wiki-links and backlinks. All are tested headless and rendered with `--shot`; **the user has
+   looked at none of them in a window, and none is approved.** Left open by the workers:
+   a table never stands beside a float even when it would fit; `[[Note|a *b* c]]` (markup in a
+   label) and `![[embed]]` stay text; a window fully covered by another keeps animating;
+   the main menu, with "Play animated images" added, just fits a window 800 px high.
 
 The editor and the shared code have their own repositories since 2026-11-12, holding plans only:
 `Kaan88/markdown-editor-rs` and `Kaan88/markdown-shared-rs` (PLAN section E, item 4). The user
