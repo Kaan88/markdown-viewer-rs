@@ -853,8 +853,10 @@ Items 1 and 2 are done and item 3 is built but waits for a first release; item 4
    the scroll position per file and live reload that keeps the reader's place (section 2);
    animated GIF and WebP; content-sized tables; highlighting for Kotlin, Swift, PowerShell and
    Dockerfile (line scanners in `mdshared-highlight`); floats across blocks (section 5);
-   wiki-links and backlinks. All are tested headless and rendered with `--shot`; **the user has
-   looked at none of them in a window, and none is approved.** Left open by the workers:
+   wiki-links and backlinks. All are tested headless and rendered with `--shot`, released as
+   v0.2.0, and **approved by the user on 2026-11-13** ("changes approved"; the notes elsewhere
+   in this file that say the user has not looked at one of them predate that). Left open by
+   the workers:
    a table never stands beside a float even when it would fit; `[[Note|a *b* c]]` (markup in a
    label) and `![[embed]]` stay text; a window fully covered by another keeps animating;
    the main menu, with "Play animated images" added, just fits a window 800 px high.
