@@ -93,7 +93,13 @@ fn refinement_alone_converges_for_text() {
 /// every part of the page makes them exact, and then frames equal the one-pass page.
 #[test]
 fn shown_and_refined_converges_to_the_eager_layout_and_pixels() {
-    for name in ["showcase.md", "math.md", "images.md", "diagrams.md"] {
+    for name in [
+        "showcase.md",
+        "math.md",
+        "images.md",
+        "diagrams.md",
+        "tables.md",
+    ] {
         for (width, scale) in [(780.0, 1.0), (520.0, 1.5)] {
             let doc = fixture(name);
             let options = options(width, scale);

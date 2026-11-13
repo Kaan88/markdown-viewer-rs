@@ -104,9 +104,13 @@ impl DocumentRenderer {
                     && local <= t.y + t.h + slack
             })
             .map(|t| t.block);
+        // The nearest line by height; among lines side by side, as the cells of a table row
+        // are, the one the point is in or nearest to.
+        let beside = |line: &LineGeom| (line.x0 - x).max(x - line.x1).max(0.0);
         let line = cached.lines.iter().min_by(|a, b| {
             distance(a, local)
                 .total_cmp(&distance(b, local))
+                .then_with(|| beside(a).total_cmp(&beside(b)))
                 .then_with(|| a.top.total_cmp(&b.top))
         });
         // A display formula or a diagram has no text line: the picture itself is the target.
