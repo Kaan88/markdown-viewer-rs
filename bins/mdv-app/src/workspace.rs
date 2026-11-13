@@ -704,7 +704,10 @@ impl Workspace {
         match read_stable(&path) {
             Ok(loaded) => {
                 let mut tab = Tab::unloaded(path.clone());
-                tab.set_document(parse_bytes(&loaded.bytes), loaded.stamp);
+                let folder_open = self.session.folder.is_some();
+                let document =
+                    notes::parse_document(&self.notes, folder_open, &path, &loaded.bytes);
+                tab.set_document(document, loaded.stamp);
                 self.tabs.push(tab);
                 self.recents.add(path);
                 self.relabel();
@@ -895,7 +898,10 @@ impl Workspace {
         match read_stable(&tab.path) {
             Ok(loaded) => {
                 tab.missing = false;
-                tab.set_document(parse_bytes(&loaded.bytes), loaded.stamp);
+                let folder_open = self.session.folder.is_some();
+                let document =
+                    notes::parse_document(&self.notes, folder_open, &tab.path, &loaded.bytes);
+                tab.set_document(document, loaded.stamp);
             }
             Err(e) => {
                 let now = stamp(&tab.path);
@@ -1002,7 +1008,8 @@ impl Workspace {
         };
         let active = self.active == Some(index);
         tab.drop_view(self.renderer.page_layout());
-        let document = parse_bytes(&loaded.bytes);
+        let folder_open = self.session.folder.is_some();
+        let document = notes::parse_document(&self.notes, folder_open, &tab.path, &loaded.bytes);
         if let (Some(old), Some(pos)) = (tab.doc.as_ref(), tab.keep) {
             tab.keep = Some(document.remap_scroll(old, pos));
         }

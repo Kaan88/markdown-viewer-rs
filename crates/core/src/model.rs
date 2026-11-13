@@ -248,9 +248,20 @@ pub struct LinkInfo {
     pub title: StrRef,
     /// Written as `[[target]]`: `dest` names a note, not a URL.
     pub wiki: bool,
-    /// A wiki-link whose note was not found. The parser leaves this false; the application sets
-    /// it once it has looked, and the renderer draws such a link muted with a dashed underline.
+    /// A wiki-link whose note was not found, as the application answered when the document was
+    /// parsed or found since. The renderer draws such a link muted with a dashed underline.
     pub missing: bool,
+}
+
+/// What `[[target]]` becomes, as the application decides for each note name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WikiAs {
+    /// A link to the note.
+    Link,
+    /// A link drawn as leading to a note that is not there.
+    Missing,
+    /// Not a link: the text stays as written, brackets included.
+    Text,
 }
 
 impl LinkInfo {
@@ -395,6 +406,9 @@ pub struct Document {
     pub footnotes: Vec<Footnote>,
     pub block_attrs: Vec<BlockAttrs>,
     pub warnings: Vec<Warning>,
+    /// The note names of the `[[target]]`s that were left as text (`WikiAs::Text`), so the
+    /// application can tell when one of them would be a link now.
+    pub wiki_text: Vec<StrRef>,
 }
 
 impl Document {
@@ -679,6 +693,11 @@ pub struct ScrollPos {
 /// Parses raw file bytes: strips a BOM, decodes UTF-16 files, replaces invalid UTF-8. The file limit
 /// applies to these bytes, however much text they decode to.
 pub fn parse_bytes(bytes: &[u8]) -> Document {
+    parse_bytes_wiki(bytes, &mut |_| WikiAs::Text)
+}
+
+/// [`parse_bytes`] with wiki-links: see [`crate::parse_wiki`].
+pub fn parse_bytes_wiki(bytes: &[u8], wiki: &mut dyn FnMut(&str) -> WikiAs) -> Document {
     if bytes.len() > MAX_FILE_BYTES {
         return Document {
             warnings: vec![Warning::FileTooLarge],
@@ -686,7 +705,7 @@ pub fn parse_bytes(bytes: &[u8]) -> Document {
         };
     }
     let (text, invalid) = crate::files::decode(bytes);
-    let mut doc = crate::parse(&text);
+    let mut doc = crate::parse_wiki(&text, wiki);
     if invalid {
         doc.warnings.push(Warning::InvalidUtf8);
     }

@@ -24,12 +24,21 @@ fn options() -> Options {
         | Options::ENABLE_GFM
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_MATH
-        | Options::ENABLE_WIKILINKS
 }
 
 /// Parses Markdown into a document. A leading BOM is ignored. Text over what any file within the limit
 /// can decode to yields an empty document with a warning, which also keeps every offset within `u32`.
 pub fn parse(src: &str) -> Document {
+    parse_wiki(src, &mut |_| WikiAs::Text)
+}
+
+/// [`parse`] with wiki-links. `wiki` is asked for each note name written as `[[Note]]`,
+/// `[[Note|text]]`, `[[Note#Heading]]` or `[[folder/Note]]` in running text, and says whether
+/// that is a link, a link to a note that is missing, or just text. It may be asked more than once
+/// for a name. For `[[#Heading]]`, a link into the same document, the name is empty. The pass runs on what CommonMark left as plain
+/// text, so `[[x]](url)`, `[[x]][ref]` and `[[x]]` with a definition for `x` keep their meaning,
+/// and nothing in code or inside another link is touched.
+pub fn parse_wiki(src: &str, wiki: &mut dyn FnMut(&str) -> WikiAs) -> Document {
     let src = src.strip_prefix('\u{FEFF}').unwrap_or(src);
     if src.len() > MAX_DECODED_BYTES {
         return Document {
@@ -66,7 +75,7 @@ pub fn parse(src: &str) -> Document {
     let protected = autolink::protect_url_delimiters(src);
     let restore = matches!(protected, Cow::Owned(_));
     if memchr::memchr(b'$', protected.as_bytes()).is_none() {
-        let mut b = Builder::new(&protected, restore, false);
+        let mut b = Builder::new(&protected, restore, false, &mut *wiki);
         for (event, range) in Parser::new_ext(&protected, options()).into_offset_iter() {
             b.event(event, range);
         }
@@ -75,9 +84,9 @@ pub fn parse(src: &str) -> Document {
         }
         let rejected = std::mem::take(&mut b.rejected_alerts);
         drop(b);
-        return parse_with_checks(protected, restore, rejected);
+        return parse_with_checks(protected, restore, rejected, wiki);
     }
-    parse_with_checks(protected, restore, Vec::new())
+    parse_with_checks(protected, restore, Vec::new(), wiki)
 }
 
 /// GitHub writes inline math as ``$`x`$`` so that Markdown cannot touch the formula. This rewrites
@@ -148,7 +157,12 @@ const MATH_PASSES: usize = 4;
 /// a bad pair is already lost by the time the event arrives. It also takes an alert marker wherever
 /// it finds one, and the line it takes may have belonged to a paragraph. So rejected delimiters are
 /// hidden from the parser and the source is parsed again. `rejected` holds those already known.
-fn parse_with_checks(mut src: Cow<'_, str>, mut restore: bool, rejected: Vec<usize>) -> Document {
+fn parse_with_checks(
+    mut src: Cow<'_, str>,
+    mut restore: bool,
+    rejected: Vec<usize>,
+    wiki: &mut dyn FnMut(&str) -> WikiAs,
+) -> Document {
     // Hiding swaps in characters from U+E003 upward. A document that already uses any character
     // from that private-use block would have its own text rewritten by `restore`, so such a
     // document takes the literal pass instead.
@@ -159,7 +173,7 @@ fn parse_with_checks(mut src: Cow<'_, str>, mut restore: bool, rejected: Vec<usi
     }
     let passes = if can_hide { MATH_PASSES } else { 0 };
     for _ in 0..passes {
-        match build_checked(&src, restore, false) {
+        match build_checked(&src, restore, false, wiki) {
             Ok(doc) => return doc,
             Err(rejected) => {
                 src = Cow::Owned(hide_delimiters(&src, &rejected));
@@ -167,7 +181,7 @@ fn parse_with_checks(mut src: Cow<'_, str>, mut restore: bool, rejected: Vec<usi
             }
         }
     }
-    match build_checked(&src, restore, true) {
+    match build_checked(&src, restore, true, wiki) {
         Ok(doc) => doc,
         Err(_) => unreachable!("the literal pass rejects nothing"),
     }
@@ -175,8 +189,13 @@ fn parse_with_checks(mut src: Cow<'_, str>, mut restore: bool, rejected: Vec<usi
 
 /// With `literal`, a rejected span or alert becomes plain text. Otherwise the first rejected span stops
 /// the build, and the rest of the walk only collects the `$` offsets to hide.
-fn build_checked(src: &str, restore: bool, literal: bool) -> Result<Document, Vec<usize>> {
-    let mut b = Builder::new(src, restore, literal);
+fn build_checked(
+    src: &str,
+    restore: bool,
+    literal: bool,
+    wiki: &mut dyn FnMut(&str) -> WikiAs,
+) -> Result<Document, Vec<usize>> {
+    let mut b = Builder::new(src, restore, literal, wiki);
     let mut gate = MathGate {
         boundary: true,
         inline: 0..src.len(),
@@ -433,8 +452,11 @@ struct Builder<'a> {
     run_start: Option<usize>,
     escapes: Vec<(usize, usize)>,
     link_hits: Vec<(usize, usize, LinkKind)>,
+    /// Says what each `[[note]]` becomes.
+    wiki: &'a mut dyn FnMut(&str) -> WikiAs,
+    /// A wiki-link changed the heading's text, so its anchor comes from the text shown.
+    heading_wiki: bool,
     link_depth: u32,
-    wiki_skip: WikiSkip,
     strong_depth: u32,
     in_code_block: bool,
     html_buf: Option<String>,
@@ -489,7 +511,12 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    fn new(src: &'a str, restore: bool, literal_alerts: bool) -> Self {
+    fn new(
+        src: &'a str,
+        restore: bool,
+        literal_alerts: bool,
+        wiki: &'a mut dyn FnMut(&str) -> WikiAs,
+    ) -> Self {
         Builder {
             src,
             restore,
@@ -509,8 +536,9 @@ impl<'a> Builder<'a> {
             run_start: None,
             escapes: Vec::new(),
             link_hits: Vec::new(),
+            wiki,
+            heading_wiki: false,
             link_depth: 0,
-            wiki_skip: WikiSkip::No,
             strong_depth: 0,
             in_code_block: false,
             html_buf: None,
@@ -570,23 +598,6 @@ impl<'a> Builder<'a> {
         }
         if self.pre_open {
             return self.pre_event(event);
-        }
-        match (self.wiki_skip, &event) {
-            (WikiSkip::No, _) => {}
-            (WikiSkip::Label, Event::End(_)) => self.wiki_skip = WikiSkip::No,
-            (WikiSkip::Dropped(n), Event::Start(_)) => {
-                self.wiki_skip = WikiSkip::Dropped(n + 1);
-                return;
-            }
-            (WikiSkip::Dropped(n), Event::End(_)) => {
-                self.wiki_skip = if n > 1 {
-                    WikiSkip::Dropped(n - 1)
-                } else {
-                    WikiSkip::No
-                };
-                return;
-            }
-            _ => return,
         }
         match event {
             Event::Start(tag) => self.start(tag, range),
@@ -706,21 +717,6 @@ impl<'a> Builder<'a> {
             MdTag::Emphasis => self.open_md_span(SpanKind::Emphasis),
             MdTag::Strong => self.open_strong(Origin::Md),
             MdTag::Strikethrough => self.open_md_span(SpanKind::Strike),
-            MdTag::Link {
-                link_type: LinkType::WikiLink { has_pothole },
-                dest_url,
-                ..
-            } => self.wiki_link(&dest_url, has_pothole, range),
-            MdTag::Image {
-                link_type: LinkType::WikiLink { .. },
-                dest_url,
-                ..
-            } if !is_image_name(&dest_url) => {
-                // An embedded note is not drawn: it stays as written.
-                let src = self.src;
-                self.md_text(&src[range.clone()], range);
-                self.wiki_skip = WikiSkip::Dropped(1);
-            }
             MdTag::Link {
                 link_type,
                 dest_url,
@@ -1381,6 +1377,8 @@ impl<'a> Builder<'a> {
         };
         // The outline shows one line, so a hard break in the heading reads as a space there.
         let raw = self.doc.text[block.text.usize()].trim();
+        // With a wiki-link in it, the anchor comes from the text shown, not the brackets.
+        let shown = std::mem::take(&mut self.heading_wiki).then(|| raw.to_string());
         let title = if raw.contains('\n') {
             let flat = raw.replace('\n', " ");
             self.pool(&flat)
@@ -1392,7 +1390,10 @@ impl<'a> Builder<'a> {
                 len: raw.len() as u32,
             }
         };
-        let slug = self.slugger.slug(&self.heading_text);
+        let slug = match shown {
+            Some(shown) => self.slugger.slug(&shown),
+            None => self.slugger.slug(&self.heading_text),
+        };
         self.in_heading = false;
         let slug = self.pool(&slug);
         self.doc.blocks[b as usize].kind = BlockKind::Heading { level, align, slug };
@@ -1701,50 +1702,6 @@ impl<'a> Builder<'a> {
         self.push_atom_like(SpanKind::Math { display, oversize }, start);
     }
 
-    /// `[[target]]` and `[[target|label]]`. `dest` is what stood before the `|`. A link without
-    /// a label shows `WikiTarget::display`; pulldown-cmark's own text for it, the target as
-    /// written, is skipped. What `parse_target` refuses, and a target that is a web address,
-    /// stays text as written.
-    fn wiki_link(&mut self, dest: &str, has_label: bool, range: Range<usize>) {
-        let dest = autolink::restore(dest).replace(['\n', '\r'], " ");
-        // In a table the bar is written `\|`, and the backslash arrives with the target.
-        let dest = match dest.strip_suffix('\\') {
-            Some(cut) if has_label => cut,
-            _ => dest.as_str(),
-        };
-        let src = self.src;
-        let source = &src[range.clone()];
-        let target = match mdshared_app::wikilink::parse_target(dest) {
-            Some(target) if !target.note.contains("://") => target,
-            _ => {
-                self.md_text(source, range);
-                self.wiki_skip = WikiSkip::Dropped(1);
-                return;
-            }
-        };
-        // `[[Note|]]` has a label with nothing in it, which would be a link nobody can see.
-        let has_label = has_label
-            && source
-                .find('|')
-                .is_some_and(|bar| !source[bar + 1..source.len() - 2].trim().is_empty());
-        let written = match target.heading {
-            Some(heading) => format!("{}#{heading}", target.note),
-            None => target.note.to_string(),
-        };
-        let shown = target.display();
-        let dest = self.pool(&written);
-        let idx = self.doc.links.len() as u32;
-        self.doc.links.push(LinkInfo {
-            wiki: true,
-            ..LinkInfo::new(dest, StrRef::default())
-        });
-        self.open_md_span(SpanKind::Link(idx));
-        if !has_label {
-            self.md_text(&shown, range);
-            self.wiki_skip = WikiSkip::Label;
-        }
-    }
-
     fn push_str_restored(&mut self, t: &str) {
         if self.restore {
             self.doc.text.push_str(&autolink::restore(t));
@@ -1856,30 +1813,53 @@ impl<'a> Builder<'a> {
         };
         let mut escapes = std::mem::take(&mut self.escapes);
         let mut named = std::mem::take(&mut self.entities);
-        if self.link_depth == 0 && autolink::may_contain_link(&self.doc.text[start..]) {
+        let wiki = if self.link_depth == 0 {
+            self.find_wiki(start, &escapes)
+        } else {
+            Vec::new()
+        };
+        if self.link_depth == 0
+            && (!wiki.is_empty() || autolink::may_contain_link(&self.doc.text[start..]))
+        {
             let mut hits = std::mem::take(&mut self.link_hits);
             hits.clear();
-            let mut pos = start;
             // An escaped character is a wall: nothing links across it or through it, as in cmark-gfm
-            // where the escape splits the text node.
-            for &(a, b) in &escapes {
-                let entities = Entities::new(&named, pos);
-                autolink::find_links_into(&self.doc.text[pos..a], pos, entities, &mut hits);
-                pos = b;
+            // where the escape splits the text node. A wiki-link is one too.
+            let merged: Vec<(usize, usize)>;
+            let walls: &[(usize, usize)] = if wiki.is_empty() {
+                &escapes
+            } else {
+                let mut all = escapes.clone();
+                all.extend(wiki.iter().map(|w| (w.start, w.end)));
+                all.sort_unstable();
+                merged = all;
+                &merged
+            };
+            let mut pos = start;
+            for &(a, b) in walls {
+                if a >= pos {
+                    let entities = Entities::new(&named, pos);
+                    autolink::find_links_into(&self.doc.text[pos..a], pos, entities, &mut hits);
+                }
+                pos = pos.max(b);
             }
             let entities = Entities::new(&named, pos);
             autolink::find_links_into(&self.doc.text[pos..], pos, entities, &mut hits);
-            for &(s, e, kind) in &hits {
-                let dest_text = kind.destination(&self.doc.text[s..e]);
-                let dest = self.pool(&dest_text);
-                let idx = self.doc.links.len() as u32;
-                self.doc.links.push(LinkInfo::new(dest, StrRef::default()));
-                self.doc.spans.push(Span {
-                    start: s as u32,
-                    end: e as u32,
-                    parent: self.cur_span,
-                    kind: SpanKind::Link(idx),
-                });
+            if wiki.is_empty() {
+                for &(s, e, kind) in &hits {
+                    let dest_text = kind.destination(&self.doc.text[s..e]);
+                    let dest = self.pool(&dest_text);
+                    let idx = self.doc.links.len() as u32;
+                    self.doc.links.push(LinkInfo::new(dest, StrRef::default()));
+                    self.doc.spans.push(Span {
+                        start: s as u32,
+                        end: e as u32,
+                        parent: self.cur_span,
+                        kind: SpanKind::Link(idx),
+                    });
+                }
+            } else {
+                self.rewrite_run(start, wiki, &hits);
             }
             self.link_hits = hits;
         }
@@ -1887,6 +1867,143 @@ impl<'a> Builder<'a> {
         self.escapes = escapes;
         named.clear();
         self.entities = named;
+    }
+
+    /// The wiki-links in the text run from `start` to the end of the text, in order. A pair of
+    /// brackets counts when neither is escaped, no `!` stands before it (an embed stays text),
+    /// the inside holds no bracket or hard break, `parse_target` accepts it, it is not a web
+    /// address, and the application wants a link for that note. One pass over the run: a search
+    /// for the closing pair ends at the next bracket, and the next opening pair cannot start
+    /// before that bracket.
+    fn find_wiki(&mut self, start: usize, escapes: &[(usize, usize)]) -> Vec<WikiHit> {
+        let mut out = Vec::new();
+        if memchr::memmem::find(&self.doc.text.as_bytes()[start..], b"[[").is_none() {
+            return out;
+        }
+        // Spans are in order of their start, so the last one says whether any begins inside the
+        // run; then the run is not plain text and is left alone.
+        if self
+            .doc
+            .spans
+            .last()
+            .is_some_and(|s| s.start as usize > start)
+        {
+            return out;
+        }
+        let escaped = |at: usize| {
+            let after = escapes.partition_point(|&(a, _)| a <= at);
+            after > 0 && at < escapes[after - 1].1
+        };
+        let mut i = start;
+        loop {
+            let b = self.doc.text.as_bytes();
+            let Some(open) = memchr::memmem::find(&b[i..], b"[[").map(|at| at + i) else {
+                break;
+            };
+            let inner = open + 2;
+            let close = b[inner..]
+                .iter()
+                .position(|c| matches!(c, b'[' | b']' | b'\n'))
+                .map(|at| at + inner);
+            let Some(close) = close else {
+                break;
+            };
+            let closed = b[close] == b']' && b.get(close + 1) == Some(&b']');
+            let plain = !(escaped(open) || escaped(open + 1) || escaped(close))
+                && !escaped(close + 1)
+                && !(open > 0 && b[open - 1] == b'!');
+            if !closed || !plain {
+                // `[[[x]]` opens at its second bracket: the next pair may start one before a
+                // bracket that directly follows this pair.
+                i = match (b[close], close == inner) {
+                    (b'[', true) => open + 1,
+                    (b'[', false) => close,
+                    _ => close + 1,
+                };
+                continue;
+            }
+            i = close + 2;
+            let text = self.doc.text[inner..close].to_string();
+            let Some(target) = mdshared_app::wikilink::parse_target(&text) else {
+                continue;
+            };
+            if target.note.contains("://") {
+                continue;
+            }
+            let missing = match (self.wiki)(target.note) {
+                WikiAs::Link => false,
+                WikiAs::Missing => true,
+                WikiAs::Text => {
+                    let note = target.note.to_string();
+                    let note = self.pool(&note);
+                    self.doc.wiki_text.push(note);
+                    continue;
+                }
+            };
+            let dest = match target.heading {
+                Some(heading) => format!("{}#{heading}", target.note),
+                None => target.note.to_string(),
+            };
+            out.push(WikiHit {
+                start: open,
+                end: close + 2,
+                shown: target.display(),
+                dest,
+                missing,
+            });
+        }
+        out
+    }
+
+    /// Writes the run from `start` again with each wiki-link replaced by the text it shows, and
+    /// records the wiki-links and the bare-URL `hits` (found in the run as it was) as spans at
+    /// their new places, in order.
+    fn rewrite_run(&mut self, start: usize, wiki: Vec<WikiHit>, hits: &[(usize, usize, LinkKind)]) {
+        let tail = self.doc.text.split_off(start);
+        let piece = |a: usize, b: usize| &tail[a - start..b - start];
+        let mut hits = hits.iter().peekable();
+        let mut pos = start;
+        let link = |this: &mut Self, dest: &str, at: usize, missing: Option<bool>| {
+            let dest = this.pool(dest);
+            let idx = this.doc.links.len() as u32;
+            this.doc.links.push(LinkInfo {
+                wiki: missing.is_some(),
+                missing: missing.unwrap_or(false),
+                ..LinkInfo::new(dest, StrRef::default())
+            });
+            this.doc.spans.push(Span {
+                start: at as u32,
+                end: this.doc.text.len() as u32,
+                parent: this.cur_span,
+                kind: SpanKind::Link(idx),
+            });
+        };
+        let mut wiki = wiki.into_iter().peekable();
+        loop {
+            let next_hit = hits.peek().map(|h| h.0);
+            let next_wiki = wiki.peek().map(|w| w.start);
+            match (next_hit, next_wiki) {
+                (Some(h), w) if w.is_none_or(|w| h < w) => {
+                    let &(s, e, kind) = hits.next().expect("peeked");
+                    self.doc.text.push_str(piece(pos, s));
+                    let at = self.doc.text.len();
+                    self.doc.text.push_str(piece(s, e));
+                    link(self, &kind.destination(piece(s, e)), at, None);
+                    pos = e;
+                }
+                (_, Some(_)) => {
+                    let w = wiki.next().expect("peeked");
+                    self.doc.text.push_str(piece(pos, w.start));
+                    let at = self.doc.text.len();
+                    self.doc.text.push_str(&w.shown);
+                    link(self, &w.dest, at, Some(w.missing));
+                    pos = w.end;
+                }
+                _ => break,
+            }
+        }
+        self.doc.text.push_str(piece(pos, start + tail.len()));
+        self.heading_wiki |= self.in_heading;
     }
 
     fn pool(&mut self, s: &str) -> StrRef {
@@ -2627,24 +2744,14 @@ fn parse_image_align(v: &str) -> ImageAlign {
 
 /// A line inside a quote that shows nothing: just the `>` markers, or a lone HTML comment, which
 /// GitHub ignores. Such a line separates a marker from the block after it.
-/// What to do with the events inside a wiki-link whose text the builder wrote itself.
-#[derive(Clone, Copy)]
-enum WikiSkip {
-    No,
-    /// Skip the link's own text; its end closes the span as usual.
-    Label,
-    /// The link became plain text: skip everything up to and including its end, this many ends
-    /// away.
-    Dropped(u32),
-}
-
-/// Whether a `![[name]]` embed names a picture, which goes down the image path.
-fn is_image_name(name: &str) -> bool {
-    let name = name.trim();
-    let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
-    ["png", "jpg", "jpeg", "gif", "webp", "svg"]
-        .iter()
-        .any(|e| ext.eq_ignore_ascii_case(e))
+/// A wiki-link found in a text run: its place in the text as written, what it shows instead, the
+/// destination kept for it (`Note#Heading`), and whether its note is missing.
+struct WikiHit {
+    start: usize,
+    end: usize,
+    shown: String,
+    dest: String,
+    missing: bool,
 }
 
 fn is_blank_quote_line(line: &str) -> bool {

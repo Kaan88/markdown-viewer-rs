@@ -9,16 +9,21 @@
 //! there are no backlinks. So opening a single file from a home folder or a drive's root lists
 //! that one folder and stops.
 //!
+//! **What is a link.** A `[[name]]` whose note is found is a link. One whose note is not found
+//! is a link to a missing note only while a folder is open; with none open it stays text as
+//! written, because a file read on its own is ordinary Markdown first (`[[nodiscard]]`). The
+//! parser asks [`Decider`] per name; `check_wiki_links` asks again when anything changed.
+//!
 //! The window sets a wake ([`Workspace::set_notes_wake`]) and the index is then built off the UI
 //! thread. Without one (`--shot`, tests) nothing is built until [`Workspace::index_notes_now`].
 
-use super::{LinkOutcome, Reveal, Workspace, same_file};
+use super::{LinkOutcome, Reveal, Workspace, read_stable, same_file};
 use mdshared_app::notes::{Config, Indexer, NoteIndex, resolve_in_folder};
 use mdshared_app::wikilink::parse_target;
-use mdview_core::Document;
 use mdview_core::limits::{BACKLINKS_SHOWN, notes_config};
 use mdview_core::links::{LinkAction, classify_link};
-use mdview_core::model::SpanKind;
+use mdview_core::model::{SpanKind, WikiAs};
+use mdview_core::{Document, parse_bytes_wiki};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -181,9 +186,12 @@ impl Workspace {
         }
     }
 
-    /// Looks up the active document's wiki-links if anything changed since they were last looked
-    /// up, and marks the ones that lead nowhere. True if a mark changed, so the page must be laid
-    /// out again. Called before every layout check; it does nothing while nothing changed.
+    /// Looks at the active document's wiki-links again if anything changed since they were last
+    /// looked at. A link whose note appeared or went is marked; if a `[[name]]` that is text
+    /// should be a link now, or the reverse (a folder was opened or closed, a note appeared
+    /// beside the file), the file is read and parsed again, keeping the reading position. True
+    /// if the page must be laid out again. Called before every layout check; it does nothing
+    /// while nothing changed.
     pub(super) fn check_wiki_links(&mut self) -> bool {
         let generation = self.notes.generation;
         let Some(index) = self.active else {
@@ -193,15 +201,33 @@ impl Workspace {
         if tab.links_checked == generation {
             return false;
         }
-        let path = tab.path.clone();
         let Some(doc) = tab.doc.as_ref() else {
             return false;
         };
-        let missing = if doc.links.iter().any(|l| l.wiki) {
-            self.missing_links(&path, doc)
-        } else {
-            Vec::new()
-        };
+        let folder_open = self.session.folder.is_some();
+        // The answers now, for every link and for every `[[name]]` that was left as text.
+        let mut missing = Vec::new();
+        let mut reparse = false;
+        if doc.links.iter().any(|l| l.wiki) || !doc.wiki_text.is_empty() {
+            let mut decide = Decider::new(&self.notes, folder_open, &tab.path);
+            for (i, link) in doc.links.iter().enumerate().filter(|(_, l)| l.wiki) {
+                let Some(target) = parse_target(doc.str(link.dest)) else {
+                    continue;
+                };
+                match decide.answer(target.note) {
+                    WikiAs::Link => {}
+                    WikiAs::Missing => missing.push(i),
+                    WikiAs::Text => reparse = true,
+                }
+            }
+            reparse |= doc
+                .wiki_text
+                .iter()
+                .any(|&note| decide.answer(doc.str(note)) != WikiAs::Text);
+        }
+        if reparse && !tab.missing {
+            return self.parse_again(index);
+        }
         let tab = &mut self.tabs[index];
         tab.links_checked = generation;
         let mut changed = false;
@@ -215,59 +241,36 @@ impl Workspace {
         changed
     }
 
-    /// The indices of `doc`'s wiki-links that name a note which is not there, ascending.
-    fn missing_links(&self, path: &Path, doc: &Document) -> Vec<usize> {
-        let config = &self.notes.config;
-        let covered = self.notes.index.as_ref().filter(|i| i.covers(path));
-        // Without an index over this file, its folder is listed once (nothing in it is opened)
-        // and every bare name is answered from the listing.
-        let listing = match (covered, path.parent()) {
-            (None, Some(dir)) => {
-                let only_names = Config {
-                    max_depth: 0,
-                    max_file_bytes: 0,
-                    ..config.clone()
-                };
-                NoteIndex::build(dir, &only_names, None, &|| false)
-            }
-            _ => None,
+    /// Reads tab `index` from disk and parses it with today's answers about its wiki-links,
+    /// without a message: to the reader nothing was reloaded, some brackets became links or
+    /// links became brackets. False, and the page as it was, if the file cannot be read.
+    fn parse_again(&mut self, index: usize) -> bool {
+        let generation = self.notes.generation;
+        let folder_open = self.session.folder.is_some();
+        let tab = &mut self.tabs[index];
+        tab.links_checked = generation;
+        let Ok(loaded) = read_stable(&tab.path) else {
+            return false;
         };
-        let mut seen: HashMap<&str, bool> = HashMap::new();
-        let mut out = Vec::new();
-        for (i, link) in doc.links.iter().enumerate() {
-            if !link.wiki {
-                continue;
-            }
-            let Some(target) = parse_target(doc.str(link.dest)) else {
-                continue;
-            };
-            if target.note.is_empty() {
-                continue;
-            }
-            let found = *seen.entry(target.note).or_insert_with(|| {
-                if let Some(index) = covered {
-                    return index.resolve(Some(path), target.note).is_some();
-                }
-                let beside = match &listing {
-                    Some(listing) if !target.note.contains(['/', '\\']) => {
-                        listing.resolve(Some(path), target.note).is_some()
-                    }
-                    _ => path
-                        .parent()
-                        .is_some_and(|dir| resolve_in_folder(dir, target.note, config).is_some()),
-                };
-                beside
-                    || self
-                        .notes
-                        .index
-                        .as_ref()
-                        .is_some_and(|index| index.resolve(None, target.note).is_some())
-            });
-            if !found {
-                out.push(i);
-            }
+        let same_file = loaded.stamp == tab.stamp;
+        tab.drop_view(self.renderer.page_layout());
+        let document = parse_document(&self.notes, folder_open, &tab.path, &loaded.bytes);
+        if let (Some(old), Some(pos)) = (tab.doc.as_ref(), tab.keep) {
+            tab.keep = Some(document.remap_scroll(old, pos));
         }
-        out
+        tab.set_document(document, loaded.stamp);
+        tab.links_checked = generation;
+        // Text offsets moved, so a selection would cover other text.
+        tab.selection = None;
+        if !same_file {
+            // The file changed as well: its blocks are not the ones the toggles were made on.
+            tab.details.clear();
+            self.renderer.clear_details();
+        }
+        self.press = None;
+        self.refind();
+        self.dirty = true;
+        true
     }
 
     /// What hovering link `index` of the active document shows: a wiki-link's file (with its
@@ -436,6 +439,91 @@ impl Workspace {
                 leads.then_some((span.start, span.end))
             })
             .collect()
+    }
+}
+
+/// Parses a file's bytes with its wiki-links decided against the notes as they are now.
+pub(super) fn parse_document(
+    notes: &Notes,
+    folder_open: bool,
+    path: &Path,
+    bytes: &[u8],
+) -> Document {
+    let mut decide = Decider::new(notes, folder_open, path);
+    parse_bytes_wiki(bytes, &mut |note| decide.answer(note))
+}
+
+/// Answers what each `[[note]]` of one document is. A note that is found is a link. One that is
+/// not is a link to a missing note when a folder is open, and stays text when none is: a file
+/// read on its own is ordinary Markdown first, where `[[nodiscard]]` is not a note. A link into
+/// the same document (an empty name) follows the same rule, since its heading is not known yet.
+struct Decider<'a> {
+    notes: &'a Notes,
+    folder_open: bool,
+    path: &'a Path,
+    /// The index when it covers this file.
+    covered: Option<&'a NoteIndex>,
+    /// Otherwise the names in the file's own folder, listed at the first question (one
+    /// directory listing, nothing opened).
+    listing: Option<Option<NoteIndex>>,
+    answers: HashMap<String, WikiAs>,
+}
+
+impl<'a> Decider<'a> {
+    fn new(notes: &'a Notes, folder_open: bool, path: &'a Path) -> Decider<'a> {
+        Decider {
+            notes,
+            folder_open,
+            path,
+            covered: notes.index.as_deref().filter(|i| i.covers(path)),
+            listing: None,
+            answers: HashMap::new(),
+        }
+    }
+
+    fn answer(&mut self, note: &str) -> WikiAs {
+        if let Some(&known) = self.answers.get(note) {
+            return known;
+        }
+        let found = note.is_empty() && self.folder_open || !note.is_empty() && self.find(note);
+        let answer = match (found, self.folder_open) {
+            (true, _) => WikiAs::Link,
+            (false, true) => WikiAs::Missing,
+            (false, false) => WikiAs::Text,
+        };
+        self.answers.insert(note.to_string(), answer);
+        answer
+    }
+
+    fn find(&mut self, note: &str) -> bool {
+        if let Some(index) = self.covered {
+            return index.resolve(Some(self.path), note).is_some();
+        }
+        let config = &self.notes.config;
+        let Some(dir) = self.path.parent() else {
+            return false;
+        };
+        let beside = if note.contains(['/', '\\']) {
+            resolve_in_folder(dir, note, config).is_some()
+        } else {
+            let listing = self.listing.get_or_insert_with(|| {
+                let only_names = Config {
+                    max_depth: 0,
+                    max_file_bytes: 0,
+                    ..config.clone()
+                };
+                NoteIndex::build(dir, &only_names, None, &|| false)
+            });
+            listing
+                .as_ref()
+                .is_some_and(|l| l.resolve(Some(self.path), note).is_some())
+        };
+        beside
+            || self
+                .notes
+                .index
+                .as_ref()
+                .is_some_and(|index| index.resolve(None, note).is_some())
     }
 }
 
@@ -679,8 +767,15 @@ mod tests {
         let mut ws = Workspace::new(None);
         ws.open(&a).unwrap();
         show(&mut ws);
-        // A path names its folder; a bare name is not searched for below this one.
-        assert_eq!(missing(&ws), ["Deep", "Nobody"]);
+        // A path names its folder; a bare name is not searched for below this one. With no
+        // folder open, what is not found is not a link at all: it stays as written.
+        let shown: Vec<String> = wiki_links(&ws).into_iter().map(|l| l.0).collect();
+        assert_eq!(shown, ["Sibling", "sub/Deep"]);
+        assert!(missing(&ws).is_empty());
+        assert_eq!(
+            ws.active_document().unwrap().text.trim_end(),
+            "Sibling sub/Deep [[Deep]] [[Nobody]]"
+        );
         assert!(ws.notes_stats().is_none(), "nothing is indexed");
         assert!(ws.backlinks().is_empty());
         assert_eq!(
@@ -691,6 +786,102 @@ mod tests {
         // Nothing is indexed by asking, either.
         ws.index_notes_now();
         assert!(ws.notes_stats().is_none());
+    }
+
+    /// Ordinary Markdown that happens to hold double brackets (the document a review of the
+    /// first wiki-link pass was rendered from).
+    const ORDINARY: &str = "\
+Citation style: see [[1]](https://example.com/one) and [[2]][two].
+
+Array type `int[[3]]` in code, and plain [[not a note]] text. C++ attr: [[nodiscard]] int f();
+
+A ref link [x] and [[x]].
+
+[two]: https://example.com/two
+[x]: https://example.com/x
+";
+
+    /// Text and destination of every link of the active document.
+    fn all_links(ws: &Workspace) -> Vec<(String, String)> {
+        let doc = ws.active_document().unwrap();
+        doc.spans
+            .iter()
+            .filter_map(|s| match s.kind {
+                SpanKind::Link(i) => Some((
+                    doc.text[s.start as usize..s.end as usize].to_string(),
+                    doc.str(doc.links[i as usize].dest).to_string(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn ordinary_markdown_with_double_brackets_reads_as_it_always_did() {
+        let pair = |a: &str, b: &str| (a.to_string(), b.to_string());
+        let commonmark = [
+            pair("[1]", "https://example.com/one"),
+            pair("[2]", "https://example.com/two"),
+            pair("x", "https://example.com/x"),
+            pair("x", "https://example.com/x"),
+        ];
+        let dir = temp_dir("ordinary");
+        let file = write(&dir, "readme.md", ORDINARY);
+        let mut ws = Workspace::new(None);
+        ws.open(&file).unwrap();
+        show(&mut ws);
+
+        // No folder open: nothing is a wiki-link, and every line reads as plain Markdown.
+        let plain = mdview_core::parse(ORDINARY);
+        let doc = ws.active_document().unwrap();
+        assert_eq!((&doc.text, &doc.spans), (&plain.text, &plain.spans));
+        assert_eq!(all_links(&ws), commonmark);
+        assert_eq!(
+            doc.text,
+            "Citation style: see [1] and [2].\n\
+             Array type int[[3]] in code, and plain [[not a note]] text. C++ attr: [[nodiscard]] int f();\n\
+             A ref link x and [x].\n"
+        );
+
+        // A folder is opened: the two that mean nothing to CommonMark are links to notes that
+        // are missing; the citation, the reference links and the code are untouched.
+        ws.set_folder(Some(dir.clone()));
+        ws.index_notes_now();
+        show(&mut ws);
+        assert_eq!(missing(&ws), ["not a note", "nodiscard"]);
+        let others: Vec<(String, String)> = all_links(&ws)
+            .into_iter()
+            .filter(|l| l.1.starts_with("https://"))
+            .collect();
+        assert_eq!(others, commonmark);
+        let text = ws.active_document().unwrap().text.clone();
+        assert!(text.starts_with("Citation style: see [1] and [2].\n"));
+        assert!(text.contains("int[[3]] in code, and plain not a note text."));
+        assert!(text.contains("C++ attr: nodiscard int f();"));
+        assert!(text.contains("A ref link x and [x]."));
+
+        // The note appears: found now, and it stays a link when the folder is closed, because
+        // it is beside the document. The other goes back to being text.
+        write(&dir, "Not a Note.md", "# here\n");
+        ws.index_notes_now();
+        show(&mut ws);
+        assert_eq!(missing(&ws), ["nodiscard"]);
+        ws.set_folder(None);
+        show(&mut ws);
+        assert_eq!(wiki_links(&ws), [("not a note".to_string(), false)]);
+        let text = ws.active_document().unwrap().text.clone();
+        assert!(text.contains("plain not a note text. C++ attr: [[nodiscard]] int f();"));
+        assert_eq!(
+            all_links(&ws)
+                .into_iter()
+                .filter(|l| l.1.starts_with("https://"))
+                .collect::<Vec<_>>(),
+            commonmark
+        );
+        assert!(
+            ws.status_line().is_none(),
+            "none of this is announced as a reload"
+        );
     }
 
     #[test]
@@ -723,10 +914,11 @@ mod tests {
         ws.set_folder(None);
         ws.activate(0);
         show(&mut ws);
+        // Only A's own folder is looked at again, and Later is not in it: text, not a link.
+        assert!(missing(&ws).is_empty());
         assert_eq!(
-            missing(&ws),
-            ["Later"],
-            "only A's own folder is listed again"
+            ws.active_document().unwrap().text.trim_end(),
+            "B and [[Later]]"
         );
     }
 
