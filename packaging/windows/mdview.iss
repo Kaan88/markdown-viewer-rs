@@ -6,7 +6,7 @@
 ; Build:  ISCC.exe /DAppVersion=0.2.0 mdview.iss   (see build-installer.ps1)
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.2.0"
 #endif
 ; Numeric a.b.c.0 for the exe version resource (strips any -prerelease suffix).
 #define Dash Pos("-", AppVersion)

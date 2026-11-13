@@ -20,7 +20,7 @@ page's own text path. Windows first. The user approved its look by using the run
 2026-11-11 (PLAN roadmap step A2). It has never been built or run on Linux.
 
 **What ships.** `mdview` is the only shell. Its installer is `packaging/windows/mdview.iss` (built
-by `build-installer.ps1`, section 8). **v0.1.0 was published on GitHub on 2026-11-13** from
+by `build-installer.ps1`, section 8). **v0.1.0 and v0.2.0 (the seven features of section 13, item 4) were published on GitHub on 2026-11-13**; v0.1.0 from
 `5cbd354`, as the latest release, with the installer, the two executables and `mdview-update.txt`
 (the earlier v0.1.0 pre-release, which carried the Qt installer, was deleted with its tag on
 2026-11-12). The installer from that release has not been downloaded and run. Nothing is packaged

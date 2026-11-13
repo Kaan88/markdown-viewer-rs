@@ -48,7 +48,7 @@ a document needs it and exits when idle, so a malformed document cannot take the
 
 ## Status
 
-A personal project, usable every day on Windows 11. Version 0.1.0 is on the
+A personal project, usable every day on Windows 11. Version 0.2.0 is on the
 [releases page](https://github.com/Kaan88/markdown-viewer-rs/releases/latest) with its installer;
 it is not code-signed. It has been built and run on one PC. Linux is planned and
 not done for this shell.
