@@ -171,6 +171,8 @@ pub struct PageContext {
     pub has_selection: bool,
     /// The TeX or Mermaid text of the formula or diagram under the pointer.
     pub source: Option<(SourceKind, String)>,
+    /// The file is there to open in the editor.
+    pub editable: bool,
 }
 
 /// Find counts for the find box.
@@ -2005,13 +2007,14 @@ impl Workspace {
     /// Scrolls so `block` (nested blocks too) sits just below the top edge, as an outline click or
     /// an anchor does. False if the block is not on the page or there is no layout yet.
     pub fn scroll_to_block(&mut self, block: u32) -> bool {
-        self.jump(Jump::Block(block))
+        self.jump(Jump::Block(block), 0.0)
     }
 
     /// Brings a block or footnote entry to just below the top edge through the renderer, which
     /// measures the viewport it lands on first. False if the target is not on the page or there
-    /// is no layout yet.
-    fn jump(&mut self, target: Jump) -> bool {
+    /// is no layout yet, or if the page would move by less than `min_move` device px, in which
+    /// case it stays.
+    fn jump(&mut self, target: Jump, min_move: f32) -> bool {
         if !self.ensure_layout() {
             return false;
         }
@@ -2032,12 +2035,86 @@ impl Workspace {
         else {
             return false;
         };
+        if (top.round() - tab.scroll).abs() < min_move {
+            self.renderer.set_top(tab.scroll);
+            return false;
+        }
         tab.keep = None;
         tab.follow_end = false;
         tab.scroll = top.round();
         self.dirty = true;
         self.adopt();
         true
+    }
+
+    // ---- source lines ------------------------------------------------------------------------
+
+    /// Scrolls the showing document to the block that source line `line` (counting from 1) is in:
+    /// the line that block starts on goes just below the top edge. A line past the end gives the
+    /// last block. False when there is no document or layout yet.
+    pub fn scroll_to_line(&mut self, line: u32) -> bool {
+        self.jump_to_line(line, 0.0)
+    }
+
+    /// [`scroll_to_line`](Self::scroll_to_line) for another window's live updates: the page stays
+    /// put when the move would be under one arrow-key step, so a caret moving inside what is
+    /// already in view does not make the page tremble.
+    pub fn follow_line(&mut self, line: u32) -> bool {
+        let step = LINE_STEP * self.viewport.map_or(1.0, |v| v.scale);
+        self.jump_to_line(line, step)
+    }
+
+    fn jump_to_line(&mut self, line: u32, min_move: f32) -> bool {
+        let Some(doc) = self.active_document() else {
+            return false;
+        };
+        let Some(block) = doc.block_at_line(line) else {
+            return false;
+        };
+        // The line of text the block starts with, when it has any; a rule has none.
+        let text = doc.blocks[block as usize].text;
+        let target = if text.is_empty() {
+            Jump::Block(block)
+        } else {
+            Jump::Text(text.start)
+        };
+        self.jump(target, min_move)
+    }
+
+    /// The source line of the block at the top of the page, counting from 1; `None` without a
+    /// document or layout. This is the first line of text in view, found as a pointer at the top
+    /// of the page would find it, so a long list or table gives the item and not the whole.
+    pub fn top_source_line(&mut self) -> Option<u32> {
+        let viewport = self.viewport?;
+        let (x, y) = (viewport.width as f32 / 2.0, 4.0 * viewport.scale);
+        let hit = self.hit(x, y);
+        let doc = self.active_document()?;
+        // The hit's own block is the page's: the offset finds the innermost one.
+        let block = match hit {
+            Some(hit) => doc.block_at(hit.offset).unwrap_or(hit.block),
+            None => self.layout()?.block_at(self.scroll())?.block,
+        };
+        doc.blocks.get(block as usize).map(|b| b.line)
+    }
+
+    /// The source line tab `index` is at, for opening the same place in the editor: the top of the
+    /// page for the showing tab, the place it was left at for another.
+    pub fn source_line(&mut self, index: usize) -> Option<u32> {
+        if self.active == Some(index) {
+            return self.top_source_line();
+        }
+        let tab = self.tabs.get(index)?;
+        let block = tab.keep?.block;
+        tab.doc.as_ref()?.blocks.get(block as usize).map(|b| b.line)
+    }
+
+    /// A live update from the editor for `path`: scrolls to `line`, and only when `path` is the
+    /// showing file. Opens nothing and switches no tab.
+    pub fn follow(&mut self, path: &Path, line: u32) -> bool {
+        let path = canonical_or_absolute(path);
+        self.active_tab()
+            .is_some_and(|tab| same_file(tab.path(), &path))
+            && self.follow_line(line)
     }
 
     // ---- hit testing and the pointer ---------------------------------------------------------
@@ -2090,6 +2167,7 @@ impl Workspace {
             link,
             has_selection: self.has_selection(),
             source,
+            editable: self.active_tab().is_some_and(|t| !t.is_missing()),
         }
     }
 
@@ -2292,7 +2370,7 @@ impl Workspace {
             .and_then(|doc| doc.footnotes.get(index as usize))
             .map(|note| note.number);
         let from = self.place();
-        let moved = number.is_some_and(|number| self.jump(Jump::Footnote(number)));
+        let moved = number.is_some_and(|number| self.jump(Jump::Footnote(number), 0.0));
         self.remember(from);
         moved
     }
@@ -3399,6 +3477,87 @@ mod tests {
         let doc = ws.active_document().unwrap();
         let block = doc.details_keys()[0].0;
         assert!(ws.renderer.details_open(doc, block), "still open");
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `# Title`, then paragraph `i` on line `3 + 2 * i`.
+    fn paragraphs_by_line(count: usize) -> String {
+        format!("# Title\n\n{}", numbered("Body", 0..count))
+    }
+
+    #[test]
+    fn a_source_line_scrolls_to_its_block_and_back() {
+        let dir = temp_dir("lines");
+        let path = write(&dir, "doc.md", &paragraphs_by_line(300));
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        assert_eq!(ws.top_source_line(), Some(1));
+        // Paragraph 150 is on line 303; the second line of a paragraph would be 304.
+        assert!(ws.scroll_to_line(303));
+        settle(&mut ws);
+        let at = on_screen(&ws, "Body paragraph number 150 ");
+        assert!(
+            (at - JUMP_MARGIN).abs() <= 6.0,
+            "the block sits below the top edge: {at}"
+        );
+        // At the top of the page the line is the block's; the same for any block put there.
+        read_at(&mut ws, "Body paragraph number 77 ", 0.0);
+        assert_eq!(ws.top_source_line(), Some(3 + 2 * 77));
+        // Past the end it is the last block, before the start the first.
+        assert!(ws.scroll_to_line(100_000));
+        settle(&mut ws);
+        assert!(ws.scroll() > 0.0);
+        assert!(ws.scroll_to_line(0));
+        settle(&mut ws);
+        assert!(ws.scroll() < 3.0 * JUMP_MARGIN, "the title, below the edge");
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_line_inside_a_long_list_is_the_item_not_the_list() {
+        let dir = temp_dir("list-lines");
+        let items: String = (0..300).map(|i| format!("- item number {i}\n")).collect();
+        let path = write(&dir, "doc.md", &format!("# Title\n\n{items}"));
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        // Item 120 is on line 123. The whole list is one block of the page; the jump still lands
+        // inside it.
+        assert!(ws.scroll_to_line(123));
+        settle(&mut ws);
+        assert!(ws.scroll() > 1000.0, "{}", ws.scroll());
+        let top = ws.top_source_line().unwrap();
+        assert!((121..=124).contains(&top), "{top}");
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_follow_moves_only_the_showing_file_and_only_by_a_step() {
+        let dir = temp_dir("follow");
+        let path = write(&dir, "doc.md", &paragraphs_by_line(300));
+        let other = write(&dir, "other.md", &paragraphs_by_line(300));
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        ws.open(&other).unwrap();
+        settle(&mut ws);
+        // `other` is showing: a follow for `doc.md` changes nothing, not even the tab.
+        assert!(!ws.follow(&path, 303));
+        assert_eq!((ws.active(), ws.scroll()), (Some(1), 0.0));
+        assert!(!ws.follow(&dir.join("not-open.md"), 303));
+        assert_eq!(ws.tab_count(), 2);
+        // For the showing file it scrolls, and a repeat is under one step: it stays.
+        assert!(ws.follow(&other, 303));
+        let first = ws.scroll();
+        assert!(first > 0.0);
+        settle(&mut ws);
+        assert_eq!(ws.scroll(), first);
+        assert!(!ws.follow(&other, 303));
+        assert!(!ws.follow(&other, 305), "the next block is one line down");
+        assert_eq!(ws.scroll(), first);
+        // A real change of place goes through.
+        assert!(ws.follow(&other, 503));
+        assert!(ws.scroll() > first);
         _ = std::fs::remove_dir_all(&dir);
     }
 

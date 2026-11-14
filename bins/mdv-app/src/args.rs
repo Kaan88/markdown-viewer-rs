@@ -1,6 +1,7 @@
 //! Command-line arguments: files to open, start-up overrides, and the flags that render a UI state
 //! to a PNG without a window (`--shot`), so the look can be checked without a human.
 
+use mdshared_app::sister::{Rect, Request};
 use mdview_core::session::PageWidth;
 use std::path::PathBuf;
 
@@ -64,6 +65,15 @@ pub struct Args {
     pub scroll_steps: Option<u32>,
     /// Start maximized (for checking the frameless maximized geometry).
     pub maximize: bool,
+    /// `--line N`: scroll to the block holding source line N (counting from 1) of the file.
+    pub line: Option<u32>,
+    /// `--follow`: a live update from the editor, not an opening. It only ever reaches a window
+    /// that is already running and shows the file; it starts nothing.
+    pub follow: bool,
+    /// `--place x,y,w,h`: move and resize the window, in physical screen px.
+    pub place: Option<Rect>,
+    /// `--from <name>`: which application sent the launch.
+    pub from: Option<String>,
 }
 
 fn pair<T: std::str::FromStr>(s: &str, sep: char) -> Option<(T, T)> {
@@ -72,6 +82,25 @@ fn pair<T: std::str::FromStr>(s: &str, sep: char) -> Option<(T, T)> {
 }
 
 impl Args {
+    /// What each file asks of a window that is already running, when the launch asked for more than
+    /// opening it: see [`Request`]. Empty for an ordinary launch.
+    pub fn requests(&self) -> Vec<Request> {
+        if self.line.is_none() && !self.follow && self.place.is_none() && self.from.is_none() {
+            return Vec::new();
+        }
+        self.files
+            .iter()
+            .map(|path| Request {
+                path: path.clone(),
+                line: self.line,
+                column: None,
+                follow: self.follow,
+                place: self.place,
+                from: self.from.clone(),
+            })
+            .collect()
+    }
+
     /// Parses the arguments after the program name. Unknown flags and bad values are reported on
     /// stderr and ignored, so a stray flag never stops the viewer from opening.
     pub fn parse(args: impl IntoIterator<Item = String>) -> Args {
@@ -98,6 +127,10 @@ impl Args {
                 "--update-bar" => out.update_bar = value(&a),
                 "--check-update" => out.check_update = true,
                 "--maximize" => out.maximize = true,
+                "--follow" => out.follow = true,
+                "--line" => out.line = value(&a).and_then(|v| v.parse().ok()).filter(|&n| n >= 1),
+                "--place" => out.place = value(&a).and_then(|v| Rect::parse(&v)),
+                "--from" => out.from = value(&a).filter(|v| !v.is_empty()),
                 "--zoom" => out.zoom = value(&a).and_then(|v| v.trim_end_matches('%').parse().ok()),
                 "--page-width" => {
                     out.page_width = value(&a).and_then(|v| PageWidth::from_name(&v));
@@ -179,6 +212,38 @@ mod tests {
         let a = parse("--shot x.png --palette >zoom --dialog settings");
         assert_eq!(a.palette.as_deref(), Some(">zoom"));
         assert_eq!(a.dialog, Some(ShotDialog::Settings));
+    }
+
+    #[test]
+    fn the_hand_off_flags() {
+        let a = parse("--line 200 --follow --place -10,20,960,1000 --from mdedit notes.md");
+        assert_eq!(a.line, Some(200));
+        assert!(a.follow);
+        assert_eq!(
+            a.place,
+            Some(Rect {
+                x: -10,
+                y: 20,
+                w: 960,
+                h: 1000
+            })
+        );
+        assert_eq!(a.from.as_deref(), Some("mdedit"));
+        assert_eq!(
+            a.requests(),
+            [Request {
+                line: Some(200),
+                follow: true,
+                place: a.place,
+                from: Some("mdedit".into()),
+                ..Request::new("notes.md")
+            }]
+        );
+        // An ordinary launch has no request; bad values are dropped, not guessed at.
+        assert!(parse("a.md --dark").requests().is_empty());
+        let bad = parse("--line 0 --place 1,2,3 a.md");
+        assert_eq!((bad.line, bad.place), (None, None));
+        assert!(bad.requests().is_empty());
     }
 
     #[test]

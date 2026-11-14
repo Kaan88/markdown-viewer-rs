@@ -1098,7 +1098,7 @@ fn command_table_matches_the_inventory() {
         [Shortcut::Keys("Ctrl+Shift+2")]
     );
     assert_eq!(keys(CommandId::FocusMode), [Shortcut::Keys("Ctrl+Shift+F")]);
-    assert_eq!(commands::menu_items(Menu::File).count(), 10);
+    assert_eq!(commands::menu_items(Menu::File).count(), 11);
     assert_eq!(commands::menu_items(Menu::Edit).count(), 4);
     assert_eq!(commands::menu_items(Menu::View).count(), 8);
     assert_eq!(commands::menu_items(Menu::Theme).count(), 3);
@@ -2533,6 +2533,7 @@ fn command_table_matches_the_old_toolbar_and_view_menu() {
             ("Open files…", false),
             ("Open folder…", false),
             ("Refresh", false),
+            ("Edit in mdedit", false),
             ("Open recent", true),
             ("Manage recent files…", false),
             ("Clear recent files", false),

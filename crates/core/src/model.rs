@@ -193,6 +193,9 @@ pub struct Block {
     pub text: TextRange,
     /// This block's own inline spans.
     pub spans: TextRange,
+    /// The line of the file where the block starts, counting from 1. A block an HTML tag opened
+    /// is placed at the start of the HTML block it is in.
+    pub line: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -600,6 +603,21 @@ impl Document {
             self.blocks[block as usize].kind,
             BlockKind::Details { open: true }
         )
+    }
+
+    /// The block to show for source line `line`: of the blocks that start at or before it, the one
+    /// that starts last, and the latest in the tree (the innermost) among those. A line above the
+    /// first block gives the first, one below the last block's start gives that block. `None` for
+    /// a document with no blocks.
+    pub fn block_at_line(&self, line: u32) -> Option<u32> {
+        let mut best: Option<(u32, usize)> = None;
+        for (i, b) in self.blocks.iter().enumerate() {
+            if b.line <= line && best.is_none_or(|(l, _)| b.line >= l) {
+                best = Some((b.line, i));
+            }
+        }
+        best.map(|(_, i)| i as u32)
+            .or_else(|| (!self.blocks.is_empty()).then_some(0))
     }
 
     /// The innermost block whose text contains `pos`.

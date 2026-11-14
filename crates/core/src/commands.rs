@@ -37,6 +37,8 @@ pub enum CommandId {
     CloseOtherTabs,
     CopyFilePath,
     ShowInFileManager,
+    /// Open the file in mdedit, the sister editor, at the place being read.
+    EditInMdedit,
     /// Linux: make mdview the default app for Markdown files. In no menu bar menu; the shell's
     /// Settings (and its command palette) offer it where it applies.
     MakeDefault,
@@ -147,6 +149,12 @@ pub const COMMANDS: &[Command] = &[
         &[K("Ctrl+Shift+O")],
     ),
     cmd(C::Refresh, Menu::File, "Refresh", &[K("F5")]),
+    cmd(
+        C::EditInMdedit,
+        Menu::File,
+        "Edit in mdedit",
+        &[K("Ctrl+E")],
+    ),
     sep(styled(
         cmd(C::OpenRecent, Menu::File, "Open recent", &[]),
         CommandStyle::Submenu,

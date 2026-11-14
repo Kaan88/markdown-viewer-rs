@@ -87,6 +87,7 @@ the `.md` default.
 |---|---|
 | Open files, open folder | Ctrl+O, Ctrl+Shift+O |
 | Reload | F5 |
+| Edit in mdedit (the file, at the place being read) | Ctrl+E |
 | Close tab, close all | Ctrl+W, Ctrl+Shift+W |
 | Find | Ctrl+F |
 | Zoom in, out, reset | Ctrl++, Ctrl+-, Ctrl+0 |

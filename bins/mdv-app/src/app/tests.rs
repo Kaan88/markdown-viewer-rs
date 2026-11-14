@@ -701,19 +701,6 @@ fn settings_open_with_ctrl_comma_and_the_form_applies_each_change_at_once() {
     assert!(!a.ws.animations());
     a.apply_setting(s::CHECK_AT_LAUNCH, Value::Bool(false));
     assert!(!a.ws.checks_updates());
-    // Focus mode hides the panes, and the rows say so.
-    a.apply_setting(s::FOCUS_MODE, Value::Bool(true));
-    assert!(a.ui.focus_mode);
-    let form = a.ui.settings.as_ref().unwrap();
-    assert_eq!(form.value(s::FOCUS_MODE), Some(Value::Bool(true)));
-    assert_eq!(form.value(s::FILES_PANE), Some(Value::Bool(false)));
-    // Turning a pane on leaves focus mode.
-    a.apply_setting(s::FILES_PANE, Value::Bool(true));
-    assert!(!a.ui.focus_mode && a.ui.panes.files);
-    let form = a.ui.settings.as_ref().unwrap();
-    assert_eq!(form.value(s::FOCUS_MODE), Some(Value::Bool(false)));
-    a.apply_setting(s::OUTLINE_PANE, Value::Bool(false));
-    assert!(!a.ui.panes.outline);
     key(&mut a, KeyName::Escape, None);
     assert!(a.ui.settings.is_none());
 }
@@ -723,7 +710,7 @@ fn the_settings_form_follows_the_apps_limits() {
     use crate::settings as s;
     use mdshared_ui::settings::Row;
     let a = app(&["showcase.md"]);
-    let rows = s::rows(&a.ws, &a.ui);
+    let rows = s::rows(&a.ws);
     let zoom = rows
         .iter()
         .find_map(|r| match r {
@@ -782,6 +769,7 @@ fn the_main_menu_holds_what_people_use_while_reading_and_fits_the_window() {
         "Close tab",
         "Zoom in",
         "Files pane",
+        "Edit in mdedit",
         "Focus reading mode",
         "Command palette…",
         "Settings…",
@@ -798,4 +786,84 @@ fn the_main_menu_holds_what_people_use_while_reading_and_fits_the_window() {
             assert_eq!(item.icon, overlays::command_icon(id), "{}", item.label);
         }
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn edit_in_mdedit_starts_the_editor_at_the_top_line() {
+    // The "editor" is a script that records what it was started with.
+    let dir = std::env::temp_dir().join(format!("mdview-edit-{}", std::process::id()));
+    _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (script, record) = (dir.join("mdedit.sh"), dir.join("args.txt"));
+    let text = format!(
+        "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{}'\n",
+        record.display()
+    );
+    std::fs::write(&script, text).unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // SAFETY: no other test reads or writes this variable.
+    unsafe { std::env::set_var("MD_SISTER_MDEDIT", &script) };
+
+    let mut a = app(&["showcase.md"]);
+    assert!(a.ws.scroll_to_line(100));
+    a.compose();
+    let top = a.ws.top_source_line().unwrap();
+    assert!((90..=100).contains(&top), "{top}");
+    a.mods = CTRL;
+    key(&mut a, KeyName::Char('e'), Some("e"));
+    for _ in 0..300 {
+        if std::fs::read_to_string(&record).is_ok_and(|t| t.ends_with(".md\n")) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let args = std::fs::read_to_string(&record).unwrap_or_default();
+    let path = a.ws.active_tab().unwrap().path().display().to_string();
+    assert_eq!(args, format!("--goto\n{top}\n--from\nmdview\n{path}\n"));
+    // SAFETY: as above.
+    unsafe { std::env::remove_var("MD_SISTER_MDEDIT") };
+    _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_hand_over_opens_at_a_line_and_a_follow_only_scrolls() {
+    let mut a = app(&["showcase.md", "tables.md"]);
+    let (showcase, tables) = (fixture("showcase.md"), fixture("tables.md"));
+    let canonical = mdview_core::files::canonical_or_absolute;
+    let at = |a: &App| a.ws.active_tab().unwrap().path().to_path_buf();
+    assert_eq!(at(&a), canonical(&tables));
+    // An opening switches to the file and shows the line.
+    a.handed_over(vec![Request {
+        line: Some(120),
+        ..Request::new(&showcase)
+    }]);
+    a.compose();
+    assert_eq!(at(&a), canonical(&showcase));
+    let top = a.ws.top_source_line().unwrap();
+    assert!((110..=120).contains(&top), "{top}");
+    // A follow for the showing file scrolls it, and for another file does nothing at all.
+    let follow = |path: &Path, line| Request {
+        follow: true,
+        line: Some(line),
+        ..Request::new(path)
+    };
+    a.handed_over(vec![follow(&showcase, 10)]);
+    a.compose();
+    assert!(a.ws.top_source_line().unwrap() < 20);
+    let before = a.ws.scroll();
+    a.handed_over(vec![follow(&tables, 40)]);
+    a.compose();
+    assert_eq!((at(&a), a.ws.scroll()), (canonical(&showcase), before));
+    // One that is not open is not opened.
+    a.handed_over(vec![follow(&fixture("math.md"), 3)]);
+    assert_eq!(a.ws.tab_count(), 2);
+    // Of several waiting, the last one counts.
+    a.handed_over(vec![follow(&showcase, 150), follow(&showcase, 60)]);
+    a.compose();
+    let top = a.ws.top_source_line().unwrap();
+    assert!((50..=60).contains(&top), "{top}");
 }

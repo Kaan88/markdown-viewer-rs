@@ -48,8 +48,13 @@ pub fn parse_wiki(src: &str, wiki: &mut dyn FnMut(&str) -> WikiAs) -> Document {
     }
     // YAML front matter becomes a table (or a yaml block) before anything else sees the source.
     let with_front;
+    let mut front = Front::default();
     let src = match crate::frontmatter::take(src) {
         Some((head, used)) => {
+            front = Front {
+                replacement_lines: count_lines(head.as_bytes()),
+                original_lines: count_lines(&src.as_bytes()[..used]),
+            };
             with_front = format!("{head}{}", &src[used..]);
             with_front.as_str()
         }
@@ -75,7 +80,7 @@ pub fn parse_wiki(src: &str, wiki: &mut dyn FnMut(&str) -> WikiAs) -> Document {
     let protected = autolink::protect_url_delimiters(src);
     let restore = matches!(protected, Cow::Owned(_));
     if memchr::memchr(b'$', protected.as_bytes()).is_none() {
-        let mut b = Builder::new(&protected, restore, false, &mut *wiki);
+        let mut b = Builder::new(&protected, restore, false, front, &mut *wiki);
         for (event, range) in Parser::new_ext(&protected, options()).into_offset_iter() {
             b.event(event, range);
         }
@@ -84,9 +89,9 @@ pub fn parse_wiki(src: &str, wiki: &mut dyn FnMut(&str) -> WikiAs) -> Document {
         }
         let rejected = std::mem::take(&mut b.rejected_alerts);
         drop(b);
-        return parse_with_checks(protected, restore, rejected, wiki);
+        return parse_with_checks(protected, restore, rejected, front, wiki);
     }
-    parse_with_checks(protected, restore, Vec::new(), wiki)
+    parse_with_checks(protected, restore, Vec::new(), front, wiki)
 }
 
 /// GitHub writes inline math as ``$`x`$`` so that Markdown cannot touch the formula. This rewrites
@@ -161,6 +166,7 @@ fn parse_with_checks(
     mut src: Cow<'_, str>,
     mut restore: bool,
     rejected: Vec<usize>,
+    front: Front,
     wiki: &mut dyn FnMut(&str) -> WikiAs,
 ) -> Document {
     // Hiding swaps in characters from U+E003 upward. A document that already uses any character
@@ -173,7 +179,7 @@ fn parse_with_checks(
     }
     let passes = if can_hide { MATH_PASSES } else { 0 };
     for _ in 0..passes {
-        match build_checked(&src, restore, false, wiki) {
+        match build_checked(&src, restore, false, front, wiki) {
             Ok(doc) => return doc,
             Err(rejected) => {
                 src = Cow::Owned(hide_delimiters(&src, &rejected));
@@ -181,7 +187,7 @@ fn parse_with_checks(
             }
         }
     }
-    match build_checked(&src, restore, true, wiki) {
+    match build_checked(&src, restore, true, front, wiki) {
         Ok(doc) => doc,
         Err(_) => unreachable!("the literal pass rejects nothing"),
     }
@@ -193,9 +199,10 @@ fn build_checked(
     src: &str,
     restore: bool,
     literal: bool,
+    front: Front,
     wiki: &mut dyn FnMut(&str) -> WikiAs,
 ) -> Result<Document, Vec<usize>> {
-    let mut b = Builder::new(src, restore, literal, wiki);
+    let mut b = Builder::new(src, restore, literal, front, wiki);
     let mut gate = MathGate {
         boundary: true,
         inline: 0..src.len(),
@@ -437,9 +444,34 @@ struct Ambient {
     depth: usize,
 }
 
+/// What replacing YAML front matter with a table did to the line count, so a block's line is still
+/// the line of the file the reader would find it on.
+#[derive(Clone, Copy, Default)]
+struct Front {
+    /// Lines of the Markdown that stands in for the front matter.
+    replacement_lines: u32,
+    /// Lines of the front matter in the file.
+    original_lines: u32,
+}
+
+fn count_lines(bytes: &[u8]) -> u32 {
+    // A plain loop: the compiler turns it into a vector count, which beats one search per line.
+    bytes.iter().filter(|&&b| b == b'\n').count() as u32
+}
+
 struct Builder<'a> {
     src: &'a str,
     restore: bool,
+    front: Front,
+    /// Where the event being handled starts in `src`: the place of any block it opens.
+    event_at: usize,
+    /// The line breaks of `src` not yet counted, the next one's offset (`usize::MAX` for none),
+    /// and how many breaks lie before `counted_to`. Blocks open in order, so one walk over the
+    /// breaks finds every block's line.
+    breaks: memchr::Memchr<'a>,
+    next_break: usize,
+    counted_to: usize,
+    counted: u32,
     doc: Document,
     stack: Vec<Open>,
     cur_block: u32,
@@ -515,11 +547,20 @@ impl<'a> Builder<'a> {
         src: &'a str,
         restore: bool,
         literal_alerts: bool,
+        front: Front,
         wiki: &'a mut dyn FnMut(&str) -> WikiAs,
     ) -> Self {
+        let mut breaks = memchr::memchr_iter(b'\n', src.as_bytes());
+        let next_break = breaks.next().unwrap_or(usize::MAX);
         Builder {
             src,
             restore,
+            front,
+            event_at: 0,
+            breaks,
+            next_break,
+            counted_to: 0,
+            counted: 0,
             doc: Document {
                 text: String::with_capacity(src.len()),
                 blocks: Vec::with_capacity(src.len() / 64),
@@ -579,7 +620,35 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// The line of the file that byte `at` of `src` is on, counting from 1.
+    fn line_of(&mut self, at: usize) -> u32 {
+        let at = at.min(self.src.len());
+        let before = if at >= self.counted_to {
+            while self.next_break < at {
+                self.counted += 1;
+                self.next_break = self.breaks.next().unwrap_or(usize::MAX);
+            }
+            self.counted_to = at;
+            self.counted
+        } else {
+            // A block that opens at an earlier place than the last: the walk stays where it is.
+            self.counted - count_lines(&self.src.as_bytes()[at..self.counted_to])
+        };
+        let Front {
+            replacement_lines,
+            original_lines,
+        } = self.front;
+        if replacement_lines == 0 {
+            before + 1
+        } else if before < replacement_lines {
+            1
+        } else {
+            before - replacement_lines + original_lines + 1
+        }
+    }
+
     fn event(&mut self, event: Event<'a>, range: Range<usize>) {
+        self.event_at = range.start;
         if self.image_depth > 0 {
             return self.image_event(event);
         }
@@ -1199,6 +1268,7 @@ impl<'a> Builder<'a> {
         let idx = self.doc.blocks.len() as u32;
         let text = self.doc.text.len() as u32;
         let spans = self.doc.spans.len() as u32;
+        let line = self.line_of(self.event_at);
         self.doc.blocks.push(Block {
             kind,
             parent: self.cur_block,
@@ -1211,6 +1281,7 @@ impl<'a> Builder<'a> {
                 start: spans,
                 end: spans,
             },
+            line,
         });
         self.push_open(Open {
             node: Node::Block(idx),
@@ -1589,6 +1660,7 @@ impl<'a> Builder<'a> {
             end: idx + 1,
             text: TextRange::new(block.text.start as usize, text_end),
             spans: TextRange::new(block.spans.start as usize, spans_end),
+            line: block.line,
         });
         if !self.doc.text.ends_with('\n') {
             self.doc.text.push('\n');

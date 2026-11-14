@@ -879,6 +879,39 @@ are for "runs and looks sane", not golden comparison.
 and `text/x-markdown` and never sets a default; `.mdown` is `text/plain` in shared-mime-info, so it
 needs a small `mime/packages` XML. The package itself has never been installed with `pacman -U`.
 
+## 12a. Hand-off with mdedit (2026-11-14)
+
+"Edit in mdedit" (Ctrl+E; the main menu, the page menu, the tab menu, the palette) starts the editor
+at the line at the top of the page: `sister::open("mdedit", Request { path, line, from })`, with the
+editor found by `mdshared_app::sister::find` (a toast says `mdedit is not installed` when it is
+not). The editor's side, "Preview in mdview", is built apart from the protocol in the shared repo's
+`docs/SISTER.md`, which has the arguments, the wire format and what the editor must do.
+
+What the viewer got for it:
+
+- `Block::line` (core): the file line each block starts on, set while parsing (one walk over the
+  line breaks; front matter, which the parser replaces by a table, is accounted for). `Document::
+  block_at_line`. Parse of the 1 MB fixture: 7.0 to 7.4 ms in a release build (min of 40, same
+  machine); nothing measurable in the first frame.
+- `Workspace::scroll_to_line`, `follow_line` (ignores a move under one arrow-key step),
+  `top_source_line` (the innermost block at the top of the page, found as a hit test finds it, so
+  a long list gives the item), `source_line(tab)`, `follow(path, line)` (only the showing file).
+- Arguments `--line N`, `--follow`, `--place x,y,w,h`, `--from NAME`. A launch with them hands each
+  file to a running window as a `Request` (`single::forward_request`); `--follow` never starts a
+  window. A window receiving a non-follow request opens the file, shows the line, places itself if
+  asked and raises; a follow request only scrolls the showing file, and several waiting count once
+  (`App::handed_over`). `--line` and `--place` also apply to the window a launch opens itself.
+- The Settings dialog lost its Panes section (Files pane, Outline pane, Focus reading mode): those
+  are view state, in the main menu and on the bar.
+
+Run on KDE Wayland with a real window: `--line 200` and `--follow --line 400` from a second launch
+scrolled the page to the block of that line; `--follow` for a file that is not open did nothing;
+`--place` on a running window put it at the asked rectangle (KWin listing). A unit test runs the real
+`Ctrl+E` against a script standing in for the editor. Not run: Windows, X11, GNOME, the real mdedit.
+Known limits: a code block or a long paragraph is one block, so the caret inside it keeps the
+page at the block's top; a follow puts the line's block just below the top edge each time, rather
+than leaving the page alone while the caret stays in view.
+
 ## 13. What to do next
 
 The user set a list on 2026-11-12; everything on it is done: Qt retired (2026-11-13), the port

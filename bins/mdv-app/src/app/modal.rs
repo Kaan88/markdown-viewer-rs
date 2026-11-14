@@ -42,7 +42,7 @@ impl App {
         self.ui.find_focused = false;
         self.ui.dialog = None;
         self.ui.palette = None;
-        self.ui.settings = Some(setting::form(&self.ws, &self.ui));
+        self.ui.settings = Some(setting::form(&self.ws));
         self.modal_changed();
     }
 
@@ -227,7 +227,6 @@ impl App {
 
     /// Applies one change with the setter the menus used, which also saves it.
     pub(super) fn apply_setting(&mut self, id: u32, value: Value) {
-        let (files, outline, focus) = setting::pane_values(&self.ui);
         match (id, value) {
             (setting::PAGE_WIDTH, Value::Choice(i)) => {
                 let width = PageWidth::ALL.get(i).copied().unwrap_or_default();
@@ -243,21 +242,8 @@ impl App {
             (setting::REMOTE_IMAGES, Value::Bool(on)) => self.ws.set_remote_always(on),
             (setting::TICK_BOXES, Value::Bool(on)) => self.ws.set_edit_always(on),
             (setting::ANIMATIONS, Value::Bool(on)) => self.ws.set_animations(on),
-            (setting::FILES_PANE, Value::Bool(on)) if on != files => self.command(C::ToggleFiles),
-            (setting::OUTLINE_PANE, Value::Bool(on)) if on != outline => {
-                self.command(C::ToggleOutline)
-            }
-            (setting::FOCUS_MODE, Value::Bool(on)) if on != focus => self.command(C::FocusMode),
             (setting::CHECK_AT_LAUNCH, Value::Bool(on)) => self.ws.set_checks_updates(on),
             _ => {}
-        }
-        // Turning on a pane leaves focus mode, and focus mode hides the panes: the three rows
-        // follow each other.
-        let (files, outline, focus) = setting::pane_values(&self.ui);
-        if let Some(f) = self.ui.settings.as_mut() {
-            f.set_value(setting::FILES_PANE, Value::Bool(files));
-            f.set_value(setting::OUTLINE_PANE, Value::Bool(outline));
-            f.set_value(setting::FOCUS_MODE, Value::Bool(focus));
         }
     }
 }

@@ -53,6 +53,7 @@ pub fn command_icon(id: C) -> &'static str {
         C::ShowShortcuts => glyph::KEYBOARD,
         C::About => glyph::INFO,
         C::CopyFilePath => glyph::COPY,
+        C::EditInMdedit => glyph::EDIT,
         C::MakeDefault => glyph::CHECK,
         C::Escape => "",
     }
@@ -62,6 +63,7 @@ pub fn command_icon(id: C) -> &'static str {
 /// Settings.
 pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
     let has_tab = ws.active().is_some();
+    let can_edit = ws.active_tab().is_some_and(|t| !t.is_missing());
     // What people use while reading; the preferences (page width, remote images, task boxes,
     // animations, the default app) are in Settings.
     let items = vec![
@@ -74,6 +76,7 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
         cmd(C::Refresh, "Reload", glyph::RELOAD)
             .sep()
             .enabled(has_tab),
+        cmd(C::EditInMdedit, "Edit in mdedit", glyph::EDIT).enabled(can_edit),
         cmd(C::CloseTab, "Close tab", glyph::CLOSE).enabled(has_tab),
         cmd(C::CloseAllTabs, "Close all tabs", glyph::CLOSE_ALL).enabled(has_tab),
         cmd(C::ZoomIn, "Zoom in", glyph::ZOOM).sep(),
@@ -147,9 +150,11 @@ pub fn tab_menu(ws: &Workspace, index: usize, x: f32, y: f32) -> Menu<Act> {
             .icon(glyph::CLOSE_OTHERS)
             .enabled(many),
         Item::new(Act::TabCmd(C::CloseAllTabs, index), "Close all tabs").icon(glyph::CLOSE_ALL),
-        Item::new(Act::TabCmd(C::CopyFilePath, index), "Copy file path")
-            .icon(glyph::COPY)
+        Item::new(Act::TabCmd(C::EditInMdedit, index), "Edit in mdedit")
+            .icon(glyph::EDIT)
+            .enabled(ws.tab(index).is_some_and(|t| !t.is_missing()))
             .sep(),
+        Item::new(Act::TabCmd(C::CopyFilePath, index), "Copy file path").icon(glyph::COPY),
         Item::new(
             Act::TabCmd(C::ShowInFileManager, index),
             mdview_core::commands::command(C::ShowInFileManager).label,
@@ -192,6 +197,7 @@ pub fn page_menu(ctx: &PageContext, x: f32, y: f32) -> Menu<Act> {
     );
     items.push(cmd(C::Find, "Find…", glyph::SEARCH).sep());
     items.push(cmd(C::Refresh, "Reload", glyph::RELOAD));
+    items.push(cmd(C::EditInMdedit, "Edit in mdedit", glyph::EDIT).enabled(ctx.editable));
     Menu::new(items, x, y, false)
 }
 

@@ -251,9 +251,12 @@ fn commands(ws: &Workspace) -> (Vec<Entry>, Vec<Target>) {
     table.sort_by_key(|c| group(c.menu));
     for c in table {
         let enabled = match c.id {
-            C::Refresh | C::CloseTab | C::CloseAllTabs | C::CopyFilePath | C::ShowInFileManager => {
-                has_tab
-            }
+            C::Refresh
+            | C::CloseTab
+            | C::CloseAllTabs
+            | C::CopyFilePath
+            | C::ShowInFileManager
+            | C::EditInMdedit => has_tab,
             C::CloseOtherTabs | C::NextTab | C::PreviousTab => many,
             C::ClearRecent => any_recent,
             _ => true,

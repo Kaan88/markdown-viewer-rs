@@ -221,6 +221,16 @@ impl App {
             C::ShowInFileManager => {
                 platform::reveal_in_file_manager(&path);
             }
+            C::EditInMdedit => {
+                let request = Request {
+                    line: self.ws.source_line(index),
+                    from: Some("mdview".into()),
+                    ..Request::new(path)
+                };
+                if let Err(message) = mdshared_app::sister::open("mdedit", &request) {
+                    self.ws.set_status(&message);
+                }
+            }
             other => self.command(other),
         }
     }
@@ -525,7 +535,7 @@ impl App {
                 self.ws.previous_tab();
             }
             C::Escape => self.escape(),
-            C::CloseOtherTabs | C::CopyFilePath | C::ShowInFileManager => {
+            C::CloseOtherTabs | C::CopyFilePath | C::ShowInFileManager | C::EditInMdedit => {
                 if let Some(i) = self.ws.active() {
                     self.tab_command(id, i);
                 }
@@ -561,23 +571,59 @@ impl App {
         self.ws.clear_selection();
     }
 
+    // ---- hand-off from the editor and later launches ------------------------------------------
+
+    /// What other launches and the editor asked for since the last frame. A file is opened and
+    /// shown at its line. A live update (`follow`) only scrolls the file that is showing, and the
+    /// window is neither raised nor focused for it; of several waiting, the last counts, so one
+    /// frame moves the page once. Anything else raises the window, as a second launch always did.
+    pub(super) fn handed_over(&mut self, requests: Vec<Request>) {
+        let mut follow: Option<&Request> = None;
+        for request in &requests {
+            if request.follow {
+                follow = Some(request);
+            } else if self.ws.open(&request.path).is_ok()
+                && let Some(line) = request.line
+            {
+                self.ws.scroll_to_line(line);
+            }
+        }
+        if let Some(request) = follow
+            && let Some(line) = request.line
+        {
+            self.ws.follow(&request.path, line);
+        }
+        if let Some(rect) = requests.iter().rev().find_map(|r| r.place) {
+            self.place(rect);
+        }
+        let only_following = !requests.is_empty() && requests.iter().all(|r| r.follow);
+        if !only_following && let Some(w) = &self.window {
+            w.set_minimized(false);
+            w.focus_window();
+        }
+    }
+
+    /// Moves and resizes the window to `rect` (physical screen px), or says it cannot be done.
+    pub(super) fn place(&mut self, rect: mdshared_app::sister::Rect) {
+        if let Some(w) = &self.window
+            && !mdshared_ui::place::set(w, rect)
+        {
+            self.ws
+                .set_status("This desktop does not let a window be placed");
+        }
+    }
+
     // ---- wakes and timers ----------------------------------------------------------------------
 
     pub(super) fn woken(&mut self, wake: Wake) {
         match wake {
             Wake::Instance => {
-                let paths: Vec<PathBuf> = self
+                let requests: Vec<Request> = self
                     .incoming
                     .as_ref()
                     .map(|r| r.try_iter().collect())
                     .unwrap_or_default();
-                for p in paths {
-                    let _ = self.ws.open(&p);
-                }
-                if let Some(w) = &self.window {
-                    w.set_minimized(false);
-                    w.focus_window();
-                }
+                self.handed_over(requests);
             }
             Wake::Files => {
                 if let Some(w) = &self.watcher {

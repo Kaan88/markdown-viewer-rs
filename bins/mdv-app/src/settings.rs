@@ -4,7 +4,6 @@
 //! used, so there is no second copy of any setting.
 
 use crate::platform;
-use crate::ui::Ui;
 use crate::updater;
 use crate::workspace::{ThemeChoice, Workspace};
 use mdshared_ui::settings::{Form, Row};
@@ -16,12 +15,9 @@ pub const THEME: u32 = 3;
 pub const REMOTE_IMAGES: u32 = 4;
 pub const TICK_BOXES: u32 = 5;
 pub const ANIMATIONS: u32 = 6;
-pub const FILES_PANE: u32 = 7;
-pub const OUTLINE_PANE: u32 = 8;
-pub const FOCUS_MODE: u32 = 9;
-pub const CHECK_AT_LAUNCH: u32 = 10;
-pub const CHECK_NOW: u32 = 11;
-pub const DEFAULT_APP: u32 = 12;
+pub const CHECK_AT_LAUNCH: u32 = 7;
+pub const CHECK_NOW: u32 = 8;
+pub const DEFAULT_APP: u32 = 9;
 
 pub const WIDTHS: [&str; 3] = ["Narrow", "Wide", "Full"];
 pub const THEMES: [&str; 3] = ["System", "Light", "Dark"];
@@ -46,17 +42,7 @@ pub fn theme_of(i: usize) -> ThemeChoice {
     }
 }
 
-/// The panes as the main menu shows them: a pane is open when it shows, which focus mode hides.
-pub fn pane_values(ui: &Ui) -> (bool, bool, bool) {
-    (
-        ui.panes.files && !ui.focus_mode,
-        ui.panes.outline && !ui.focus_mode,
-        ui.focus_mode,
-    )
-}
-
-pub fn rows(ws: &Workspace, ui: &Ui) -> Vec<Row> {
-    let (files, outline, focus) = pane_values(ui);
+pub fn rows(ws: &Workspace) -> Vec<Row> {
     let mut rows = vec![
         Row::header("Page"),
         Row::choice(
@@ -90,11 +76,6 @@ pub fn rows(ws: &Workspace, ui: &Ui) -> Vec<Row> {
         .help("Otherwise the first tick in a file asks."),
         Row::toggle(ANIMATIONS, "Play animated images", ws.animations())
             .help("Off shows their first frame."),
-        Row::header("Panes"),
-        Row::toggle(FILES_PANE, "Files pane", files),
-        Row::toggle(OUTLINE_PANE, "Outline pane", outline),
-        Row::toggle(FOCUS_MODE, "Focus reading mode", focus)
-            .help("Hides the bar and the panes. Escape leaves it."),
         // The About dialog offers both unconditionally (a copy that cannot update itself says so
         // when asked), so this does too.
         Row::header("Updates"),
@@ -124,6 +105,6 @@ fn check_now_label(ws: &Workspace) -> String {
     }
 }
 
-pub fn form(ws: &Workspace, ui: &Ui) -> Form {
-    Form::new("Settings", rows(ws, ui))
+pub fn form(ws: &Workspace) -> Form {
+    Form::new("Settings", rows(ws))
 }

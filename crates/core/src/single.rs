@@ -2,6 +2,7 @@
 //! with this application's name.
 
 use mdshared_app::single as shared;
+use mdshared_app::sister::Request;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 
@@ -26,4 +27,17 @@ pub fn listen_waking(
     wake: impl Fn() + Send + 'static,
 ) -> Option<Receiver<PathBuf>> {
     shared::listen_waking(APP, settings, wake)
+}
+
+/// [`forward`] for a file with a line to show or a window to place: see [`Request`].
+pub fn forward_request(settings: &Path, request: &Request) -> bool {
+    shared::forward_request(APP, settings, request)
+}
+
+/// [`listen_waking`] handing over what each launch asked for its file, not only the path.
+pub fn listen_requests_waking(
+    settings: &Path,
+    wake: impl Fn() + Send + 'static,
+) -> Option<Receiver<Request>> {
+    shared::listen_requests_waking(APP, settings, wake)
 }

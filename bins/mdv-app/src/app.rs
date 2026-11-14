@@ -27,6 +27,7 @@ use crate::ui::{
 };
 use crate::updater;
 use crate::workspace::{Click, LinkOutcome, ThemeChoice, Workspace};
+use mdshared_app::sister::Request;
 use mdview_core::commands::CommandId as C;
 use mdview_core::watch::FileWatcher;
 use mdview_render::Bitmap;
@@ -121,7 +122,7 @@ struct App {
     /// request is ignored until its answer arrives.
     #[cfg(not(windows))]
     dialog_open: bool,
-    incoming: Option<Receiver<PathBuf>>,
+    incoming: Option<Receiver<Request>>,
     watcher: Option<FileWatcher>,
     /// The folders the watcher follows for the Files pane: the tree's root and expanded folders
     /// while the pane is open.
@@ -1075,6 +1076,14 @@ impl ApplicationHandler<Wake> for App {
             self.ws.scroll_to(px * self.scale);
             self.redraw();
         }
+        // `--line` and `--place`, for the launch that opened this window.
+        if let Some(line) = self.args.line {
+            self.ws.scroll_to_line(line);
+            self.redraw();
+        }
+        if let Some(rect) = self.args.place {
+            self.place(rect);
+        }
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, wake: Wake) {
@@ -1383,10 +1392,23 @@ pub fn run() -> i32 {
         (false, false) => explicit.or_else(mdview_core::session::default_settings_path),
     };
     if let Some(settings) = session.as_ref().filter(|_| args.shot.is_none()) {
-        // A window is already open: hand it the files and quit, before any window work.
-        if mdview_core::single::forward(settings, &args.files) {
+        // A window is already open: hand it the files and quit, before any window work. A launch
+        // that asks for a line, a place or a follow hands each file over with that.
+        let requests = args.requests();
+        let handed = if requests.is_empty() {
+            mdview_core::single::forward(settings, &args.files)
+        } else {
+            requests
+                .iter()
+                .all(|r| mdview_core::single::forward_request(settings, r))
+        };
+        if handed {
             return 0;
         }
+    }
+    // A live update is for a window that shows the file already: with none, there is nothing to do.
+    if args.follow && args.shot.is_none() {
+        return 0;
     }
     stage(started, "single-instance check");
     let ws = Workspace::new(session.clone());
@@ -1418,7 +1440,7 @@ pub fn run() -> i32 {
     let proxy = event_loop.create_proxy();
     if let Some(settings) = &app.session {
         let p = proxy.clone();
-        app.incoming = mdview_core::single::listen_waking(settings, move || {
+        app.incoming = mdview_core::single::listen_requests_waking(settings, move || {
             let _ = p.send_event(Wake::Instance);
         });
     }
