@@ -2592,6 +2592,12 @@ impl Workspace {
         doc.text.get(from as usize..to as usize).map(str::to_string)
     }
 
+    /// The selection as an HTML fragment, to go on the clipboard beside the text.
+    pub fn selected_html(&self) -> Option<String> {
+        let (from, to) = self.selection()?;
+        mdview_core::rich::selection_html(self.active_document()?, from, to)
+    }
+
     pub fn select_all(&mut self) -> bool {
         let Some(tab) = self.active.and_then(|i| self.tabs.get_mut(i)) else {
             return false;
@@ -4078,6 +4084,22 @@ mod tests {
         ws.find_set("needle");
         assert!(ws.scroll() > 1000.0);
         assert_eq!(ws.find_marks().current.len(), 1, "the match is on screen");
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_selection_is_also_html() {
+        let dir = temp_dir("selhtml");
+        let path = write(&dir, "doc.md", "# Head\n\nalpha **bravo** charlie\n");
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        ws.paint(800, 600, 1.0).unwrap();
+        assert!(ws.selected_html().is_none());
+        assert!(ws.select_all());
+        assert_eq!(
+            ws.selected_html().as_deref(),
+            Some("<h1>Head</h1><p>alpha <strong>bravo</strong> charlie</p>")
+        );
         _ = std::fs::remove_dir_all(&dir);
     }
 
