@@ -2,7 +2,9 @@
 # Builds every file of an mdview release on Linux, the Windows and Linux files together, and with
 # --publish creates the GitHub release. Everything is written to target/release-files-all/:
 #
-#   mdview-<version>-linux-x86_64.AppImage  packaging/linux/build-appimage.sh (both binaries inside)
+#   mdview-<version>-linux-x86_64.AppImage  packaging/linux/build-packages.sh (both binaries inside; it also
+#   mdview-<version>-linux-x86_64.tar.gz    makes the .tar.gz, .deb, .rpm and PKGBUILD below)
+#   mdview_<version>_amd64.deb, mdview-<version>-1.x86_64.rpm, PKGBUILD
 #   mdview.exe, mdview-engine.exe           packaging/windows-cross/build.sh (cross-built)
 #   mdview-setup-<version>.exe              packaging/windows-cross/build.sh (ISCC under Wine)
 #   mdview-update.txt                       packaging/write-manifest.sh, both platforms
@@ -14,7 +16,8 @@
 # --notes is the manifest's one line (what the in-app update bar shows; optional); --notes-file
 # holds the GitHub release text. It refuses a dirty tree (changes under docs/ do not count) and a
 # HEAD that no remote branch contains. The release is created on the current commit as
-# `v<version>`, marked latest, with all five assets.
+# `v<version>`, marked latest, with all the assets (the Linux packages included;
+# a release from the CI workflow is the one meant for users, see docs/CI.md).
 set -euo pipefail
 
 app=mdview
@@ -51,9 +54,11 @@ all="$root/target/release-files-all"
 rm -rf "$all"
 mkdir -p "$all"
 
-packaging/linux/build-appimage.sh
+packaging/linux/build-packages.sh
 packaging/windows-cross/build.sh ${notes:+--notes "$notes"}
-cp "target/dist-linux/$app-$version-linux-x86_64.AppImage" target/dist-cross/mdview.exe target/dist-cross/mdview-engine.exe \
+cp "target/dist-linux/$app-$version-linux-x86_64.AppImage" "target/dist-linux/$app-$version-linux-x86_64.tar.gz" \
+   "target/dist-linux/${app}_${version}_amd64.deb" "target/dist-linux/$app-$version-1.x86_64.rpm" target/dist-linux/PKGBUILD \
+   target/dist-cross/mdview.exe target/dist-cross/mdview-engine.exe \
    "target/dist-cross/$app-setup-$version.exe" "$all/"
 packaging/write-manifest.sh --version "$version" ${notes:+--notes "$notes"} --out "$all" \
     --windows-exe "$all/mdview.exe" --windows-engine "$all/mdview-engine.exe" \
@@ -68,7 +73,8 @@ if [ "$publish" = 0 ]; then
     exit 0
 fi
 cmd=(gh release create "v$version" "$all/$app-$version-linux-x86_64.AppImage" "$all/mdview.exe"
-     "$all/mdview-engine.exe" "$all/$app-setup-$version.exe" "$all/$app-update.txt"
+     "$all/mdview-engine.exe" "$all/$app-setup-$version.exe" "$all/$app-update.txt" "$all/$app-$version-linux-x86_64.tar.gz"
+     "$all/${app}_${version}_amd64.deb" "$all/$app-$version-1.x86_64.rpm" "$all/PKGBUILD"
      --repo "$slug" --target "$sha" --title "$app $version" --notes-file "$notes_file" --latest)
 if [ "$dry" = 1 ]; then
     printf 'dry run, would run:'; printf ' %q' "${cmd[@]}"; echo
