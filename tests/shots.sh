@@ -133,4 +133,14 @@ fi
 # An unknown family: the same page as the default, since the default stack stays behind it.
 shot page-font-unknown --light --page-font "No Such Family Anywhere" --code-font "Nor This One" "$fx/showcase.md"
 
+# The window as the client-drawn margin shows it (--frame): the shadow and the rounded corners over
+# a flat backdrop, at scale 1 and 2 in both themes, and the other two choices of Window corners.
+# The settings dialogs above show the row.
+shot frame-round-light --light --size 520x360 --frame round "$fx/showcase.md"
+shot frame-round-dark --dark --size 520x360 --frame round "$fx/showcase.md"
+shot frame-round-light-2x --light --size 520x360 --scale 2 --frame round "$fx/showcase.md"
+shot frame-round-dark-2x --dark --size 520x360 --scale 2 --frame round "$fx/showcase.md"
+shot frame-small-light --light --size 520x360 --frame small "$fx/showcase.md"
+shot frame-square-light --light --size 520x360 --frame square "$fx/showcase.md"
+
 ls "$out" | wc -l

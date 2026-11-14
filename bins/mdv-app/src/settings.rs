@@ -6,6 +6,7 @@
 use crate::platform;
 use crate::updater;
 use crate::workspace::{ThemeChoice, Workspace};
+use mdshared_ui::corners::{self, Corners};
 use mdshared_ui::settings::{Form, Row};
 use mdview_core::session::{PageWidth, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
 
@@ -20,6 +21,7 @@ pub const CHECK_NOW: u32 = 8;
 pub const DEFAULT_APP: u32 = 9;
 pub const PAGE_FONT: u32 = 10;
 pub const CODE_FONT: u32 = 11;
+pub const WINDOW_CORNERS: u32 = 12;
 
 pub const WIDTHS: [&str; 3] = ["Narrow", "Wide", "Full"];
 pub const THEMES: [&str; 3] = ["System", "Light", "Dark"];
@@ -44,7 +46,9 @@ pub fn theme_of(i: usize) -> ThemeChoice {
     }
 }
 
-pub fn rows(ws: &Workspace) -> Vec<Row> {
+/// The rows. `corners` is whether the window can be rounded here, so the setting is offered: where
+/// the system gives it no way to (X11 without the margin) the row is left out.
+pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
     let mut rows = vec![
         Row::header("Page"),
         Row::choice(
@@ -92,6 +96,23 @@ pub fn rows(ws: &Workspace) -> Vec<Row> {
         ),
         Row::action(CHECK_NOW, "Look for a newer version", check_now_label(ws)),
     ];
+    if corners {
+        // After Theme, in the Page group.
+        let at = rows
+            .iter()
+            .position(|r| matches!(r, Row::Choice { id, .. } if *id == THEME))
+            .map_or(rows.len(), |i| i + 1);
+        rows.insert(
+            at,
+            Row::choice(
+                WINDOW_CORNERS,
+                Corners::SETTING_LABEL,
+                &Corners::LABELS,
+                Corners::from_setting(ws.corners()).index(),
+            )
+            .help(corners::setting_help()),
+        );
+    }
     if platform::can_offer_default_app() {
         rows.push(Row::header("System"));
         rows.push(Row::action(
@@ -111,6 +132,6 @@ fn check_now_label(ws: &Workspace) -> String {
     }
 }
 
-pub fn form(ws: &Workspace) -> Form {
-    Form::new("Settings", rows(ws))
+pub fn form(ws: &Workspace, corners: bool) -> Form {
+    Form::new("Settings", rows(ws, corners))
 }

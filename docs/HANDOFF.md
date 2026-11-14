@@ -1115,14 +1115,7 @@ up.
 - A copy button on code blocks.
 - Carried over: the speed-versus-size build comparison on Windows, and a hand run of this
   release on a Windows desktop.
-- For consideration, not agreed (owner, 2026-11-14): rounded window corners. Default radius 8
-  logical px, scaled with the display, square when maximised, tiled or fullscreen, with a setting
-  that includes 0. Reasons: 8 sits between KDE Breeze (about 5 px, from bug reports) and GNOME
-  libadwaita (about 12 px, from a 2021 commit and forum estimates), and matches the 8 px radius the
-  apps' own dialogs use. There is no standard way to ask a Linux desktop for its radius. On Windows
-  11, ask the system for its standard rounding (the DWM corner preference) instead of drawing. On
-  KDE it needs the client-margin shadow route, because KWin's shadow route leaves the window opaque
-  and square; that is why it was not squeezed into this release.
+- Rounded window corners (agreed 2026-11-14): built on branch `next`, see "Next release work".
 
 The same list is in `docs/PLAN.md`.
 
@@ -1365,3 +1358,34 @@ elease`). **The installer's last page
 - `rc.exe` (for the exe icon) is at
   `C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64`; from Git Bash the build script
   could not run it once.
+
+## Next release work (branch next)
+
+### Rounded window corners (base `774cea3`)
+
+Built in the shared crates (`mdshared_ui::corners`, `shadow`; branch `next` of the shared
+repository, docs/LINUX.md "Rounded window corners") and wired here the same way as in mdedit.
+
+- Built: the "Window corners" setting (Square, Small = 4, Round = 8 logical px; default Round),
+  in the Page group of Settings under Theme, kept as `corners=` in the session file (the radius;
+  written only when not 8; `Session.corners`, `Workspace::corners` / `set_corners`). Windows:
+  the DWM preference, applied at window creation, on a theme change and on a change of the
+  setting. Wayland client margin: the anti-aliased corner cut in `present` (only the corner
+  squares a copied rectangle touches, all four after a whole copy or a repainted margin) with the
+  shadow under it. `--frame square|small|round` for `--shot`, six `frame-*` shots (scale 1 and 2,
+  both themes). Tests: the session value, the settings row and its change, `--frame`, the frame
+  picture; the corner mask and painter are tested in the shared crate.
+- Decisions: radii 0, 4 and 8 only (exact on Windows too: do not round, small, round). On KDE the
+  default (Round) uses the client margin instead of KWin's protocol, because KWin's route is
+  opaque; Square keeps KWin's route, and a change from Square to Round applies at the next start
+  (the help line says so). The row is hidden where nothing can round (X11 without the margin). The
+  Windows 11 preference was set to Round unconditionally in the shared `style_window`; that call is
+  now the setting's.
+- NOT verified (no local builds by the owner's rule; CI only): any real window on any desktop.
+  Not seen: the corner in a real Wayland window, KDE with the route change, the shadow under the
+  corner, a tiled or maximized window, switching the setting at run time, Windows 11 DWM rounding,
+  Windows 10 staying square, fractional scales other than in the shared unit tests. The startup
+  and scroll budgets were not measured: the change adds a `Shadow::rounds()` check to `present` and
+  nothing else on the scroll path; with Square or without a margin nothing runs. The KDE route
+  change moves the default KDE window from KWin's shadow to the client-drawn one (a larger buffer
+  by the 36 px margin on each side), which was not timed.

@@ -324,14 +324,15 @@ Agreed after mdview 0.3.0 and mdedit 0.5.0 (Windows and Linux).
   purpose.
 - Carried over: the speed-versus-size build comparison on Windows (a build compiled for speed
   with unwinding against the current profile), and a hand run of 0.3.0 on a Windows desktop.
-- For consideration, not agreed (owner, 2026-11-14): rounded window corners. Default radius 8
-  logical px, scaled with the display, square when maximised, tiled or fullscreen, with a setting
-  that includes 0. It sits between KDE Breeze (about 5 px, from bug reports) and GNOME
-  libadwaita (about 12 px, from a 2021 commit and forum estimates), and matches the 8 px radius the
-  apps' own dialogs use. There is no standard way to ask a Linux desktop for its radius. On Windows
-  11, ask the system for its standard rounding (the DWM corner preference) instead of drawing. On
-  KDE it needs the client-margin shadow route, because KWin's shadow route leaves the window opaque
-  and square.
+- Rounded window corners (owner request 2026-11-14, agreed 2026-11-14): **built on branch `next`,
+  not yet released.** Default radius 8 logical px, scaled with the display, square when maximised,
+  tiled or fullscreen, with a setting (Square, Small = 4, Round = 8). It sits between KDE Breeze
+  (about 5 px, from bug reports) and GNOME libadwaita (about 12 px, from a 2021 commit and forum
+  estimates), and matches the 8 px radius the apps' own dialogs use. There is no standard way to
+  ask a Linux desktop for its radius. On Windows 11 the system rounds (the DWM corner preference),
+  nothing is drawn. On KDE it needs the client-margin shadow route, because KWin's shadow route
+  leaves the window opaque and square: with rounding wanted, `Auto` takes the margin there too
+  (the shared repository's docs/LINUX.md, "Rounded window corners").
 
 ### Scope to port
 

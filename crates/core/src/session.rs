@@ -105,6 +105,9 @@ pub struct Session {
     pub edit_tasks: bool,
     /// Play animated GIF and WebP images. On by default; off shows their first frame.
     pub animations: bool,
+    /// The window's corner radius in logical px: 8 (the default), 4 or 0 (square). The shell
+    /// turns it into `mdshared_ui::corners::Corners`; this crate keeps the number.
+    pub corners: u8,
     /// Look for a newer version at launch, at most once a day. On by default.
     pub check_updates: bool,
     /// When the last look for a newer version finished, in seconds since the Unix epoch; 0 for
@@ -118,6 +121,17 @@ pub struct Session {
     /// line per file, most recent first. The position is the shell's text
     /// (`place::ReadingPlace::to_setting`); the session stores it and never reads it.
     pub places: Places,
+}
+
+/// The default window corner radius, logical px.
+pub const CORNERS_DEFAULT: u8 = 8;
+
+/// A corner radius from the settings file: 0, 4 or 8; anything else is the default.
+pub fn clean_corners(v: u8) -> u8 {
+    match v {
+        0 | 4 => v,
+        _ => CORNERS_DEFAULT,
+    }
 }
 
 /// A font family name as typed, made safe to put in a family list: trimmed, without the characters
@@ -146,6 +160,7 @@ impl Default for Session {
             page_width: PageWidth::default(),
             edit_tasks: false,
             animations: true,
+            corners: CORNERS_DEFAULT,
             check_updates: true,
             update_checked: 0,
             page_font: String::new(),
@@ -180,6 +195,9 @@ impl Session {
                 "page_width" => s.page_width = PageWidth::from_name(value).unwrap_or_default(),
                 "edit_tasks" => s.edit_tasks = value.trim() == "1",
                 "animations" => s.animations = value.trim() != "0",
+                "corners" => {
+                    s.corners = clean_corners(value.trim().parse().unwrap_or(CORNERS_DEFAULT))
+                }
                 "check_updates" => s.check_updates = value.trim() != "0",
                 "update_checked" => s.update_checked = value.trim().parse().unwrap_or(0),
                 "page_font" => s.page_font = clean_family(value),
@@ -217,6 +235,10 @@ impl Session {
         line("page_width", self.page_width.name());
         line("edit_tasks", if self.edit_tasks { "1" } else { "0" });
         line("animations", if self.animations { "1" } else { "0" });
+        // Only when not the default, so a session that never chose is the file it always was.
+        if self.corners != CORNERS_DEFAULT {
+            line("corners", &self.corners.to_string());
+        }
         line("check_updates", if self.check_updates { "1" } else { "0" });
         line("update_checked", &self.update_checked.to_string());
         // Only when set, so a session that never chose a font is the file it always was.
@@ -455,6 +477,30 @@ mod window_state_tests {
         );
         assert_eq!(super::clean_family("  A, \"B\"; 'c'\n "), "A B c");
         assert_eq!(super::clean_family(&"x".repeat(100)).len(), 64);
+    }
+
+    #[test]
+    fn the_window_corners_are_kept_only_when_chosen() {
+        assert_eq!(Session::default().corners, 8);
+        assert!(!Session::default().serialize().contains("corners"));
+        for r in [0u8, 4] {
+            let s = Session {
+                corners: r,
+                ..Session::default()
+            };
+            let text = s.serialize();
+            assert!(text.contains(&format!("corners={r}")), "{text}");
+            assert_eq!(Session::parse(&text).corners, r);
+        }
+        // Unreadable or unknown values are the default.
+        for bad in ["x", "99", "", "-4"] {
+            assert_eq!(
+                Session::parse(&format!("corners={bad}\n")).corners,
+                8,
+                "{bad}"
+            );
+        }
+        assert_eq!(Session::parse("zoom=100\n").corners, 8);
     }
 
     #[test]

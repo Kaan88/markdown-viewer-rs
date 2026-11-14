@@ -29,6 +29,7 @@ use crate::ui::{
 use crate::updater;
 use crate::workspace::{Click, LinkOutcome, ThemeChoice, Workspace};
 use mdshared_app::sister::Request;
+use mdshared_ui::corners::Corners;
 use mdview_core::commands::CommandId as C;
 use mdview_core::watch::FileWatcher;
 use mdview_render::Bitmap;
@@ -329,7 +330,7 @@ impl App {
             self.full = true;
             #[cfg(windows)]
             if let Some(w) = &self.window {
-                style(w, dark);
+                style(w, dark, Corners::from_setting(self.ws.corners()));
             }
         }
     }
@@ -958,6 +959,21 @@ impl App {
                 })
                 .collect()
         };
+        // The rounded corners are cut out of the content just copied: only the corner squares the
+        // copied rectangles touch are redone (all four after a whole copy, or when the margin was
+        // painted again and the shadow under the corners changed with it). Nothing without
+        // rounding.
+        if let Some(s) = self.shadow.as_ref().filter(|s| s.rounds()) {
+            let touched: Vec<_> = damage.iter().map(&clamp).collect();
+            let all = age != 1 || margin_painted;
+            s.paint_corners(
+                &mut buffer,
+                sw,
+                sh,
+                &self.screen.pixels,
+                (!all).then_some(&touched[..]),
+            );
+        }
         let copied = t.elapsed();
         let _ = buffer.present_with_damage(&rects);
         copied
@@ -1071,10 +1087,12 @@ fn hwnd(w: &Window) -> Option<isize> {
     }
 }
 
+/// The dark title bar and the corner rounding (Windows 11 draws it; Windows 10 stays square).
 #[cfg(windows)]
-fn style(w: &Window, dark: bool) {
+fn style(w: &Window, dark: bool, corners: Corners) {
     if let Some(h) = hwnd(w) {
         platform::style_window(h, dark);
+        mdshared_ui::corners::set_window_corners(h, corners);
     }
 }
 
@@ -1117,10 +1135,13 @@ impl ApplicationHandler<Wake> for App {
             attributes = attributes.with_undecorated_shadow(true);
         }
         // Transparent and grown by the margin only where the client-drawn shadow will be used
-        // (not on KDE, not on Windows): the attributes come back unchanged there.
-        let attributes = mdshared_ui::shadow::Shadow::prepare(
+        // (not on Windows; on KDE only with rounded corners, which need the alpha channel): the
+        // attributes come back unchanged elsewhere.
+        let corners = Corners::from_setting(self.ws.corners());
+        let attributes = mdshared_ui::shadow::Shadow::prepare_corners(
             attributes,
             mdshared_ui::shadow::Mode::from_env(),
+            corners,
             event_loop,
         );
         // Linux: the Wayland app id, X11 class and window icon; a no-op on Windows.
@@ -1133,9 +1154,10 @@ impl ApplicationHandler<Wake> for App {
         stage(self.started, "window created");
         self.scale = window.scale_factor() as f32;
         self.maximized = window.is_maximized();
-        self.shadow = mdshared_ui::shadow::Shadow::attach_mode(
+        self.shadow = mdshared_ui::shadow::Shadow::attach_corners(
             &window,
             mdshared_ui::shadow::Mode::from_env(),
+            corners,
         );
         // The minimum is a content size whatever the route.
         let min = LogicalSize::new(520.0, 360.0);
@@ -1146,7 +1168,7 @@ impl ApplicationHandler<Wake> for App {
         let size = window.inner_size();
         self.size = self.content_size(size.width, size.height);
         #[cfg(windows)]
-        style(&window, self.pal.dark);
+        style(&window, self.pal.dark, corners);
         let context = softbuffer::Context::new(window.clone()).expect("display");
         let mut surface = softbuffer::Surface::new(&context, window.clone()).expect("surface");
         // The client-drawn margin is transparent: Wayland buffers must carry alpha (the content
@@ -1435,12 +1457,36 @@ fn shot(mut app: App, path: &Path) -> i32 {
     }
     app.full = true;
     app.compose();
-    match app.screen.write_png(path) {
+    // `--frame`: the window as the client-drawn margin puts it on screen.
+    let framed = app
+        .args
+        .frame
+        .map(|c| frame_of(&app.screen, c, app.scale as f64, app.pal.dark));
+    match framed.as_ref().unwrap_or(&app.screen).write_png(path) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("mdview: could not write {}: {e}", path.display());
             1
         }
+    }
+}
+
+/// What `--frame` renders: `content` with the shadow margin and `corners`, composited over a flat
+/// backdrop (a mid grey, lighter for a dark window so its shadow shows), by the same code the
+/// client-drawn window uses (`shadow::Frame`). The picture is larger than the content by the margin.
+fn frame_of(content: &Bitmap, corners: Corners, scale: f64, dark: bool) -> Bitmap {
+    let frame = mdshared_ui::shadow::Frame::with_radius(scale, true, corners.px(scale));
+    let backdrop = if dark {
+        [0x5a, 0x5a, 0x5f]
+    } else {
+        [0xc8, 0xc8, 0xcd]
+    };
+    let (width, height, pixels) =
+        frame.preview(&content.pixels, content.width, content.height, backdrop);
+    Bitmap {
+        width,
+        height,
+        pixels,
     }
 }
 

@@ -2,6 +2,7 @@
 //! to a PNG without a window (`--shot`), so the look can be checked without a human.
 
 use mdshared_app::sister::{Rect, Request};
+use mdshared_ui::corners::Corners;
 use mdview_core::session::PageWidth;
 use std::path::PathBuf;
 
@@ -45,6 +46,10 @@ pub struct Args {
     /// Logical window size for `--shot`.
     pub size: Option<(u32, u32)>,
     pub scale: Option<f32>,
+    /// `--frame square|small|round`: the shot shows the window as the client-drawn shadow margin
+    /// puts it on screen (its shadow and corners, over a flat backdrop) instead of the content
+    /// alone.
+    pub frame: Option<Corners>,
     pub files_pane: Option<bool>,
     pub outline_pane: Option<bool>,
     pub find: Option<String>,
@@ -149,6 +154,7 @@ impl Args {
                         .and_then(|v| v.parse().ok())
                         .filter(|s: &f32| *s >= 0.5 && *s <= 4.0)
                 }
+                "--frame" => out.frame = value(&a).and_then(|v| Corners::from_name(&v)),
                 "--find" => out.find = value(&a),
                 "--scroll" => out.scroll = value(&a).and_then(|v| v.parse().ok()),
                 "--scroll-steps" => out.scroll_steps = value(&a).and_then(|v| v.parse().ok()),
@@ -218,6 +224,15 @@ mod tests {
         let a = parse("--shot x.png --palette >zoom --dialog settings");
         assert_eq!(a.palette.as_deref(), Some(">zoom"));
         assert_eq!(a.dialog, Some(ShotDialog::Settings));
+    }
+
+    #[test]
+    fn frame_names_the_corners_of_a_window_shot() {
+        assert_eq!(parse("--frame round").frame, Some(Corners::Round));
+        assert_eq!(parse("--frame Square").frame, Some(Corners::Square));
+        assert_eq!(parse("--frame 4").frame, Some(Corners::Small));
+        assert_eq!(parse("--frame pointy").frame, None);
+        assert_eq!(parse("a.md").frame, None);
     }
 
     #[test]

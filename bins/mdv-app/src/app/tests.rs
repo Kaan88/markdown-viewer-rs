@@ -750,7 +750,7 @@ fn the_settings_form_follows_the_apps_limits() {
     use crate::settings as s;
     use mdshared_ui::settings::Row;
     let a = app(&["showcase.md"]);
-    let rows = s::rows(&a.ws);
+    let rows = s::rows(&a.ws, true);
     let zoom = rows
         .iter()
         .find_map(|r| match r {
@@ -1166,4 +1166,79 @@ fn the_wheel_beside_the_palette_does_nothing() {
     a.wheel(MouseScrollDelta::LineDelta(0.0, -3.0));
     assert_eq!(a.ws.scroll(), 0.0);
     assert_eq!(a.ui.palette.as_ref().unwrap().palette.scroll(), 0.0);
+}
+
+#[test]
+fn the_window_corners_setting_is_applied_kept_and_offered() {
+    use crate::settings as s;
+    use mdshared_ui::settings::{Row, Value};
+    let mut a = app(&["showcase.md"]);
+    // Round (8) is the default, listed after Theme; Square and Small are the other choices.
+    assert_eq!(a.ws.corners(), 8);
+    let rows = s::rows(&a.ws, true);
+    let at = rows
+        .iter()
+        .position(|r| matches!(r, Row::Choice { id, .. } if *id == s::THEME))
+        .unwrap();
+    match &rows[at + 1] {
+        Row::Choice {
+            id,
+            label,
+            options,
+            value,
+            ..
+        } => {
+            assert_eq!(*id, s::WINDOW_CORNERS);
+            assert_eq!(label, "Window corners");
+            assert_eq!(options, &["Square", "Small", "Round"]);
+            assert_eq!(*value, 2);
+        }
+        other => panic!("{other:?}"),
+    }
+    // Left out where nothing can round the window.
+    assert!(
+        !s::rows(&a.ws, false)
+            .iter()
+            .any(|r| matches!(r, Row::Choice { id, .. } if *id == s::WINDOW_CORNERS))
+    );
+    a.apply_setting(s::WINDOW_CORNERS, Value::Choice(0));
+    assert_eq!(a.ws.corners(), 0);
+    a.apply_setting(s::WINDOW_CORNERS, Value::Choice(1));
+    assert_eq!(a.ws.corners(), 4);
+    a.apply_setting(s::WINDOW_CORNERS, Value::Choice(2));
+    assert_eq!(a.ws.corners(), 8);
+    // A shot has no window and shows the row; a plain test run on Linux has no shadow route.
+    assert_eq!(a.corners_offered(), cfg!(windows));
+}
+
+/// `--frame` puts the shadow margin around the composed content and cuts its corners: the corner
+/// pixel is the backdrop with a shadow, the middle is the content, and the picture is larger by the
+/// margin on each side. Square corners keep the content's corner.
+#[test]
+fn a_frame_shot_cuts_the_corners() {
+    for scale in [1.0f64, 2.0] {
+        let (cw, ch) = ((400.0 * scale) as u32, (240.0 * scale) as u32);
+        let content = Bitmap {
+            width: cw,
+            height: ch,
+            pixels: [0x60u8, 0x40, 0x20, 0xFF].repeat((cw * ch) as usize),
+        };
+        let m = (mdshared_ui::shadow::EXTENT * scale).ceil() as u32;
+        for dark in [false, true] {
+            let round = frame_of(&content, Corners::Round, scale, dark);
+            let square = frame_of(&content, Corners::Square, scale, dark);
+            assert_eq!((round.width, round.height), (cw + 2 * m, ch + 2 * m));
+            let at = |b: &Bitmap, x: u32, y: u32| {
+                let o = ((y * b.width + x) * 4) as usize;
+                [b.pixels[o + 2], b.pixels[o + 1], b.pixels[o]]
+            };
+            let own = [0x20, 0x40, 0x60];
+            assert_eq!(at(&round, round.width / 2, round.height / 2), own);
+            assert_eq!(at(&square, m, m), own);
+            assert_ne!(at(&round, m, m), own, "dark {dark} scale {scale}");
+            // The straight edge is not touched by the rounding.
+            assert_eq!(at(&round, m + 60, m), own);
+            assert_eq!(at(&round, m, m + 60), own);
+        }
+    }
 }
