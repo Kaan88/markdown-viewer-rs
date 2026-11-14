@@ -826,6 +826,8 @@ fn tab_in_the_settings_dialog_visits_every_control_and_then_close() {
         .iter()
         .filter(|r| !matches!(r, Row::Header(_)))
         .count();
+    // The first Tab only shows where the focus already is.
+    key(&mut a, KeyName::Tab, None);
     let mut seen = vec![a.ui.settings.as_ref().unwrap().focus_id()];
     for _ in 0..controls - 1 {
         key(&mut a, KeyName::Tab, None);
