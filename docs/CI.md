@@ -101,29 +101,33 @@ the Linux packages locally with Docker (`target/dist-linux/`), the same script t
 ## Findings from the first runs
 
 Found by the first CI runs on a clean Linux runner and on real Windows (the first time the whole
-viewer test suite ran there in CI). None is a defect of the program.
+viewer test suite ran there in CI). All are fixed; no test is skipped and no step may fail
+(`ci.yml` has no `--skip` and no `continue-on-error`). A few tests are `#[ignore]`d in the source
+(engine idle and watchdog waits of 5 to 10 s, dumps and a live network test); they are run by hand
+with `-- --ignored`.
 
-Windows (windows-latest, the MSVC toolchain): all tests passed, clippy with `-D warnings` and
-`cargo fmt` are clean, and all 70 screenshots that `tests/shots.sh` always takes were produced (it
-takes 3 more where `fc-list` lists DejaVu Serif, which Windows does not). The `shots-windows`
-artifact shows the main menu, settings, the palette, the diagram page and the emoji file as the app
-draws them with Segoe UI; the emoji file's heart and warning sign (and the check mark, sun,
-telephone, keycap, flag and rocket) are in colour, from Segoe UI Emoji. Two glyphs of the "Without
-the selector" line, which are meant to stay text, show as empty boxes there.
-
-Linux (ubuntu-latest):
-
-- `an_aligned_image_stands_beside_its_text` (crates/render/tests/render.rs) finds an image's
-  columns by pixel colour ("badge blue") and the text's subpixel fringes make the same colour
-  in a different font: with the runner's Noto Sans it found the badge at columns 289..739 instead
-  of 640..740. It is skipped on Linux in `ci.yml` until the test is made font-independent; it
-  passes on Windows and on the development machines (Segoe UI).
-- `pathological_inputs_stay_linear` (crates/core/tests/fuzz.rs) compares the parse time of an input
-  with that of one four times larger and failed once (8 ms against 83 ms) when it ran next to
-  the other tests of its binary on the four-core runner, and passed once. Run alone
-  (`--test-threads=1`) on Linux it failed again on `main`: "unmatched fences among dollars" took
-  10 ms and then 93 ms on 4x the input (limit 8x). The Linux step is therefore `continue-on-error`
-  (a failure is shown, not blocking); on Windows it is a normal step and passes. Whether that case
-  is slightly superlinear or only memory-bound on the runner has not been investigated.
+- Windows drew U+2714 and U+2764 as empty boxes on the "Without the selector" line of
+  `fixtures/emoji.md`: `shared_fonts()` applied the shared font fallbacks off Windows only, and the
+  editor added them itself on Windows. `shared_fonts()` now applies them on every system (shared
+  crates), so the page text and the chrome draw both as text glyphs (Segoe UI Symbol) on Windows.
+- `an_aligned_image_stands_beside_its_text` (crates/render/tests/render.rs) found the image's
+  columns by pixel colour, and the text's subpixel fringes made the same colour in the runner's
+  Noto Sans. It now puts the image in a link and reads where the image is from the layout (the
+  renderer's hit test for a floated image, the selection rectangle of an inline one): no glyph
+  can affect it.
+- `pathological_inputs_stay_linear` (crates/core/tests/fuzz.rs) failed on the runner for the case
+  "unmatched fences among dollars" (10 ms, then 93 ms on 4x the input, bound 8x). Measured on a
+  development machine (release, 256 KiB to 8 MiB, minima of five runs) the parser is linear for
+  every family of the test: the slowest case, "unmatched fences among dollars", grows as n^1.13
+  (4x the input costs 5.5x; 32x costs 51x, where quadratic code would cost 1024x), and the time per
+  byte is flat from 1 MiB on; the rise is the output outgrowing the CPU caches, and a 6 ms
+  baseline is noise on a shared runner. The test now compares 1 MiB with 4 MiB (20 to 90 ms
+  baselines), warms both up, takes minima of several rounds, retries a failure alone, and bounds
+  the ratio at 10x; quadratic code gives 16x. `scaling_holds_at_the_file_limit` still compares
+  256 KiB with 4 MiB.
 - Fonts: the runner has Noto Sans (installed by `ci.yml`) where the development machines have
   Segoe UI, so the screenshots differ from theirs and the smoke test compares nothing.
+
+Windows (windows-latest): all tests, clippy with `-D warnings` and `cargo fmt` are clean, and all
+70 screenshots that `tests/shots.sh` always takes were produced (it takes 3 more where `fc-list`
+lists DejaVu Serif, which Windows does not).

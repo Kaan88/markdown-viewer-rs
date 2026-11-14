@@ -44,19 +44,7 @@ jobs:
           key: linux
       - run: cargo fmt --all --check
       - run: cargo clippy --release --workspace --all-targets -- -D warnings
-      # Two tests are not fit for a shared runner (docs/CI.md, "Findings from Linux"): the render test
-      # that finds an image's columns by pixel colour depends on the UI font (the runner has Noto
-      # Sans, the development machines Segoe UI), so it is skipped here; the timing test of the
-      # parser runs alone below, because next to the other tests of its binary on four cores its
-      # ratio test is noise.
-      - run: >
-          cargo test --release --workspace --no-fail-fast --
-          --skip an_aligned_image_stands_beside_its_text
-          --skip pathological_inputs_stay_linear
-      # Reported, not blocking on Linux: the "unmatched fences among dollars" case takes about 9x as
-      # long on 4x the input on the runner (limit 8x), even run alone. See docs/CI.md.
-      - run: cargo test --release -p mdview-core --test fuzz -- pathological_inputs_stay_linear --test-threads=1
-        continue-on-error: true
+      - run: cargo test --release --workspace --no-fail-fast
       - name: Screenshot suite (smoke test)
         if: ${{ !cancelled() }}
         run: |
@@ -86,10 +74,7 @@ jobs:
           key: windows
       - run: cargo fmt --all --check
       - run: cargo clippy --release --workspace --all-targets -- -D warnings
-      # The parser's timing test runs alone (see the Linux job); --no-fail-fast lists every failing
-      # test, not only the first binary's.
-      - run: cargo test --release --workspace --no-fail-fast -- --skip pathological_inputs_stay_linear
-      - run: cargo test --release -p mdview-core --test fuzz -- pathological_inputs_stay_linear --test-threads=1
+      - run: cargo test --release --workspace --no-fail-fast
       - name: Screenshot suite (smoke test)
         if: ${{ !cancelled() }}
         shell: bash
