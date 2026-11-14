@@ -533,8 +533,9 @@ impl App {
             return;
         }
         if let Some(p) = self.ui.popup.as_mut() {
-            // Over a menu taller than its room the wheel scrolls it; anywhere else, and over a
-            // menu that fits, it closes the menus, as it always did.
+            // While a menu is open the wheel belongs to the menus: over one taller than its room it
+            // scrolls it; over one that fits, or outside all of them, it does nothing (a click
+            // outside closes the menus, the wheel does not).
             let dy = match pixels {
                 Some(py) => -py / self.scale,
                 None => -notches * PANE_WHEEL,
@@ -544,18 +545,12 @@ impl App {
                 Some(s) if over_sub => Some(s),
                 _ => Some(&mut p.menu).filter(|m| m.contains(x, y)),
             };
-            match menu {
-                Some(m) if m.scrolls() => {
-                    if m.scroll_by(dy) {
-                        let hover = m.pointer(x, y);
-                        self.wants_frame |= hover;
-                        self.redraw();
-                    }
-                }
-                _ => {
-                    self.ui.popup = None;
-                    self.redraw();
-                }
+            if let Some(m) = menu.filter(|m| m.scrolls())
+                && m.scroll_by(dy)
+            {
+                let hover = m.pointer(x, y);
+                self.wants_frame |= hover;
+                self.redraw();
             }
             return;
         }

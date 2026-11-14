@@ -986,6 +986,17 @@ than leaving the page alone while the caret stays in view.
   Default look unchanged: every existing shot is byte-identical except the five settings dialogs,
   which have the two new rows.
 
+## 12b. The wheel over open menus; shared pin 9222f96 (2026-11-14)
+
+Found in a driven test of the editor and fixed the same way here: with a menu open one wheel notch
+closed the whole menu. Now, while a menu, submenu or the palette is open, a wheel turn over a menu
+that does not scroll, or outside all of them, does nothing; over one that scrolls it scrolls it; the
+palette takes the wheel only over its card (`bins/mdv-app/src/app/input.rs`, `modal.rs`; tests in
+`app/tests.rs`). The shared pin moves to `9222f96` (palette footer without a "0 results" beside a
+message row such as "Go to line 25"; icons for the editor's line commands; the request listener
+hands folders to request receivers, which the viewer's own `mdview_core::single` is not). Shots
+compared with a baseline made before the change: see the commit message.
+
 ## 13. What to do next
 
 The user set a list on 2026-11-12; everything on it is done: Qt retired (2026-11-13), the port

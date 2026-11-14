@@ -1074,3 +1074,56 @@ fn live_update_cost() {
     measure("200 KB", &mut a, &file, &big);
     _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_wheel_while_a_menu_is_open_does_nothing_over_a_menu_that_fits_or_outside_it() {
+    let mut a = app(&["showcase.md"]);
+    // The control: with no menu the wheel scrolls the page.
+    let page = a.areas.page;
+    a.pointer_moved(page.cx(), page.cy());
+    a.wheel(MouseScrollDelta::LineDelta(0.0, -3.0));
+    a.compose();
+    let scrolled = a.ws.scroll();
+    assert!(scrolled > 0.0);
+    a.open_popup(PopupKind::Main);
+    a.compose();
+    let m = a.ui.popup.as_ref().expect("a menu").menu.rect();
+    assert!(!a.ui.popup.as_ref().unwrap().menu.scrolls());
+    // Over the menu, which fits: nothing happens, the menu stays, the page stays.
+    a.pointer_moved(m.cx(), m.cy());
+    a.wheel(MouseScrollDelta::LineDelta(0.0, -3.0));
+    a.compose();
+    assert!(a.ui.popup.is_some());
+    assert_eq!(a.ws.scroll(), scrolled);
+    // Outside every menu: the same.
+    a.pointer_moved(5.0, 700.0);
+    a.wheel(MouseScrollDelta::LineDelta(0.0, -3.0));
+    a.compose();
+    assert!(a.ui.popup.is_some());
+    assert_eq!(a.ws.scroll(), scrolled);
+    // A menu taller than the window scrolls under the wheel.
+    a.ui.popup = None;
+    a.size = (1280, 260);
+    a.compose();
+    a.open_popup(PopupKind::Main);
+    a.compose();
+    let m = a.ui.popup.as_ref().unwrap().menu.rect();
+    assert!(a.ui.popup.as_ref().unwrap().menu.scrolls());
+    a.pointer_moved(m.cx(), m.cy());
+    a.wheel(MouseScrollDelta::LineDelta(0.0, -3.0));
+    assert!(a.ui.popup.as_ref().unwrap().menu.scroll() > 0.0);
+    assert_eq!(a.ws.scroll(), scrolled);
+}
+
+#[test]
+fn the_wheel_beside_the_palette_does_nothing() {
+    let mut a = app(&["showcase.md"]);
+    a.command(C::CommandPalette);
+    a.compose();
+    type_text(&mut a, ">");
+    a.pointer_moved(5.0, 790.0);
+    assert!(!a.ui.palette.as_ref().unwrap().palette.contains(5.0, 790.0));
+    a.wheel(MouseScrollDelta::LineDelta(0.0, -3.0));
+    assert_eq!(a.ws.scroll(), 0.0);
+    assert_eq!(a.ui.palette.as_ref().unwrap().palette.scroll(), 0.0);
+}

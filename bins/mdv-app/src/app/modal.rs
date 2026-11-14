@@ -135,7 +135,8 @@ impl App {
     pub(super) fn modal_wheel(&mut self, dy: f32) {
         let (x, y) = self.ui.mouse;
         let moved = match (self.ui.palette.as_mut(), self.ui.settings.as_mut()) {
-            (Some(p), _) => p.palette.wheel(dy),
+            // Over the palette it scrolls the list; beside it, nothing.
+            (Some(p), _) => p.palette.contains(x, y) && p.palette.wheel(dy),
             (_, Some(f)) => f.wheel(x, y, dy),
             _ => false,
         };
