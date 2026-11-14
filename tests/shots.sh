@@ -76,6 +76,8 @@ shot palette-empty-light --light --palette "" "$fx/showcase.md" "$fx/tables.md" 
 shot palette-empty-dark --dark --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
 shot palette-commands-light --light --palette ">zoom" "$fx/showcase.md"
 shot palette-commands-dark --dark --palette ">zoom" "$fx/showcase.md"
+shot palette-export-light --light --palette ">export" "$fx/showcase.md"
+shot palette-print-dark --dark --palette ">print" "$fx/showcase.md"
 shot palette-headings-light --light --palette "#" "$fx/showcase.md"
 shot palette-headings-dark --dark --palette "#" "$fx/showcase.md"
 

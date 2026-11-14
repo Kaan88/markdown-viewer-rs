@@ -426,6 +426,8 @@ impl App {
                     })
                 });
             }
+            C::ExportHtml => self.export_html(),
+            C::Print => self.print_page(),
             C::MakeDefault => {
                 let result = platform::make_mdview_default();
                 self.ws.set_status(match result {
@@ -678,6 +680,7 @@ impl App {
             Wake::Update(updater::Event::Installed(result)) => {
                 self.ws.update_finished(result);
             }
+            Wake::Export(progress) => self.export_progress(progress),
             #[cfg(not(windows))]
             Wake::Dialog(answer) => {
                 self.dialog_open = false;

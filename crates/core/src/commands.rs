@@ -42,6 +42,10 @@ pub enum CommandId {
     /// Linux: make mdview the default app for Markdown files. In no menu bar menu; the shell's
     /// Settings (and its command palette) offer it where it applies.
     MakeDefault,
+    /// Save the document as one self-contained HTML file.
+    ExportHtml,
+    /// Hand the document to the default browser to print.
+    Print,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,6 +165,8 @@ pub const COMMANDS: &[Command] = &[
     )),
     cmd(C::ManageRecent, Menu::File, "Manage recent files…", &[]),
     cmd(C::ClearRecent, Menu::File, "Clear recent files", &[]),
+    sep(cmd(C::ExportHtml, Menu::File, "Export as HTML…", &[])),
+    cmd(C::Print, Menu::File, "Print (opens in browser)", &[]),
     sep(cmd(
         C::CloseTab,
         Menu::File,

@@ -3,6 +3,7 @@
 
 mod anim;
 mod engine;
+mod export;
 mod image;
 mod layout;
 mod theme;
@@ -11,6 +12,7 @@ use mdshared_highlight as highlight;
 use mdshared_text::{bitmap, text};
 
 pub use bitmap::Bitmap;
+pub use export::{ExportOptions, export_html};
 pub use image::{DecodedImage, decode_image};
 pub use layout::{
     AnimationTick, BlockBox, DocumentRenderer, Frame, Hit, ImageStats, Jump, Options, PageLayout,
