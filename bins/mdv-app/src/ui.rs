@@ -107,6 +107,8 @@ pub enum Hit {
     RemoteClose,
     /// The bar that offers a newer version.
     UpdateGo,
+    /// The update bar's Restart button, once the new version is installed.
+    UpdateRestart,
     UpdateClose,
     DlgButton(usize),
     DlgOpen(usize),
@@ -140,6 +142,7 @@ impl Hit {
             | Hit::RemoteAlways
             | Hit::RemoteClose
             | Hit::UpdateGo
+            | Hit::UpdateRestart
             | Hit::UpdateClose => Region::Page,
             _ => return None,
         })

@@ -2837,6 +2837,16 @@ impl Workspace {
         self.dirty = true;
     }
 
+    /// Records what a restart would start, for the installation about to begin.
+    pub fn update_set_relaunch(&mut self, target: Option<PathBuf>) {
+        self.updates.set_relaunch(target);
+    }
+
+    /// The file a restart starts: only once the update is installed, and only when there is one.
+    pub fn update_relaunch_target(&self) -> Option<PathBuf> {
+        self.updates.relaunch_target().map(Path::to_path_buf)
+    }
+
     /// Closes the update bar until the stage changes. An installation under way keeps its bar.
     pub fn dismiss_update(&mut self) {
         self.updates.dismiss();

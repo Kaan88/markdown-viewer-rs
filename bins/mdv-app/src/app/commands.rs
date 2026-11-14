@@ -76,6 +76,7 @@ impl App {
             Hit::RemoteAlways => self.ws.allow_remote(true),
             Hit::RemoteClose => self.ws.dismiss_remote(),
             Hit::UpdateGo => self.install_update(),
+            Hit::UpdateRestart => self.restart_into_update(),
             Hit::UpdateClose => self.ws.dismiss_update(),
             Hit::EmptyRecent(i) => {
                 if let Some(p) = self.ws.recents().get(i).cloned() {
@@ -96,6 +97,8 @@ impl App {
                     self.close_dialog();
                     if matches!(self.ws.update_stage(), updater::Stage::Available(_)) {
                         self.install_update();
+                    } else if self.ws.update_relaunch_target().is_some() {
+                        self.restart_into_update();
                     } else {
                         self.check_for_updates(true);
                     }
@@ -743,6 +746,16 @@ impl App {
         });
     }
 
+    /// Closes the window as Exit does (the session is saved on the way out), then starts the
+    /// version the update installed: the file is taken now and started by `run()` after the
+    /// window and the engine are gone. The viewer has no unsaved text to ask about.
+    pub(super) fn restart_into_update(&mut self) {
+        if let Some(target) = self.ws.update_relaunch_target() {
+            self.restart = Some(target);
+            self.exit = true;
+        }
+    }
+
     /// Downloads and swaps in the version that was offered, on its own thread.
     pub(super) fn install_update(&mut self) {
         let (Some(files), Some(proxy)) = (updater::installed_files(), self.proxy.clone()) else {
@@ -752,6 +765,8 @@ impl App {
         let Some(offer) = self.ws.update_begin() else {
             return;
         };
+        self.ws
+            .update_set_relaunch(mdshared_app::relaunch::target(Some(&files)));
         spawn_updater(move || {
             let result = updater::install(&offer, &files, &updater::fetch);
             if result.is_ok() {

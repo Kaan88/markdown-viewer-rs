@@ -150,7 +150,7 @@ document with SVG, math or Mermaid.
 | `--find q`, `--scroll px`, `--hover x,y` | Find query, scroll offset, pointer position. `--scroll` also applies to a real window's first document |
 | `--menu main\|recent\|cascade\|tab\|page\|find`, `--dialog about\|shortcuts\|recent` | Open a popup or dialog in the shot |
 | `--scroll-steps n` | Open a real window, wait until the page is refined, scroll n wheel steps, log timings, exit |
-| `--update-bar available\|installing\|installed` | Show the update bar at that stage with a made-up version, for a shot |
+| `--update-bar available\|installing\|installed\|installed-plain` | Show the update bar at that stage with a made-up version, for a shot |
 | `--check-update` | Look for a newer version as the app would, print the answer, exit. No window |
 
 ```sh

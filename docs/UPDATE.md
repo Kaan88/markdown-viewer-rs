@@ -40,11 +40,12 @@ code; mdview supplies its name, manifest address and file names.
 | shared `mdshared-app/src/selfupdate.rs` | The swap: `<name>.new` in, the running file aside to `<name>.old`, all files or none, and the clean-up of what an earlier update left. `mdview_core::selfupdate` re-exports it |
 | shared `mdshared-app/src/updater.rs` | `App` (what names an application), `check`, `install`, `installed_files`, `record_version`, `check_due`, and `Updates`: the offer, installing, installed, bar closed, and every message |
 | shared `mdshared-fetch` `fetch_file` | One blocking https GET with the caller's size cap and deadline, on the image fetcher's transport |
-| shared `mdshared-ui/src/notice.rs` | `draw_update_bar`: the bar, its button and its close button |
+| shared `mdshared-app/src/relaunch.rs` | Restart after an update: `target` (what to start: the installed file; none for a copy that cannot update), `spawn` (with `--restarted`), `wait_for_predecessor` (the new process waits until the old instance's port and lock are gone, before the single-instance hand-over) |
+| shared `mdshared-ui/src/notice.rs` | `draw_update_bar`: the bar, its button (Restart once installed) and its close button |
 | `bins/mdv-app/src/updater.rs` | `APP`: mdview's name, version, manifest address, engine name and installed-apps key |
 | `bins/mdv-app/src/workspace.rs` ("updates") | Holds the `Updates`, remembers the time of the last look in the session |
 | `bins/mdv-app/src/page.rs` `draw_update_bar`, `overlays.rs` (About) | Where the bar and the two buttons are placed and hit |
-| `bins/mdv-app/src/app/commands.rs` | The threads (`mdview-update`) and their `Wake::Update` answers |
+| `bins/mdv-app/src/app/commands.rs` | The threads (`mdview-update`) and their `Wake::Update` answers; `restart_into_update` sets `App::restart` and exit, and `run()` starts the new file after the window is dropped |
 
 ## Manifest
 

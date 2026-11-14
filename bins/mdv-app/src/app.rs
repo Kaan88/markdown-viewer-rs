@@ -163,6 +163,8 @@ struct App {
     expose: bool,
     first: bool,
     exit: bool,
+    /// The file to start once the window is closed: set by a Restart that was carried out.
+    restart: Option<PathBuf>,
     mods: Mods,
     cursor: CursorIcon,
     last_title: String,
@@ -230,6 +232,7 @@ impl App {
             expose: false,
             first: true,
             exit: false,
+            restart: None,
             mods: Mods::default(),
             cursor: CursorIcon::Default,
             last_title: String::new(),
@@ -1492,6 +1495,9 @@ pub fn run() -> i32 {
         (false, false) => explicit.or_else(mdview_core::session::default_settings_path),
     };
     if let Some(settings) = session.as_ref().filter(|_| args.shot.is_none()) {
+        // Started by a restart: the window that started it is still closing; wait it out, or the
+        // hand-over below would go to it and leave no window.
+        mdshared_app::relaunch::wait_for_predecessor(std::env::args().skip(1), settings);
         // A window is already open: hand it the files and quit, before any window work. A launch
         // that asks for a line, a place or a follow hands each file over with that.
         let requests = args.requests();
@@ -1568,5 +1574,14 @@ pub fn run() -> i32 {
     app.updates_at_launch();
     stage(started, "ready to run");
     let _ = event_loop.run_app(&mut app);
+    // A restart starts the new version last, with the window and the engine gone and the session
+    // written. The new process waits for this one to end before it looks for a running instance.
+    let restart = app.restart.take();
+    drop(app);
+    if let Some(target) = restart
+        && let Err(e) = mdshared_app::relaunch::spawn(&target)
+    {
+        eprintln!("mdview: could not start {}: {e}", target.display());
+    }
     0
 }

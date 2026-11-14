@@ -176,6 +176,8 @@ impl Args {
                         _ => None,
                     }
                 }
+                // The mark of a restart after an update, read before this (`relaunch::FLAG`).
+                mdshared_app::relaunch::FLAG => {}
                 f if f.starts_with("--") => eprintln!("mdview: ignoring {f}"),
                 _ => out.files.push(PathBuf::from(a)),
             }
@@ -190,6 +192,13 @@ mod tests {
 
     fn parse(s: &str) -> Args {
         Args::parse(s.split_whitespace().map(String::from))
+    }
+
+    #[test]
+    fn the_restart_mark_is_not_a_file() {
+        let a = parse("--restarted");
+        assert!(a.files.is_empty());
+        assert_eq!(a, parse(""));
     }
 
     #[test]

@@ -116,6 +116,7 @@ shot hover-menu --light --menu main --hover 1100,120 "$fx/showcase.md"
 shot update-available --light --update-bar available "$fx/showcase.md"
 shot update-installing --dark --update-bar installing "$fx/showcase.md"
 shot update-installed --dark --update-bar installed
+shot update-installed-plain --light --update-bar installed-plain
 
 # A menu taller than its window: kept below the title row, scrolling, and scrolled to its end.
 shot menu-tall-main --light --size 1000x520 --menu main

@@ -307,6 +307,40 @@ fn the_update_bar_pushes_the_page_down_and_closes() {
 }
 
 #[test]
+fn the_bar_shows_restart_only_when_installed_with_a_file_to_start() {
+    let mut a = app(&["linked.md"]);
+    for (stage, restart) in [
+        ("available", false),
+        ("installing", false),
+        ("installed-plain", false),
+        ("installed", true),
+    ] {
+        a.ws.preview_update(stage);
+        a.compose();
+        assert_eq!(a.hit_rect(Hit::UpdateRestart).is_some(), restart, "{stage}");
+        assert_eq!(
+            a.hit_rect(Hit::UpdateGo).is_some(),
+            stage == "available",
+            "{stage}"
+        );
+    }
+    // Pressing it closes the window the way Exit does, and remembers what to start.
+    assert!(!a.exit);
+    click(&mut a, Hit::UpdateRestart);
+    assert!(a.exit);
+    assert_eq!(a.restart, Some(std::path::PathBuf::from("/preview/app")));
+}
+
+#[test]
+fn a_bar_without_a_file_to_start_restarts_nothing() {
+    let mut a = app(&["linked.md"]);
+    a.ws.preview_update("installed-plain");
+    a.restart_into_update();
+    assert!(!a.exit);
+    assert_eq!(a.restart, None);
+}
+
+#[test]
 fn the_update_bar_shows_over_the_empty_state() {
     let mut a = app(&[]);
     a.ws.preview_update("available");
