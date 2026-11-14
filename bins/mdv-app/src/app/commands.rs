@@ -631,17 +631,10 @@ impl App {
                 self.handed_over(requests);
             }
             Wake::Files => {
-                if let Some(w) = &self.watcher {
-                    w.woken();
-                }
-                self.ws.check_changed();
-                self.ws.notes_changed();
-                let changed = self.ui.tree.refresh();
-                if self.trace {
-                    let rows = self.ui.tree.rows().len();
-                    eprintln!(
-                        "mdview: file watcher woke; files tree changed: {changed}, {rows} rows"
-                    );
+                // A burst (a git checkout) is looked at once: the watcher stays "pending" until
+                // the check runs, so the events of the next moments do not wake again.
+                if self.watch_due.is_none() {
+                    self.watch_due = Some(Instant::now() + WATCH_DEBOUNCE);
                 }
             }
             Wake::Sister(alive) => {
@@ -761,6 +754,23 @@ impl App {
         });
     }
 
+    /// Looks at the open files and the Files pane's folders once the burst of changes is over.
+    fn watch_check(&mut self) {
+        if let Some(w) = &self.watcher {
+            w.woken();
+        }
+        self.ws.check_changed();
+        self.ws.notes_changed();
+        let changed = self.ui.tree.refresh();
+        if changed {
+            self.wants_frame = true;
+        }
+        if self.trace {
+            let rows = self.ui.tree.rows().len();
+            eprintln!("mdview: file watcher woke; files tree changed: {changed}, {rows} rows");
+        }
+    }
+
     pub(super) fn timers(&mut self, now: Instant) -> Option<Instant> {
         let mut next: Option<Instant> = None;
         let mut at = |t: Instant| next = Some(next.map_or(t, |n| n.min(t)));
@@ -837,6 +847,14 @@ impl App {
             if now >= due {
                 self.size_save_due = None;
                 self.save_size();
+            } else {
+                at(due);
+            }
+        }
+        if let Some(due) = self.watch_due {
+            if now >= due {
+                self.watch_due = None;
+                self.watch_check();
             } else {
                 at(due);
             }

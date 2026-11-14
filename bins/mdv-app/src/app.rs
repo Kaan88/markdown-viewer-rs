@@ -71,6 +71,9 @@ const CLICK_SLOP: f32 = 4.0;
 /// anywhere in it refreshes the backlinks. A larger folder is refreshed by the other wakes only.
 const WATCHED_NOTES: usize = 5_000;
 
+/// How long a file watcher wake waits for the rest of a burst of changes.
+const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
+
 pub enum Wake {
     /// The single-instance listener queued paths.
     Instance,
@@ -174,6 +177,8 @@ struct App {
     idle_due: Option<Instant>,
     /// When to ask next whether the editor answers; `Some` only while a tab is live.
     sister_due: Option<Instant>,
+    /// When the watcher's wake is looked at: a short wait that folds a burst of changes into one check.
+    watch_due: Option<Instant>,
     /// A helper thread is asking now.
     sister_asking: bool,
     /// Rows of the page viewport (device px, first and one past the last) where an animated
@@ -208,6 +213,7 @@ impl App {
             dialog_open: false,
             incoming: None,
             watcher: None,
+            watch_due: None,
             tree_dirs: Vec::new(),
             session,
             screen: Bitmap::new(1, 1),

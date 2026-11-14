@@ -1167,3 +1167,28 @@ fn the_wheel_beside_the_palette_does_nothing() {
     assert_eq!(a.ws.scroll(), 0.0);
     assert_eq!(a.ui.palette.as_ref().unwrap().palette.scroll(), 0.0);
 }
+
+#[test]
+fn a_burst_of_watcher_wakes_is_one_check_of_the_folder() {
+    let dir = std::env::temp_dir().join(format!("mdview-watch-burst-{}", std::process::id()));
+    _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.md"), "# a\n").unwrap();
+    let mut a = app(&[]);
+    a.ui.tree.set_root(Some(dir.clone()));
+    assert_eq!(a.ui.tree.rows().len(), 1);
+    std::fs::write(dir.join("b.md"), "# b\n").unwrap();
+    // The wake only starts the wait; the pane still shows what it showed.
+    let now = Instant::now();
+    a.woken(Wake::Files);
+    a.woken(Wake::Files);
+    let due = a.watch_due.expect("a check is due");
+    assert_eq!(a.ui.tree.rows().len(), 1);
+    assert!(due > now);
+    assert!(a.timers(now).is_some(), "the loop wakes for the check");
+    // When the wait is over the folder is read once and the new file shows.
+    a.timers(due + Duration::from_millis(1));
+    assert!(a.watch_due.is_none());
+    assert_eq!(a.ui.tree.rows().len(), 2);
+    _ = std::fs::remove_dir_all(&dir);
+}
