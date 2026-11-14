@@ -767,6 +767,78 @@ fn the_settings_form_follows_the_apps_limits() {
     assert_eq!(zoom, (60, 250, 10, "%".to_string()));
 }
 
+/// The dialog is one page: no category list, every control reachable by pointer inside the card
+/// at the default size without scrolling, and inside the window (scrolling, not clipped) at the
+/// minimum size.
+#[test]
+fn the_settings_dialog_is_one_page_at_the_default_and_the_minimum_window_size() {
+    use mdshared_ui::settings::Row;
+    for (size, scrolls) in [((1280, 800), false), ((520, 360), true)] {
+        let mut a = app(&["showcase.md"]);
+        a.size = size;
+        a.command(C::Settings);
+        a.compose();
+        let f = a.ui.settings.as_ref().expect("the dialog");
+        assert!(!f.has_nav(), "no category list at {size:?}");
+        assert_eq!(f.categories().len(), 3, "the headings stay");
+        let card = f.rect();
+        let win = Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32);
+        assert!(
+            card.x >= 0.0 && card.y >= 0.0 && card.right() <= win.w && card.bottom() <= win.h,
+            "{card:?} inside {win:?}"
+        );
+        assert_eq!(f.scroll(), 0.0);
+        let body = f.body_rect();
+        let mut ids = 0;
+        for (i, row) in f.rows().iter().enumerate() {
+            if row.id().is_none() {
+                continue;
+            }
+            ids += 1;
+            let c = f.control_rect(i);
+            let inside = c.x >= card.x && c.right() <= card.right();
+            assert!(inside, "{i}: {c:?} inside {card:?}");
+            if !scrolls {
+                assert!(
+                    c.y >= body.y && c.bottom() <= body.bottom(),
+                    "row {i} visible without scrolling: {c:?} in {body:?}"
+                );
+            }
+        }
+        assert_eq!(
+            ids,
+            crate::settings::rows(&a.ws)
+                .iter()
+                .filter(|r| !matches!(r, Row::Header(_)))
+                .count()
+        );
+    }
+}
+
+/// Tab walks every control once and then the Close button, with no tab strip in between.
+#[test]
+fn tab_in_the_settings_dialog_visits_every_control_and_then_close() {
+    use mdshared_ui::settings::Row;
+    let mut a = app(&["showcase.md"]);
+    a.command(C::Settings);
+    a.compose();
+    let controls = crate::settings::rows(&a.ws)
+        .iter()
+        .filter(|r| !matches!(r, Row::Header(_)))
+        .count();
+    let mut seen = vec![a.ui.settings.as_ref().unwrap().focus_id()];
+    for _ in 0..controls - 1 {
+        key(&mut a, KeyName::Tab, None);
+        seen.push(a.ui.settings.as_ref().unwrap().focus_id());
+    }
+    assert!(seen.iter().all(Option::is_some));
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), controls, "each control once");
+    key(&mut a, KeyName::Tab, None);
+    assert!(a.ui.settings.as_ref().unwrap().focus_on_close());
+}
+
 #[test]
 fn settings_keep_the_page_keys_and_the_bar_button_working_after_they_close() {
     let mut a = app(&["showcase.md"]);
