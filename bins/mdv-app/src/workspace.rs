@@ -1260,6 +1260,27 @@ impl Workspace {
         self.reload_tab(index, false)
     }
 
+    /// The editor is gone without a `live_off`: every live tab reads its file again, and one toast
+    /// says so. False when no tab was live.
+    pub fn live_end_all(&mut self) -> bool {
+        let live: Vec<usize> = (0..self.tabs.len())
+            .filter(|&i| self.tabs[i].live)
+            .collect();
+        for &index in &live {
+            self.tabs[index].live_pending = None;
+            self.reload_tab(index, false);
+        }
+        if !live.is_empty() {
+            self.message(strings::LIVE_EDITOR_GONE);
+        }
+        !live.is_empty()
+    }
+
+    /// Whether any tab shows the editor's text.
+    pub fn any_live(&self) -> bool {
+        self.tabs.iter().any(|t| t.live)
+    }
+
     // ---- animated images -------------------------------------------------------------------
 
     /// Sets what runs (on the decoding thread) when an animation frame is ready; it must only

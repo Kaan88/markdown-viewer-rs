@@ -365,6 +365,7 @@ pub mod strings {
     pub const REFRESHING: &str = "Refreshing document…";
     pub const REFRESHED: &str = "Document refreshed from disk";
     pub const LIVE_STARTED: &str = "Live preview: showing the editor's unsaved text";
+    pub const LIVE_EDITOR_GONE: &str = "mdedit closed: showing the saved file";
     pub const RENDER_TIMEOUT: &str = "Rendering exceeded 15 seconds. Try a smaller document.";
     pub const REMOTE_ONE: &str = "This document has 1 remote image that was not loaded.";
     pub const REMOTE_MANY: &str = "This document has {} remote images that were not loaded.";

@@ -644,6 +644,12 @@ impl App {
                     );
                 }
             }
+            Wake::Sister(alive) => {
+                self.sister_asking = false;
+                if !alive {
+                    self.ws.live_end_all();
+                }
+            }
             Wake::Images => {
                 self.ws.remote_completed();
             }
@@ -835,6 +841,17 @@ impl App {
                 at(due.max(now));
             }
         }
+        // The editor may die without a word: while a tab shows its text, ask now and then.
+        if self.ws.any_live() {
+            let due = *self.sister_due.get_or_insert(now + SISTER_CHECK);
+            if now >= due {
+                self.ask_sister();
+                self.sister_due = Some(now + SISTER_CHECK);
+            }
+            at(self.sister_due.unwrap_or(now + SISTER_CHECK));
+        } else {
+            self.sister_due = None;
+        }
         let active = self.ws.active();
         let unloadable = self
             .ws
@@ -853,6 +870,21 @@ impl App {
             self.idle_due = None;
         }
         next
+    }
+
+    /// Asks, on a helper thread, whether a window of mdedit answers, and posts the answer. Sends
+    /// nothing to it. One question at a time: a slow answer is waited for, not asked again.
+    fn ask_sister(&mut self) {
+        let Some(proxy) = self.proxy.clone() else {
+            return;
+        };
+        if self.sister_asking {
+            return;
+        }
+        self.sister_asking = true;
+        std::thread::spawn(move || {
+            let _ = proxy.send_event(Wake::Sister(mdshared_app::sister::alive("mdedit")));
+        });
     }
 
     /// Whether the window is on screen: created, shown, not minimised and not fully covered.

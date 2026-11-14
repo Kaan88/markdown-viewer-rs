@@ -926,6 +926,15 @@ than leaving the page alone while the caret stays in view.
   is the editor saving, which ends the state; F5, `live_off`, or closing the tab also end it. A live
   tab is not unloaded by `drop_idle`. Relative images and links resolve against the file's folder
   as always. `crates/core/examples/live_send.rs` is a stand-in sender for checking by hand.
+- **A dead editor** sends no `live_off`. While any tab is live, `App::timers` asks every 5 s
+  (`SISTER_CHECK`, `sister_due`) on a helper thread `mdshared_app::sister::alive("mdedit")` (a bare
+  connection to its instance port, closed at once; nothing is sent, so the editor is not opened,
+  raised or changed) and posts `Wake::Sister(bool)`. False: `Workspace::live_end_all` returns every
+  live tab to its file, as `live_off` does, with the toast "mdedit closed: showing the saved file".
+  With no live tab `sister_due` is `None` and no timer is scheduled. One question at a time
+  (`sister_asking`). Shared pin 99f810c (`feat/linux`). Version 0.3.0 (command palette, settings,
+  live preview, hand-off, page fonts); release notes and the installer's default version are for the
+  release step.
 - **Measured** (release, this machine): parse + layout + compose of a live update, median 1.7 ms for
   the showcase fixture and 4.0 ms for a 200 KB document (`live_update_cost`, ignored test; the
   idle refinement of the far blocks comes after and is not in that number); one send + receive of

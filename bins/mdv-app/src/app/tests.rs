@@ -1007,6 +1007,39 @@ fn a_change_on_disk_ends_the_live_state_and_f5_returns_to_the_file() {
     _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn the_editor_check_runs_only_while_a_tab_is_live() {
+    use std::time::{Duration, Instant};
+    let (mut a, dir, file) = live_app("alive");
+    let now = Instant::now();
+    // No live tab: no timer for it, and nothing is remembered.
+    assert_eq!(a.timers(now), None);
+    assert!(a.sister_due.is_none());
+    a.handed_over(vec![live(&file, "# Unsaved\n", None)]);
+    a.compose();
+    assert!(a.ws.active_tab().unwrap().is_live());
+    // A live tab: the first look is 5 s away.
+    assert!(a.timers(now).is_some(), "a wake for the editor check");
+    assert_eq!(a.sister_due, Some(now + Duration::from_secs(5)));
+    // The editor answered: the tab stays live.
+    a.woken(Wake::Sister(true));
+    assert!(a.ws.active_tab().unwrap().is_live());
+    assert!(a.timers(now + Duration::from_secs(1)).is_some());
+    // The editor is gone: the tab shows the file, with a toast, and the timer goes.
+    a.woken(Wake::Sister(false));
+    assert!(!a.ws.active_tab().unwrap().is_live());
+    assert!(page_text(&a).contains("of the file on disk"));
+    assert_eq!(
+        a.ws.status(Instant::now()),
+        Some("mdedit closed: showing the saved file")
+    );
+    a.timers(now + Duration::from_secs(2));
+    assert!(a.sister_due.is_none());
+    // Gone again with nothing live does nothing.
+    a.woken(Wake::Sister(false));
+    _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The cost of a live update: handing the text over, then the frame that parses and lays it out.
 /// `cargo test --release -p mdview live_update_cost -- --ignored --nocapture`
 #[test]

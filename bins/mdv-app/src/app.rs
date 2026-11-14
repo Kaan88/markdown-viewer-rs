@@ -9,7 +9,8 @@
 //!
 //! **Idle.** The loop waits for events; it wakes on a timer only for something pending (caret
 //! blink while the find box has focus, a tooltip delay, the toast expiring, drag auto-scroll,
-//! unloading idle tabs, saving the window size after a resize).
+//! unloading idle tabs, saving the window size after a resize, and every 5 s
+//! while a tab shows the editor's live text: asking, on a helper thread, if the editor is there).
 
 use crate::args::{Args, ShotDialog, ShotMenu};
 use crate::chrome::{self, Ctx};
@@ -53,6 +54,8 @@ mod tests;
 const TIP_DELAY: Duration = Duration::from_millis(500);
 const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
+/// While a tab shows the editor's text: how often to ask whether the editor still answers.
+const SISTER_CHECK: Duration = Duration::from_secs(5);
 const IDLE_UNLOAD: Duration = Duration::from_secs(60);
 const SIZE_SAVE_DELAY: Duration = Duration::from_millis(800);
 /// How long the page's refinement may run between events: short enough that input waiting
@@ -81,6 +84,8 @@ pub enum Wake {
     Animation,
     /// An updater thread has an answer.
     Update(updater::Event),
+    /// The helper thread asked whether a window of mdedit still answers: true if one does.
+    Sister(bool),
     /// A file or folder dialog, which runs on a helper thread off Windows, was closed.
     #[cfg(not(windows))]
     Dialog(DialogAnswer),
@@ -167,6 +172,10 @@ struct App {
     toast_until: Option<Instant>,
     size_save_due: Option<Instant>,
     idle_due: Option<Instant>,
+    /// When to ask next whether the editor answers; `Some` only while a tab is live.
+    sister_due: Option<Instant>,
+    /// A helper thread is asking now.
+    sister_asking: bool,
     /// Rows of the page viewport (device px, first and one past the last) where an animated
     /// image went to its next frame since the last frame was drawn.
     anim_rows: Option<(u32, u32)>,
@@ -229,6 +238,8 @@ impl App {
             toast_until: None,
             size_save_due: None,
             idle_due: None,
+            sister_due: None,
+            sister_asking: false,
             anim_rows: None,
             page_again: false,
             occluded: false,
