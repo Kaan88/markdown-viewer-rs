@@ -94,6 +94,9 @@ locked; that update fails cleanly and can be tried again once the old window is 
 
 ## Publishing a release
 
+This is the Windows procedure. For both platforms from Linux see "Releasing from Linux" below
+(0.3.0 is the first release made that way).
+
 1. Set the version in `[workspace.package]` of `Cargo.toml`.
 2. `packaging\windows\build-installer.ps1 -Notes 'One line.'` builds the static executables and
    the installer, and fills `target\release-files\` with `mdview.exe`, `mdview-engine.exe`,
@@ -153,15 +156,18 @@ engine is inside the AppImage (`usr/bin/mdview-engine` beside `usr/bin/mdview`, 
 update replaces the one AppImage (`<name>.new` staged with mode 0755, the old one aside as
 `.old`). A plain binary or a cargo build updates nothing. The transport is the system libcurl,
 loaded at run time; `mdview --check-update` reached GitHub from the 0.2.3 build on Linux ("nothing
-newer"). An update of a real AppImage, and a Linux release asset and manifest entry
-(`linux-x86_64.asset/url/sha256`), have not been made or run. The release test
-(`the_release_scripts_write_a_manifest_this_build_reads`) runs on both systems.
+newer"). The Linux manifest entry (`linux-x86_64.asset/url/sha256`) is written by
+`packaging/write-manifest.sh` (see below); an update of a real AppImage from a published release
+has not run. The release test (`the_release_scripts_write_a_manifest_this_build_reads`) runs on
+both systems.
 
 ## Releasing from Linux
 
-Added 2026-11-14. Both platforms' files can be built on a Linux PC with Docker, `appimagetool`,
-`wine`, and the Inno Setup folder from a Windows install. `build-installer.ps1` stays the way to
-build on Windows; the two make the same file names.
+Added 2026-11-14; checked against the scripts on the same day for 0.3.0. Both platforms' files can
+be built on a Linux PC with Docker, `appimagetool` (with `mksquashfs`), `curl`, `wine`, the Inno
+Setup folder from a Windows install, and `python3` with `pefile` for the installer's icon step
+below. Publishing needs `gh`. `build-installer.ps1` stays the way to build on Windows; the two make
+the same Windows file names.
 
 ### Commands
 
@@ -175,9 +181,14 @@ packaging/release-all.sh --notes '...' --notes-file FILE --publish    # also: gh
 packaging/wine-compare.sh NATIVE_DIR CROSS_DIR           # tests/shots.sh under Wine with both builds, cmp the PNGs
 ```
 
-`release-all.sh` refuses a dirty tree (changes under `docs/` excepted) and a HEAD no remote
-branch contains. `--notes` is the manifest's line (optional, as in the PowerShell script),
-`--notes-file` the GitHub release text. `--publish --dry-run` prints the `gh` command instead of
+`release-all.sh` reads the version from `[workspace.package]` of `Cargo.toml`, refuses a dirty tree
+(changes under `docs/` excepted) and a HEAD no remote branch contains (it runs `git fetch` first).
+It runs the AppImage script, then `packaging/windows-cross/build.sh`, copies the four files into
+`target/release-files-all/` (the intermediate outputs stay in `target/dist-linux/` and
+`target/dist-cross/`), and writes the one manifest there with `packaging/write-manifest.sh`, which
+re-reads it and checks every hash against the file it names. `--notes` is the manifest's line
+(optional, as in the PowerShell script; at most 1024 bytes, one line), `--notes-file` the GitHub
+release text. `--publish --dry-run` prints the `gh` command instead of
 running it. The release has five assets: the AppImage, `mdview.exe`, `mdview-engine.exe`, the
 setup and the manifest. The manifest carries the Windows entry with its engine keys and the Linux
 entry without any: the engine is inside the AppImage.
@@ -189,7 +200,9 @@ entry without any: the engine is inside the AppImage.
   read-only. The script checks that `objdump -T` needs no glibc symbol newer than 2.31 (0.2.3:
   2.30), assembles `AppDir` (`usr/bin/mdview` and `usr/bin/mdview-engine`, `mdview.desktop`,
   `mdview.png`, `.DirIcon`, `AppRun` a symlink to `usr/bin/mdview`) and runs the host's
-  `appimagetool` with a pinned runtime (`--runtime-file`, so it never downloads one).
+  `appimagetool` with a pinned runtime (`--runtime-file`; the script fetches that runtime once with
+  `curl` and checks its SHA-256, so `appimagetool` never downloads one). Squashfs compression is
+  the default (the measurements are in `docs/HANDOFF.md`, section 12).
   `SOURCE_DATE_EPOCH` is the commit time: two runs on one commit give the same AppImage (checked).
   The viewer finds the engine as a sibling of its own executable, which inside the AppImage is
   the file under the mount point, so `MDV_ENGINE` is not needed (checked: `--shot` of
@@ -207,7 +220,14 @@ entry without any: the engine is inside the AppImage.
   embedded (the script sets `MD_LLVM_RC=/usr/bin/llvm-rc`).
 - **Installer.** `ISCC.exe` from the copied Inno Setup folder runs under Wine on the same
   `packaging\windows\mdview.iss`, in a scratch tree (`target/cross-installer`) laid out the way
-  the script expects its inputs.
+  the script expects its inputs. Then `packaging/windows-cross/fix-setup-icons.py` (needs
+  `python3` with `pefile`) rewrites the setup's resource tables to drop the stock Inno Setup icons
+  that Wine's `UpdateResource` leaves beside ours, so the setup carries only our icon, as one built
+  on Windows does. Without `pefile` the script prints a warning and leaves the setup as built.
+- **Manifest.** `packaging/write-manifest.sh` writes `windows-x86_64.*` keys (with the two
+  `engine.*` keys) and `linux-x86_64.*` keys (no engine keys) for the files it is given; the URLs
+  point at tag `v<version>`. `windows-cross/build.sh` alone writes a Windows-only manifest into
+  `target/dist-cross/`.
 
 ### Licence
 
@@ -239,10 +259,11 @@ the cross pair gave 57 PNGs each, all byte-identical (diagrams and math included
 works); `--check-update` of both answered "nothing newer".
 
 Not checked: any run on Windows. The cross exes are not byte-identical to the native ones (a
-different linker and resource compiler). The cross-built setup is about 11.75 MB against 11.60 MB
+different linker and resource compiler). The cross-built setup was about 11.75 MB against 11.60 MB
 for the native one because Wine's `UpdateResource` leaves Inno Setup's stock icons in `Setup.exe`
-when ISCC swaps in ours; it was not run, and every run makes a different file (Inno stamps the
-build time), unlike the exes and the AppImage.
+when ISCC swaps in ours; `fix-setup-icons.py` now removes them (commit `30cb862`; its effect on a
+setup run under Windows was not checked). The setup was not clicked through, and every run makes a
+different file (Inno stamps the build time), unlike the exes and the AppImage.
 
-The shared pin on main has the Linux transport and the engine rule since 2026-11-14, so the
-two-platform manifest test applies on Linux too.
+The shared pin (branch `feat/linux`, `7cd6461` for 0.3.0, to become `main`) has the Linux transport
+and the engine rule, so the two-platform manifest test applies on Linux too.

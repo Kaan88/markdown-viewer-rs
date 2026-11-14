@@ -17,14 +17,14 @@ that last changed this file is the state it describes; check `git log --oneline 
 the window and input, softbuffer 0.4 for the pixels, a frameless window, and every control (title
 row, tabs, command bar, panes, menus, dialogs, tooltips, text field) drawn by the crate through the
 page's own text path. Windows first. The user approved its look by using the running app on
-2026-11-11 (PLAN roadmap step A2). It has never been built or run on Linux.
+2026-11-11 (PLAN roadmap step A2). It builds and runs on Linux from 2026-11-14 (section 12; KDE Plasma 6 on Wayland, sway headless; the owner has not tested Linux).
 
 **What ships.** `mdview` is the only shell. Its installer is `packaging/windows/mdview.iss` (built
 by `build-installer.ps1`, section 8). **v0.1.0 and v0.2.0 (the seven features of section 13, item 4) were published on GitHub on 2026-11-13, and 0.2.2 is the latest (section 14)**; v0.1.0 from
 `5cbd354`, as the latest release, with the installer, the two executables and `mdview-update.txt`
 (the earlier v0.1.0 pre-release, which carried the Qt installer, was deleted with its tag on
-2026-11-12). The installer from that release has not been downloaded and run. Nothing is packaged
-for Linux.
+2026-11-12). The installer from that release has not been downloaded and run (not re-checked). 0.3.0
+(see "Release 0.3.0", before section 13) adds an AppImage for Linux.
 
 **What is retired.** The Qt 6 shell (`bins/mdv-qt`, CXX-Qt, Qt Widgets), its installer
 (`mdview-qt.iss`, `build-installer-qt.ps1`) and its Linux packaging (`packaging/arch`,
@@ -52,7 +52,7 @@ Runtime dependency, Windows only, and hand-trimmed generated bindings.
 - The installer never takes the `.md` default; it registers mdview as a handler, so Windows' Default apps
   page lists it. Its last page offers only "Launch mdview" (the "Choose mdview as the default app"
   checkbox was removed on 2026-11-13 as a redundant question, as in the editor's installer).
-- Linux is low priority until the Windows shell has replaced Qt.
+- Linux was low priority until the Windows shell had replaced Qt; it was done for 0.3.0 (section 12).
 
 **Plan phases.** 0 spikes, 1 core, 2 headless renderer, 4 engine: closed. 3 (Qt parity) and 5
 (WinUI) are superseded by the roadmap in PLAN ("Roadmap from 2026-11-11"): A1-A2 done, A3 (hand
@@ -61,7 +61,8 @@ B1-B5 (GIF/WebP, remote images, Mermaid families, emoji list, ruby/dl/figure and
 C1-C5 (image store, `layout.rs` split, estimated heights, cheap toggles, text and bitmap work) have
 landed in `main`; see section 14 for the commits.
 
-**Where the work happens.** The physical Windows PC (Windows 11, RTX 4070 Ti SUPER, 3440x1440 at
+**Where the work happens.** On 2026-11-14 the Linux desktop (CachyOS, KDE Plasma, Wayland) again, for
+the Linux port and 0.3.0. Before that the physical Windows PC (Windows 11, RTX 4070 Ti SUPER, 3440x1440 at
 100%) since 2026-11-11. Before that, the user's Linux desktop (CachyOS, KDE Plasma) with a WinApps
 Windows 11 VM, and before 2026-11-10 a Debian VM (section 12).
 
@@ -767,8 +768,9 @@ and the showcase's two decodes separately.
 - A Qt first-frame comparison: the Qt `--measure` run hung and was killed.
 - A scrolling comparison on the 1 MiB document against Qt.
 - The installer's wizard pages and an upgrade over an older version (not re-checked).
-- Anything on Linux or KDE for the new shell; the Linux dependency features in `Cargo.toml` are
-  untested.
+- On Linux (2026-11-14, in 0.3.0): the shell builds and runs on KDE Plasma 6 (Wayland) and sway
+  headless; the AppImage is built. Not run there: GNOME and other desktops, fractional scales in
+  a real window, two monitors with different scales. Nothing in 0.3.0 has run on Windows.
 
 ## 11. Known gaps
 
@@ -776,7 +778,7 @@ and the showcase's two decodes separately.
 
 - No snap-layouts flyout on the maximize button. The system accent colour is not used.
 - Maximized memory is three full-window bitmaps.
-- Icons need Segoe Fluent Icons or Segoe MDL2 Assets (Windows only).
+- On Windows, icons need Segoe Fluent Icons or Segoe MDL2 Assets; off Windows a built-in subset of the Fluent UI System Icons is used (shared `1e244ec`).
 
 **Renderer and engine:**
 
@@ -796,6 +798,10 @@ and the showcase's two decodes separately.
 - Any image format other than PNG, JPEG, GIF, WebP and SVG keeps its placeholder.
 
 ## 12. Linux: what exists for the KDE run
+
+*(For 0.3.0: an AppImage was built later the same day and `--shot` of `fixtures/diagrams.md` from it
+drew the diagrams, see `docs/UPDATE.md`; the desktop entry and "Make default" are described below
+as written then.)*
 
 **2026-11-14, Linux pass (shared `84de734`, branch `feat/linux`; the version stays 0.2.3).** The new shell now
 builds and runs on CachyOS, KDE Wayland, cargo 1.99 (`CARGO_TARGET_DIR` off the repo). Changed, all under
@@ -997,6 +1003,81 @@ message row such as "Go to line 25"; icons for the editor's line commands; the r
 hands folders to request receivers, which the viewer's own `mdview_core::single` is not). Shots
 compared with a baseline made before the change: see the commit message.
 
+## Release 0.3.0 (2026-11-14)
+
+mdview 0.3.0, for Windows and, for the first time, Linux. Version 0.2.3 was never published, so
+0.3.0 holds everything dated 2026-11-13 (menus taller than the window scroll) and 2026-11-14 in
+sections 12 to 14: the command palette, Settings (with page and code fonts), Edit in mdedit,
+live preview of the editor's unsaved text, the window shadow, colour emoji, and the Linux port.
+
+**The files.** Five assets: the AppImage, `mdview.exe`, `mdview-engine.exe`, the Windows setup and
+`mdview-update.txt` (one manifest: the Windows entry with its engine keys, the Linux entry without).
+The AppImage is x86-64, built in an Ubuntu 20.04 container, so it needs glibc 2.31 or later; the
+engine is inside it. It needs the system's libc, fontconfig, freetype and the X11/xcb libraries,
+and loads libcurl and the Wayland libraries at run time. It updates itself. On first run it writes
+its desktop entry and icon into the user's data folder and registers its file types without taking
+defaults; "make default" is a command in Settings. The Windows files were cross-compiled on Linux
+(cargo-xwin; Inno Setup under Wine) and checked under Wine only. How they are made:
+`docs/UPDATE.md`, "Releasing from Linux".
+
+**Pins.** The shared crates are the branch `feat/linux` of `Kaan88/markdown-shared-rs` at `7cd6461`
+(pinned in `bins/mdv-app`, `crates/core` and `crates/render`), to become its `main`. Two forks are
+carried on Linux and resolved for all platforms through `[patch.crates-io]`: `Kaan88/winit`, branch
+`md-0.30.13` (a content margin for the client-drawn shadow) and `Kaan88/softbuffer`, branch
+`md-0.4.8` (ARGB buffers on Wayland).
+
+**The last builds made and run on Windows itself** were mdview 0.2.2 (and mdedit 0.4.0). 0.2.3 was
+built on Windows but never published. Nothing in 0.3.0 has run on Windows.
+
+### Decisions taken without the owner
+
+The owner said on 2026-11-14: use your best judgement for open questions and make a note. These
+were taken that way, or agreed on that day where it says so.
+
+- **The exe size is reported, not a gate** (the owner agreed on 2026-11-14). Launch time is the
+  first budget. The build profile was left as it is until a build compiled for speed with
+  unwinding can be compared on real Windows.
+- **Window shadow.** On KDE the window uses KWin's own protocol. Other Wayland desktops get the
+  client-drawn margin (patched winit and softbuffer). X11 gets none by default, because a tiled
+  X11 window would draw its shadow over its neighbour.
+- **A second fork (softbuffer)** was made beside the approved winit fork, because stock softbuffer
+  cannot present a transparent margin on Wayland.
+- **Checked menu items have a check-mark column of their own** before the icons: a tinted icon
+  alone did not read as "on".
+- **The Panes section was removed from Settings** (Files pane, Outline pane, Focus reading mode):
+  that is view state, not preferences. The preference toggles and the page widths moved from the
+  main menu into Settings, so the menu fits the default window.
+- **Live preview.** The viewer returns to the saved file when the editor is gone (it checks every
+  5 s while a tab is live). Text is sent only while the document is modified. The cap is 2 MiB.
+- **Versions.** mdview 0.3.0 and mdedit 0.5.0, as feature releases; 0.2.3 and 0.4.1 were never
+  published.
+- **The AppImage keeps the default squashfs compression.** It adds about 18 ms to start-up; only
+  an uncompressed image (2.5 times the size) was measurably faster (table in section 12).
+- **The Windows files are cross-built and Wine-checked.** This was the owner's choice ("find a way
+  to cross compile windows").
+
+### Not verified
+
+- A run on real Windows of anything in this release: the palette, settings, hand-off, live
+  preview, the installer's wizard pages, Explorer icons, emoji with the variation selector on
+  Windows, and SmartScreen.
+- GNOME and other desktops than KDE Plasma 6 and sway (sway ran headless).
+- Fractional display scales in a real window on Linux.
+- Two monitors with different scales.
+- The toast when the editor closes during a live preview ("mdedit closed: showing the saved
+  file"): the return to the file was seen, the toast was not.
+
+### Next release (agreed with the owner 2026-11-14)
+
+- Search across the open folder.
+- Export or print (HTML; PDF through printing). First check what exists.
+- Copy as rich text. First check what a copy puts on the clipboard today.
+- A copy button on code blocks.
+- Carried over: the speed-versus-size build comparison on Windows, and a native Windows run of
+  this release.
+
+The same list is in `docs/PLAN.md`.
+
 ## 13. What to do next
 
 The user set a list on 2026-11-12; everything on it is done: Qt retired (2026-11-13), the port
@@ -1009,12 +1090,11 @@ What is open:
    shell on 2026-11-11/12 and the seven features on 2026-11-13; whether they have since checked
    the 0.2.1 and 0.2.2 changes (update look at every launch, cascade submenus) by hand was not
    re-checked.
-2. **Move the shared `main`.** mdview pins commit `24865c5` of `markdown-shared-rs`, on the branch
-   `chore/finalize` (on top of `1c3710a`, branch `fix/update-look-every-launch`). A push to the
-   shared `main` is refused from the PC; the owner moves it, then the `rev`s here
-   (`bins/mdv-app`, `crates/core`, `crates/render`) can name commits on `main`.
-3. **Linux** is set aside by the user (see the end of this section) and has never been built
-   for the new shell.
+2. **Move the shared `main`.** mdview pins commit `7cd6461` of `markdown-shared-rs`, on the branch
+   `feat/linux`, to become its `main`. A push to the shared `main` is refused from here; the owner
+   moves it, then the `rev`s here (`bins/mdv-app`, `crates/core`, `crates/render`) can name
+   commits on `main`.
+3. **Linux** was built for 0.3.0 (see "Release 0.3.0"). The owner has not tested it.
 4. Left open by the workers of the seven features: a table never stands beside a float even
    when it would fit; `[[Note|a *b* c]]` (markup in a label) and `![[embed]]` stay text; a
    window fully covered by another keeps animating; the main menu, with "Play animated
@@ -1026,12 +1106,13 @@ What is open:
 6. The editor and the shared code have their own repositories (`Kaan88/markdown-editor-rs`,
    `Kaan88/markdown-shared-rs`); the editor's plan is built to its end.
 
-Set aside by the user for now: crash reporting, accessibility, non-Latin input methods, Linux,
-testing on other machines (there is one PC). The editor is a second project (PLAN section E).
+Set aside by the user for now: crash reporting, accessibility, non-Latin input methods, testing on
+other machines (there is one PC). The list for the next release is in "Release 0.3.0" and in
+`docs/PLAN.md`. The editor is a second project (PLAN section E).
 
 ## 14. History
 
-- **2026-11-14, command palette, settings dialog, window shadow (0.2.3 still, not published; shared
+- **2026-11-14, command palette, settings dialog, window shadow (0.2.3 still, not published; in 0.3.0; shared
   `d6e6cf1`, branch `feat/linux`, pinned in `bins/mdv-app`, `crates/core`, `crates/render`).**
   Built by an agent without the owner; the owner has not looked at any of it. Run headless on
   Linux (CachyOS, KDE Wayland): the tests (385 pass, 4 ignored; 371 before), clippy, fmt, 67 `--shot`
@@ -1076,7 +1157,8 @@ testing on other machines (there is one PC). The editor is a second project (PLA
     fonts through `shared_fonts`) and a picker (the form has choice and text rows only, so a
     dropdown of installed families or a text box), and the page's `SANS` family string in
     `crates/render/src/theme.rs` made a parameter of the renderer, with every layout cache keyed
-    on it. Not done here (no new rendering options).
+    on it. Not done here (no new rendering options). (Built later the same day: page and code font
+    settings, section 12a.)
   - **Main menu** now: Open files, Open folder, Open recent, Reload, Close tab, Close all tabs,
     Zoom in, Zoom out, Reset zoom, Files pane, Outline pane, Focus reading mode, Command palette,
     Settings, Keyboard shortcuts, About, Exit: 606 px tall (from 713), so it no longer needs to
@@ -1110,7 +1192,7 @@ testing on other machines (there is one PC). The editor is a second project (PLA
   - First frame before and after this work (showcase, 6 interleaved runs): 70.5 to 74.9 ms
     before, 71.7 to 77.4 after: unchanged.
 
-- **2026-11-13, 0.2.3 (not published).** Menus taller than the window scroll and stay below the
+- **2026-11-13, 0.2.3 (not published; in 0.3.0).** Menus taller than the window scroll and stay below the
   title row. Found in a real window 665 to 760 logical px tall: the main menu rose to the top edge
   over the caption buttons and its last rows ("Keyboard shortcuts", "About", "Exit") were cut off
   (the scrollbar seen there was the page's); nothing in the menu scrolled and the wheel closed it.

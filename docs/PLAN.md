@@ -282,7 +282,7 @@ crates and can overlap once A is approved.
 
 - `docs/COVERAGE.md` still calls the renderer and engine "planned": re-verify each row on screen with a fixture, and rewrite the status column.
 - Rewrite `docs/HANDOFF.md` around the new shell; move the WinUI and Qt sections to history.
-- Linux: build and run the winit shell on KDE (Wayland file drops, portal dialogs, an icon font to replace Segoe Fluent Icons).
+- Linux: build and run the winit shell on KDE (Wayland file drops, portal dialogs, an icon font to replace Segoe Fluent Icons). (Done for 0.3.0, 2026-11-14: file dialogs through the shared async calls, a built-in icon font, an AppImage. The dialogs and Wayland file drops were not run by hand: HANDOFF section 12.)
 
 **Order:** A1-A2, then C1 (small, and it may be free), B1, B2, then C2-C4, B3, B4-B5, C5, with A3-A6
 running alongside as soon as A2 passes. Self-contained pieces (B1, B3's test harness, B4) go to
@@ -308,6 +308,17 @@ alternative with syntax highlighting. Not started until the reader has shipped (
    and the checks for each step); `Kaan88/markdown-editor-rs` is the editor, `mdedit` (goals,
    budgets, phases, open decisions). Both are checked out beside this repository on the PC. No
    code has moved and the user has not said to start.
+
+### Next release (agreed with the owner 2026-11-14)
+
+Agreed after mdview 0.3.0 and mdedit 0.5.0 (Windows and Linux).
+
+- Search across the open folder.
+- Export or print (HTML; PDF through printing). First check what exists.
+- Copy as rich text. First check what a copy puts on the clipboard today.
+- A copy button on code blocks.
+- Carried over: the speed-versus-size build comparison on Windows (a build compiled for speed
+  with unwinding against the current profile), and a native Windows run of 0.3.0.
 
 ### Scope to port
 
