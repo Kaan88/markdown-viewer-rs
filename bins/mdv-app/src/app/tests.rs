@@ -1167,3 +1167,74 @@ fn the_wheel_beside_the_palette_does_nothing() {
     assert_eq!(a.ws.scroll(), 0.0);
     assert_eq!(a.ui.palette.as_ref().unwrap().palette.scroll(), 0.0);
 }
+
+/// Whether outline row `i` lies fully inside the outline's list.
+fn outline_row_visible(a: &App, i: usize) -> bool {
+    let top = i as f32 * mdshared_ui::pane::ROW;
+    let s = a.ui.panes.outline_scroll;
+    top >= s && top + mdshared_ui::pane::ROW <= s + a.ui.panes.outline_view
+}
+
+#[test]
+fn the_outline_follows_the_page_and_keeps_the_current_row_in_view() {
+    let mut a = app(&["everything.md"]);
+    assert!(
+        a.ui.panes.outline_content > a.ui.panes.outline_view,
+        "the outline needs scrolling for this test"
+    );
+    // Park the pointer on the page: it is not on the outline.
+    a.pointer_moved(900.0, 400.0);
+    let total = a.ws.layout().unwrap().total_height();
+    for step in 1..=8 {
+        a.ws.scroll_to(total * step as f32 / 9.0);
+        a.compose();
+        a.compose();
+        let Some(i) = a.ws.current_heading() else {
+            continue;
+        };
+        assert!(outline_row_visible(&a, i), "row {i} at step {step}");
+    }
+    // Back at the top the outline is back at its top.
+    a.ws.scroll_to(0.0);
+    a.compose();
+    a.compose();
+    assert_eq!(a.ui.panes.outline_scroll, 0.0);
+}
+
+#[test]
+fn the_outline_stays_put_under_the_pointer_and_catches_up_when_it_leaves() {
+    let mut a = app(&["everything.md"]);
+    a.pointer_moved(900.0, 400.0);
+    let total = a.ws.layout().unwrap().total_height();
+    let r = rect(&a, Hit::OutlineRow(0));
+    a.pointer_moved(r.cx(), r.cy());
+    a.compose();
+    assert!(matches!(a.ui.hover, Some(Hit::OutlineRow(0))));
+    a.ws.scroll_to(total * 0.9);
+    a.compose();
+    a.compose();
+    let i = a.ws.current_heading().expect("a heading at 90%");
+    assert!(!outline_row_visible(&a, i), "the outline did not move");
+    assert_eq!(a.ui.panes.outline_scroll, 0.0);
+    // The pointer leaves for the page: the next frame brings the row into view.
+    a.pointer_moved(900.0, 400.0);
+    a.compose();
+    a.compose();
+    assert!(outline_row_visible(&a, i));
+}
+
+#[test]
+fn a_click_on_an_outline_row_jumps_and_the_highlight_matches() {
+    let mut a = app(&["everything.md"]);
+    click(&mut a, Hit::OutlineRow(20));
+    a.compose();
+    a.compose();
+    // Painting settles the jump; the heading at the top is the one clicked, or, when the page
+    // cannot scroll that far, the page is at its end.
+    let now = a.ws.current_heading().expect("a current heading");
+    assert!(
+        now == 20 || a.ws.scroll() == a.ws.max_scroll(),
+        "current {now}"
+    );
+    assert!(outline_row_visible(&a, 20));
+}

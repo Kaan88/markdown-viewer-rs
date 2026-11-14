@@ -306,6 +306,40 @@ pub fn draw_outline(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
     edge(c, r, Side::Outline, dragging);
 }
 
+/// Whether the pointer is on the outline (a row, a backlink, its scrollbar) or dragging that
+/// scrollbar: the reader is using it, and it must not move under them.
+fn outline_in_use(ui: &Ui) -> bool {
+    matches!(
+        ui.hover,
+        Some(
+            Hit::OutlineRow(_)
+                | Hit::BacklinkRow(_)
+                | Hit::ScrollBar(Scroller::Pane(Side::Outline))
+        )
+    ) || matches!(
+        ui.drag,
+        Some(crate::ui::Drag::Thumb {
+            target: Scroller::Pane(Side::Outline),
+            ..
+        })
+    )
+}
+
+/// Whether the outline's rows have room once drawn, so waiting for its first draw ends.
+pub fn outline_has_room(r: Option<Rect>) -> bool {
+    r.is_some_and(|r| r.h > HEAD + ROW)
+}
+
+/// Keeps the outline's current row in view as the page scrolls. False when it did not (the
+/// pointer is on the outline, or it has not been drawn yet), so the caller tries again later.
+pub fn follow_outline_row(ui: &mut Ui, index: usize) -> bool {
+    if ui.panes.outline_view <= 0.0 || outline_in_use(ui) {
+        return false;
+    }
+    reveal_outline_row(ui, index);
+    true
+}
+
 /// Scrolls the outline pane so row `index` is visible.
 pub fn reveal_outline_row(ui: &mut Ui, index: usize) {
     let top = index as f32 * ROW;
