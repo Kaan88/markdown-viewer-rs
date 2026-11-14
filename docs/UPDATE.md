@@ -272,3 +272,22 @@ different file (Inno stamps the build time), unlike the exes and the AppImage.
 
 The shared pin (branch `feat/linux`, `7cd6461` for 0.3.0, to become `main`) has the Linux transport
 and the engine rule, so the two-platform manifest test applies on Linux too.
+
+## v0.3.0 (published 2026-11-14 by the release workflow, from the tag at commit 5e043ba)
+
+Assets: `mdview.exe` (8,630,272 bytes), `mdview-engine.exe`, `mdview-setup-0.3.0.exe`,
+`mdview-0.3.0-windows-x86_64.zip`, `mdview-0.3.0-linux-x86_64.AppImage` (15,346,168 bytes),
+`mdview-0.3.0-linux-x86_64.tar.gz`, `mdview_0.3.0_amd64.deb`, `mdview-0.3.0-1.x86_64.rpm`,
+`PKGBUILD` and `mdview-update.txt`. The Windows files were built natively on a Windows runner.
+
+Verified against the live release: the manifest at the latest-download address names 0.3.0 with a
+Windows entry (exe and engine) and a Linux entry without engine keys; the downloaded `mdview.exe`,
+`mdview-engine.exe` and AppImage have the manifest's three SHA-256 values; the published
+AppImage's `--check-update` answered "nothing newer", exit 0; the published 0.2.2 `mdview.exe`
+with its engine, run under Wine with `--check-update`, was offered 0.3.0 with both addresses.
+
+Before publishing: an AppImage built from the same code offered, installed and became a newer
+test build end to end on KDE Plasma 6.
+
+Not verified: the Windows files run by hand on a Windows desktop; an installed 0.2.2 updating
+itself to 0.3.0 through the bar; the deb, rpm, tar.gz and PKGBUILD of this exact build installed.
