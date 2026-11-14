@@ -73,8 +73,8 @@ Homepage: $homepage
 Description: $summary
  $app is a light, fast native Markdown viewer: tables, math, diagrams,
  images, tabs, find and an outline. This package installs the viewer,
- mdview-engine (the helper process it starts for diagrams and math), its
- desktop entry and its icon. It does not update itself; use the package
+ mdview-engine (the helper process it starts for math, diagrams and SVG),
+ its desktop entry and its icon. It does not update itself; use the package
  manager, or the AppImage if you want the built-in updater.
 CONTROL
 for script in postinst postrm; do
