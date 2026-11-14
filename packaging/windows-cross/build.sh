@@ -86,6 +86,15 @@ if [ "$installer" = 1 ]; then
     export WINEPREFIX="$cache/wine-prefix" WINEARCH=win64 WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml="
     wine "$iscc_dir/ISCC.exe" "/DAppVersion=$version" "$(winepath -w "$stage/packaging/windows/mdview.iss" 2>/dev/null)" >/dev/null
     cp "$stage/target/installer/mdview-setup-$version.exe" "$dist/"
+    # ISCC under Wine leaves Inno Setup's stock icons in the setup beside ours (Wine's resource
+    # update does not delete them). Take them out, so the file has the same icons as one built
+    # on Windows. Needs python3 with pefile; without it the setup is left as built.
+    if python3 -c 'import pefile' 2>/dev/null; then
+        python3 "$root/packaging/windows-cross/fix-setup-icons.py" "$dist/mdview-setup-$version.exe" "$dist/mdview-setup-$version.exe.fixed" \
+            && mv -f "$dist/mdview-setup-$version.exe.fixed" "$dist/mdview-setup-$version.exe"
+    else
+        echo "python3 pefile not found: the setup keeps Inno Setup's stock icons" >&2
+    fi
 fi
 
 # 3. The manifest, Windows entry only.
