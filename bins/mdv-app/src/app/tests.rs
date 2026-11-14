@@ -867,3 +867,177 @@ fn a_hand_over_opens_at_a_line_and_a_follow_only_scrolls() {
     let top = a.ws.top_source_line().unwrap();
     assert!((50..=60).contains(&top), "{top}");
 }
+
+/// A scratch folder with one long document, and an app showing it.
+fn live_app(name: &str) -> (App, PathBuf, PathBuf) {
+    let dir = std::env::temp_dir().join(format!("mdview-live-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("doc.md");
+    let mut text = String::from("# Title\n\n");
+    for i in 0..200 {
+        text.push_str(&format!("Paragraph number {i} of the file on disk.\n\n"));
+    }
+    std::fs::write(&file, text).unwrap();
+    let args = Args {
+        files: vec![file.clone()],
+        dark: Some(true),
+        no_session: true,
+        ..Args::default()
+    };
+    let mut a = App::new(args, Workspace::new(None), None);
+    a.scale = 1.0;
+    a.size = (1280, 800);
+    a.setup();
+    a.compose();
+    (a, dir, file)
+}
+
+fn live(path: &Path, text: &str, line: Option<u32>) -> Request {
+    Request {
+        follow: true,
+        text: Some(text.to_string()),
+        line,
+        ..Request::new(path)
+    }
+}
+
+fn page_text(a: &App) -> String {
+    a.ws.active_tab()
+        .unwrap()
+        .document()
+        .unwrap()
+        .text
+        .to_string()
+}
+
+#[test]
+fn live_text_replaces_the_page_keeps_the_place_and_ends_on_live_off() {
+    let (mut a, dir, file) = live_app("replace");
+    let disk = std::fs::read_to_string(&file).unwrap();
+    let disk_page = page_text(&a);
+    a.handed_over(vec![Request {
+        line: Some(300),
+        ..Request::new(&file)
+    }]);
+    a.compose();
+    let top = a.ws.top_source_line().unwrap();
+    assert!(top > 200, "{top}");
+    let before = a.ws.scroll();
+    // The editor's text: the heading changed, one paragraph added below the reader.
+    let edited = disk.replace("# Title", "# A new heading") + "\nTail added in the editor.\n";
+    a.handed_over(vec![live(&file, &edited, Some(top))]);
+    assert_eq!(
+        page_text(&a),
+        disk_page,
+        "nothing is parsed before the frame"
+    );
+    a.compose();
+    assert!(a.ws.active_tab().unwrap().is_live());
+    assert!(page_text(&a).contains("A new heading"));
+    assert!(page_text(&a).contains("Tail added in the editor"));
+    assert!(
+        (a.ws.scroll() - before).abs() < 2.0,
+        "the reader stays where they were: {before} -> {}",
+        a.ws.scroll()
+    );
+    // A follow without text does not end it, and does not change the text.
+    a.handed_over(vec![Request {
+        follow: true,
+        line: Some(top),
+        ..Request::new(&file)
+    }]);
+    a.compose();
+    assert!(a.ws.active_tab().unwrap().is_live());
+    assert!(page_text(&a).contains("A new heading"));
+    // A reload of the file by the watcher path does nothing while nothing changed on disk.
+    a.ws.check_changed();
+    assert!(a.ws.active_tab().unwrap().is_live());
+    // Of several texts arriving together the last is parsed.
+    a.handed_over(vec![
+        live(&file, "# First\n", None),
+        live(&file, "# Second\n", None),
+    ]);
+    a.compose();
+    assert!(page_text(&a).contains("Second") && !page_text(&a).contains("First"));
+    // Live off returns to the file, in the same place.
+    a.handed_over(vec![Request {
+        live_off: true,
+        follow: true,
+        ..Request::new(&file)
+    }]);
+    a.compose();
+    assert!(!a.ws.active_tab().unwrap().is_live());
+    assert_eq!(page_text(&a), disk_page);
+    _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_change_on_disk_ends_the_live_state_and_f5_returns_to_the_file() {
+    let (mut a, dir, file) = live_app("disk");
+    a.handed_over(vec![live(&file, "# Unsaved\n", None)]);
+    a.compose();
+    assert!(a.ws.active_tab().unwrap().is_live());
+    // The editor saves: the file changed after the last live text.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(&file, "# Saved\n\nBody.\n").unwrap();
+    a.ws.check_changed();
+    a.compose();
+    assert!(!a.ws.active_tab().unwrap().is_live());
+    assert!(page_text(&a).contains("Saved"));
+    // F5 from a live state shows the file.
+    a.handed_over(vec![live(&file, "# Unsaved again\n", None)]);
+    a.compose();
+    assert!(page_text(&a).contains("Unsaved again"));
+    a.ws.reload();
+    assert!(!a.ws.active_tab().unwrap().is_live());
+    assert!(page_text(&a).contains("Saved"));
+    // Text for a file that is not open is dropped: nothing is opened.
+    let other = dir.join("other.md");
+    std::fs::write(&other, "# Other\n").unwrap();
+    a.handed_over(vec![live(&other, "# Other live\n", None)]);
+    a.compose();
+    assert_eq!(a.ws.tab_count(), 1);
+    // Live off for a tab that is not live does nothing.
+    a.handed_over(vec![Request {
+        live_off: true,
+        follow: true,
+        ..Request::new(&file)
+    }]);
+    assert!(!a.ws.active_tab().unwrap().is_live());
+    _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The cost of a live update: handing the text over, then the frame that parses and lays it out.
+/// `cargo test --release -p mdview live_update_cost -- --ignored --nocapture`
+#[test]
+#[ignore = "a measurement"]
+fn live_update_cost() {
+    let measure = |label: &str, a: &mut App, file: &Path, base: &str| {
+        let mut times = Vec::new();
+        for i in 0..40 {
+            // Each update changes the first heading, as typing in it would.
+            let text = format!("# Edit {i}\n\n{base}");
+            let t = std::time::Instant::now();
+            a.handed_over(vec![live(file, &text, Some(1))]);
+            a.compose();
+            times.push(t.elapsed());
+        }
+        times.sort();
+        eprintln!(
+            "{label}: median {:?}, worst {:?} (parse + layout + compose, {} bytes)",
+            times[times.len() / 2],
+            times[times.len() - 1],
+            base.len()
+        );
+    };
+    let (mut a, dir, file) = live_app("cost");
+    let showcase = std::fs::read_to_string(fixture("showcase.md")).unwrap();
+    measure("showcase", &mut a, &file, &showcase);
+    let mut big = String::new();
+    while big.len() < 200 * 1024 {
+        big.push_str(&showcase);
+    }
+    big.truncate(200 * 1024);
+    measure("200 KB", &mut a, &file, &big);
+    _ = std::fs::remove_dir_all(&dir);
+}

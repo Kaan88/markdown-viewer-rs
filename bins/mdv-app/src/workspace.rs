@@ -264,6 +264,10 @@ pub struct Tab {
     edit_allowed: bool,
     /// The notes generation the document's wiki-links were last looked up at; 0 for never.
     links_checked: u64,
+    /// The page shows text the editor sent, not the file's. See [`Workspace::live_text`].
+    live: bool,
+    /// The newest text received and not parsed yet, and the line to follow.
+    live_pending: Option<(String, Option<u32>)>,
 }
 
 /// What a tab decided about its document's remote images.
@@ -299,6 +303,8 @@ impl Tab {
             remote: Remote::default(),
             edit_allowed: false,
             links_checked: 0,
+            live: false,
+            live_pending: None,
         }
     }
 
@@ -318,6 +324,11 @@ impl Tab {
     /// False for a restored tab that has not been shown yet (or was unloaded by `drop_idle`).
     pub fn is_loaded(&self) -> bool {
         self.doc.is_some()
+    }
+
+    /// The page shows text sent by the editor, not what is on disk.
+    pub fn is_live(&self) -> bool {
+        self.live
     }
 
     /// The file was deleted (its last text is still shown) or could not be found.
@@ -985,7 +996,7 @@ impl Workspace {
             let stale = tab
                 .left_at
                 .is_some_and(|t| now.saturating_duration_since(t) >= idle);
-            if Some(i) != self.active && stale && tab.doc.is_some() && !tab.missing {
+            if Some(i) != self.active && stale && tab.doc.is_some() && !tab.missing && !tab.live {
                 tab.doc = None;
                 tab.view = None;
                 tab.details.clear();
@@ -1115,11 +1126,22 @@ impl Workspace {
                 return false;
             }
         };
+        // Whatever ends a live state reads the file; nothing else does.
+        self.install(index, &loaded.bytes, loaded.stamp, manual, false);
+        true
+    }
+
+    /// Makes `bytes` the text of tab `index`, keeping the reader's place as a reload does. `stamp`
+    /// is what the file looked like; `live` is text from the editor, which says nothing aloud.
+    fn install(&mut self, index: usize, bytes: &[u8], stamp: FileStamp, manual: bool, live: bool) {
+        let Some(tab) = self.tabs.get_mut(index) else {
+            return;
+        };
         let active = self.active == Some(index);
         let height = self.viewport.map_or(0.0, |v| v.height as f32);
         tab.drop_view(self.renderer.page_layout(), height);
         let folder_open = self.session.folder.is_some();
-        let document = notes::parse_document(&self.notes, folder_open, &tab.path, &loaded.bytes);
+        let document = notes::parse_document(&self.notes, folder_open, &tab.path, bytes);
         let mut current = None;
         if let Some(old) = tab.doc.as_ref() {
             let remap = Remap::new(old, &document);
@@ -1150,8 +1172,10 @@ impl Workspace {
                 .collect();
         }
         tab.follow_end = tab.at_end;
-        tab.set_document(document, loaded.stamp);
-        tab.missing = false;
+        tab.set_document(document, stamp);
+        tab.missing = live && tab.missing;
+        tab.live = live;
+        tab.live_pending = None;
         let blocks = tab.stats.blocks;
         let name = file_name(&tab.path);
         if active {
@@ -1169,13 +1193,71 @@ impl Workspace {
                 self.find.current = at;
             }
         }
-        if manual {
+        if !live && manual {
             self.message(&format!("Refreshed {name}: {blocks} blocks"));
-        } else if active {
+        } else if !live && active {
             self.message(strings::REFRESHED);
         }
         self.dirty = true;
+    }
+
+    // ---- live text from the editor -----------------------------------------------------------
+
+    /// The editor sent the text of `path` as it has it now, unsaved changes included, and the
+    /// line the caret is on. Only an open tab whose file is loaded takes it: nothing is opened,
+    /// no tab is switched. The text waits for the next frame ([`apply_live`](Self::apply_live)),
+    /// and a newer one replaces it, so a burst costs one parse. False when no tab takes it.
+    ///
+    /// The tab then shows this text instead of the file's until it is told `live_text` is over
+    /// ([`live_off`](Self::live_off)), the file changes on disk (the editor saved: the file is
+    /// the newest text again), the reader reloads (F5), or the tab closes.
+    pub fn live_text(&mut self, path: &Path, text: String, line: Option<u32>) -> bool {
+        let path = canonical_or_absolute(path);
+        let Some(tab) = self
+            .tabs
+            .iter_mut()
+            .find(|t| t.doc.is_some() && same_file(&t.path, &path))
+        else {
+            return false;
+        };
+        tab.live_pending = Some((text, line));
+        self.dirty = true;
         true
+    }
+
+    /// Parses the newest live text of each tab that has one: at most one parse per tab per frame.
+    /// Keeps the place as a reload does, then follows the caret's line like a `follow`.
+    pub fn apply_live(&mut self) {
+        for index in 0..self.tabs.len() {
+            let Some((text, line)) = self.tabs[index].live_pending.take() else {
+                continue;
+            };
+            // What the file looks like now: a change after this is a save, which ends the state.
+            let stamp = stamp(&self.tabs[index].path);
+            let first = !self.tabs[index].live;
+            self.install(index, text.as_bytes(), stamp, false, true);
+            if first && self.active == Some(index) {
+                self.message(strings::LIVE_STARTED);
+            }
+            if self.active == Some(index)
+                && let Some(line) = line
+            {
+                self.follow_line(line);
+            }
+        }
+    }
+
+    /// The editor ended the live text of `path`: the tab reads the file again.
+    pub fn live_off(&mut self, path: &Path) -> bool {
+        let path = canonical_or_absolute(path);
+        let Some(index) = self.tabs.iter().position(|t| same_file(&t.path, &path)) else {
+            return false;
+        };
+        self.tabs[index].live_pending = None;
+        if !self.tabs[index].live {
+            return false;
+        }
+        self.reload_tab(index, false)
     }
 
     // ---- animated images -------------------------------------------------------------------
@@ -1432,12 +1514,42 @@ impl Workspace {
 
     /// The theme the current choice gives on a desktop that is (or is not) dark.
     pub fn resolve_theme(&self, system_is_dark: bool) -> Theme {
-        match self.choice {
+        let theme = match self.choice {
             ThemeChoice::Light => LIGHT,
             ThemeChoice::Dark => DARK,
             ThemeChoice::System if system_is_dark => DARK,
             ThemeChoice::System => LIGHT,
+        };
+        theme.with_fonts(&self.session.page_font, &self.session.code_font)
+    }
+
+    /// The reader's font family for the page's text; empty is the default.
+    pub fn page_font(&self) -> &str {
+        &self.session.page_font
+    }
+
+    /// The reader's font family for code; empty is the default.
+    pub fn code_font(&self) -> &str {
+        &self.session.code_font
+    }
+
+    /// Sets the page font (`code` false) or the code font, saves, and lays the page out again at
+    /// the next paint. A family that is not installed changes nothing visible: the default list
+    /// stays behind it.
+    pub fn set_font(&mut self, code: bool, family: &str) -> bool {
+        let family = session::clean_family(family);
+        let slot = if code {
+            &mut self.session.code_font
+        } else {
+            &mut self.session.page_font
+        };
+        if *slot == family {
+            return false;
         }
+        *slot = family;
+        self.dirty = true;
+        self.persist();
+        true
     }
 
     /// The theme in use, from the choice and the last [`set_system_dark`](Self::set_system_dark).
@@ -1817,7 +1929,7 @@ impl Workspace {
         let fresh = tab.view.as_ref().is_some_and(|v| {
             v.options.width == width
                 && (v.options.scale - scale).abs() < 0.001
-                && v.options.theme.name == theme.name
+                && v.options.theme.key() == theme.key()
                 && v.options.theme.reading_width == theme.reading_width
         });
         if !fresh {
@@ -3902,6 +4014,48 @@ mod tests {
         assert_eq!(ws.zoom(), 70);
         assert!(ws.zoom_reset());
         assert_eq!(ws.zoom(), 100);
+    }
+
+    #[test]
+    fn a_font_is_saved_cleaned_and_lays_the_page_out_again() {
+        let dir = temp_dir("fonts");
+        let path = write(
+            &dir,
+            "doc.md",
+            &format!("# T\n\n{}", numbered("Body", 0..40)),
+        );
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        let key = |ws: &Workspace| {
+            ws.active_tab()
+                .unwrap()
+                .view
+                .as_ref()
+                .unwrap()
+                .options
+                .theme
+                .key()
+        };
+        let before = key(&ws);
+        assert_eq!(before, LIGHT.key());
+        assert!(ws.set_font(false, " Noto Serif, \"x\" "));
+        assert!(
+            !ws.set_font(false, "Noto Serif x"),
+            "the cleaned name is the same"
+        );
+        assert_eq!(ws.page_font(), "Noto Serif x");
+        assert!(ws.theme().sans.starts_with("Noto Serif x, "));
+        settle(&mut ws);
+        assert_ne!(
+            key(&ws),
+            before,
+            "the page was laid out again for the new family"
+        );
+        assert!(ws.set_font(false, ""));
+        settle(&mut ws);
+        assert_eq!(key(&ws), before);
+        _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

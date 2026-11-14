@@ -120,4 +120,16 @@ shot update-installed --dark --update-bar installed
 shot menu-tall-main --light --size 1000x520 --menu main
 shot menu-tall-main-end --light --size 1000x520 --menu main-end
 
+# A page font. Only where the family is installed (fc-list lists it, so Windows skips these): a
+# serif for the text, a monospace for code, with emoji and symbols still coming from the default
+# stack, and the settings dialog showing both rows filled.
+families="$(fc-list : family 2>/dev/null || true)"
+if grep -qx "DejaVu Serif" <<<"$families"; then
+    shot page-font-serif --light --page-font "DejaVu Serif" --code-font "DejaVu Sans Mono" "$fx/showcase.md"
+    shot page-font-serif-dark --dark --page-font "DejaVu Serif" "$fx/everything.md"
+    shot dialog-settings-fonts --light --page-font "DejaVu Serif" --code-font "DejaVu Sans Mono" --dialog settings "$fx/showcase.md"
+fi
+# An unknown family: the same page as the default, since the default stack stays behind it.
+shot page-font-unknown --light --page-font "No Such Family Anywhere" --code-font "Nor This One" "$fx/showcase.md"
+
 ls "$out" | wc -l

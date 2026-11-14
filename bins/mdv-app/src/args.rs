@@ -33,6 +33,9 @@ pub struct Args {
     /// `--light` (false) or `--dark` (true).
     pub dark: Option<bool>,
     pub zoom: Option<u16>,
+    /// `--page-font FAMILY` and `--code-font FAMILY`: the same as the Settings rows.
+    pub page_font: Option<String>,
+    pub code_font: Option<String>,
     /// `--page-width narrow|wide|full`.
     pub page_width: Option<PageWidth>,
     pub folder: Option<PathBuf>,
@@ -97,6 +100,7 @@ impl Args {
                 follow: self.follow,
                 place: self.place,
                 from: self.from.clone(),
+                ..Request::default()
             })
             .collect()
     }
@@ -132,6 +136,8 @@ impl Args {
                 "--place" => out.place = value(&a).and_then(|v| Rect::parse(&v)),
                 "--from" => out.from = value(&a).filter(|v| !v.is_empty()),
                 "--zoom" => out.zoom = value(&a).and_then(|v| v.trim_end_matches('%').parse().ok()),
+                "--page-font" => out.page_font = value(&a),
+                "--code-font" => out.code_font = value(&a),
                 "--page-width" => {
                     out.page_width = value(&a).and_then(|v| PageWidth::from_name(&v));
                 }

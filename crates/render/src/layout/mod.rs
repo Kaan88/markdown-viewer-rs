@@ -93,7 +93,7 @@ impl Options {
     fn same_layout(&self, other: &Options) -> bool {
         self.width == other.width
             && (self.scale - other.scale).abs() < 0.001
-            && self.theme.name == other.theme.name
+            && self.theme.key() == other.theme.key()
             && self.base_dir == other.base_dir
     }
 }
@@ -228,7 +228,11 @@ pub struct DocumentRenderer {
     /// image re-measures only those.
     uses: HashMap<u32, Vec<u32>>,
     /// The average glyph advances estimates use, for the scale and theme they were taken at.
-    metrics: Option<(u32, &'static str, estimate::Metrics)>,
+    metrics: Option<(
+        u32,
+        (&'static str, &'static str, &'static str),
+        estimate::Metrics,
+    )>,
     /// Sorted document ranges of formulas and diagrams the engine failed to draw in the blocks
     /// laid out so far, and how many times that list has changed.
     undrawn: Vec<(u32, u32)>,

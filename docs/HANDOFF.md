@@ -912,6 +912,35 @@ Known limits: a code block or a long paragraph is one block, so the caret inside
 page at the block's top; a follow puts the line's block just below the top edge each time, rather
 than leaving the page alone while the caret stays in view.
 
+### Live preview and page fonts (2026-11-14)
+
+- **Live text from the editor** (`docs/SISTER.md` in mdshared has the wire format, the cap and why
+  older receivers are safe). A request with `text` (`?text=<bytes>` after the message) or `live_off`
+  reaches `App::handed_over`: `Workspace::live_text(path, text, line)` stores the newest text on the
+  open, loaded tab of that file (nothing is opened, no tab switched, no raise), and the next frame
+  (`compose` calls `Workspace::apply_live`) parses it once, with the same parser and the same
+  reload-keeps-place code as a file reload (`Workspace::install`, split out of `reload_tab`), then
+  follows the caret's line like a `follow`. Texts that arrive together cost one parse. The tab shows
+  a dot before its name and one toast says when it starts. File-change reloads do not touch a live
+  tab unless the file really changed: each live text records the file's stamp, so a later difference
+  is the editor saving, which ends the state; F5, `live_off`, or closing the tab also end it. A live
+  tab is not unloaded by `drop_idle`. Relative images and links resolve against the file's folder
+  as always. `crates/core/examples/live_send.rs` is a stand-in sender for checking by hand.
+- **Measured** (release, this machine): parse + layout + compose of a live update, median 1.7 ms for
+  the showcase fixture and 4.0 ms for a 200 KB document (`live_update_cost`, ignored test; the
+  idle refinement of the far blocks comes after and is not in that number); one send + receive of
+  200 KB over loopback 0.5 ms. 10 updates a second leave the window idle for 96 percent of the time,
+  so the "drop to the latest text when idle" fallback was not needed beyond the per-frame coalescing.
+- **Page font and code font**: Settings, Page: two text rows, any installed family, empty is the
+  default. They are `page_font`/`code_font` in the session (written only when set), `Theme::
+  with_fonts` puts the chosen family in front of the default list (which stays behind it, so an
+  unknown family, emoji and symbols fall through as before), and `Theme::key()` (name and both
+  lists) replaces the theme name wherever a layout is compared or cached. `--page-font` and
+  `--code-font` do the same from the command line (used by the shots). The row applies on every
+  keystroke, so a partly typed name is an unknown family and changes nothing until it is whole.
+  Default look unchanged: every existing shot is byte-identical except the five settings dialogs,
+  which have the two new rows.
+
 ## 13. What to do next
 
 The user set a list on 2026-11-12; everything on it is done: Qt retired (2026-11-13), the port

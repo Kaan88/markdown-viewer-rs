@@ -323,7 +323,16 @@ pub fn draw_title(c: &mut Ctx, ws: &Workspace, ui: &Ui, r: Rect, maximized: bool
     }
 
     // Tabs.
-    let labels = ws.labels();
+    // A tab showing the editor's unsaved text starts with a dot, which survives a cut label.
+    let labels: Vec<String> = ws
+        .labels()
+        .iter()
+        .enumerate()
+        .map(|(i, l)| match ws.tab(i) {
+            Some(t) if t.is_live() => format!("\u{25cf} {l}"),
+            _ => l.clone(),
+        })
+        .collect();
     let avail = (right - DRAG_MIN - NEW_TAB_W - TABS_X).max(0.0);
     let natural: Vec<f32> = labels.iter().map(|l| tab_natural_width(c.p, l)).collect();
     let widths = tab_widths(&natural, avail);

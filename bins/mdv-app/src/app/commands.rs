@@ -580,7 +580,12 @@ impl App {
     pub(super) fn handed_over(&mut self, requests: Vec<Request>) {
         let mut follow: Option<&Request> = None;
         for request in &requests {
-            if request.follow {
+            if request.live_off {
+                self.ws.live_off(&request.path);
+            } else if let Some(text) = &request.text {
+                // Of several texts that arrive together the last is the one shown.
+                self.ws.live_text(&request.path, text.clone(), request.line);
+            } else if request.follow {
                 follow = Some(request);
             } else if self.ws.open(&request.path).is_ok()
                 && let Some(line) = request.line

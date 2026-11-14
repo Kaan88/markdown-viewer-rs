@@ -110,10 +110,25 @@ pub struct Session {
     /// When the last look for a newer version finished, in seconds since the Unix epoch; 0 for
     /// never.
     pub update_checked: u64,
+    /// An installed font family for the page's text, and one for code; empty is the default stack.
+    /// The default families stay behind a chosen one, so a missing family changes nothing.
+    pub page_font: String,
+    pub code_font: String,
     /// Where the reader was in each file left, for the `MAX_PLACES` files used last: one `place`
     /// line per file, most recent first. The position is the shell's text
     /// (`place::ReadingPlace::to_setting`); the session stores it and never reads it.
     pub places: Places,
+}
+
+/// A font family name as typed, made safe to put in a family list: trimmed, without the characters
+/// that separate or quote families, at most 64 characters.
+pub fn clean_family(text: &str) -> String {
+    let kept: String = text
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, ',' | '"' | '\'' | ';' | '\\'))
+        .take(64)
+        .collect();
+    kept.trim().to_string()
 }
 
 impl Default for Session {
@@ -133,6 +148,8 @@ impl Default for Session {
             animations: true,
             check_updates: true,
             update_checked: 0,
+            page_font: String::new(),
+            code_font: String::new(),
             places: Places::default(),
         }
     }
@@ -165,6 +182,8 @@ impl Session {
                 "animations" => s.animations = value.trim() != "0",
                 "check_updates" => s.check_updates = value.trim() != "0",
                 "update_checked" => s.update_checked = value.trim().parse().unwrap_or(0),
+                "page_font" => s.page_font = clean_family(value),
+                "code_font" => s.code_font = clean_family(value),
                 "place" => _ = s.places.read(value),
                 _ => {}
             }
@@ -200,6 +219,13 @@ impl Session {
         line("animations", if self.animations { "1" } else { "0" });
         line("check_updates", if self.check_updates { "1" } else { "0" });
         line("update_checked", &self.update_checked.to_string());
+        // Only when set, so a session that never chose a font is the file it always was.
+        if !self.page_font.is_empty() {
+            line("page_font", &self.page_font);
+        }
+        if !self.code_font.is_empty() {
+            line("code_font", &self.code_font);
+        }
         self.places.write(&mut out, "place");
         out.finish()
     }
@@ -411,6 +437,24 @@ mod window_state_tests {
         assert_eq!(s.window_size(), None);
         s.geometry = "junk".into();
         assert_eq!(s.window_size(), None);
+    }
+
+    #[test]
+    fn fonts_are_saved_only_when_chosen_and_cleaned() {
+        let none = Session::default().serialize();
+        assert!(!none.contains("font"), "{none}");
+        let s = Session {
+            page_font: "Noto Serif".into(),
+            code_font: "Fira Code".into(),
+            ..Session::default()
+        };
+        let back = Session::parse(&s.serialize());
+        assert_eq!(
+            (back.page_font.as_str(), back.code_font.as_str()),
+            ("Noto Serif", "Fira Code")
+        );
+        assert_eq!(super::clean_family("  A, \"B\"; 'c'\n "), "A B c");
+        assert_eq!(super::clean_family(&"x".repeat(100)).len(), 64);
     }
 
     #[test]

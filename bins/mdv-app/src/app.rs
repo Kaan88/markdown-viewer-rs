@@ -250,6 +250,12 @@ impl App {
         if let Some(z) = a.zoom {
             self.ws.set_zoom(z);
         }
+        if let Some(font) = &a.page_font {
+            self.ws.set_font(false, font);
+        }
+        if let Some(font) = &a.code_font {
+            self.ws.set_font(true, font);
+        }
         if let Some(width) = a.page_width {
             self.ws.set_page_width(width);
         }
@@ -327,7 +333,12 @@ impl App {
         );
         match r {
             Region::Title => {
-                let missing: Vec<bool> = self.ws.tabs().iter().map(|t| t.is_missing()).collect();
+                let missing: Vec<(bool, bool)> = self
+                    .ws
+                    .tabs()
+                    .iter()
+                    .map(|t| (t.is_missing(), t.is_live()))
+                    .collect();
                 let drag = match ui.drag {
                     Some(Drag::Tab { index, moving, .. }) => Some((index, moving)),
                     _ => None,
@@ -460,6 +471,8 @@ impl App {
             self.full = true;
         }
         self.sync_theme();
+        // Text the editor sent since the last frame: one parse, of the newest.
+        self.ws.apply_live();
         let (w, h) = self.logical();
         let areas = Areas::compute(w, h, &self.ui);
         if areas != self.areas {

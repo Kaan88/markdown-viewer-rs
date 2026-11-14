@@ -62,7 +62,7 @@ pub struct PageLayout {
     estimated: usize,
     pub(super) width: f32,
     pub(super) scale: f32,
-    pub(super) theme: &'static str,
+    pub(super) theme: (&'static str, &'static str, &'static str),
     /// The document's text and block counts, so a layout used with another document is caught.
     pub(super) shape: (usize, usize),
 }
@@ -89,7 +89,7 @@ impl PageLayout {
             estimated: count,
             width: options.width,
             scale: options.scale,
-            theme: options.theme.name,
+            theme: options.theme.key(),
             shape: (doc.text.len(), doc.blocks.len()),
         };
         page.settle();
@@ -169,7 +169,7 @@ impl PageLayout {
     pub fn matches(&self, options: &Options) -> bool {
         self.width == options.width
             && (self.scale - options.scale).abs() < 0.001
-            && self.theme == options.theme.name
+            && self.theme == options.theme.key()
     }
 
     /// Top-level blocks; the footnote list is index `len()`.

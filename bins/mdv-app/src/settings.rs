@@ -18,6 +18,8 @@ pub const ANIMATIONS: u32 = 6;
 pub const CHECK_AT_LAUNCH: u32 = 7;
 pub const CHECK_NOW: u32 = 8;
 pub const DEFAULT_APP: u32 = 9;
+pub const PAGE_FONT: u32 = 10;
+pub const CODE_FONT: u32 = 11;
 
 pub const WIDTHS: [&str; 3] = ["Narrow", "Wide", "Full"];
 pub const THEMES: [&str; 3] = ["System", "Light", "Dark"];
@@ -61,6 +63,10 @@ pub fn rows(ws: &Workspace) -> Vec<Row> {
         .step(ZOOM_STEP as i32)
         .unit("%"),
         Row::choice(THEME, "Theme", &THEMES, theme_index(ws.theme_choice())),
+        Row::text(PAGE_FONT, "Page font", ws.page_font())
+            .placeholder("Default")
+            .help("Any installed family. Unknown ones are ignored."),
+        Row::text(CODE_FONT, "Code font", ws.code_font()).placeholder("Default"),
         Row::header("Content"),
         Row::toggle(
             REMOTE_IMAGES,

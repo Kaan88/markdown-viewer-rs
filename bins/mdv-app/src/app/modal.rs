@@ -239,6 +239,8 @@ impl App {
             (setting::THEME, Value::Choice(i)) => {
                 self.ws.set_theme_choice(setting::theme_of(i));
             }
+            (setting::PAGE_FONT, Value::Text(family)) => _ = self.ws.set_font(false, &family),
+            (setting::CODE_FONT, Value::Text(family)) => _ = self.ws.set_font(true, &family),
             (setting::REMOTE_IMAGES, Value::Bool(on)) => self.ws.set_remote_always(on),
             (setting::TICK_BOXES, Value::Bool(on)) => self.ws.set_edit_always(on),
             (setting::ANIMATIONS, Value::Bool(on)) => self.ws.set_animations(on),

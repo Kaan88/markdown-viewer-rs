@@ -124,7 +124,74 @@ pub const DARK: Theme = Theme {
 };
 
 impl Theme {
+    /// What makes one layout differ from another by look: the name and the two family lists. Two
+    /// themes with the same key lay text out the same.
+    pub fn key(&self) -> (&'static str, &'static str, &'static str) {
+        (self.name, self.sans, self.mono)
+    }
+
+    /// This theme with the reader's families first: each is tried before the default list, which
+    /// stays behind it, so an unknown family, or a character the chosen one lacks (emoji, symbols),
+    /// falls through to what the page always used. An empty family leaves the default.
+    pub fn with_fonts(mut self, page: &str, code: &str) -> Theme {
+        self.sans = family_list(page, SANS);
+        self.mono = family_list(code, MONO);
+        self
+    }
+
     pub fn is_dark(&self) -> bool {
         self.name == "dark"
+    }
+}
+
+/// `chosen` in front of `default`, as one list that lives for the rest of the process. Lists are
+/// kept by what they say, so setting the same font again, or typing and deleting, adds nothing.
+fn family_list(chosen: &str, default: &'static str) -> &'static str {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    let chosen: String = chosen
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, ',' | '"' | '\'' | ';' | '\\'))
+        .take(64)
+        .collect();
+    let chosen = chosen.trim();
+    if chosen.is_empty() {
+        return default;
+    }
+    static LISTS: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
+    let mut lists = LISTS.get_or_init(Default::default).lock().unwrap();
+    let list = format!("{chosen}, {default}");
+    lists
+        .entry(list.clone())
+        .or_insert_with(|| Box::leak(list.into_boxed_str()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_chosen_family_goes_first_and_the_default_stays_behind() {
+        let t = LIGHT.with_fonts("Noto Serif", "Fira Code");
+        assert!(t.sans.starts_with("Noto Serif, Segoe UI"));
+        assert!(t.sans.ends_with("sans-serif"));
+        assert!(t.mono.starts_with("Fira Code, Consolas"));
+        if !cfg!(windows) {
+            assert!(t.sans.contains("Noto Color Emoji"), "emoji still fall back");
+        }
+        assert_ne!(t.key(), LIGHT.key());
+        assert_eq!(t.key(), LIGHT.with_fonts("Noto Serif", "Fira Code").key());
+        assert!(std::ptr::eq(
+            t.sans,
+            LIGHT.with_fonts("Noto Serif", "").sans
+        ));
+    }
+
+    #[test]
+    fn no_family_is_the_default_list_itself_and_a_list_cannot_be_injected() {
+        let t = DARK.with_fonts("", "  ");
+        assert_eq!(t.key(), DARK.key());
+        let t = LIGHT.with_fonts("Evil\", monospace; x", "");
+        assert!(t.sans.starts_with("Evil monospace x, Segoe UI"));
     }
 }
