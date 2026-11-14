@@ -1184,7 +1184,7 @@ fn the_outline_follows_the_page_and_keeps_the_current_row_in_view() {
     );
     // Park the pointer on the page: it is not on the outline.
     a.pointer_moved(900.0, 400.0);
-    let total = a.ws.layout().unwrap().total_height();
+    let total = a.ws.total_height();
     for step in 1..=8 {
         a.ws.scroll_to(total * step as f32 / 9.0);
         a.compose();
@@ -1205,7 +1205,7 @@ fn the_outline_follows_the_page_and_keeps_the_current_row_in_view() {
 fn the_outline_stays_put_under_the_pointer_and_catches_up_when_it_leaves() {
     let mut a = app(&["everything.md"]);
     a.pointer_moved(900.0, 400.0);
-    let total = a.ws.layout().unwrap().total_height();
+    let total = a.ws.total_height();
     let r = rect(&a, Hit::OutlineRow(0));
     a.pointer_moved(r.cx(), r.cy());
     a.compose();

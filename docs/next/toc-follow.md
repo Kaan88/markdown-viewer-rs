@@ -27,6 +27,7 @@ The highlight and the binary search (`Workspace::current_heading`) and `reveal_o
 existed. Gaps fixed: the reveal was lost when the outline was not drawn yet or hidden (its height was
 0), it moved the list under the pointer, and a tab switch to a document with the same heading index
 did not reveal. New: `panes::follow_outline_row`, `last_heading_tab` in `App`. Tests added in
-`app/tests.rs`. Not verified: nothing was built or run locally (CI only); no new screenshot, as the
+`app/tests.rs`. Above the first heading nothing is current and the outline returns to its top. Locally: fmt, clippy -D warnings and the whole workspace test suite pass (debug).
+Not verified: no new screenshot, as the
 visible states are the existing outline shots; the owner has not looked at it. Budgets cannot be
 measured here; the change adds one comparison per frame and nothing at startup.

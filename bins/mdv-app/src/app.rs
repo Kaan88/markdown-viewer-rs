@@ -508,10 +508,8 @@ impl App {
             // known yet (not drawn): then the row is revealed on a later frame.
             let shown = self.areas.outline.is_some();
             let done = !shown
-                || match current {
-                    Some(i) => panes::follow_outline_row(&mut self.ui, i),
-                    None => true,
-                };
+                // Above the first heading nothing is current: the outline returns to its top.
+                || panes::follow_outline_row(&mut self.ui, current.unwrap_or(0));
             if done {
                 self.last_heading = current;
                 self.last_heading_tab = tab;
