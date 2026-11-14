@@ -518,6 +518,7 @@ impl App {
                     self.ws.set_status("Focus mode: press Escape to leave");
                 }
             }
+            C::FindInFolder => self.open_folder_search(),
             C::CommandPalette => {
                 if self.ui.palette.is_some() {
                     self.close_palette();
@@ -652,6 +653,11 @@ impl App {
             }
             Wake::Images => {
                 self.ws.remote_completed();
+            }
+            Wake::FolderSearch => {
+                if self.ui.palette.as_mut().is_some_and(|p| p.poll_folder()) {
+                    self.modal_changed();
+                }
             }
             Wake::Notes => {
                 let taken = self.ws.notes_ready();

@@ -54,6 +54,8 @@ pub struct Args {
     pub dialog: Option<ShotDialog>,
     /// `--palette <query>`: the command palette open with this text (an empty one is `""`).
     pub palette: Option<String>,
+    /// `--folder-search <query>`: Find in folder open with this text, searched to the end.
+    pub folder_search: Option<String>,
     /// Logical pointer position.
     pub hover: Option<(f32, f32)>,
     pub focus_mode: bool,
@@ -166,6 +168,7 @@ impl Args {
                     }
                 }
                 "--palette" => out.palette = value(&a),
+                "--folder-search" => out.folder_search = value(&a),
                 "--dialog" => {
                     out.dialog = match value(&a).as_deref() {
                         Some("about") => Some(ShotDialog::About),

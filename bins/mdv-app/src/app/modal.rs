@@ -8,11 +8,13 @@
 //! Escape away.
 
 use super::*;
+use crate::folder_search::Waker;
 use crate::palette::{PaletteState, Target};
 use crate::settings as setting;
 use mdshared_ui::palette::Outcome as Pick;
 use mdshared_ui::settings::{Outcome as Form, Value};
 use mdview_core::session::{PageWidth, clamp_zoom};
+use std::sync::Arc;
 
 impl App {
     // ---- opening and closing -------------------------------------------------------------------
@@ -28,6 +30,40 @@ impl App {
         self.ui.palette = Some(PaletteState::open(&self.ws, query));
         self.caret_reset();
         self.modal_changed();
+    }
+
+    /// Find in folder over the open folder, with the find box's text in its box. Without a folder
+    /// it says so.
+    pub(super) fn open_folder_search(&mut self) {
+        let Some(root) = self.ws.folder().map(Path::to_path_buf) else {
+            self.ws.set_status("Open a folder to search it");
+            return;
+        };
+        let wake: Option<Waker> = self.proxy.clone().map(|proxy| {
+            Arc::new(move || {
+                let _ = proxy.send_event(Wake::FolderSearch);
+            }) as Waker
+        });
+        let query = self.ui.find.text().to_string();
+        self.ui.popup = None;
+        self.ui.tip = None;
+        self.ui.hover = None;
+        self.ui.find_focused = false;
+        self.ui.dialog = None;
+        self.ui.settings = None;
+        self.ui.palette = Some(PaletteState::open_folder(root, &query, wake));
+        self.caret_reset();
+        self.modal_changed();
+    }
+
+    /// Opens a result of Find in folder: the file, with the query found in the page as the find
+    /// box would, at the match nearest the line.
+    fn open_search_hit(&mut self, path: &Path, line: u32, query: &str) {
+        if !self.ws.open_search_result(path, query, line) {
+            return;
+        }
+        self.ui.find.set_text(query);
+        self.redraw();
     }
 
     pub(super) fn close_palette(&mut self) {
@@ -51,7 +87,7 @@ impl App {
         self.modal_closed();
     }
 
-    fn modal_changed(&mut self) {
+    pub(super) fn modal_changed(&mut self) {
         self.ui.overlay_tick += 1;
         self.redraw();
     }
@@ -159,6 +195,14 @@ impl App {
             }
             Pick::Closed => self.close_palette(),
             Pick::Chosen(id) => {
+                // A result of Find in folder: the file, at the line.
+                if let Some((path, line, query)) =
+                    self.ui.palette.as_ref().and_then(|p| p.folder_hit(id))
+                {
+                    self.close_palette();
+                    self.open_search_hit(&path, line, &query);
+                    return;
+                }
                 let target = self.ui.palette.as_ref().and_then(|p| p.target(id)).cloned();
                 match target {
                     Some(Target::Prefix(prefix)) => {

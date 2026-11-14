@@ -47,7 +47,27 @@ pub fn find_in_text(text: &str, query: &str, cap: usize) -> FindResult {
 }
 
 fn find_with(text: &str, query: &str, cap: usize, hidden: impl Fn(u32) -> bool) -> FindResult {
-    let mut result = FindResult::default();
+    find_folded(text, &fold_query(query), cap, hidden)
+}
+
+/// A finder for one query to run on many short pieces of text (the lines of the files of a folder):
+/// the byte ranges of its matches in a line, at most `cap`, found as the find in the page finds
+/// them. The query is folded once, here.
+pub fn line_matcher(
+    query: &str,
+) -> impl Fn(&str, usize) -> Vec<std::ops::Range<usize>> + Send + use<> {
+    let query = fold_query(query);
+    move |line: &str, cap: usize| {
+        find_folded(line, &query, cap, |_| false)
+            .hits
+            .into_iter()
+            .map(TextRange::usize)
+            .collect()
+    }
+}
+
+/// The query as the characters it is compared as.
+fn fold_query(query: &str) -> Vec<char> {
     // Blocks are separated by newlines in the text, so a line break typed or pasted into the query
     // must look for a space to be able to match wrapped text at all.
     // A CRLF pair is one break, not two: Windows clipboard text would otherwise become two spaces
@@ -66,7 +86,11 @@ fn find_with(text: &str, query: &str, cap: usize, hidden: impl Fn(u32) -> bool) 
             _ => folded.push(fold(c)),
         }
     }
-    let query = folded;
+    folded
+}
+
+fn find_folded(text: &str, query: &[char], cap: usize, hidden: impl Fn(u32) -> bool) -> FindResult {
+    let mut result = FindResult::default();
     let Some(&first) = query.first() else {
         return result;
     };
@@ -82,7 +106,7 @@ fn find_with(text: &str, query: &str, cap: usize, hidden: impl Fn(u32) -> bool) 
                 None => break,
             }
         }
-        let end = match match_at(text, pos, &query) {
+        let end = match match_at(text, pos, query) {
             Ok(end) => end,
             Err(compared) => {
                 work += compared;
@@ -178,4 +202,23 @@ fn chars_match(a: char, b: char) -> bool {
             (a, b),
             ('i', 'I') | ('I', 'i') | ('i', 'İ') | ('İ', 'i') | ('I', 'ı') | ('ı', 'I')
         )
+}
+
+#[cfg(test)]
+mod line_matcher_tests {
+    use super::*;
+
+    #[test]
+    fn a_line_matcher_finds_what_the_page_find_finds() {
+        let m = line_matcher("Needle");
+        assert_eq!(m("a needle, a NEEDLE", 16), vec![2..8, 12..18]);
+        assert_eq!(m("a needle, a NEEDLE", 1), vec![2..8]);
+        assert!(m("nothing", 16).is_empty());
+        // Turkish dotted and dotless i as in the page's find.
+        assert_eq!(line_matcher("İş")("bir iş", 4), vec![4..7]);
+        assert!(line_matcher("")("text", 4).is_empty());
+        let page = find_in_text("a needle, a NEEDLE", "Needle", 16);
+        let ranges: Vec<_> = page.hits.iter().map(|h| h.usize()).collect();
+        assert_eq!(ranges, m("a needle, a NEEDLE", 16));
+    }
 }

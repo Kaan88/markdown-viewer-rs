@@ -2641,6 +2641,48 @@ impl Workspace {
         true
     }
 
+    /// Runs find for `query` on the showing document and makes the current match the first one in
+    /// the block that source line `line` is in, as a result of Find in folder asks. A line whose
+    /// block has no match (the query was found in markup or a link's address) scrolls the page to
+    /// the line, and the find stays on, with its matches elsewhere.
+    pub fn find_set_at_line(&mut self, query: &str, line: u32) {
+        self.find = Find {
+            query: query.to_string(),
+            ..Find::default()
+        };
+        self.refind();
+        let pick = self.active_document().and_then(|doc| {
+            let block = doc.block_at_line(line)?;
+            let text = doc.blocks[block as usize].text;
+            self.find
+                .hits
+                .iter()
+                .position(|&(start, _)| start >= text.start && start < text.end)
+        });
+        match pick {
+            Some(i) => {
+                self.find.current = i;
+                self.reveal_current();
+            }
+            None => {
+                self.scroll_to_line(line);
+            }
+        }
+        self.dirty = true;
+    }
+
+    /// Opens a result of Find in folder (the file, then the find at the line) as a jump: Back
+    /// returns to where the reader was.
+    pub fn open_search_result(&mut self, path: &Path, query: &str, line: u32) -> bool {
+        let from = self.place();
+        if self.open(path).is_err() {
+            return false;
+        }
+        self.find_set_at_line(query, line);
+        self.remember(from);
+        true
+    }
+
     /// Moves to the next match, wrapping, and brings it into view.
     pub fn find_next(&mut self) -> bool {
         self.find_step(1)
@@ -4017,6 +4059,42 @@ mod tests {
         assert!(ws.active_document().unwrap().text.contains("new text"));
         assert_eq!(ws.status(Instant::now()), Some(strings::REFRESHED));
         assert_eq!(ws.watched_paths().collect::<Vec<_>>(), [path.as_path()]);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_at_a_line_makes_the_match_in_that_block_current() {
+        let dir = temp_dir("find-line");
+        let text = "# Fruit\n\napple one\n\nsecond apple\n\nthird apple and *apple*\n";
+        let path = write(&dir, "doc.md", text);
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        ws.find_set_at_line("apple", 5);
+        assert_eq!(ws.find_query(), "apple");
+        let c = ws.find_counts();
+        assert_eq!((c.current, c.total), (2, 4));
+        ws.find_set_at_line("apple", 7);
+        assert_eq!(ws.find_counts().current, 3);
+        ws.find_set_at_line("apple", 3);
+        assert_eq!(ws.find_counts().current, 1);
+        // A line whose block has no match (the page does not show what the source says): the
+        // query stays on, the page goes to the line.
+        ws.find_set_at_line("apple", 1);
+        assert_eq!(ws.find_counts().total, 4);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_search_result_is_a_jump_back_returns_from() {
+        let dir = temp_dir("find-line-back");
+        let first = write(&dir, "a.md", "# A\n\nstart\n");
+        let second = write(&dir, "b.md", "# B\n\nneedle here\n");
+        let mut ws = workspace();
+        ws.open(&first).unwrap();
+        assert!(ws.open_search_result(&second, "needle", 3));
+        assert_eq!(ws.find_query(), "needle");
+        assert!(ws.go_back());
+        assert_eq!(ws.active(), Some(0));
         _ = std::fs::remove_dir_all(&dir);
     }
 
