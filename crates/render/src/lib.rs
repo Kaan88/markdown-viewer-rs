@@ -13,8 +13,9 @@ use mdshared_text::{bitmap, text};
 pub use bitmap::Bitmap;
 pub use image::{DecodedImage, decode_image};
 pub use layout::{
-    AnimationTick, BlockBox, DocumentRenderer, Frame, Hit, ImageStats, Jump, Options, PageLayout,
-    Rect, RemoteState, Rendered, Slice, Source, SourceKind, layout, render, render_slice,
+    AnimationTick, BlockBox, Code, DocumentRenderer, Frame, Hit, ImageStats, Jump, Options,
+    PageLayout, Rect, RemoteState, Rendered, Slice, Source, SourceKind, layout, render,
+    render_slice,
 };
 pub use mdshared_text::shared_fonts;
 pub use text::{CacheStats, Subpixel, TextEngine};

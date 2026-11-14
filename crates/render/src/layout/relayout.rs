@@ -275,6 +275,7 @@ impl DocumentRenderer {
         let mut lines = std::mem::take(&mut pager.hits);
         let mut sources = std::mem::take(&mut pager.sources);
         let mut tasks = std::mem::take(&mut pager.tasks);
+        let mut codes = std::mem::take(&mut pager.codes);
         let mut floats = std::mem::take(&mut pager.float_boxes);
         drop(pager);
         match block {
@@ -283,6 +284,7 @@ impl DocumentRenderer {
                 lines.iter_mut().for_each(|line| line.shift(-base));
                 sources.iter_mut().for_each(|source| source.shift(-base));
                 tasks.iter_mut().for_each(|task| task.shift(-base));
+                codes.iter_mut().for_each(|code| code.shift(-base));
                 floats.iter_mut().for_each(|float| float.shift(-base));
                 let phase = top - base;
                 self.cache.insert(
@@ -292,6 +294,7 @@ impl DocumentRenderer {
                         lines,
                         sources,
                         tasks,
+                        codes,
                         floats,
                         phase,
                     },

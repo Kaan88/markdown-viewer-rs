@@ -20,6 +20,7 @@ impl App {
             Hit::WinMax => self.toggle_maximized(),
             Hit::WinClose => self.exit = true,
             Hit::NewTab => self.command(C::OpenFiles),
+            Hit::CopyCode => self.copy_code_under_pointer(),
             Hit::LeaveFocus => self.command(C::FocusMode),
             Hit::TabClose(i) => {
                 self.ws.close(i);
@@ -189,6 +190,32 @@ impl App {
             }
         }
         self.redraw();
+    }
+
+    /// The copy button was clicked: the code of the block under the pointer goes to the clipboard
+    /// and the button shows a check mark for a moment.
+    pub(super) fn copy_code_under_pointer(&mut self) {
+        let vr = page::viewport(&self.ws, self.areas.page);
+        let Some(spot) = crate::codebtn::spot(&mut self.ws, &self.ui, vr, self.scale) else {
+            return;
+        };
+        if let Some(text) = self.ws.code_text(spot.start)
+            && platform::set_clipboard_text(&text)
+        {
+            self.ui.copied = Some((spot.start, Instant::now() + crate::codebtn::COPIED_FOR));
+        }
+    }
+
+    /// "Copy code block": the code at the selection, else of the first code block in view.
+    pub(super) fn copy_code_block(&mut self) {
+        match self.ws.code_in_reach() {
+            Some(text) => {
+                if platform::set_clipboard_text(&text) {
+                    self.ws.set_status("Code copied");
+                }
+            }
+            None => self.ws.set_status("No code block in view"),
+        }
     }
 
     pub(super) fn copy(&mut self) {
@@ -535,6 +562,7 @@ impl App {
                 self.ws.previous_tab();
             }
             C::Escape => self.escape(),
+            C::CopyCodeBlock => self.copy_code_block(),
             C::CloseOtherTabs | C::CopyFilePath | C::ShowInFileManager | C::EditInMdedit => {
                 if let Some(i) = self.ws.active() {
                     self.tab_command(id, i);
@@ -810,6 +838,14 @@ impl App {
                 self.wants_frame = true;
             } else {
                 at(tip.due);
+            }
+        }
+        if let Some((_, until)) = self.ui.copied {
+            if now >= until {
+                self.ui.copied = None;
+                self.wants_frame = true;
+            } else {
+                at(until);
             }
         }
         if let Some(until) = self.toast_until {

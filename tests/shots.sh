@@ -133,4 +133,11 @@ fi
 # An unknown family: the same page as the default, since the default stack stays behind it.
 shot page-font-unknown --light --page-font "No Such Family Anywhere" --code-font "Nor This One" "$fx/showcase.md"
 
+# The copy button of a code block: under the pointer in the block, with its tip on the button, and
+# with its check mark after a copy.
+shot code-copy-light --light --scroll 400 --hover 700,420 "$fx/showcase.md"
+shot code-copy-tip-light --light --scroll 400 --hover 971,339 "$fx/showcase.md"
+shot code-copy-done-dark --dark --scroll 400 --hover 971,339 --copied "$fx/showcase.md"
+shot code-copy-dark --dark --scroll 1200 --hover 640,475 "$fx/showcase.md"
+
 ls "$out" | wc -l

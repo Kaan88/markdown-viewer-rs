@@ -42,6 +42,9 @@ pub enum CommandId {
     /// Linux: make mdview the default app for Markdown files. In no menu bar menu; the shell's
     /// Settings (and its command palette) offer it where it applies.
     MakeDefault,
+    /// Copy the code of the block at the selection, or the first one in view. In no menu bar menu:
+    /// the command palette and the code box's own button offer it.
+    CopyCodeBlock,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,6 +279,7 @@ pub const COMMANDS: &[Command] = &[
         "Leave focus mode or search",
         &[K("Escape")],
     ),
+    cmd(C::CopyCodeBlock, Menu::None, "Copy code block", &[]),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

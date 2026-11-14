@@ -6,7 +6,7 @@ use super::inline::{Inline, Style};
 use super::pager::{Pager, Txt};
 use super::paint::Paint;
 use super::store::Found;
-use super::{Source, SourceKind};
+use super::{Code, Rect, Source, SourceKind};
 use crate::highlight;
 use mdview_core::model::BlockKind;
 use std::path::PathBuf;
@@ -349,9 +349,25 @@ impl<'a, 'b> Pager<'a, 'b> {
         if !source.is_empty() {
             self.emit(&inline, layout, left + pad_x, y0 + pad_y, size);
         }
+        let mut tag_width = 0.0;
         if let Some((tag, layout)) = tag {
+            tag_width = self.px(12.0) + layout.width();
             let x = left + width - self.px(12.0) - layout.width();
             self.emit(&tag, layout, x, y0 + self.px(8.0), 12.0);
+        }
+        if self.record && !source.is_empty() {
+            let end = self.doc.blocks[b as usize].text.end;
+            self.codes.push(Code {
+                rect: Rect {
+                    x: left,
+                    y: y0,
+                    w: width,
+                    h: height,
+                },
+                start: text_start,
+                end,
+                tag: tag_width,
+            });
         }
         self.y = y0 + height + self.px(16.0);
     }

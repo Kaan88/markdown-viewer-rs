@@ -27,7 +27,7 @@ use mdshared_fetch::{Fetcher, State as Fetched};
 use mdview_core::commands::strings;
 use mdview_core::files::{FileStamp, canonical_or_absolute, read_stable, stamp, tab_labels};
 use mdview_core::links::{LinkAction, classify_link};
-use mdview_core::model::{NONE, ScrollPos};
+use mdview_core::model::{BlockKind, NONE, ScrollPos};
 use mdview_core::place::{Fit, ReadingPlace, Remap};
 use mdview_core::session::{self, PageWidth, RecentEntry, Recents, Session};
 use mdview_core::{Document, parse_bytes, tasks};
@@ -151,6 +151,18 @@ pub struct Hover {
     /// The pointer is on a line of text: show the text cursor. Off it (a margin, the gap
     /// between blocks, a picture) the arrow stays.
     pub text: bool,
+    /// The code box under the pointer, by the start of its code in the document.
+    pub code: Option<u32>,
+}
+
+/// A code box on screen: where it is in the page viewport (device px) and which code it holds,
+/// by the start of that code in the document text (what [`Workspace::code_text`] takes).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CodeSpot {
+    pub rect: Rect,
+    pub start: u32,
+    /// How far in from the box's right edge the language label reaches, in device px.
+    pub tag: f32,
 }
 
 /// Somewhere the reader was: a file and how far down it. Back and Forward walk these.
@@ -2319,7 +2331,61 @@ impl Workspace {
                 || hit.details.is_some()
                 || hit.task.is_some(),
             text: hit.on_text,
+            code: hit.code.map(|c| c.start),
         }
+    }
+
+    /// The code box at viewport point `x, y` (device px), in viewport coordinates.
+    pub fn code_spot(&mut self, x: f32, y: f32) -> Option<CodeSpot> {
+        let hit = self.hit(x, y)?;
+        let code = hit.code?;
+        let scroll = self.active_tab()?.scroll;
+        Some(CodeSpot {
+            rect: Rect {
+                y: code.rect.y - scroll,
+                ..code.rect
+            },
+            start: code.start,
+            tag: code.tag,
+        })
+    }
+
+    /// The code of the code, diagram or math block whose text starts at `start`, as drawn: without
+    /// the newline that ends the block's last line.
+    pub fn code_text(&self, start: u32) -> Option<String> {
+        let doc = self.active_document()?;
+        let block = doc
+            .blocks
+            .iter()
+            .find(|b| b.text.start == start && is_code_kind(&b.kind))?;
+        Some(code_of(doc.text_of(block.text)))
+    }
+
+    /// The code the "Copy code block" command takes: that of the block the selection starts in,
+    /// else of the first code block in view.
+    pub fn code_in_reach(&mut self) -> Option<String> {
+        let selected = self.selection().and_then(|(from, _)| {
+            let doc = self.active_document()?;
+            let block = doc.blocks.get(doc.block_at(from)? as usize)?;
+            is_code_kind(&block.kind).then(|| code_of(doc.text_of(block.text)))
+        });
+        if selected.is_some() {
+            return selected;
+        }
+        if !self.ensure_layout() {
+            return None;
+        }
+        let height = self.viewport?.height as f32;
+        let tab = self.tabs.get(self.active?)?;
+        let doc = tab.doc.as_ref()?;
+        let layout = self.renderer.page_layout()?;
+        let (lo, hi) = visible_text(doc, layout, tab.scroll, height)?;
+        doc.blocks
+            .iter()
+            .filter(|b| is_code_kind(&b.kind) && b.text.end > lo && b.text.start < hi)
+            .map(|b| doc.text_of(b.text))
+            .find(|text| !text.trim().is_empty())
+            .map(code_of)
     }
 
     /// What a right click at `x, y` offers.
@@ -2990,6 +3056,20 @@ fn into_view(rects: &[Rect], scroll: f32, height: f32, margin: f32) -> Option<f3
     let top = rects.iter().map(|r| r.y).reduce(f32::min)?;
     let bottom = rects.iter().map(|r| r.y + r.h).reduce(f32::max)?;
     (top < scroll || bottom > scroll + height).then_some(top - margin)
+}
+
+/// Whether a block shows code, or the source of a diagram or formula.
+fn is_code_kind(kind: &BlockKind) -> bool {
+    matches!(
+        kind,
+        BlockKind::CodeBlock { .. } | BlockKind::Diagram { .. } | BlockKind::Math { .. }
+    )
+}
+
+/// A code block's text as it is copied: the newline that ends its last line left off, as the page
+/// draws it.
+fn code_of(text: &str) -> String {
+    text.trim_end_matches(['\n', '\r']).to_string()
 }
 
 /// The text range of the top-level blocks that reach into `top..top + height`.

@@ -185,6 +185,7 @@ pub fn draw_page(c: &mut Ctx, ws: &mut Workspace, ui: &Ui, r: Rect) -> Duration 
         );
     }
     c.hit(Hit::Page, vr);
+    crate::codebtn::draw(c, ws, ui, vr);
     if let Some((track, thumb)) = scrollbar(vr, total, h as f32, scroll) {
         let hit = Hit::ScrollBar(Scroller::Page);
         let active = c.hover == Some(hit)

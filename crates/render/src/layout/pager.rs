@@ -7,7 +7,7 @@ use super::hit::{FloatBox, LineGeom, SourceBox, TaskBox};
 use super::inline::{ImageBox, Inline, RubyNote, Style};
 use super::paint::Paint;
 use super::store::{Found, ImageStore};
-use super::{BlockBox, Options, Source, SourceKind};
+use super::{BlockBox, Code, Options, Source, SourceKind};
 use crate::text::Brush;
 use crate::theme::{Color, Theme};
 use mdview_core::model::{Align, BlockKind, Dir, Document, ImageAlign, Length, NONE};
@@ -55,6 +55,8 @@ pub(super) struct Pager<'a, 'b> {
     /// The formulas and diagrams of the block being laid out, kept like `hits`.
     pub(super) sources: Vec<SourceBox>,
     pub(super) tasks: Vec<TaskBox>,
+    /// The code boxes of the block being laid out, kept like `hits`.
+    pub(super) codes: Vec<Code>,
     pub(super) float_boxes: Vec<FloatBox>,
     /// Whether to keep hit geometry; a measuring pass does not need it.
     pub(super) record: bool,
@@ -132,6 +134,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             hits: Vec::new(),
             sources: Vec::new(),
             tasks: Vec::new(),
+            codes: Vec::new(),
             float_boxes: Vec::new(),
             record,
             notes: Vec::new(),

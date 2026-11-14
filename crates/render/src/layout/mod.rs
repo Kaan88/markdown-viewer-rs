@@ -118,7 +118,7 @@ pub struct Rect {
 /// Where a click landed: the top-level block, the offset into `Document::text`, and anything
 /// actionable under the point. `link` indexes `Document::links`, `footnote` indexes
 /// `Document::footnotes`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Hit {
     pub block: u32,
     pub offset: u32,
@@ -130,6 +130,8 @@ pub struct Hit {
     pub task: Option<u32>,
     /// The formula or diagram drawn at the point, when it is inside the picture itself.
     pub source: Option<Source>,
+    /// The code box the point is in, whether on its text or beside it.
+    pub code: Option<Code>,
     /// Whether the point is on a line of text, rather than beside, above or below the nearest
     /// one. `offset` is the nearest position either way, which is what a drag wants; a link or
     /// footnote is reported only when the point is on it.
@@ -151,6 +153,18 @@ pub struct Source {
     pub kind: SourceKind,
     pub start: u32,
     pub end: u32,
+}
+
+/// A code box: where it is drawn and the range of `Document::text` its code was taken from (the
+/// block's text, which ends in the fence's newline). Kept in the cache relative to its block like
+/// the lines; in a [`Hit`] it is in page coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Code {
+    pub rect: Rect,
+    pub start: u32,
+    pub end: u32,
+    /// How far in from the box's right edge the language label reaches, 0 without one.
+    pub tag: f32,
 }
 
 pub struct Rendered {

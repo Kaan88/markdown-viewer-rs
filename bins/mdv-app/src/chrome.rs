@@ -277,6 +277,7 @@ pub fn tooltip(hit: Hit, ws: &Workspace, maximized: bool) -> Option<String> {
             BarItem::More => "More".into(),
         },
         Hit::FindClear => "Clear search (Escape)".into(),
+        Hit::CopyCode => "Copy code".into(),
         Hit::FilesFolder => with("Open folder", CommandId::OpenFolder),
         _ => return None,
     })
