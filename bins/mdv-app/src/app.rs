@@ -452,7 +452,13 @@ impl App {
                 } else {
                     0
                 };
-                let update = self.ws.update_bar().map(|stage| format!("{stage:?}"));
+                let update = self.ws.update_bar().map(|stage| {
+                    // The Restart button comes and goes with the file there is to start.
+                    (
+                        format!("{stage:?}"),
+                        self.ws.update_relaunch_target().is_some(),
+                    )
+                });
                 sig((common, self.ws.active(), missing, drag, recents, update))
             }
         }
