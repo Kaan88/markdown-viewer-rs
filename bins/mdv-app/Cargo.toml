@@ -12,9 +12,9 @@ path = "src/main.rs"
 [dependencies]
 mdview-core = { path = "../../crates/core" }
 mdview-render = { path = "../../crates/render" }
-mdshared-fetch = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "61514b3e434199e91b8350a7da394f16303854f1" }
-mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "61514b3e434199e91b8350a7da394f16303854f1" }
-mdshared-ui = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "61514b3e434199e91b8350a7da394f16303854f1" }
+mdshared-fetch = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "1e39bc19766216e515a1fcdabca3440a088250f1" }
+mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "1e39bc19766216e515a1fcdabca3440a088250f1" }
+mdshared-ui = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "1e39bc19766216e515a1fcdabca3440a088250f1", features = ["client-margin"] }
 parley = "=0.12.0"
 # Views softbuffer's u32 pixels as bytes, so presenting is a row memcpy.
 bytemuck = "1.25"
