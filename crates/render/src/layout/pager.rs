@@ -481,6 +481,8 @@ impl<'a, 'b> Pager<'a, 'b> {
                 );
             }
         }
+        // Last, so it wins over a code run's family: emoji sequences that need the colour font.
+        mdshared_text::push_emoji_runs(&mut builder, &inline.text, family);
         for (image, &(id, mut width, mut height, mut baseline)) in inline.boxes.iter().zip(&boxes) {
             if let Some(max) = txt.max
                 && width > max

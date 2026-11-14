@@ -1725,11 +1725,47 @@ impl Workspace {
     }
 
     /// How many remote images the active document is holding back, when the bar offering to
-    /// load them should show: none allowed yet, and the reader has not closed the bar.
+    /// load them should show: loading is not allowed for this tab (neither "always" nor its own
+    /// choice), and the reader has not closed the bar. [`gate_remote`](Self::gate_remote) keeps
+    /// the page to the same rule, so the bar shows exactly when the page shows placeholders.
     pub fn remote_blocked(&self) -> usize {
         match self.active_tab() {
-            Some(tab) if !tab.remote.allowed && !tab.remote.dismissed => tab.remote.count,
+            Some(tab)
+                if !self.session.remote_images && !tab.remote.allowed && !tab.remote.dismissed =>
+            {
+                tab.remote.count
+            }
             _ => 0,
+        }
+    }
+
+    /// Before a layout of tab `index`: makes the shared image store show this document's remote
+    /// images as its tab allows. A tab shown while "always" is on counts as allowed from then on,
+    /// so turning "always" off leaves what it shows. Otherwise another tab may have loaded the
+    /// same URLs, and those images must not draw here until the reader allows them: they go back
+    /// to placeholders and are held, and allowing delivers them from the fetcher's cache without
+    /// a new request. A tab that is allowed gets back what another tab's gate held.
+    fn gate_remote(&mut self, index: usize) {
+        if self.session.remote_images {
+            self.tabs[index].remote.allowed = true;
+        }
+        let tab = &self.tabs[index];
+        let Some(doc) = tab.doc.as_ref() else {
+            return;
+        };
+        if tab.remote.allowed {
+            let (mine, rest) = split_held(std::mem::take(&mut self.held), doc);
+            self.held = rest;
+            for url in mine {
+                self.fetch_remote(&url);
+            }
+            return;
+        }
+        for url in remote_urls(doc) {
+            self.renderer.set_remote(&url, RemoteState::Blocked);
+            if !self.held.contains(&url) {
+                self.held.push(url);
+            }
         }
     }
 
@@ -1747,10 +1783,11 @@ impl Workspace {
                 return;
             };
             tab.remote.allowed = true;
-            let doc = tab.doc.as_ref();
-            let (mine, rest) = std::mem::take(&mut self.held)
-                .into_iter()
-                .partition(|url| doc.is_some_and(|doc| names_image(doc, url)));
+            let Some(doc) = tab.doc.as_ref() else {
+                self.dirty = true;
+                return;
+            };
+            let (mine, rest) = split_held(std::mem::take(&mut self.held), doc);
             self.held = rest;
             mine
         };
@@ -1946,13 +1983,16 @@ impl Workspace {
         let zoom = f32::from(self.zoom) / 100.0;
         let width = viewport.width as f32 / viewport.scale / zoom;
         let scale = viewport.scale * zoom;
-        let tab = &mut self.tabs[index];
-        let fresh = tab.view.as_ref().is_some_and(|v| {
+        let fresh = self.tabs[index].view.as_ref().is_some_and(|v| {
             v.options.width == width
                 && (v.options.scale - scale).abs() < 0.001
                 && v.options.theme.key() == theme.key()
                 && v.options.theme.reading_width == theme.reading_width
         });
+        if !fresh {
+            self.gate_remote(index);
+        }
+        let tab = &mut self.tabs[index];
         if !fresh {
             tab.drop_view(self.renderer.page_layout(), viewport.height as f32);
             let Some(doc) = tab.doc.as_ref() else {
@@ -3077,6 +3117,32 @@ fn remote_images(doc: &Document) -> usize {
     urls.len()
 }
 
+/// Every distinct `http`/`https` source the document's images name, plain, dark and light, as
+/// the page asks for them (trimmed).
+fn remote_urls(doc: &Document) -> Vec<String> {
+    let mut urls: Vec<String> = doc
+        .images
+        .iter()
+        .flat_map(|image| [image.src, image.dark_src, image.light_src])
+        .map(|src| doc.str(src).trim())
+        .filter(|src| {
+            ["http://", "https://"].iter().any(|scheme| {
+                src.get(..scheme.len())
+                    .is_some_and(|head| head.eq_ignore_ascii_case(scheme))
+            })
+        })
+        .map(str::to_string)
+        .collect();
+    urls.sort_unstable();
+    urls.dedup();
+    urls
+}
+
+/// Splits the held-back URLs into the ones `doc` names and the rest.
+fn split_held(held: Vec<String>, doc: &Document) -> (Vec<String>, Vec<String>) {
+    held.into_iter().partition(|url| names_image(doc, url))
+}
+
 /// Whether one of the document's images is `url`, as the page asks for it (trimmed; any of the
 /// plain, dark and light sources).
 fn names_image(doc: &Document, url: &str) -> bool {
@@ -3167,6 +3233,115 @@ mod tests {
         assert!(ws.remote_always());
         ws.set_remote_always(false);
         assert!(!ws.remote_always());
+    }
+
+    /// A loopback server that answers every request with a 32 px red PNG and counts them.
+    fn image_server() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read, Write};
+        let mut png = Vec::new();
+        let mut encoder = png::Encoder::new(&mut png, 32, 32);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer
+            .write_image_data(&[255, 0, 0].repeat(32 * 32))
+            .unwrap();
+        drop(writer);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/red.png", listener.local_addr().unwrap());
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = hits.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut stream = stream;
+                counted.fetch_add(1, Ordering::SeqCst);
+                let mut request = [0u8; 2048];
+                _ = stream.read(&mut request);
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    png.len()
+                );
+                _ = stream.write_all(head.as_bytes());
+                _ = stream.write_all(&png);
+            }
+        });
+        (url, hits)
+    }
+
+    /// Paints and says whether the page shows the server's red image.
+    fn shows_red(ws: &mut Workspace) -> bool {
+        let view = ws.paint(800, 600, 1.0).expect("a page");
+        view.frame.bitmap.pixels.as_chunks::<4>().0.iter().any(|p| {
+            let (lo, hi) = (p[0].min(p[2]), p[0].max(p[2]));
+            hi > 200 && lo < 40 && p[1] < 40
+        })
+    }
+
+    /// Waits for the fetcher to finish the requests started so far.
+    fn finish_downloads(ws: &mut Workspace) {
+        let until = Instant::now() + Duration::from_secs(10);
+        while !ws.remote_completed() {
+            assert!(Instant::now() < until, "the download did not finish");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// The bar is a function of what the page shows: it is up when the tab may not load remote
+    /// images and its page shows placeholders, never when "always" is on or the page shows the
+    /// images. A tab that may not load never draws an image another tab loaded, and allowing it
+    /// shows the image from the cache without a new request.
+    #[test]
+    fn the_remote_bar_and_the_page_agree() {
+        let (url, hits) = image_server();
+        let dir = temp_dir("remote-bar");
+        let text = format!("![r]({url})\n");
+        let [a, b, c, d] = ["a.md", "b.md", "c.md", "d.md"].map(|name| write(&dir, name, &text));
+        let mut ws = workspace();
+
+        // Allowed in one tab: loaded, no bar.
+        let tab_a = ws.open(&a).unwrap();
+        assert_eq!(ws.remote_blocked(), 1);
+        ws.allow_remote(false);
+        assert!(!shows_red(&mut ws), "nothing has arrived yet");
+        finish_downloads(&mut ws);
+        assert!(shows_red(&mut ws));
+        assert_eq!(ws.remote_blocked(), 0);
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+        // Another tab, not allowed: the image is in memory but not drawn, and the bar says so.
+        ws.open(&b).unwrap();
+        assert!(
+            !shows_red(&mut ws),
+            "cached bytes do not draw without permission"
+        );
+        assert_eq!(ws.remote_blocked(), 1);
+        assert!(!shows_red(&mut ws), "nor on the next frame");
+        // Allowing it uses the cached bytes: no second request.
+        ws.allow_remote(false);
+        assert!(shows_red(&mut ws));
+        assert_eq!(ws.remote_blocked(), 0);
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "served from the cache");
+
+        // The first tab still has its image after the other tab held the URL back.
+        ws.activate(tab_a);
+        assert!(shows_red(&mut ws));
+        assert_eq!(ws.remote_blocked(), 0);
+
+        // "Always": no bar for a document opened afterwards, with or without its image yet.
+        ws.set_remote_always(true);
+        ws.open(&c).unwrap();
+        assert_eq!(ws.remote_blocked(), 0, "before its first frame");
+        assert!(shows_red(&mut ws));
+        assert_eq!(ws.remote_blocked(), 0);
+
+        // Turned off again: what the tab shows stays and so does no bar; a new document asks.
+        ws.set_remote_always(false);
+        assert!(shows_red(&mut ws));
+        assert_eq!(ws.remote_blocked(), 0);
+        ws.open(&d).unwrap();
+        assert!(!shows_red(&mut ws));
+        assert_eq!(ws.remote_blocked(), 1);
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "nothing was fetched again");
     }
 
     fn paragraphs(prefix: &str, n: usize) -> String {

@@ -813,8 +813,9 @@ builds and runs on CachyOS, KDE Wayland, cargo 1.99 (`CARGO_TARGET_DIR` off the 
 - Window identity: `window::identify(.., "mdview", assets/mdview.png)` on the attributes and
   `desktop_entry::ensure` once before the event loop (a no-op outside an AppImage and on Windows).
   The command `MakeDefault` ("Make mdview the default for Markdown files", no key, in no menu-bar
-  menu) is in the main menu only off Windows, only when `$APPIMAGE` names a file, and not once
-  `is_default` is true; its toast says the result.
+  menu) is in Settings > System and in the command palette (not in the main menu), only off
+  Windows, only when `$APPIMAGE` names a file, and not once `is_default` is true; its toast says
+  the result.
 - Updates: nothing in the viewer assumes an engine file; the shared `installed_files` returns the
   AppImage with no engine and a Linux release lists no `engine.*` keys. `engine_path()` looks at
   `current_exe().parent()` first, which inside a mounted AppImage is `usr/bin`, where

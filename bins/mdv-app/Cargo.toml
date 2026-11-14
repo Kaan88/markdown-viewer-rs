@@ -12,9 +12,9 @@ path = "src/main.rs"
 [dependencies]
 mdview-core = { path = "../../crates/core" }
 mdview-render = { path = "../../crates/render" }
-mdshared-fetch = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "99f810c1852e2233a6d9348b846b262df3fb7faf" }
-mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "99f810c1852e2233a6d9348b846b262df3fb7faf" }
-mdshared-ui = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "99f810c1852e2233a6d9348b846b262df3fb7faf", features = ["client-margin"] }
+mdshared-fetch = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "bbb1c7a5a56b8fe7295e0a5e4b3104f74e8e2550" }
+mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "bbb1c7a5a56b8fe7295e0a5e4b3104f74e8e2550" }
+mdshared-ui = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "bbb1c7a5a56b8fe7295e0a5e4b3104f74e8e2550", features = ["client-margin"] }
 parley = "=0.12.0"
 # Views softbuffer's u32 pixels as bytes, so presenting is a row memcpy.
 bytemuck = "1.25"
@@ -40,3 +40,6 @@ windows-sys = { version = "0.59", features = [
 [target.'cfg(not(windows))'.dependencies]
 winit = { version = "=0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
 softbuffer = { version = "=0.4.8", default-features = false, features = ["x11", "wayland", "wayland-dlopen"] }
+
+[dev-dependencies]
+png = "0.18"
