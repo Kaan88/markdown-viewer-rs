@@ -68,7 +68,7 @@ shot dialog-edit --light --dialog edit "$fx/showcase.md"
 shot dialog-settings-light --light --dialog settings "$fx/showcase.md"
 shot dialog-settings-dark --dark --dialog settings "$fx/showcase.md"
 shot dialog-settings-scale-150 --light --scale 1.5 --dialog settings "$fx/showcase.md"
-shot dialog-settings-760 --dark --size 760x800 --dialog settings "$fx/showcase.md"
+shot dialog-settings-min-dark --dark --size 520x360 --dialog settings "$fx/showcase.md"
 shot dialog-settings-640 --light --size 640x800 --dialog settings "$fx/showcase.md"
 
 # The command palette: tabs and recent files, commands by prefix, headings by prefix.

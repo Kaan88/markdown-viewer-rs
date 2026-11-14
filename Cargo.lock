@@ -93,7 +93,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
  "wl-clipboard-rs",
  "x11rb",
 ]
@@ -1639,7 +1639,7 @@ dependencies = [
 [[package]]
 name = "mdshared-app"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=ce1345d2395a2a157d5d90b70dba1995b3396cd1#ce1345d2395a2a157d5d90b70dba1995b3396cd1"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=ba9d342b6e6703186fb105206cde0b103c71ea51#ba9d342b6e6703186fb105206cde0b103c71ea51"
 dependencies = [
  "notify",
 ]
@@ -1647,7 +1647,7 @@ dependencies = [
 [[package]]
 name = "mdshared-fetch"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=ce1345d2395a2a157d5d90b70dba1995b3396cd1#ce1345d2395a2a157d5d90b70dba1995b3396cd1"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=ba9d342b6e6703186fb105206cde0b103c71ea51#ba9d342b6e6703186fb105206cde0b103c71ea51"
 dependencies = [
  "libloading",
  "windows-sys 0.59.0",
@@ -1656,7 +1656,7 @@ dependencies = [
 [[package]]
 name = "mdshared-highlight"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=ce1345d2395a2a157d5d90b70dba1995b3396cd1#ce1345d2395a2a157d5d90b70dba1995b3396cd1"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=ba9d342b6e6703186fb105206cde0b103c71ea51#ba9d342b6e6703186fb105206cde0b103c71ea51"
 dependencies = [
  "syntect",
 ]
@@ -1664,7 +1664,7 @@ dependencies = [
 [[package]]
 name = "mdshared-text"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=ce1345d2395a2a157d5d90b70dba1995b3396cd1#ce1345d2395a2a157d5d90b70dba1995b3396cd1"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=ba9d342b6e6703186fb105206cde0b103c71ea51#ba9d342b6e6703186fb105206cde0b103c71ea51"
 dependencies = [
  "parley",
  "png",
@@ -1674,7 +1674,7 @@ dependencies = [
 [[package]]
 name = "mdshared-ui"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=ce1345d2395a2a157d5d90b70dba1995b3396cd1#ce1345d2395a2a157d5d90b70dba1995b3396cd1"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=ba9d342b6e6703186fb105206cde0b103c71ea51#ba9d342b6e6703186fb105206cde0b103c71ea51"
 dependencies = [
  "arboard",
  "mdshared-app",
@@ -2388,7 +2388,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3343,7 +3343,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a253edfdea34032da21af84e16fcc94f4c7a6ba237f9f3bc2dbf43cea8535c44"
 dependencies = [
- "base64 0.23.1",
+ "base64 0.22.1",
  "nohash-hasher",
  "num-traits",
  "serde_core",

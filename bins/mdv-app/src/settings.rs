@@ -1,7 +1,8 @@
 //! The settings dialog's rows, from the options the application has today. The form, its
 //! controls and its layout are `mdshared_ui::settings`; each change comes back as an outcome and
 //! is applied (and saved, where the option is saved) by the same `Workspace` setter the menus
-//! used, so there is no second copy of any setting.
+//! used, so there is no second copy of any setting. It is one page: three small headings, no
+//! category list, and it scrolls only in a window too short for it.
 
 use crate::platform;
 use crate::updater;
@@ -112,5 +113,5 @@ fn check_now_label(ws: &Workspace) -> String {
 }
 
 pub fn form(ws: &Workspace) -> Form {
-    Form::new("Settings", rows(ws))
+    Form::new("Settings", rows(ws)).single_page()
 }
