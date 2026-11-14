@@ -1364,40 +1364,54 @@ fn an_aligned_image_stands_beside_its_text() {
         dir.join("badge.png"),
     )
     .unwrap();
-    let draw = |markdown: &str| {
-        render(
-            &mdview_core::parse(markdown),
-            &Options {
-                base_dir: Some(dir.clone()),
-                ..Options::light()
-            },
-        )
+    let options = Options {
+        base_dir: Some(dir.clone()),
+        ..Options::light()
     };
-    // The badge is blue; where its pixels are says where the image went.
-    let blue_columns = |r: &mdview_render::Rendered| {
-        let width = r.bitmap.width as usize;
-        // Columns with a run of badge blue; subpixel text leaves the odd blue pixel too.
-        let mut per_column = vec![0u32; width];
-        for (i, p) in r.bitmap.pixels.as_chunks::<4>().0.iter().enumerate() {
-            if p[0] > 140 && p[2] < 40 && p[1] > 80 {
-                per_column[i % width] += 1;
+    let draw = |markdown: &str| render(&mdview_core::parse(markdown), &options);
+    // The image sits in a link, and the renderer reports where a link is under a point (a floated
+    // image through its own hit test), so where the image went is read from the layout, not from
+    // pixels: no glyph, in any font, is a link or a float.
+    let linked_columns = |markdown: &str| {
+        let doc = mdview_core::parse(markdown);
+        let mut renderer = DocumentRenderer::new();
+        renderer.layout(&doc, &options);
+        renderer.view_frame(&doc, &options, 0.0, 400.0);
+        let mut span: Option<(usize, usize)> = None;
+        for x in 0..options.width as usize {
+            let on_image = (0..30).map(|k| k as f32 * 8.0).any(|y| {
+                renderer
+                    .hit_test(&doc, &options, x as f32, y)
+                    .is_some_and(|h| h.link.is_some())
+            });
+            if on_image {
+                span = Some(span.map_or((x, x), |(first, _)| (first, x)));
             }
         }
-        let solid = |n: &u32| *n >= 8;
-        (
-            per_column.iter().position(solid).unwrap(),
-            per_column.iter().rposition(solid).unwrap(),
-        )
+        span.expect("the image is hittable")
     };
     let text = "word ".repeat(40);
-    let right = draw(&format!(
-        "<img src=\"badge.png\" width=\"100\" align=\"right\"> {text}\n"
-    ));
-    let (first, last) = blue_columns(&right);
+    let link = |attrs: &str| {
+        format!("<a href=\"https://example.com/\"><img src=\"badge.png\" width=\"100\"{attrs}></a>")
+    };
+    let right = format!("{} {text}\n", link(" align=\"right\""));
+    let (first, last) = linked_columns(&right);
     assert!(first >= 640 && last <= 740, "{first}..{last}");
-    let inline = draw(&format!("<img src=\"badge.png\" width=\"100\"> {text}\n"));
-    assert!(blue_columns(&inline).0 < 60);
+    assert!(
+        last - first >= 95,
+        "the image is 100 px wide: {first}..{last}"
+    );
+    // Inline, the image is a character of the line: the rectangle the layout reports for it starts
+    // at the left margin.
+    let inline = format!("{} {text}\n", link(""));
+    let doc = mdview_core::parse(&inline);
+    let mut renderer = DocumentRenderer::new();
+    renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, 0.0, 400.0);
+    let at = renderer.selection_rects(&doc, &options, 0, 1)[0];
+    assert!(at.x < 60.0 && at.w >= 100.0, "{at:?}");
     // Beside the image the text is one block, not pushed under it.
+    let (right, inline) = (draw(&right), draw(&inline));
     assert!(right.bitmap.height < inline.bitmap.height + 20);
 }
 

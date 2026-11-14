@@ -586,38 +586,49 @@ fn min_time(best: &mut Duration, runs: usize, mut f: impl FnMut()) {
     }
 }
 
-/// Checks that 4x the input takes under 8x the time, where linear code gives about 4x and quadratic
-/// about 16x. Comparing the two sizes needs no absolute limit, so a slow machine can't fail it. The
-/// sizes take turns so a burst of other work hits both, and each round lowers the minimums further.
+/// The small size of the scaling tests; the large one is 4x it. At 256 KiB the slowest case took
+/// 6 ms, where a cold cache or the allocator moved the ratio more than the code did (a shared
+/// CI runner measured 9.3x for linear code); at 1 MiB the baseline is 20 to 90 ms.
+const SCALE_SMALL: usize = 1024 * 1024;
+/// Linear code gives 4x for 4x the input and, with the output outgrowing the CPU caches, up to
+/// about 6x; quadratic code gives 16x. Measured on this code (release, 256 KiB to 8 MiB, minima of
+/// five runs): the slowest case grows as n^1.13 and 4x the input costs at most 5.5x.
+const SCALE_BOUND: u32 = 10;
+
+/// Checks that 4x the input takes under [`SCALE_BOUND`] times as long. Comparing the two sizes
+/// needs no absolute limit, so a slow machine can't fail it. Each size is run once first, to warm
+/// the caches and the allocator, the sizes then take turns so a burst of other work hits both, and
+/// each round lowers the minimums further.
 ///
 /// Under memory or CPU contention the large input is hit harder than the small one, so a would-be
 /// failure is measured again on its own after a pause before it counts. A real quadratic keeps its
 /// ratio through the retry; a loaded machine does not.
 fn assert_scales(what: &str, name: &str, mut f: impl FnMut(usize)) {
-    const SMALL: usize = 256 * 1024;
     const ROUNDS: usize = 8;
     // Below this the clock and the allocator's mood matter more than the code.
-    const FLOOR: Duration = Duration::from_millis(2);
+    const FLOOR: Duration = Duration::from_millis(10);
+    f(SCALE_SMALL);
+    f(4 * SCALE_SMALL);
     let (mut small, mut large) = (Duration::MAX, Duration::MAX);
     for _ in 0..ROUNDS {
         for _ in 0..3 {
-            min_time(&mut small, 1, || f(SMALL));
-            min_time(&mut large, 1, || f(4 * SMALL));
+            min_time(&mut small, 1, || f(SCALE_SMALL));
+            min_time(&mut large, 1, || f(4 * SCALE_SMALL));
         }
-        if large < small * 8 + FLOOR {
+        if large < small * SCALE_BOUND + FLOOR {
             return;
         }
     }
     std::thread::sleep(Duration::from_millis(100));
     let (mut small, mut large) = (Duration::MAX, Duration::MAX);
     for _ in 0..ROUNDS {
-        min_time(&mut small, 1, || f(SMALL));
+        min_time(&mut small, 1, || f(SCALE_SMALL));
     }
     for _ in 0..ROUNDS {
-        min_time(&mut large, 1, || f(4 * SMALL));
+        min_time(&mut large, 1, || f(4 * SCALE_SMALL));
     }
     assert!(
-        large < small * 8 + FLOOR,
+        large < small * SCALE_BOUND + FLOOR,
         "{name}: {what} grew from {small:?} to {large:?} on 4x the input"
     );
 }
@@ -710,7 +721,7 @@ fn pathological_inputs_stay_linear() {
     ];
     for (name, unit) in cases {
         let doc = |len: usize| unit.repeat(len / unit.len());
-        let (small, large) = (doc(256 * 1024), doc(1024 * 1024));
+        let (small, large) = (doc(SCALE_SMALL), doc(4 * SCALE_SMALL));
         assert_scales("scanning", name, |len| {
             let s = pick_size(&small, &large, len);
             std::hint::black_box((Tokenizer::new(s).count(), find_links(s).len()));
@@ -734,7 +745,7 @@ fn pathological_inputs_stay_linear() {
 }
 
 fn pick_size<'a>(small: &'a str, large: &'a str, len: usize) -> &'a str {
-    if len <= 256 * 1024 { small } else { large }
+    if len <= SCALE_SMALL { small } else { large }
 }
 
 /// Keys are built on every load that has details, and find runs on every keystroke, so they count too.
@@ -749,9 +760,9 @@ fn details_keys_and_find_stay_linear() {
         }
         parse(&s)
     };
-    let (small, large) = (doc(256 * 1024), doc(1024 * 1024));
+    let (small, large) = (doc(SCALE_SMALL), doc(4 * SCALE_SMALL));
     assert_scales("details_keys", "unique summaries", |len| {
-        let d = if len <= 256 * 1024 { &small } else { &large };
+        let d = if len <= SCALE_SMALL { &small } else { &large };
         std::hint::black_box(d.details_keys());
     });
     // Find is not compared here: with a fixed query the unbudgeted code is still linear in the text,
