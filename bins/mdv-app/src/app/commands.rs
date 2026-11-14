@@ -888,7 +888,11 @@ impl App {
         if w.is_minimized() == Some(true) {
             return;
         }
-        let size = w.inner_size().to_logical::<f64>(w.scale_factor());
+        // The CONTENT size (the window reports the surface, margin included, with the
+        // client-drawn shadow), so the saved size does not grow by the margin on every start.
+        let surface = w.inner_size();
+        let (cw, ch) = self.content_size(surface.width, surface.height);
+        let size = winit::dpi::PhysicalSize::new(cw, ch).to_logical::<f64>(w.scale_factor());
         self.ws.set_window_size(
             size.width.round() as u32,
             size.height.round() as u32,
