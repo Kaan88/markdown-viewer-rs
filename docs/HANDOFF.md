@@ -1005,6 +1005,14 @@ message row such as "Go to line 25"; icons for the editor's line commands; the r
 hands folders to request receivers, which the viewer's own `mdview_core::single` is not). Shots
 compared with a baseline made before the change: see the commit message.
 
+## Release 0.3.1 (2026-11-14)
+
+One fix, the viewer's side of the editor's 0.5.1: the "Open recent" submenu closed at once when the
+pointer crossed another item of the main menu on its way to it, and its item lost the highlight
+on the menu's padding. Now the submenu stays while the pointer is off the rows, and another row
+closes it only after a rest of `SUBMENU_DWELL` (pointer handling in `app/input.rs`, the close in
+`timers`). Verified by the unit tests on CI (Linux and Windows) only; no real window was driven.
+
 ## Release 0.3.0 (2026-11-14)
 
 mdview 0.3.0, for Windows and, for the first time, Linux. Version 0.2.3 was never published, so
