@@ -1167,3 +1167,128 @@ fn the_wheel_beside_the_palette_does_nothing() {
     assert_eq!(a.ws.scroll(), 0.0);
     assert_eq!(a.ui.palette.as_ref().unwrap().palette.scroll(), 0.0);
 }
+
+// ---- hover cards -----------------------------------------------------------------------------
+
+/// `previews.md` in a 1000x600 window with no panes, so the page sits where the screenshots have
+/// it: the first footnote mark at (411, 191), the link to a heading at (390, 217), the link to a
+/// file at (800, 217) and the web address at (240, 242).
+fn previews_app() -> App {
+    let args = Args {
+        files: vec![fixture("previews.md")],
+        dark: Some(false),
+        files_pane: Some(false),
+        outline_pane: Some(false),
+        no_session: true,
+        ..Args::default()
+    };
+    let mut app = App::new(args, Workspace::new(None), None);
+    app.scale = 1.0;
+    app.size = (1000, 600);
+    app.setup();
+    app.compose();
+    app
+}
+
+/// Rests the pointer at `(x, y)` past the tooltips' delay.
+fn rest(a: &mut App, x: f32, y: f32) {
+    a.pointer_moved(x, y);
+    a.timers(std::time::Instant::now() + std::time::Duration::from_secs(1));
+    a.compose();
+}
+
+#[test]
+fn resting_on_a_footnote_shows_its_text_and_moving_away_hides_it() {
+    let mut a = previews_app();
+    a.pointer_moved(411.0, 191.0);
+    let c = a.ui.card.as_ref().expect("a card waits");
+    assert!(!c.shown, "not before the pointer has rested");
+    let due = a.timers(std::time::Instant::now()).expect("a wake for the card");
+    assert!(due > std::time::Instant::now());
+    rest(&mut a, 411.0, 191.0);
+    let c = a.ui.card.as_ref().expect("the card");
+    assert!(c.shown);
+    assert_eq!(c.content.as_ref().unwrap().title, "Footnote 1");
+    assert!(c.content.as_ref().unwrap().body.starts_with("A short note"));
+    assert!(a.card_layout(1000.0, 600.0).is_some());
+    // Small moves on the mark keep it; leaving the mark drops it.
+    a.pointer_moved(412.0, 192.0);
+    assert!(a.ui.card.as_ref().is_some_and(|c| c.shown));
+    a.pointer_moved(600.0, 450.0);
+    assert!(a.ui.card.is_none());
+}
+
+#[test]
+fn a_link_to_a_heading_of_the_page_shows_the_heading_and_its_lines() {
+    let mut a = previews_app();
+    rest(&mut a, 390.0, 217.0);
+    let p = a.ui.card.as_ref().and_then(|c| c.content.clone()).unwrap();
+    assert_eq!(p.title, "Notes");
+    assert!(p.body.starts_with("The notes are a heading"));
+}
+
+#[test]
+fn a_local_markdown_link_is_read_on_a_thread_and_then_shown() {
+    let mut a = previews_app();
+    a.pointer_moved(800.0, 217.0);
+    a.timers(std::time::Instant::now() + std::time::Duration::from_secs(1));
+    // The answer is being read: the card waits and does not ask again every tick.
+    assert!(a.ui.card.as_ref().is_some_and(|c| c.loading && !c.shown));
+    assert_eq!(a.timers(std::time::Instant::now()), None);
+    let mut tries = 0;
+    while !a.ui.previews.collect() {
+        tries += 1;
+        assert!(tries < 500, "the thread never answered");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    a.resolve_card(std::time::Instant::now() + std::time::Duration::from_secs(1));
+    let c = a.ui.card.as_ref().expect("the card");
+    assert!(c.shown);
+    assert_eq!(c.content.as_ref().unwrap().title, "The linked file");
+    // Resting on it again is answered from what was kept, with no thread.
+    a.pointer_moved(600.0, 450.0);
+    rest(&mut a, 800.0, 217.0);
+    assert!(a.ui.card.as_ref().is_some_and(|c| c.shown));
+}
+
+#[test]
+fn a_web_address_and_the_page_text_have_no_card() {
+    let mut a = previews_app();
+    rest(&mut a, 240.0, 242.0);
+    assert!(a.ui.card.is_none());
+    rest(&mut a, 300.0, 283.0);
+    assert!(a.ui.card.is_none());
+}
+
+#[test]
+fn a_key_a_press_and_the_wheel_dismiss_the_card() {
+    use winit::dpi::PhysicalPosition;
+    let mut a = previews_app();
+    rest(&mut a, 411.0, 191.0);
+    assert!(a.ui.card.is_some());
+    key(&mut a, KeyName::Char('x'), Some("x"));
+    assert!(a.ui.card.is_none());
+    rest(&mut a, 411.0, 191.0);
+    a.wheel(MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, -40.0)));
+    assert!(a.ui.card.is_none());
+    rest(&mut a, 411.0, 191.0);
+    a.left_press();
+    assert!(a.ui.card.is_none());
+}
+
+#[test]
+fn previews_can_be_turned_off_in_settings() {
+    use crate::settings as s;
+    use mdshared_ui::settings::Value;
+    let mut a = previews_app();
+    rest(&mut a, 411.0, 191.0);
+    assert!(a.ui.card.is_some());
+    a.apply_setting(s::PREVIEWS, Value::Bool(false));
+    assert!(!a.ws.previews());
+    assert!(a.ui.card.is_none());
+    rest(&mut a, 411.0, 191.0);
+    assert!(a.ui.card.is_none(), "no card while they are off");
+    a.apply_setting(s::PREVIEWS, Value::Bool(true));
+    rest(&mut a, 411.0, 191.0);
+    assert!(a.ui.card.is_some());
+}

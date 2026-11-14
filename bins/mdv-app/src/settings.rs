@@ -20,6 +20,7 @@ pub const CHECK_NOW: u32 = 8;
 pub const DEFAULT_APP: u32 = 9;
 pub const PAGE_FONT: u32 = 10;
 pub const CODE_FONT: u32 = 11;
+pub const PREVIEWS: u32 = 30;
 
 pub const WIDTHS: [&str; 3] = ["Narrow", "Wide", "Full"];
 pub const THEMES: [&str; 3] = ["System", "Light", "Dark"];
@@ -82,6 +83,8 @@ pub fn rows(ws: &Workspace) -> Vec<Row> {
         .help("Otherwise the first tick in a file asks."),
         Row::toggle(ANIMATIONS, "Play animated images", ws.animations())
             .help("Off shows their first frame."),
+        Row::toggle(PREVIEWS, "Preview footnotes and links", ws.previews())
+            .help("A card appears when the pointer rests on one."),
         // The About dialog offers both unconditionally (a copy that cannot update itself says so
         // when asked), so this does too.
         Row::header("Updates"),

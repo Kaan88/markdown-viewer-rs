@@ -245,6 +245,10 @@ impl App {
             (setting::REMOTE_IMAGES, Value::Bool(on)) => self.ws.set_remote_always(on),
             (setting::TICK_BOXES, Value::Bool(on)) => self.ws.set_edit_always(on),
             (setting::ANIMATIONS, Value::Bool(on)) => self.ws.set_animations(on),
+            (setting::PREVIEWS, Value::Bool(on)) => {
+                self.ws.set_previews(on);
+                self.ui.card = None;
+            }
             (setting::CHECK_AT_LAUNCH, Value::Bool(on)) => self.ws.set_checks_updates(on),
             _ => {}
         }

@@ -47,6 +47,7 @@ use winit::window::{CursorIcon, ResizeDirection, Theme as WinTheme, Window, Wind
 
 mod commands;
 mod input;
+mod cards;
 mod modal;
 #[cfg(test)]
 mod tests;
@@ -82,6 +83,8 @@ pub enum Wake {
     Notes,
     /// The animation thread has a frame ready.
     Animation,
+    /// A helper thread has read a file for a hover card.
+    Preview,
     /// An updater thread has an answer.
     Update(updater::Event),
     /// The helper thread asked whether a window of mdedit still answers: true if one does.
@@ -553,7 +556,9 @@ impl App {
             }
         }
         self.toast_until = self.ws.status(now).and(self.ws.status_expires());
+        let card = self.card_layout(w, h);
         let mut bounds: Vec<Rect> = bubbles.iter().map(Bubble::bounds).collect();
+        bounds.extend(card.iter().map(crate::preview::Layout::bounds));
         if let Some(popup) = &self.ui.popup {
             bounds.push(popup.menu.rect().inset(-20.0));
             if let Some(s) = &popup.sub {
@@ -582,6 +587,7 @@ impl App {
                     )
                 })
                 .collect::<Vec<_>>(),
+            card.as_ref().map(crate::preview::Layout::key),
             self.ui.popup.as_ref().map(|p| {
                 (
                     p.kind,
@@ -730,6 +736,9 @@ impl App {
                 }
                 for b in &bubbles {
                     b.draw(c.p, &pal);
+                }
+                if let Some(l) = &card {
+                    crate::preview::draw(l, c.p, &pal);
                 }
                 // Last, over everything.
                 let window = Rect::new(0.0, 0.0, w, h);
@@ -1254,6 +1263,7 @@ impl ApplicationHandler<Wake> for App {
                 if !focused {
                     self.ui.caret_on = true;
                     self.ui.tip = None;
+                    self.ui.card = None;
                 }
                 self.redraw();
             }
@@ -1274,6 +1284,7 @@ impl ApplicationHandler<Wake> for App {
                 if self.ui.drag.is_none() {
                     self.ui.hover = None;
                     self.ui.tip = None;
+                    self.ui.card = None;
                     self.ui.link_hint = None;
                     self.redraw();
                 }
@@ -1426,6 +1437,7 @@ fn shot(mut app: App, path: &Path) -> i32 {
         if let Some(t) = app.ui.tip.as_mut() {
             t.shown = true;
         }
+        app.show_card_now();
         if let Some(p) = app.ui.popup.as_mut() {
             p.menu.pointer(x, y);
             if let Some(s) = p.sub.as_mut() {
@@ -1563,6 +1575,10 @@ pub fn run() -> i32 {
     app.ws.set_system_animations(platform::shows_animations());
     app.ws.set_animation_wake(move || {
         let _ = p.send_event(Wake::Animation);
+    });
+    let p = proxy.clone();
+    app.ui.previews.set_wake(move || {
+        let _ = p.send_event(Wake::Preview);
     });
     app.proxy = Some(proxy);
     app.updates_at_launch();
