@@ -15,6 +15,7 @@ pub mod place;
 pub mod selfupdate;
 pub mod session;
 pub mod single;
+pub mod slides;
 pub mod slug;
 pub mod status;
 pub mod tasks;

@@ -6,6 +6,10 @@ impl App {
     // ---- pointer -------------------------------------------------------------------------------
 
     pub(super) fn pointer_moved(&mut self, x: f32, y: f32) {
+        if self.presenting() {
+            self.present_pointer(x, y);
+            return;
+        }
         self.ui.mouse = (x, y);
         if self.ui.modal() {
             self.modal_pointer(x, y);
@@ -317,6 +321,10 @@ impl App {
     }
 
     pub(super) fn left_press(&mut self) {
+        if self.presenting() {
+            self.present_press();
+            return;
+        }
         let (x, y) = self.ui.mouse;
         self.ui.tip = None;
         self.ui.tip_blocked = self.ui.hover;
@@ -462,6 +470,9 @@ impl App {
     }
 
     pub(super) fn right_press(&mut self) {
+        if self.presenting() {
+            return;
+        }
         let (x, y) = self.ui.mouse;
         self.ui.tip = None;
         if self.ui.dialog.is_some() || self.ui.modal() {
@@ -500,7 +511,7 @@ impl App {
 
     /// The mouse's Back and Forward buttons, and Alt+Left and Alt+Right.
     pub(super) fn travel(&mut self, back: bool) {
-        if self.ui.dialog.is_some() || self.ui.modal() {
+        if self.presenting() || self.ui.dialog.is_some() || self.ui.modal() {
             return;
         }
         self.ui.popup = None;
@@ -514,6 +525,9 @@ impl App {
     }
 
     pub(super) fn middle_press(&mut self) {
+        if self.presenting() {
+            return;
+        }
         let (x, y) = self.ui.mouse;
         if self.ui.dialog.is_some() || self.ui.popup.is_some() || self.ui.modal() {
             return;
@@ -531,6 +545,10 @@ impl App {
             MouseScrollDelta::LineDelta(_, dy) => (dy, None),
             MouseScrollDelta::PixelDelta(p) => (p.y as f32 / (48.0 * self.scale), Some(p.y as f32)),
         };
+        if self.presenting() {
+            self.present_wheel(notches, pixels);
+            return;
+        }
         if self.ui.modal() {
             let dy = match pixels {
                 Some(py) => -py / self.scale,
@@ -670,6 +688,11 @@ impl App {
         self.ui.tip = None;
         self.redraw();
 
+        // A presentation takes the keyboard before anything else.
+        if self.presenting() {
+            self.present_key(name, mods);
+            return;
+        }
         // The palette and the settings dialog take the keyboard before anything else.
         if self.ui.modal() {
             self.modal_key(name, typed);

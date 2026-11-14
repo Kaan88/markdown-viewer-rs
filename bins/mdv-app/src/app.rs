@@ -48,6 +48,7 @@ use winit::window::{CursorIcon, ResizeDirection, Theme as WinTheme, Window, Wind
 mod commands;
 mod input;
 mod modal;
+mod slides;
 #[cfg(test)]
 mod tests;
 
@@ -300,6 +301,12 @@ impl App {
             self.ws.find_set(q);
         }
         self.ui.focus_mode = a.focus_mode;
+        if let Some(n) = a.present {
+            self.present_begin();
+            if let Some(show) = self.ui.present.as_mut() {
+                show.go(n - 1);
+            }
+        }
         if let Some(stage) = &a.update_bar {
             self.ws.preview_update(stage);
         }
@@ -486,6 +493,12 @@ impl App {
         self.sync_theme();
         // Text the editor sent since the last frame: one parse, of the newest.
         self.ws.apply_live();
+        // A presentation is the whole frame.
+        if self.ui.present.is_some()
+            && let Some(done) = self.compose_present()
+        {
+            return done;
+        }
         let (w, h) = self.logical();
         let areas = Areas::compute(w, h, &self.ui);
         if areas != self.areas {
@@ -1156,6 +1169,7 @@ impl ApplicationHandler<Wake> for App {
         }
         self.surface = Some(surface);
         self.window = Some(window);
+        self.present_window();
         stage(self.started, "surface");
         self.draw();
         stage(self.started, "first draw returned");

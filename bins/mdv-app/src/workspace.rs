@@ -268,6 +268,13 @@ pub struct Tab {
     live: bool,
     /// The newest text received and not parsed yet, and the line to follow.
     live_pending: Option<(String, Option<u32>)>,
+    /// The Markdown of the file as last read (or the editor's text), kept only while the tab is
+    /// live or presented: the document model does not hold the source. See `present_source`.
+    source: Option<String>,
+    /// Slides are shown from this tab; `source` is kept current.
+    presenting: bool,
+    /// Counts the documents the tab has taken, so a presentation can tell the text changed.
+    revision: u64,
 }
 
 /// What a tab decided about its document's remote images.
@@ -305,10 +312,14 @@ impl Tab {
             links_checked: 0,
             live: false,
             live_pending: None,
+            source: None,
+            presenting: false,
+            revision: 0,
         }
     }
 
     fn set_document(&mut self, doc: Document, stamp: FileStamp) {
+        self.revision += 1;
         self.stats = DocStats::of(&doc);
         self.remote.count = remote_images(&doc);
         self.links_checked = 0;
@@ -1173,6 +1184,7 @@ impl Workspace {
         }
         tab.follow_end = tab.at_end;
         tab.set_document(document, stamp);
+        tab.source = (live || tab.presenting).then(|| mdview_core::files::decode(bytes).0.into_owned());
         tab.missing = live && tab.missing;
         tab.live = live;
         tab.live_pending = None;
@@ -1199,6 +1211,48 @@ impl Workspace {
             self.message(strings::REFRESHED);
         }
         self.dirty = true;
+    }
+
+    // ---- presentation ------------------------------------------------------------------------
+
+    /// What a presentation of the active tab needs: the tab's index, the revision of its text
+    /// (it changes whenever the text is read again) and the Markdown. The source is kept current
+    /// from now on, until [`present_end`](Self::present_end). Nothing is held for a tab that is
+    /// never presented.
+    pub fn present_source(&mut self) -> Result<(usize, u64, String), String> {
+        let index = self.active.ok_or_else(|| strings::NOTHING_TO_PRESENT.to_string())?;
+        self.load(index);
+        let tab = &mut self.tabs[index];
+        if tab.source.is_none() {
+            let loaded = read_stable(&tab.path).map_err(|e| e.to_string())?;
+            tab.source = Some(mdview_core::files::decode(&loaded.bytes).0.into_owned());
+        }
+        tab.presenting = true;
+        let source = tab.source.clone().unwrap_or_default();
+        Ok((index, tab.revision, source))
+    }
+
+    /// The tab and text revision a presentation of `index` shows now, and its source when the
+    /// revision is not `known`.
+    pub fn present_update(&self, index: usize, known: u64) -> Option<(u64, String)> {
+        let tab = self.tabs.get(index)?;
+        if tab.revision == known {
+            return None;
+        }
+        Some((tab.revision, tab.source.clone()?))
+    }
+
+    /// The presentation is over: the sources kept for it are let go (the editor's live text keeps
+    /// its own).
+    pub fn present_end(&mut self) {
+        for tab in &mut self.tabs {
+            if tab.presenting {
+                tab.presenting = false;
+                if !tab.live {
+                    tab.source = None;
+                }
+            }
+        }
     }
 
     // ---- live text from the editor -----------------------------------------------------------

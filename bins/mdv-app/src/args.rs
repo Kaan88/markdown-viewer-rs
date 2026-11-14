@@ -57,6 +57,8 @@ pub struct Args {
     /// Logical pointer position.
     pub hover: Option<(f32, f32)>,
     pub focus_mode: bool,
+    /// `--present N`: start presenting at slide N (1 is the first), for shots and checks.
+    pub present: Option<usize>,
     /// Load the first document's remote images without showing the bar (for checks).
     pub load_remote: bool,
     /// Show the update bar at this stage (`available`, `installing` or `installed`) with a
@@ -127,6 +129,9 @@ impl Args {
                 "--outline" => out.outline_pane = Some(true),
                 "--no-outline" => out.outline_pane = Some(false),
                 "--focus-mode" => out.focus_mode = true,
+                "--present" => {
+                    out.present = value(&a).and_then(|v| v.parse().ok()).filter(|&n| n >= 1);
+                }
                 "--load-remote" => out.load_remote = true,
                 "--update-bar" => out.update_bar = value(&a),
                 "--check-update" => out.check_update = true,

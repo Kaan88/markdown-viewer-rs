@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use unicase::UniCase;
 
-fn options() -> Options {
+pub(crate) fn options() -> Options {
     Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS

@@ -256,7 +256,8 @@ fn commands(ws: &Workspace) -> (Vec<Entry>, Vec<Target>) {
             | C::CloseAllTabs
             | C::CopyFilePath
             | C::ShowInFileManager
-            | C::EditInMdedit => has_tab,
+            | C::EditInMdedit
+            | C::Present => has_tab,
             C::CloseOtherTabs | C::NextTab | C::PreviousTab => many,
             C::ClearRecent => any_recent,
             _ => true,

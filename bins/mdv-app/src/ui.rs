@@ -345,6 +345,8 @@ pub struct Ui {
     pub overlay_tick: u64,
     pub panes: Panes,
     pub focus_mode: bool,
+    /// Presentation mode, while it runs. See `present`.
+    pub present: Option<crate::present::Show>,
     pub tree: FileTree,
     pub find: TextField,
     pub find_focused: bool,
@@ -390,6 +392,7 @@ impl Ui {
                 outline_view: 0.0,
             },
             focus_mode: false,
+            present: None,
             tree: new_tree(),
             find: TextField::new(),
             find_focused: false,

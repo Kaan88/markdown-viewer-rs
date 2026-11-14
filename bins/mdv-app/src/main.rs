@@ -10,6 +10,7 @@ mod page;
 mod palette;
 mod panes;
 mod platform;
+mod present;
 mod settings;
 mod tree;
 mod ui;
