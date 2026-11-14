@@ -880,6 +880,41 @@ are for "runs and looks sane", not golden comparison.
 and `text/x-markdown` and never sets a default; `.mdown` is `text/plain` in shared-mime-info, so it
 needs a small `mime/packages` XML. The package itself has never been installed with `pacman -U`.
 
+**Emoji with U+FE0F (2026-11-14).** `❤️` and `⚠️` drew as monochrome text glyphs: parley looks an
+emoji cluster up in the style's own family list first and the `emoji` generic only after it, and
+DejaVu Sans (in the family string) has U+2764 and U+26A0, so it won. `mdshared_text::push_emoji_runs`
+(shared `fonts.rs`) pushes the colour emoji families, then the style's own, for the byte ranges that
+are a base plus U+FE0F / keycap U+20E3 / skin-tone modifier, or a ZWJ sequence of pictographs; the
+pager calls it last in `build_layout` and the shared `Gfx::layout` for the chrome. It is empty on
+Windows and for ASCII text. A bare `✔`, `→`, `©` is not touched. `fixtures/emoji.md` and the
+`emoji-light` shot show it. Cost: nothing measurable on a 1 MB ASCII document; on a 1 MB document
+with four emoji sequences per 100 bytes the exact layout took about 735 ms and now about 835 ms.
+
+**AppImage start-up (measured 2026-11-14, i7-14700KF, headless `--shot` of showcase.md, 10 to 12
+alternating runs, medians of wall-clock from `date +%s%N`).** The binary built in the glibc 2.31
+container is as fast as the host build (84 ms against 81 ms), so the binary is not the cost. The
+AppImage adds about 18 ms (102 to 104 ms): about 9 ms for the FUSE mount (the "raw" image, which has
+no compression at all, is at 93 ms) and about 10 ms to decompress what start-up touches.
+`--appimage-extract-and-run` is 104 ms (it unpacks 38 MB each time). Squashfs options through
+`appimagetool` (`--comp`, `--mksquashfs-opt`), size against the median:
+
+| image | size | median ms |
+|---|---|---|
+| default (zstd, 128 KiB blocks) | 15.37 MB | 104 |
+| zstd level 1 | 18.37 MB (+20 %) | 102 |
+| zstd level 3 | 17.45 MB (+14 %) | 106 |
+| zstd level 10 | 16.26 MB (+6 %) | 107 |
+| zstd level 3, 1 MiB blocks | 16.55 MB | 115 |
+| zstd level 3, 32 KiB blocks | 18.28 MB | 106 |
+| gzip | 16.74 MB | 133 |
+| lz4 | 23.16 MB | does not run (the runtime has no lz4) |
+| no compression | 39.0 MB (+154 %) | 93 |
+
+Nothing within +25 % size beats the default beyond noise, so `build-appimage.sh` is unchanged. Only
+an uncompressed image is faster (about 10 ms) and it is 2.5 times the size. The 141 to 252 ms seen
+earlier came from other session contents, not from the packaging. Not measured: first frame of a
+window (that needs the display).
+
 ## 12a. Hand-off with mdedit (2026-11-14)
 
 "Edit in mdedit" (Ctrl+E; the main menu, the page menu, the tab menu, the palette) starts the editor
