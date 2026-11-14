@@ -19,41 +19,48 @@ impl App {
         let edge = self.edge_at(x, y);
         let in_menu = self.ui.popup.as_ref().is_some_and(|p| p.contains(x, y));
         if let Some(p) = self.ui.popup.as_mut() {
-            if p.sub.as_ref().is_some_and(|s| s.contains(x, y)) {
-                // On the submenu the parent keeps its highlight on the item it came from.
-                if let Some(s) = p.sub.as_mut()
-                    && s.pointer(x, y)
-                {
-                    self.wants_frame = true;
-                }
+            // An open submenu is never closed by the move itself, or the pointer could not reach
+            // it: on its way there it crosses the menu's padding, a separator, or the corner of
+            // another row. Off the rows it stays; on another row it stays until the pointer has
+            // rested there for the dwell.
+            let opener = p
+                .sub
+                .as_ref()
+                .and_then(|_| p.menu.items.iter().position(|it| it.id.is_submenu()));
+            let before = p.menu.hover;
+            let on_sub = p.sub.as_ref().is_some_and(|s| s.contains(x, y));
+            if let Some(s) = p.sub.as_mut()
+                && s.pointer(x, y)
+            {
+                self.wants_frame = true;
+            }
+            if on_sub || (p.sub.is_some() && !p.menu.contains(x, y)) {
+                // On the submenu, or off both menus: the parent keeps its highlight on the item
+                // the submenu came from, and nothing is pending.
                 p.dwell = None;
+                p.menu.hover = opener;
             } else {
-                if p.menu.pointer(x, y) {
-                    self.wants_frame = true;
-                }
-                if let Some(s) = p.sub.as_mut()
-                    && s.pointer(x, y)
-                {
-                    self.wants_frame = true;
-                }
+                p.menu.pointer(x, y);
                 match p.menu.hover {
-                    // Resting on an item with a submenu: it opens after the dwell, unless
-                    // it is open already.
-                    Some(i) if p.menu.items[i].id.is_submenu() => {
-                        if p.sub.is_none() && p.dwell.map(|d| d.0) != Some(i) {
+                    None => {
+                        p.dwell = None;
+                        if opener.is_some() {
+                            p.menu.hover = opener;
+                        }
+                    }
+                    Some(i) => {
+                        // Something happens after a rest here only if it would change what is
+                        // open: a submenu item opens its submenu, any other item closes it.
+                        if p.menu.items[i].id.is_submenu() == p.sub.is_some() {
+                            p.dwell = None;
+                        } else if p.dwell.map(|d| d.0) != Some(i) {
                             p.dwell = Some((i, Instant::now() + crate::ui::SUBMENU_DWELL));
                         }
                     }
-                    // Another item closes the submenu. Between items, or off the menu, the
-                    // submenu stays so the pointer can travel to it.
-                    Some(_) => {
-                        p.dwell = None;
-                        if p.sub.take().is_some() {
-                            self.wants_frame = true;
-                        }
-                    }
-                    None => p.dwell = None,
                 }
+            }
+            if p.menu.hover != before {
+                self.wants_frame = true;
             }
         }
         let hit = if edge.is_some() || in_menu {

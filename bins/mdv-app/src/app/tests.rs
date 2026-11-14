@@ -426,10 +426,50 @@ fn a_click_opens_the_submenu_at_once_and_other_items_close_it() {
     a.left_release();
     a.compose();
     assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_some()));
-    // Moving to another item of the parent closes the submenu.
-    let (x, y) = menu_row(&a, 0);
-    a.pointer_moved(x, y);
-    assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_none()));
+    // The pointer leaving the item sideways crosses the menu's padding, where no row is
+    // hovered: the submenu stays and its item stays lit (0.3.0 closed it there, so the pointer
+    // never reached the submenu).
+    let m = a.ui.popup.as_ref().unwrap().menu.rect();
+    let (mut px, mut end) = (x, m.x);
+    if a.ui.popup.as_ref().unwrap().sub.as_ref().unwrap().rect().x >= m.right() - 8.0 {
+        end = m.right() - 1.0;
+    }
+    let step = if end < px { -1.0 } else { 1.0 };
+    while (end - px) * step >= 0.0 {
+        a.pointer_moved(px, y);
+        let p = a.ui.popup.as_ref().unwrap();
+        assert!(p.sub.is_some(), "closed at x = {px}");
+        assert_eq!(p.menu.hover, Some(r), "the item stays lit at x = {px}");
+        assert!(p.dwell.is_none());
+        px += step;
+    }
+    // Another item of the parent does not close the submenu at once (the pointer may be on its
+    // way to the submenu), only after it has rested there.
+    let (x0, y0) = menu_row(&a, 0);
+    a.pointer_moved(x0, y0);
+    assert!(
+        a.ui.popup
+            .as_ref()
+            .is_some_and(|p| p.sub.is_some() && p.dwell.is_some())
+    );
+    // Into the submenu before the dwell is up: it stays, and nothing is pending.
+    let s = a.ui.popup.as_ref().unwrap().sub.as_ref().unwrap().rect();
+    a.pointer_moved(s.x + 40.0, s.y + 16.0);
+    assert!(
+        a.ui.popup
+            .as_ref()
+            .is_some_and(|p| p.sub.is_some() && p.dwell.is_none())
+    );
+    a.timers(std::time::Instant::now() + crate::ui::SUBMENU_DWELL * 2);
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_some()));
+    // Resting on the other item closes it.
+    a.pointer_moved(x0, y0);
+    a.timers(std::time::Instant::now() + crate::ui::SUBMENU_DWELL * 2);
+    assert!(
+        a.ui.popup
+            .as_ref()
+            .is_some_and(|p| p.sub.is_none() && p.dwell.is_none())
+    );
     // And back on the item: it opens again after the dwell, not before.
     let (x, y) = menu_row(&a, r);
     a.pointer_moved(x, y);

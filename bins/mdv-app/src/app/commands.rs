@@ -783,7 +783,22 @@ impl App {
         let dwell = self.ui.popup.as_ref().and_then(|p| p.dwell);
         if let Some((_, due)) = dwell {
             if now >= due {
-                self.open_submenu(false);
+                // The pointer rested: on a submenu item its submenu opens, on any other item
+                // the open submenu closes.
+                let opens = self.ui.popup.as_mut().is_some_and(|p| {
+                    let i = p.dwell.take().map(|d| d.0);
+                    let opens =
+                        i.is_some_and(|i| p.menu.items.get(i).is_some_and(|it| it.id.is_submenu()));
+                    if opens {
+                        p.menu.hover = i;
+                    } else {
+                        p.sub = None;
+                    }
+                    opens
+                });
+                if opens {
+                    self.open_submenu(false);
+                }
                 self.wants_frame = true;
             } else {
                 at(due);
