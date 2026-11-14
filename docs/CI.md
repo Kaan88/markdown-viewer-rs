@@ -109,7 +109,7 @@ with `-- --ignored`.
 - Windows drew U+2714 and U+2764 as empty boxes on the "Without the selector" line of
   `fixtures/emoji.md`: `shared_fonts()` applied the shared font fallbacks off Windows only, and the
   editor added them itself on Windows. `shared_fonts()` now applies them on every system (shared
-  crates), so the page text and the chrome draw both as text glyphs (Segoe UI Symbol) on Windows.
+  crates), so the page text and the chrome draw both as text glyphs on Windows (looked at in the CI shot).
 - `an_aligned_image_stands_beside_its_text` (crates/render/tests/render.rs) found the image's
   columns by pixel colour, and the text's subpixel fringes made the same colour in the runner's
   Noto Sans. It now puts the image in a link and reads where the image is from the layout (the
