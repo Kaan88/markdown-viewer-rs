@@ -650,6 +650,43 @@ fn the_hash_prefix_lists_headings_and_enter_scrolls_to_one() {
 }
 
 #[test]
+fn alt_arrows_and_the_palette_go_back_and_forward() {
+    use crate::palette::Target;
+    let mut a = app(&["showcase.md"]);
+    let last = a.ws.outline().last().expect("headings").block;
+    // Nowhere to go yet: both are listed, greyed.
+    assert!(!a.ws.can_go_back() && !a.ws.can_go_forward());
+    assert!(a.ws.outline_jump(last));
+    a.compose();
+    let jumped = a.ws.scroll();
+    assert!(jumped > 0.0 && a.ws.can_go_back());
+    a.mods = Mods {
+        alt: true,
+        ..Mods::default()
+    };
+    key(&mut a, KeyName::Left, None);
+    assert_eq!(a.ws.scroll(), 0.0);
+    assert!(a.ws.can_go_forward());
+    key(&mut a, KeyName::Right, None);
+    assert_eq!(a.ws.scroll(), jumped);
+    a.mods = Mods::default();
+    // The palette runs the same steps.
+    a.command(C::CommandPalette);
+    a.compose();
+    type_text(&mut a, ">back");
+    let at = listed(&a)
+        .iter()
+        .position(|t| *t == Target::Cmd(C::Back))
+        .expect("Back is listed");
+    for _ in 0..at {
+        key(&mut a, KeyName::Down, None);
+    }
+    key(&mut a, KeyName::Enter, None);
+    assert!(a.ui.palette.is_none());
+    assert_eq!(a.ws.scroll(), 0.0);
+}
+
+#[test]
 fn the_question_mark_lists_the_prefixes_and_a_row_puts_one_in_the_box() {
     let mut a = app(&["showcase.md"]);
     a.command(C::CommandPalette);

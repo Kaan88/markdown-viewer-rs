@@ -534,6 +534,12 @@ impl App {
             C::PreviousTab => {
                 self.ws.previous_tab();
             }
+            C::Back => {
+                self.ws.go_back();
+            }
+            C::Forward => {
+                self.ws.go_forward();
+            }
             C::Escape => self.escape(),
             C::CloseOtherTabs | C::CopyFilePath | C::ShowInFileManager | C::EditInMdedit => {
                 if let Some(i) = self.ws.active() {

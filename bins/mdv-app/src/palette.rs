@@ -258,6 +258,8 @@ fn commands(ws: &Workspace) -> (Vec<Entry>, Vec<Target>) {
             | C::ShowInFileManager
             | C::EditInMdedit => has_tab,
             C::CloseOtherTabs | C::NextTab | C::PreviousTab => many,
+            C::Back => ws.can_go_back(),
+            C::Forward => ws.can_go_forward(),
             C::ClearRecent => any_recent,
             _ => true,
         };

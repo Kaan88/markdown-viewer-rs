@@ -107,6 +107,10 @@ mod tests {
             Some(CommandId::Exit)
         );
         assert_eq!(command_for(&KeyName::Escape, NONE), Some(CommandId::Escape));
+        let alt = Mods { alt: true, ..NONE };
+        assert_eq!(command_for(&KeyName::Left, alt), Some(CommandId::Back));
+        assert_eq!(command_for(&KeyName::Right, alt), Some(CommandId::Forward));
+        assert_eq!(command_for(&KeyName::Left, NONE), None);
         assert_eq!(command_for(&KeyName::Char('o'), NONE), None);
         assert_eq!(hint(CommandId::FindNext), "F3");
         assert_eq!(hint(CommandId::About), "");
