@@ -60,10 +60,11 @@ a document needs it and exits when idle, so a malformed document cannot take the
 
 A personal project, usable every day on Windows 11. Version 0.3.0 is on the
 [releases page](https://github.com/Kaan88/markdown-viewer-rs/releases/latest) for Windows (with its
-installer) and, for the first time, Linux (an AppImage); nothing is code-signed. The Windows files
-of 0.3.0 were cross-built on Linux and checked under Wine only: the last builds made and run on
-Windows itself were 0.2.2. The Linux build has run on KDE Plasma 6 (Wayland) and, headless, on
-sway; GNOME and other desktops have not been tried.
+installer) and, for the first time, Linux; nothing is code-signed. The release files are built by
+GitHub Actions, Windows natively on a Windows runner. On 2026-11-14 the full test suite and every
+screenshot state ran on a real Windows runner; nobody has yet used 0.3.0 by hand on a Windows
+desktop. Linux has run on KDE Plasma 6 (Wayland) and, headless, on sway; GNOME and other desktops
+have not been tried.
 
 Known gaps are listed in [docs/HANDOFF.md](docs/HANDOFF.md), section 11. The larger one: tables
 always fill the page column.
@@ -72,11 +73,27 @@ always fill the page column.
 
 The releases page has:
 
-- **Windows:** `mdview-setup-<version>.exe`, a per-user installer that registers the Markdown
-  extensions under "Open with" and never takes the `.md` default; or `mdview.exe` together with
-  `mdview-engine.exe`, kept in one folder.
-- **Linux:** `mdview-<version>-linux-x86_64.AppImage` (x86-64). Make it executable and run it:
-  `chmod +x mdview-*.AppImage && ./mdview-*.AppImage`. It updates itself. The engine is inside it.
+- **Windows:**
+  - `mdview-setup-<version>.exe`: the installer, per user. It registers the Markdown extensions
+    under "Open with" and never takes the `.md` default. Pick this for a normal install.
+  - `mdview.exe` together with `mdview-engine.exe`, kept in one folder: the bare executables.
+  - `mdview-<version>-windows-x86_64.zip`: the same two executables with LICENSE and README.md in
+    a folder, for a portable copy.
+  - None is code-signed.
+- **Linux** (x86-64):
+  - `mdview-<version>-linux-x86_64.AppImage`: any distribution, no root. Make it executable and
+    run it: `chmod +x mdview-*.AppImage && ./mdview-*.AppImage`. The engine is inside it.
+  - `mdview_<version>_amd64.deb` for Debian 11+, Ubuntu 20.04+ and derivatives, and
+    `mdview-<version>-1.x86_64.rpm` for Fedora, openSUSE and RHEL: pick one with a package manager.
+  - `PKGBUILD` for Arch: in a folder holding it, `makepkg -si` installs the tar.gz as `mdview-bin`.
+  - `mdview-<version>-linux-x86_64.tar.gz`: `install.sh [PREFIX]` (default `~/.local`) and
+    `uninstall.sh`, on any distribution.
+- `mdview-update.txt` is the manifest the updater reads.
+
+The Windows installed copy, the bare exes and the portable zip's exes update themselves (the
+folder must be writable), and so does the AppImage. The deb, rpm, tar.gz and Arch installs do not;
+the app says only the AppImage can update itself. They install a desktop file, so the taskbar icon
+and "Open with" work without the AppImage's first-run registration.
 
 The AppImage is built in an Ubuntu 20.04 container, so it needs glibc 2.31 or later. It needs the
 system's libc, fontconfig, freetype and the X11/xcb libraries, and loads libcurl and the Wayland
@@ -97,8 +114,9 @@ cargo test --release --workspace
 ```
 
 This gives `target\release\mdview.exe` and `target\release\mdview-engine.exe`; keep them together
-(on Linux `target/release/mdview` and `target/release/mdview-engine`). The release files for both
-systems are built from Linux as `docs/UPDATE.md` describes.
+(on Linux `target/release/mdview` and `target/release/mdview-engine`). Releases are cut by
+pushing a tag `v<version>`: GitHub Actions builds and publishes the files above. See `docs/CI.md`;
+`docs/UPDATE.md` has the local scripts for a dry run.
 
 ```powershell
 target\release\mdview.exe README.md

@@ -94,8 +94,13 @@ locked; that update fails cleanly and can be tried again once the old window is 
 
 ## Publishing a release
 
-This is the Windows procedure. For both platforms from Linux see "Releasing from Linux" below
-(0.3.0 is the first release made that way).
+**The way to publish is the tag-driven workflow** (`.github/workflows/release.yml`): set the
+version, push, wait for the `ci` run, push the tag `v<version>`. What it builds, the asset names
+and the dry run are in `docs/CI.md`. The local scripts below (the Windows procedure here, and
+"Releasing from Linux") are the dry path: for trying a release and for testing, not what users
+download. The published Windows files are built natively by the workflow.
+
+The Windows procedure with the local script:
 
 1. Set the version in `[workspace.package]` of `Cargo.toml`.
 2. `packaging\windows\build-installer.ps1 -Notes 'One line.'` builds the static executables and
