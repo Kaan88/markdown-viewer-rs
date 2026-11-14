@@ -317,6 +317,11 @@ Agreed after mdview 0.3.0 and mdedit 0.5.0 (Windows and Linux).
 - Export or print (HTML; PDF through printing). First check what exists.
 - Copy as rich text. First check what a copy puts on the clipboard today.
 - A copy button on code blocks.
+- Owner request 2026-11-14: a "Restart" button once an update is installed, both apps, only if it
+  is simple to do (the update bar now says the new version starts next time).
+- Owner request 2026-11-14: the Settings dialog on one page, without tabs. The tabbed layout taken
+  from mdedit does not suit the viewer: its settings almost fit one window and the tabs serve no
+  purpose.
 - Carried over: the speed-versus-size build comparison on Windows (a build compiled for speed
   with unwinding against the current profile), and a hand run of 0.3.0 on a Windows desktop.
 - For consideration, not agreed (owner, 2026-11-14): rounded window corners. Default radius 8
