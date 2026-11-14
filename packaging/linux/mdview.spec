@@ -14,7 +14,7 @@ URL:            https://github.com/Kaan88/markdown-viewer-rs
 ExclusiveArch:  x86_64
 Recommends:     libcurl
 Recommends:     libwayland-client
-Recommends:     xdg-desktop-portal
+Suggests:       xdg-desktop-portal
 
 %description
 mdview is a light, fast native Markdown viewer: tables, math, diagrams, images,
