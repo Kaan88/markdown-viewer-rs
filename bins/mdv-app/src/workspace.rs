@@ -4532,6 +4532,14 @@ mod tests {
         let mut ws = workspace();
         ws.open(&path).unwrap();
         settle(&mut ws);
+        // The height of a line of the code here: the fonts, and so the rows, differ by system.
+        assert!(ws.scroll_to_line(120));
+        settle(&mut ws);
+        let at_120 = ws.scroll();
+        assert!(ws.scroll_to_line(121));
+        settle(&mut ws);
+        let row = ws.scroll() - at_120;
+        assert!(row > 4.0, "{row}");
         assert!(ws.follow(&path, 104));
         settle(&mut ws);
         // Down, a line at a time: the page never goes back, moves by a step or more when
@@ -4555,8 +4563,10 @@ mod tests {
             assert!(shown, "line {line} is not near the top");
         }
         assert!((10..55).contains(&moves), "{moves}");
-        // Up again: the page never goes forward, and the caret's line is never more than
-        // the one row above the edge that the step allows.
+        // Up again: the page never goes forward, and the caret's line is never further above
+        // the edge than the step allows: less than a step above its place under the margin,
+        // which is one row with rows of 20 px, and the top is read 4 px down.
+        let allowed = ((LINE_STEP - JUMP_MARGIN + 4.0) / row).floor() as u32;
         for line in (110..159).rev() {
             let before = ws.scroll();
             ws.follow(&path, line);
@@ -4564,8 +4574,8 @@ mod tests {
             assert!(ws.scroll() <= before, "line {line}");
             let top = ws.top_source_line().unwrap();
             assert!(
-                top <= line + 1,
-                "line {line} left the view: the top is {top}"
+                top <= line + allowed,
+                "line {line} left the view: the top is {top}, a row is {row} px"
             );
         }
         _ = std::fs::remove_dir_all(&dir);

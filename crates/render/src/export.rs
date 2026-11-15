@@ -1047,6 +1047,11 @@ mod tests {
     }
 
     fn export_with(md: &str, base: Option<&Path>, remote: bool) -> String {
+        // A formula or a diagram goes to the engine, which the engine's own tests count on
+        // having to themselves.
+        let _engine = crate::engine::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let doc = parse(md);
         export_html(
             &doc,

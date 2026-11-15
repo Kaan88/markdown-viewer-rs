@@ -276,13 +276,15 @@ fn reset_engine() {
     }
 }
 
+/// Tests that use the engine share a process and a global slot, so they cannot run
+/// concurrently: each holds this while it does.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Instant;
-
-    /// Engine tests share a process and a global slot, so they cannot run concurrently.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn badge() -> &'static [u8] {
         include_bytes!("../../../fixtures/assets/badge.svg")
