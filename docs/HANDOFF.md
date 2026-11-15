@@ -1593,3 +1593,46 @@ desktop, so no feature below has been seen live, and no budget was measured.
 - Cost: nothing unless the pointer is over the page; with it there, two hit tests per page frame
   (signature and draw), also while the wheel scrolls under a resting pointer. Not measured.
 - NOT verified: a real window (the real clipboard write of the click, the 1.5 s timer on screen).
+
+### Footnote and link previews on hover (`f/hover-previews`)
+
+- Trigger: the pointer rests (the tooltips' 500 ms; moving on the mark before the card shows
+  starts the wait again) on a footnote reference, on a link to `#heading` of the open page (a
+  heading only), or on a link to a local Markdown file (with or without `#heading`). Never for
+  http(s)/mailto, wiki-links, missing targets or other file types.
+- Card: a title in semibold ("Footnote N", the heading, or the file's first heading) and up to 6
+  wrapped lines, at most 380 px wide, placed 12/20 px right and below the pointer, above it when
+  there is no room, kept inside the window; the tooltips' frame, shadow and palette. The body is
+  at most 360 characters (`mdview_core::preview`), whitespace made single spaces; rules, formulas,
+  diagrams, code blocks and tables are skipped; a heading ends it. A card goes away when the
+  pointer leaves the mark or link, on any key, press or wheel turn, on history travel, and when
+  the setting is turned off.
+- Files: read when the card is due, on one short-lived `preview` thread per file, at most 128 KiB,
+  parsed with the page's parser; the answer wakes the loop (`Wake::Preview`). 12 answers are kept
+  and used only while the file's modification time is unchanged. Nothing starts at launch.
+- Setting `previews` in the session file (default on); the row "Preview footnotes and links on
+  hover" under Content in Settings (`settings::PREVIEWS`, id 30).
+- Code: `crates/core/src/preview.rs` (card text), `bins/mdv-app/src/preview.rs` (target, cache,
+  thread, layout, drawing), `bins/mdv-app/src/app/cards.rs` (wanting, timing, resolving),
+  `Hover::preview` in the workspace, fixtures `previews.md` and `previews-target.md`.
+- Changed after the merge (the branch was an unbuilt WIP; it compiled and its tests passed):
+  - A linked file with front matter showed the front-matter table as the card's text
+    ("Property Value title ..."). `preview::start` now takes the first heading as the title and
+    what follows it when nothing readable comes before it; tables and code blocks are no card text.
+  - The 360-character cut and the card's last line now end after a whole word.
+  - The settings row lost its help line and got "on hover" in its label: with the help line the
+    one-page form was 2 px taller than its card and showed a scrollbar in the default window.
+  - The app tests found their marks and links at fixed pixel positions of the Windows fonts; they
+    now scan the page for them, so they do not depend on the system's fonts.
+- Decisions: the card is drawn with the UI font, not the page's text styles (the Painter has only
+  the UI faces and the page renderer cannot draw into an overlay without a layout pass); plain
+  text only. It is drawn in mdview, not in the shared crate, because it is multi-line and the
+  editor has no use for it yet.
+- Shots: `preview-footnote-light`, `preview-footnote-dark`, `preview-footnote-long`,
+  `preview-heading-light`, `preview-heading-dark`, `preview-file-light`, `preview-file-dark`,
+  `preview-remote`. Existing shots that changed: the five `dialog-settings-*` (the new row) and
+  `files-pane`, `both-panes` (the two new fixtures are listed in the pane).
+- One run of `tests/shots.sh` stopped after `preview-footnote-light` with no message; it could
+  not be reproduced (6 more full runs and 125 single preview shots were clean and identical).
+- NOT verified: a real window (the 500 ms rest, the thread's wake, the card following real pointer
+  moves), Linux. Cost: `Hover::preview` is one link lookup when the pointer is on a link or mark.

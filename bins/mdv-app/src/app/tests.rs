@@ -1639,9 +1639,7 @@ fn copy_code_block_copies_the_selected_block_or_says_there_is_none() {
 
 // ---- hover cards -----------------------------------------------------------------------------
 
-/// `previews.md` in a 1000x600 window with no panes, so the page sits where the screenshots have
-/// it: the first footnote mark at (411, 191), the link to a heading at (390, 217), the link to a
-/// file at (800, 217) and the web address at (240, 242).
+/// `previews.md` in a 1000x600 window with no panes, as the screenshots have it.
 fn previews_app() -> App {
     let args = Args {
         files: vec![fixture("previews.md")],
@@ -1659,8 +1657,43 @@ fn previews_app() -> App {
     app
 }
 
+/// The first point of the page, row by row, whose hover is what `want` asks for. The tests find
+/// their marks and links this way, so they hold whatever fonts the system lays the page out with.
+fn hover_point(a: &mut App, want: impl Fn(&crate::workspace::Hover) -> bool) -> (f32, f32) {
+    let vr = page::viewport(&a.ws, a.areas.page);
+    let mut y = vr.y + 2.0;
+    while y < vr.bottom() - 2.0 {
+        let mut x = vr.x + 2.0;
+        while x < vr.right() - 2.0 {
+            let (_, px, py) = a.page_point(x, y);
+            if want(&a.ws.hover(px, py)) {
+                // A little inside the mark, not on its first pixel.
+                return (x + 2.0, y + 2.0);
+            }
+            x += 3.0;
+        }
+        y += 3.0;
+    }
+    panic!("nothing on the page matches");
+}
+
+fn footnote_mark(a: &mut App) -> (f32, f32) {
+    use crate::preview::Target;
+    hover_point(a, |h| h.preview == Some(Target::Footnote(0)))
+}
+
+fn heading_link(a: &mut App) -> (f32, f32) {
+    use crate::preview::Target;
+    hover_point(a, |h| matches!(h.preview, Some(Target::Heading(_))))
+}
+
+fn file_link(a: &mut App) -> (f32, f32) {
+    use crate::preview::Target;
+    hover_point(a, |h| matches!(h.preview, Some(Target::File { .. })))
+}
+
 /// Rests the pointer at `(x, y)` past the tooltips' delay.
-fn rest(a: &mut App, x: f32, y: f32) {
+fn rest(a: &mut App, (x, y): (f32, f32)) {
     a.pointer_moved(x, y);
     a.timers(std::time::Instant::now() + std::time::Duration::from_secs(1));
     a.compose();
@@ -1669,19 +1702,22 @@ fn rest(a: &mut App, x: f32, y: f32) {
 #[test]
 fn resting_on_a_footnote_shows_its_text_and_moving_away_hides_it() {
     let mut a = previews_app();
-    a.pointer_moved(411.0, 191.0);
+    let mark = footnote_mark(&mut a);
+    a.pointer_moved(mark.0, mark.1);
     let c = a.ui.card.as_ref().expect("a card waits");
     assert!(!c.shown, "not before the pointer has rested");
-    let due = a.timers(std::time::Instant::now()).expect("a wake for the card");
+    let due = a
+        .timers(std::time::Instant::now())
+        .expect("a wake for the card");
     assert!(due > std::time::Instant::now());
-    rest(&mut a, 411.0, 191.0);
+    rest(&mut a, mark);
     let c = a.ui.card.as_ref().expect("the card");
     assert!(c.shown);
     assert_eq!(c.content.as_ref().unwrap().title, "Footnote 1");
     assert!(c.content.as_ref().unwrap().body.starts_with("A short note"));
     assert!(a.card_layout(1000.0, 600.0).is_some());
     // Small moves on the mark keep it; leaving the mark drops it.
-    a.pointer_moved(412.0, 192.0);
+    a.pointer_moved(mark.0 + 1.0, mark.1 + 1.0);
     assert!(a.ui.card.as_ref().is_some_and(|c| c.shown));
     a.pointer_moved(600.0, 450.0);
     assert!(a.ui.card.is_none());
@@ -1690,7 +1726,8 @@ fn resting_on_a_footnote_shows_its_text_and_moving_away_hides_it() {
 #[test]
 fn a_link_to_a_heading_of_the_page_shows_the_heading_and_its_lines() {
     let mut a = previews_app();
-    rest(&mut a, 390.0, 217.0);
+    let link = heading_link(&mut a);
+    rest(&mut a, link);
     let p = a.ui.card.as_ref().and_then(|c| c.content.clone()).unwrap();
     assert_eq!(p.title, "Notes");
     assert!(p.body.starts_with("The notes are a heading"));
@@ -1699,7 +1736,8 @@ fn a_link_to_a_heading_of_the_page_shows_the_heading_and_its_lines() {
 #[test]
 fn a_local_markdown_link_is_read_on_a_thread_and_then_shown() {
     let mut a = previews_app();
-    a.pointer_moved(800.0, 217.0);
+    let link = file_link(&mut a);
+    a.pointer_moved(link.0, link.1);
     a.timers(std::time::Instant::now() + std::time::Duration::from_secs(1));
     // The answer is being read: the card waits and does not ask again every tick.
     assert!(a.ui.card.as_ref().is_some_and(|c| c.loading && !c.shown));
@@ -1716,16 +1754,20 @@ fn a_local_markdown_link_is_read_on_a_thread_and_then_shown() {
     assert_eq!(c.content.as_ref().unwrap().title, "The linked file");
     // Resting on it again is answered from what was kept, with no thread.
     a.pointer_moved(600.0, 450.0);
-    rest(&mut a, 800.0, 217.0);
+    rest(&mut a, link);
     assert!(a.ui.card.as_ref().is_some_and(|c| c.shown));
 }
 
 #[test]
 fn a_web_address_and_the_page_text_have_no_card() {
     let mut a = previews_app();
-    rest(&mut a, 240.0, 242.0);
+    let web = hover_point(&mut a, |h| h.link.is_some() && h.preview.is_none());
+    rest(&mut a, web);
     assert!(a.ui.card.is_none());
-    rest(&mut a, 300.0, 283.0);
+    let text = hover_point(&mut a, |h| {
+        h.text && h.link.is_none() && h.preview.is_none()
+    });
+    rest(&mut a, text);
     assert!(a.ui.card.is_none());
 }
 
@@ -1733,14 +1775,22 @@ fn a_web_address_and_the_page_text_have_no_card() {
 fn a_key_a_press_and_the_wheel_dismiss_the_card() {
     use winit::dpi::PhysicalPosition;
     let mut a = previews_app();
-    rest(&mut a, 411.0, 191.0);
+    let mark = footnote_mark(&mut a);
+    rest(&mut a, mark);
     assert!(a.ui.card.is_some());
     key(&mut a, KeyName::Char('x'), Some("x"));
     assert!(a.ui.card.is_none());
-    rest(&mut a, 411.0, 191.0);
-    a.wheel(MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, -40.0)));
-    assert!(a.ui.card.is_none());
-    rest(&mut a, 411.0, 191.0);
+    rest(&mut a, mark);
+    a.wheel(MouseScrollDelta::PixelDelta(PhysicalPosition::new(
+        0.0, -40.0,
+    )));
+    // The page moved under the pointer: the card is gone, and whatever is under the pointer now
+    // has at most a card that waits for it to rest again.
+    assert!(!a.ui.card.as_ref().is_some_and(|c| c.shown));
+    a.ws.scroll_to(0.0);
+    a.compose();
+    rest(&mut a, mark);
+    assert!(a.ui.card.as_ref().is_some_and(|c| c.shown));
     a.left_press();
     assert!(a.ui.card.is_none());
 }
@@ -1750,14 +1800,15 @@ fn previews_can_be_turned_off_in_settings() {
     use crate::settings as s;
     use mdshared_ui::settings::Value;
     let mut a = previews_app();
-    rest(&mut a, 411.0, 191.0);
+    let mark = footnote_mark(&mut a);
+    rest(&mut a, mark);
     assert!(a.ui.card.is_some());
     a.apply_setting(s::PREVIEWS, Value::Bool(false));
     assert!(!a.ws.previews());
     assert!(a.ui.card.is_none());
-    rest(&mut a, 411.0, 191.0);
+    rest(&mut a, mark);
     assert!(a.ui.card.is_none(), "no card while they are off");
     a.apply_setting(s::PREVIEWS, Value::Bool(true));
-    rest(&mut a, 411.0, 191.0);
+    rest(&mut a, mark);
     assert!(a.ui.card.is_some());
 }

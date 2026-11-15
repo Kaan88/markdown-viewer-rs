@@ -44,17 +44,25 @@ pub fn heading(doc: &Document, block: u32) -> Option<Preview> {
 }
 
 /// The start of a document: its first heading as the title (empty when it has none) over the
-/// text that opens it. A leading heading is the title; text before the first heading is the body
-/// otherwise.
+/// text that opens it. Prose before the first heading is the body; when there is none (the
+/// heading comes first, or after front matter, which the page shows as a table) the body is what
+/// follows the heading.
 pub fn start(doc: &Document) -> Option<Preview> {
-    let first = doc.blocks.first()?;
+    doc.blocks.first()?;
     let mut body = String::new();
-    if matches!(first.kind, BlockKind::Heading { .. }) {
-        let title = heading_title(doc, 0)?;
-        body_from(doc, 0, first.end, &mut body);
+    body_from(doc, NONE, 0, &mut body);
+    let first = doc.headings.first().filter(|h| {
+        doc.blocks
+            .get(h.block as usize)
+            .is_some_and(|b| b.parent == NONE)
+    });
+    if body.is_empty()
+        && let Some(h) = first
+    {
+        let title = heading_title(doc, h.block)?;
+        body_from(doc, h.block, doc.blocks[h.block as usize].end, &mut body);
         return Some(Preview { title, body });
     }
-    body_from(doc, NONE, 0, &mut body);
     let title = doc
         .headings
         .first()
@@ -100,6 +108,8 @@ fn push_block(doc: &Document, block: u32, out: &mut String) {
     if matches!(
         b.kind,
         BlockKind::ThematicBreak
+            | BlockKind::CodeBlock { .. }
+            | BlockKind::Table
             | BlockKind::Diagram { .. }
             | BlockKind::Math { .. }
             | BlockKind::FootnoteDefinition { .. }
@@ -122,14 +132,21 @@ fn push_block(doc: &Document, block: u32, out: &mut String) {
 }
 
 /// Keeps `s` to `MAX_BODY_CHARS` characters, at a character boundary; a longer text ends in an
-/// ellipsis.
+/// ellipsis, after a whole word when the cut fell inside one that began not far back.
 fn cut(s: &mut String) {
     if let Some((i, _)) = s.char_indices().nth(MAX_BODY_CHARS) {
         let keep = s
             .char_indices()
             .nth(MAX_BODY_CHARS - 1)
             .map_or(i, |(k, _)| k);
+        let inside_a_word = s[keep..].chars().next().is_some_and(|c| !c.is_whitespace());
         s.truncate(keep);
+        if inside_a_word
+            && let Some(space) = s.rfind(char::is_whitespace)
+            && s[space..].chars().count() <= 24
+        {
+            s.truncate(space);
+        }
         let trimmed = s.trim_end().len();
         s.truncate(trimmed);
         s.push('…');
@@ -187,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn code_pictures_and_rules_are_not_prose_but_code_is_text() {
+    fn formulas_diagrams_and_rules_are_not_prose() {
         let doc = parse("# T\n\n---\n\n$$\nx\n$$\n\n```mermaid\ngraph TD\n```\n\nBody.\n");
         assert_eq!(heading(&doc, 0).unwrap().body, "Body.");
     }
@@ -232,5 +249,33 @@ mod tests {
         let h = doc.headings.first().unwrap();
         let p = heading(&doc, h.block).unwrap();
         assert_eq!(p.body, "inside");
+    }
+
+    #[test]
+    fn front_matter_code_and_tables_are_not_card_text() {
+        let doc = crate::parse_bytes(
+            b"---\ntitle: T\ntags: [a, b]\n---\n\n# Head\n\nBody text.\n\n```rust\nfn x() {}\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nAfter.\n",
+        );
+        let p = start(&doc).expect("a preview");
+        assert_eq!(p.title, "Head");
+        assert_eq!(p.body, "Body text.\nAfter.");
+        // A section that holds only a table has a title and no lines.
+        let doc = parse("# One\n\n| a |\n|---|\n| 1 |\n\n## Two\n\nText.\n");
+        let p = heading(&doc, doc.headings[0].block).unwrap();
+        assert_eq!((p.title.as_str(), p.body.as_str()), ("One", ""));
+    }
+
+    #[test]
+    fn the_cut_falls_after_a_whole_word() {
+        let long = "seven77 ".repeat(100);
+        let doc = parse(&format!(
+            "# T
+
+{long}
+"
+        ));
+        let body = heading(&doc, 0).unwrap().body;
+        assert!(body.ends_with("seven77…"), "{body}");
+        assert!(body.chars().count() <= MAX_BODY_CHARS);
     }
 }

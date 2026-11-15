@@ -14,3 +14,5 @@ NEXT
   are unchanged.
 - Code blocks have a copy button: point at one and click to copy its code, or use "Copy code block"
   in the command palette.
+- Resting the pointer on a footnote, or on a link to a heading or to another local Markdown file,
+  shows a small card with its text; a setting turns it off.

@@ -247,6 +247,13 @@ pub fn layout(
     }
     if let Some(last) = lines.last_mut() {
         if more && !last.ends_with('…') {
+            // The ellipsis follows a whole word where one fits.
+            while p.measure(Face::Ui, TEXT, &format!("{last}…")) > inner {
+                let Some(space) = last.rfind(' ') else { break };
+                last.truncate(space);
+            }
+            let kept = last.trim_end_matches([',', ';', ':', ' ']).len();
+            last.truncate(kept);
             last.push('…');
         }
         *last = p.elide(Face::Ui, TEXT, last, inner);

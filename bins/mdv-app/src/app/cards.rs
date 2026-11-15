@@ -58,16 +58,17 @@ impl App {
             return;
         };
         let content = match &c.target {
-            Target::File { path, fragment } => match self.ui.previews.get(path, fragment.as_deref())
-            {
-                Lookup::Ready(p) => p,
-                Lookup::Loading => {
-                    if let Some(c) = self.ui.card.as_mut() {
-                        c.loading = true;
+            Target::File { path, fragment } => {
+                match self.ui.previews.get(path, fragment.as_deref()) {
+                    Lookup::Ready(p) => p,
+                    Lookup::Loading => {
+                        if let Some(c) = self.ui.card.as_mut() {
+                            c.loading = true;
+                        }
+                        return;
                     }
-                    return;
                 }
-            },
+            }
             t => self.ws.preview_text(t),
         };
         match (content, self.ui.card.as_mut()) {

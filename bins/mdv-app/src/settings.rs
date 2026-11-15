@@ -88,8 +88,12 @@ pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
         .help("Otherwise the first tick in a file asks."),
         Row::toggle(ANIMATIONS, "Play animated images", ws.animations())
             .help("Off shows their first frame."),
-        Row::toggle(PREVIEWS, "Preview footnotes and links", ws.previews())
-            .help("A card appears when the pointer rests on one."),
+        // No help line: with one the form is 2 px taller than its card and would scroll.
+        Row::toggle(
+            PREVIEWS,
+            "Preview footnotes and links on hover",
+            ws.previews(),
+        ),
         // The About dialog offers both unconditionally (a copy that cannot update itself says so
         // when asked), so this does too.
         Row::header("Updates"),

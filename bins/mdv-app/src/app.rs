@@ -46,9 +46,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{CursorIcon, ResizeDirection, Theme as WinTheme, Window, WindowId};
 
+mod cards;
 mod commands;
 mod input;
-mod cards;
 mod modal;
 #[cfg(test)]
 mod tests;

@@ -2397,7 +2397,10 @@ impl Workspace {
     }
 
     /// The card's text for a footnote or a heading of the open page; a file's is read apart.
-    pub fn preview_text(&self, target: &crate::preview::Target) -> Option<mdview_core::preview::Preview> {
+    pub fn preview_text(
+        &self,
+        target: &crate::preview::Target,
+    ) -> Option<mdview_core::preview::Preview> {
         use crate::preview::Target;
         let doc = self.active_document()?;
         match target {

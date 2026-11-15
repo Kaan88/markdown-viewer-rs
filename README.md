@@ -39,6 +39,10 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
   right; a click copies the block's code exactly (without the newline that ends its last line) and
   the button shows a check mark for a moment. "Copy code block" in the command palette copies the
   block the selection starts in, else the first code block in view.
+- **Hover previews.** Rest the pointer on a footnote mark and a small card shows the footnote's
+  text; on a link to a heading of the same page, the heading and the first lines under it; on a
+  link to another local Markdown file, its title and first lines. Web addresses keep their hint at
+  the bottom left. Settings > "Preview footnotes and links on hover" turns the cards off.
 - **Command palette (Ctrl+P):** open tabs, recent files, the open folder's Markdown files,
   commands (`>`) and headings (`#`).
 - **Settings (Ctrl+,):** page width, text size, theme, a page font and a code font (any installed
