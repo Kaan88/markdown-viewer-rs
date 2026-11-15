@@ -934,7 +934,14 @@ impl App {
         let Some(w) = self.watcher.as_mut() else {
             return;
         };
-        let dirs = if self.ui.panes.files {
+        // The folders the Files pane lists, while it is open or Find in folder is: a file made
+        // or removed there changes what a search finds.
+        let searching = self
+            .ui
+            .palette
+            .as_ref()
+            .is_some_and(|p| p.is_folder_search());
+        let dirs = if self.ui.panes.files || searching {
             self.ui.tree.watched_dirs()
         } else {
             Vec::new()

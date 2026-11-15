@@ -2782,3 +2782,74 @@ fn a_covered_window_arms_no_animation_timer_and_wakes_when_seen_again() {
     a.occluded = false;
     assert!(a.timers(Instant::now()).is_some());
 }
+
+#[test]
+fn find_in_folder_searches_again_when_files_change_and_keeps_the_selected_row() {
+    let f = Folder::new("changes");
+    let mut a = folder_app(&f);
+    a.command(C::FindInFolder);
+    type_text(&mut a, "needle");
+    settle(&mut a);
+    a.compose();
+    // Select "needle two" of sub/b.md (the second row that can be chosen).
+    key(&mut a, KeyName::Down, None);
+    let p = a.ui.palette.as_ref().unwrap();
+    assert_eq!(p.folder_hit(p.palette.selected_id().unwrap()).unwrap().1, 5);
+    assert_eq!(rows(&a).len(), 5);
+
+    // A watcher wake with nothing changed leaves the list as it was.
+    a.watch_check();
+    refreshed(&mut a);
+    assert_eq!(rows(&a).len(), 5);
+
+    // Two files change: a line added to a.md, a new file (listed before a.md, so ids move). The list is
+    // replaced when the new search is done, and the selection is on the same line of b.md.
+    std::fs::write(
+        f.0.join("a.md"),
+        "# Alpha\n\nneedle top\n\nthe Needle here\n",
+    )
+    .unwrap();
+    std::fs::write(f.0.join("0.md"), "needle zero\n").unwrap();
+    a.watch_check();
+    // Not replaced yet: the old rows stay while the search reads.
+    assert_eq!(rows(&a).len(), 5);
+    assert!(a.ui.palette.as_ref().unwrap().folder_refreshing());
+    refreshed(&mut a);
+    a.compose();
+    let labels: Vec<String> = rows(&a).into_iter().map(|r| r.1).collect();
+    assert_eq!(
+        labels,
+        [
+            "sub/b.md",
+            "needle one",
+            "needle two",
+            "0.md",
+            "needle zero",
+            "a.md",
+            "needle top",
+            "the Needle here"
+        ]
+    );
+    let p = a.ui.palette.as_ref().unwrap();
+    let (path, line, query) = p.folder_hit(p.palette.selected_id().unwrap()).unwrap();
+    assert_eq!((path.ends_with("sub/b.md"), line), (true, 5));
+    assert_eq!(query, "needle");
+
+    // Without a query, or with the card closed, a wake searches nothing.
+    key(&mut a, KeyName::Escape, None);
+    a.watch_check();
+    assert!(a.ui.palette.is_none());
+}
+
+/// Waits for a search started by changed files to end, taking what it finds as the window does.
+fn refreshed(a: &mut App) {
+    let p = a.ui.palette.as_mut().expect("Find in folder is open");
+    for _ in 0..4000 {
+        p.poll_folder();
+        if !p.folder_refreshing() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("the search did not end");
+}

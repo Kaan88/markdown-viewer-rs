@@ -136,6 +136,24 @@ impl PaletteState {
         }
     }
 
+    /// Files changed: Find in folder searches again for its query, and its list is replaced
+    /// when that is done ([`poll_folder`](Self::poll_folder)). False when this is no such card or
+    /// its box is empty.
+    pub fn refresh_folder(&mut self) -> bool {
+        self.folder.as_mut().is_some_and(FolderSearch::refresh)
+    }
+
+    /// Whether a search started by a change of files is still reading.
+    #[cfg(test)]
+    pub fn folder_refreshing(&self) -> bool {
+        self.folder.as_ref().is_some_and(FolderSearch::refreshing)
+    }
+
+    /// Whether this card is Find in folder, which wants to hear about files changing.
+    pub fn is_folder_search(&self) -> bool {
+        self.folder.is_some()
+    }
+
     /// Whether Find in folder is still reading files.
     pub fn folder_running(&self) -> bool {
         self.folder.as_ref().is_some_and(FolderSearch::running)

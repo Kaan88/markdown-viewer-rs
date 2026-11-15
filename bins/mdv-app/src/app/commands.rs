@@ -1052,7 +1052,7 @@ impl App {
     }
 
     /// Looks at the open files and the Files pane's folders once the burst of changes is over.
-    fn watch_check(&mut self) {
+    pub(super) fn watch_check(&mut self) {
         if let Some(w) = &self.watcher {
             w.woken();
         }
@@ -1061,6 +1061,11 @@ impl App {
         let changed = self.ui.tree.refresh();
         if changed {
             self.wants_frame = true;
+        }
+        // Find in folder, open: the results are looked for again (off this thread, as the
+        // search always is); the list on screen is replaced when that is done.
+        if self.ui.palette.as_mut().is_some_and(|p| p.refresh_folder()) {
+            self.modal_changed();
         }
         if self.trace {
             let rows = self.ui.tree.rows().len();

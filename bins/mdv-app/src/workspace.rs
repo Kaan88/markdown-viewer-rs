@@ -3194,10 +3194,22 @@ impl Workspace {
         let pick = self.active_document().and_then(|doc| {
             let block = doc.block_at_line(line)?;
             let text = doc.blocks[block as usize].text;
-            self.find
-                .hits
-                .iter()
-                .position(|&(start, _)| start >= text.start && start < text.end)
+            let in_block = |&(start, _): &(u32, u32)| start >= text.start && start < text.end;
+            // A paragraph, list item or code block of many source lines is one block: the match
+            // wanted is the first one written on this line, between where its text begins in the
+            // block and where the next line's does. Failing that (the line matched in markup,
+            // not in what the page shows) the block's first match, as before.
+            let from = doc.text_at_line(line, 0).unwrap_or(text.start);
+            let to = if doc.block_at_line(line + 1) == Some(block) {
+                doc.text_at_line(line + 1, 0).filter(|&t| t > from)
+            } else {
+                None
+            }
+            .unwrap_or(text.end);
+            let hits = &self.find.hits;
+            hits.iter()
+                .position(|&(start, _)| start >= from && start < to)
+                .or_else(|| hits.iter().position(in_block))
         });
         match pick {
             Some(i) => {
@@ -4852,6 +4864,35 @@ mod tests {
         // query stays on, the page goes to the line.
         ws.find_set_at_line("apple", 1);
         assert_eq!(ws.find_counts().total, 4);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_at_a_line_of_a_long_block_goes_to_the_match_written_on_that_line() {
+        let dir = temp_dir("find-line-long");
+        // One paragraph of six source lines with the word on lines 3, 5 and 6 (twice on 6), a
+        // code block of three lines after it with the word on lines 10 and 11.
+        let text = "# T\n\nplain start\nmore plain\nthe needle here\nand again\nneedle needle\n\n\
+                    ```\ncode\nneedle in code\nneedle again\n```\n";
+        let path = write(&dir, "doc.md", text);
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        let total = |ws: &Workspace| ws.find_counts().total;
+        // Line 5 (first match of the paragraph), line 7 (second and third are on it): the
+        // first match written there, not the paragraph's first.
+        ws.find_set_at_line("needle", 5);
+        assert_eq!((ws.find_counts().current, total(&ws)), (1, 5));
+        ws.find_set_at_line("needle", 7);
+        assert_eq!(ws.find_counts().current, 2);
+        // A line of the paragraph without a match: the block's first.
+        ws.find_set_at_line("needle", 6);
+        assert_eq!(ws.find_counts().current, 1);
+        // Code lines are exact.
+        ws.find_set_at_line("needle", 11);
+        assert_eq!(ws.find_counts().current, 4);
+        ws.find_set_at_line("needle", 12);
+        assert_eq!(ws.find_counts().current, 5);
         _ = std::fs::remove_dir_all(&dir);
     }
 
