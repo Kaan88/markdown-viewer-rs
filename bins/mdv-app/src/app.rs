@@ -1429,6 +1429,9 @@ impl ApplicationHandler<Wake> for App {
             }
             WindowEvent::Occluded(occluded) => {
                 self.occluded = occluded;
+                // Seen again: whatever changed while covered is drawn, and the animations start
+                // again (`about_to_wait` follows this event and arms their timer).
+                self.wants_frame |= !occluded;
             }
             WindowEvent::Focused(focused) => {
                 self.update_shadow(Some(focused));
@@ -1546,7 +1549,9 @@ impl ApplicationHandler<Wake> for App {
             }
             return;
         }
-        if self.wants_frame {
+        // A window that is fully covered is not drawn: the frame waits until it is seen again.
+        // (The first frame is drawn whatever is reported: it is what shows the window.)
+        if self.wants_frame && (!self.occluded || self.first) {
             self.wants_frame = false;
             if let Some(w) = &self.window {
                 self.requested = true;

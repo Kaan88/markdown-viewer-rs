@@ -1233,13 +1233,16 @@ impl App {
     }
 
     /// Whether the window is on screen: created, shown, not minimised and not fully covered.
+    /// Covered is what winit reports with `WindowEvent::Occluded` (X11 and macOS; Windows and
+    /// Wayland never send it, so a window covered there is not known to be). Without a window (the
+    /// tests') there is nothing to ask, and nothing hides it.
     pub(super) fn shows_page(&self) -> bool {
         !self.first
             && !self.occluded
             && self
                 .window
                 .as_ref()
-                .is_some_and(|w| w.is_minimized() != Some(true) && w.is_visible() != Some(false))
+                .is_none_or(|w| w.is_minimized() != Some(true) && w.is_visible() != Some(false))
     }
 
     pub(super) fn window_focused(&self) -> bool {

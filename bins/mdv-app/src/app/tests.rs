@@ -2753,3 +2753,32 @@ fn the_keyboard_walks_on_from_the_headings_into_the_backlinks_and_enter_opens_on
         "the keyboard went back to the page"
     );
 }
+
+#[test]
+fn a_covered_window_arms_no_animation_timer_and_wakes_when_seen_again() {
+    let mut a = app(&["formats.md"]);
+    a.first = false; // the first frame is drawn by the event loop, which a test has not got
+    a.ws.set_animation_wake(|| {});
+    let mut now = Instant::now();
+    // Images arrive from helper threads: compose until the animated one is on the page.
+    let mut armed = None;
+    for _ in 0..200 {
+        a.compose();
+        armed = a.timers(now);
+        if armed.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        now = Instant::now();
+    }
+    assert!(a.shows_page(), "no window, nothing hides it");
+    assert!(armed.is_some(), "an animated GIF in view asks for a wake");
+
+    // Covered: the same page, nothing asked for. Idle is idle.
+    a.occluded = true;
+    assert!(!a.shows_page());
+    assert_eq!(a.timers(Instant::now()), None, "no timer while covered");
+    // Seen again: the timer is armed again.
+    a.occluded = false;
+    assert!(a.timers(Instant::now()).is_some());
+}
