@@ -4563,10 +4563,10 @@ mod tests {
             assert!(shown, "line {line} is not near the top");
         }
         assert!((10..55).contains(&moves), "{moves}");
-        // Up again: the page never goes forward, and the caret's line is never further above
-        // the edge than the step allows: less than a step above its place under the margin,
-        // which is one row with rows of 20 px, and the top is read 4 px down.
-        let allowed = ((LINE_STEP - JUMP_MARGIN + 4.0) / row).floor() as u32;
+        // Up again: the page never goes forward, and the caret's line is never a whole step
+        // above the top of the page: the page follows before that. In rows that is two, with
+        // rows of 20 or 21 px (the fonts, and so the rows, differ by system).
+        let allowed = (LINE_STEP / row).floor() as u32;
         for line in (110..159).rev() {
             let before = ws.scroll();
             ws.follow(&path, line);

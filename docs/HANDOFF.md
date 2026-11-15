@@ -72,6 +72,11 @@ back, as was done here).
 - A real update followed by a click on Restart (it needs a newer build on an https host; the
   editor's handoff says how to stage one).
 - Linux: nothing of this batch was built or run there, except by CI.
+- Known gap of the finer follow: when the editor's caret walks up line by line, the page follows in
+  steps of 48 px, so the caret's line can be up to two rows above the top of the page before the
+  page moves (CI on Linux, rows of 21 px, showed two; the test allows what the step allows).
+  Making the upward follow keep the line in view is a change of `Workspace::jump`'s `min_move`
+  rule that was not made.
 - Startup time and memory of the whole branch were not measured again (finer sync and the
   backdrop were measured on their own; see their sections).
 - Then: merge `merge/next-release` into `main` in the shared repository, the viewer and the editor,
