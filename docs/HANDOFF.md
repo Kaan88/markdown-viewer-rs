@@ -60,8 +60,10 @@ back, as was done here).
   one-line paragraph), the backdrop (Mica light and dark, Acrylic dark; captures in
   `docs/images/frosted-window/`), a start with `--restarted` waiting for the first window to go,
   the close request above.
-- CI was started for the head of each `merge/next-release` branch; read its result with
-  `gh run list --workflow ci.yml --branch merge/next-release --limit 1` (do not poll).
+- CI (`ci.yml`, Linux and Windows: fmt, clippy, tests, shots) passed on `merge/next-release` in
+  all three repositories: viewer run 43689394395 at `e9fb5a1` (two earlier runs failed on Linux:
+  a new test assumed Windows' row height, and the new export tests raced the engine's tests for
+  the one engine process; both fixed), editor run 43686313531, shared run 43686315745.
 
 ### Not verified, and what the owner has to do
 
