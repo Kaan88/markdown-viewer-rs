@@ -2706,6 +2706,42 @@ fn the_outline_pane_is_walked_with_the_keyboard_only_once_focused() {
 }
 
 #[test]
+fn the_outline_ring_is_drawn_again_at_once_on_every_key() {
+    let mut a = app(&["everything.md"]);
+    a.command(CommandId::FocusOutline);
+    a.compose();
+    let outline = crate::app::Region::Outline.index();
+    // Each key that moves the row changes what the pane looks like, so the pane's cached
+    // bitmap must be dropped and drawn again: its signature has to change with the focus.
+    let mut seen = a.sigs[outline];
+    for name in [
+        KeyName::Down,
+        KeyName::Down,
+        KeyName::Up,
+        KeyName::End,
+        KeyName::Home,
+        KeyName::PageDown,
+    ] {
+        let before = a.ui.outline_focus;
+        key(&mut a, name.clone(), None);
+        assert_ne!(a.ui.outline_focus, before, "{name:?} moved the row");
+        assert_ne!(a.sigs[outline], seen, "{name:?} repaints the outline pane");
+        seen = a.sigs[outline];
+    }
+    // Escape takes the ring away at once.
+    key(&mut a, KeyName::Escape, None);
+    assert_eq!(a.ui.outline_focus, None);
+    assert_ne!(a.sigs[outline], seen, "Escape repaints the outline pane");
+    // So does a click on the page.
+    a.command(CommandId::FocusOutline);
+    a.compose();
+    seen = a.sigs[outline];
+    a.ui.outline_focus = None;
+    a.compose();
+    assert_ne!(a.sigs[outline], seen, "losing the focus repaints the pane");
+}
+
+#[test]
 fn the_outline_focus_follows_clicks_and_other_panes() {
     let mut a = app(&["everything.md"]);
     click(&mut a, Hit::OutlineRow(2));
@@ -3331,4 +3367,73 @@ fn underlines_follow_how_the_menu_was_opened_and_alt_shows_them() {
     assert!(!a.ui.popup.as_ref().unwrap().access);
     a.ui.popup.as_mut().unwrap().show_access();
     assert!(a.ui.popup.as_ref().unwrap().access);
+}
+
+/// In a restored window the vertical scrollbars at the right edge (the page with the Outline pane
+/// closed, the Outline pane's list) can be grabbed: the resize band over their track is only the
+/// outermost pixels, which the thumb does not cover, and the rest of the right edge, the corners
+/// and the other edges still resize.
+#[test]
+fn the_scrollbar_at_the_right_edge_is_not_covered_by_the_resize_band() {
+    use winit::window::ResizeDirection as D;
+    let mut a = app(&["everything.md"]);
+    let (w, h) = a.logical();
+    // The Outline pane at the window's edge.
+    let track = rect(&a, Hit::ScrollBar(Scroller::Pane(Side::Outline)));
+    assert!((track.right() - w).abs() < 0.5, "the bar is at the edge");
+    let y = track.cy();
+    for dx in [4.0, 6.0, 7.5, 11.0] {
+        assert_eq!(a.resize_band(w - dx, y), None, "outline, {dx} px in");
+        assert_eq!(
+            a.hit_at(w - dx, y),
+            Some(Hit::ScrollBar(Scroller::Pane(Side::Outline)))
+        );
+    }
+    assert_eq!(a.resize_band(w - 1.0, y), Some(D::East));
+    assert_eq!(a.resize_band(w - 6.0, h - 4.0), Some(D::SouthEast));
+    assert_eq!(a.resize_band(w - 6.0, 2.0), Some(D::NorthEast));
+    assert_eq!(a.resize_band(2.0, y), Some(D::West));
+    assert_eq!(a.resize_band(w / 2.0, h - 2.0), Some(D::South));
+    assert_eq!(a.resize_band(w / 2.0, 2.0), Some(D::North));
+    // The page with the Outline pane closed.
+    click(&mut a, Hit::Bar(BarItem::Outline));
+    let track = rect(&a, Hit::ScrollBar(Scroller::Page));
+    assert!((track.right() - w).abs() < 0.5, "the bar is at the edge");
+    let y = track.cy();
+    for dx in [4.0, 6.0, 7.5, 11.0] {
+        assert_eq!(a.resize_band(w - dx, y), None, "page, {dx} px in");
+        assert_eq!(a.hit_at(w - dx, y), Some(Hit::ScrollBar(Scroller::Page)));
+    }
+    assert_eq!(a.resize_band(w - 1.0, y), Some(D::East));
+    // With no scrollbar beside the point the old band stands.
+    assert_eq!(a.resize_band(w - 6.0, 24.0), Some(D::East));
+}
+
+/// Text sent as `KEYEVENTF_UNICODE` arrives as `Key::Unidentified` with the characters only in the
+/// event's text: it still gets a key, so it reaches the find box and the palette.
+#[test]
+fn text_without_a_key_name_still_gets_a_key_so_that_it_is_typed() {
+    use super::input::event_key;
+    use winit::keyboard::{Key as WKey, NativeKey};
+    let none = Mods::default();
+    let packet = WKey::Unidentified(NativeKey::Unidentified);
+    assert_eq!(
+        event_key(&packet, &packet, Some("\u{e9}"), none),
+        Some(KeyName::Char('\u{e9}'))
+    );
+    assert_eq!(
+        event_key(&packet, &packet, Some("\u{11f}\u{11f}"), none),
+        Some(KeyName::Char('\u{11f}'))
+    );
+    assert_eq!(event_key(&packet, &packet, Some("\r"), none), None);
+    assert_eq!(event_key(&packet, &packet, None, none), None);
+    let ctrl = Mods { ctrl: true, ..none };
+    assert_eq!(event_key(&packet, &packet, Some("\u{e9}"), ctrl), None);
+
+    // And the text lands in the find box and the palette.
+    let mut a = app(&["linked.md"]);
+    a.command(CommandId::Find);
+    a.compose();
+    key(&mut a, KeyName::Char('\u{e9}'), Some("\u{e9}"));
+    assert_eq!(a.ui.find.text(), "\u{e9}");
 }

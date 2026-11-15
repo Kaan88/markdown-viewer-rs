@@ -57,6 +57,9 @@ mod slides;
 #[cfg(test)]
 mod tests;
 
+/// Over a vertical scrollbar at the window's right edge the east resize band is only this wide
+/// (px), so the thumb, which starts 3 px in, can be grabbed.
+const SCROLLBAR_EDGE: f32 = 3.0;
 const TIP_DELAY: Duration = Duration::from_millis(500);
 const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
@@ -556,6 +559,7 @@ impl App {
                     backlinks,
                     self.ws.current_heading(),
                     ui.panes.outline_scroll.to_bits(),
+                    ui.outline_focus,
                     drag,
                 ))
             }
@@ -1242,8 +1246,29 @@ impl App {
         if self.maximized || self.window.is_none() {
             return None;
         }
+        self.resize_band(x, y)
+    }
+
+    /// The resize direction at the point for a restored window, without asking the window.
+    ///
+    /// The band is 8 px wide, and a vertical scrollbar at the window's right edge (the page with
+    /// the Outline pane closed, or the Outline pane's list) has its thumb 3 to 11 px from that
+    /// edge: the east band over such a track shrinks to the outermost [`SCROLLBAR_EDGE`] px, which
+    /// the thumb never covers, so the bar can be grabbed and the edge still resizes. The corners
+    /// keep their full band.
+    fn resize_band(&self, x: f32, y: f32) -> Option<ResizeDirection> {
         let (w, h) = self.logical();
-        mdshared_ui::window::edge_at(x, y, w, h)
+        let dir = mdshared_ui::window::edge_at(x, y, w, h);
+        if dir == Some(ResizeDirection::East)
+            && x < w - SCROLLBAR_EDGE
+            && matches!(
+                self.hit_at(x, y),
+                Some(Hit::ScrollBar(Scroller::Page | Scroller::Pane(_)))
+            )
+        {
+            return None;
+        }
+        dir
     }
 
     /// The page viewport (logical) and a logical point in it as device px.
