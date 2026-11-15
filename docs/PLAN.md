@@ -334,6 +334,82 @@ Agreed after mdview 0.3.0 and mdedit 0.5.0 (Windows and Linux).
   leaves the window opaque and square: with rounding wanted, `Auto` takes the margin there too
   (the shared repository's docs/LINUX.md, "Rounded window corners").
 
+### After 0.4.0 and 0.6.0 (written 2026-11-15; item 1 asked for by the owner, the rest proposed, nothing built)
+
+mdview 0.4.0 and mdedit 0.6.0 are released and every item of "Next release" above is in them.
+This is what is left, in the proposed order. Rules as always: code both apps could use goes into
+`markdown-shared-rs` first; each item keeps the budgets; the owner approves the interface by
+looking at it.
+
+**1. Windows return to where they were when a side-by-side preview ends (both apps; owner
+request 2026-11-15).** Today "Preview side by side" puts mdedit on the left half of its screen
+(`tile_left` in mdedit's `app/handoff.rs`) and sends mdview the right half (`--place`, or a
+`place` request to a running copy; `App::place` in `app/commands.rs`). Nothing puts either
+window back.
+
+- Each app remembers its window's place (position, size, maximised or not) at the moment it is
+  tiled for a preview, and only then. A second tiling while one is remembered keeps the first.
+- The preview has ended when: mdedit turns the preview off or closes the previewed document;
+  mdedit exits or is found gone (`Wake::Sister(false)`, `live_end_all`); the viewer's live tab
+  or the viewer itself is closed (mdedit learns that from the link). Each app then goes back to
+  its remembered place, on its own: neither waits for the other.
+- A window the user has moved or resized since it was tiled is theirs: it stays, and the
+  remembered place is dropped. A remembered place no screen shows any more is dropped too (the
+  rule the start-up restore already has).
+- An app that exits while still tiled saves the remembered place as its window size for the next
+  start, not the half-screen one. To check first: what `save_size` writes today after a tiling.
+- Where the desktop does not let a window be placed (Wayland), nothing was tiled, so nothing is
+  restored.
+- Shared first: the remembered place and the "has the user moved it" test go beside
+  `mdshared_ui::place`; the two apps only call it.
+- Gate: unit tests for the remember, drop and restore rules; on the Windows PC by script, both
+  windows back at their pixels after each of the endings above; then the owner's look.
+- Open questions for the owner: should the windows also go back when only the *side-by-side*
+  arrangement is given up but the preview goes on (there is no command for that today)? Should
+  a viewer that the preview started be closed when the preview ends, or only moved back (the
+  plan here: only moved back)?
+
+**2. Copy as Markdown (mdview).** Left out of 0.4.0 because a selection could not be mapped back
+to the file. Since finer sync the viewer has a map from the file's lines to places on the page.
+Plan: "Copy as Markdown" copies the source lines of the blocks the selection touches (whole
+blocks, from the file's bytes, not from the parsed text), in the page's menu and the palette.
+First step is a check that the line map covers every block kind (front matter, math, tables,
+`<details>`); if it does not, report and stop.
+
+**3. Small gaps of the viewer**, each on its own, smallest first:
+
+- Outline rows (and backlink rows) get keyboard navigation.
+- Following mdedit's caret upward: the caret's line can be up to two rows above the top of the
+  page before the page follows (the test bound was loosened for 0.4.0; fix the rule, tighten the
+  test).
+- Markup inside a wiki-link label (`[[Note|a *b* c]]`); `![[embed]]`.
+- A table beside a floated image when it fits; `<br clear>`.
+
+**4. Frosted window on Linux (both apps).** Only the Windows 11 backdrop was built. KDE Wayland
+has a blur-behind protocol and the window already has an ARGB surface on the client-margin
+route; GNOME offers nothing, so flat colour stays there. A spike first (does the blur show behind
+the chrome only, what does it cost when idle), then the setting's Linux value. Needs the Linux
+machine; nothing of it can be judged on the Windows PC.
+
+**5. Checks and measurements that are owed**, no new code:
+
+- The owner's look at 0.4.0 and 0.6.0, and the list of what nobody has seen in a real window
+  (`docs/HANDOFF.md`, "Not verified").
+- A real update followed by Restart (first possible at the release after 0.4.0 and 0.6.0).
+- Startup time and memory of 0.4.0 and 0.6.0 against the budget tables.
+- The speed-versus-size build comparison on Windows (carried over since 0.3.0 and 0.5.0).
+- Linux by hand: the AppImages of this release.
+- An audit of the 2026-11-11 roadmap above (stages B and C): the rows carry no status. Go
+  through each against the code and mark it done or open; what is open joins this list.
+
+**6. Housekeeping:** delete the merged feature branches and the editor's `spike/frosted-window`
+(on the owner's word), remove the build folders under `Desktop\md-wt`.
+
+**Not planned** (set aside by the owner earlier; listed so they are not mistaken for forgotten):
+crash reporting, accessibility, non-Latin input methods, testing on other machines; in mdedit
+plugins, the FTP and project panels, printing.
+
+
 ### Scope to port
 
 The full inventory is in the research output and gets copied to `docs/PORT_CHECKLIST.md` in Phase 1 as the parity checklist:
