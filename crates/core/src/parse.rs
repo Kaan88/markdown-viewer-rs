@@ -496,6 +496,11 @@ struct Builder<'a> {
     wiki: &'a mut dyn FnMut(&str) -> WikiAs,
     /// A wiki-link changed the heading's text, so its anchor comes from the text shown.
     heading_wiki: bool,
+    /// The span of a wiki-link whose label holds markup (`[[Note|a *b* c]]`) while its closing
+    /// `]]` is still to come, or `NONE`.
+    wiki_open: u32,
+    /// Set by `find_wiki` when the run ends inside such a label.
+    wiki_pending: Option<WikiOpen>,
     link_depth: u32,
     strong_depth: u32,
     in_code_block: bool,
@@ -590,6 +595,8 @@ impl<'a> Builder<'a> {
             link_hits: Vec::new(),
             wiki,
             heading_wiki: false,
+            wiki_open: NONE,
+            wiki_pending: None,
             link_depth: 0,
             strong_depth: 0,
             in_code_block: false,
@@ -1311,6 +1318,9 @@ impl<'a> Builder<'a> {
         let span = &mut self.doc.spans[s as usize];
         span.end = end;
         self.cur_span = span.parent;
+        if self.wiki_open == s {
+            self.wiki_open = NONE;
+        }
         match span.kind {
             SpanKind::Link(_) => self.link_depth -= 1,
             SpanKind::Strong => self.strong_depth -= 1,
@@ -1948,6 +1958,11 @@ impl<'a> Builder<'a> {
         };
         let mut escapes = std::mem::take(&mut self.escapes);
         let mut named = std::mem::take(&mut self.entities);
+        let start = if self.wiki_open != NONE {
+            self.close_wiki_label(start, &mut escapes, &mut named)
+        } else {
+            start
+        };
         let wiki = if self.link_depth == 0 {
             self.find_wiki(start, &escapes)
         } else {
@@ -1998,6 +2013,9 @@ impl<'a> Builder<'a> {
             }
             self.link_hits = hits;
         }
+        if let Some(open) = self.wiki_pending.take() {
+            self.open_wiki_label(open);
+        }
         escapes.clear();
         self.escapes = escapes;
         named.clear();
@@ -2041,6 +2059,11 @@ impl<'a> Builder<'a> {
                 .position(|c| matches!(c, b'[' | b']' | b'\n'))
                 .map(|at| at + inner);
             let Some(close) = close else {
+                let bare =
+                    !(escaped(open) || escaped(open + 1) || (open > 0 && b[open - 1] == b'!'));
+                if bare && self.wiki_open == NONE {
+                    self.wiki_pending = self.wiki_label_start(open);
+                }
                 break;
             };
             let closed = b[close] == b']' && b.get(close + 1) == Some(&b']');
@@ -2088,6 +2111,121 @@ impl<'a> Builder<'a> {
             });
         }
         out
+    }
+
+    /// The run ends inside `[[Note|label` and the label goes on after markup: the source after the
+    /// run reaches a `]]` on the same line, through nothing that could end the label early (a
+    /// bracket, a backslash, a tag, a line end, a code span). What the link would be, to open
+    /// when the run is finished; `None` leaves the text as it is.
+    fn wiki_label_start(&mut self, open: usize) -> Option<WikiOpen> {
+        let inner = open + 2;
+        let head = &self.doc.text[inner..];
+        let pipe = head.find('|')?;
+        let target = mdshared_app::wikilink::parse_target(head)?;
+        if target.note.contains("://") {
+            return None;
+        }
+        let label_head = &head[pipe + 1..];
+        let floor = self.text_floor;
+        let before = self.src.get(..floor)?;
+        // The source must really end where this run does (an HTML text has no such place).
+        if !before.ends_with(if label_head.is_empty() { "|" } else { label_head }) {
+            return None;
+        }
+        if !wiki_label_closes(&self.src.as_bytes()[floor..]) {
+            return None;
+        }
+        let dest = match target.heading {
+            Some(heading) => format!("{}#{heading}", target.note),
+            None => target.note.to_string(),
+        };
+        let note = target.note.to_string();
+        let missing = match (self.wiki)(&note) {
+            WikiAs::Link => false,
+            WikiAs::Missing => true,
+            WikiAs::Text => {
+                let note = self.pool(&note);
+                self.doc.wiki_text.push(note);
+                return None;
+            }
+        };
+        Some(WikiOpen {
+            tail: self.doc.text.len() - open,
+            prefix: 2 + pipe + 1,
+            dest,
+            missing,
+        })
+    }
+
+    /// Takes `[[Note|` off the end of the finished run and opens the link there; the label's
+    /// markup that follows becomes its children and `close_wiki_label` ends it at the `]]`.
+    fn open_wiki_label(&mut self, w: WikiOpen) {
+        let at = self.doc.text.len() - w.tail;
+        if self.doc.spans.last().is_some_and(|s| s.start as usize > at) {
+            // A bare address in the label's start made a span after the opening: leave the text.
+            return;
+        }
+        self.cut_text(at, w.prefix);
+        let dest = self.pool(&w.dest);
+        let idx = self.doc.links.len() as u32;
+        self.doc.links.push(LinkInfo {
+            wiki: true,
+            missing: w.missing,
+            ..LinkInfo::new(dest, StrRef::default())
+        });
+        let span = self.push_span(SpanKind::Link(idx), Origin::Auto);
+        self.doc.spans[span as usize].start = at as u32;
+        self.wiki_open = span;
+        self.heading_wiki |= self.in_heading;
+    }
+
+    /// With a markup label open and a run that holds its `]]`: takes the brackets out, ends the
+    /// link there and returns where the rest of the run begins. Any other run, or one whose
+    /// brackets are inside nested markup, leaves everything as it is.
+    fn close_wiki_label(
+        &mut self,
+        start: usize,
+        escapes: &mut [(usize, usize)],
+        named: &mut [(usize, usize)],
+    ) -> usize {
+        let idx = self.wiki_open;
+        if self.stack.last().map(|o| o.node) != Some(Node::Span(idx)) {
+            return start;
+        }
+        let b = self.doc.text.as_bytes();
+        let Some(at) = b[start..]
+            .iter()
+            .position(|c| matches!(c, b'[' | b']'))
+            .map(|at| at + start)
+        else {
+            return start;
+        };
+        let walled = escapes.iter().any(|&(a, e)| a < at + 2 && at < e);
+        if walled || b[at] != b']' || b.get(at + 1) != Some(&b']') {
+            return start;
+        }
+        self.cut_text(at, 2);
+        for (a, e) in escapes.iter_mut().chain(named.iter_mut()) {
+            if *a >= at + 2 {
+                *a -= 2;
+                *e -= 2;
+            }
+        }
+        let open = self.pop_open().expect("the link is on the stack");
+        self.close(open);
+        self.doc.spans[idx as usize].end = at as u32;
+        at
+    }
+
+    /// Removes `n` bytes of text at `at` and moves the marks after them back.
+    fn cut_text(&mut self, at: usize, n: usize) {
+        self.doc.text.replace_range(at..at + n, "");
+        for m in self.doc.marks.iter_mut().rev() {
+            if (m.text as usize) <= at {
+                break;
+            }
+            m.text = (m.text as usize - n).max(at) as u32;
+        }
     }
 
     /// Writes the run from `start` again with each wiki-link replaced by the text it shows, and
@@ -2886,6 +3024,42 @@ struct WikiHit {
     shown: String,
     dest: String,
     missing: bool,
+}
+
+/// A wiki-link label that goes on after the end of a text run, to open when the run is done: how
+/// far its `[[` is from the end of the text, how long `[[Note|` is, where it points.
+struct WikiOpen {
+    tail: usize,
+    prefix: usize,
+    dest: String,
+    missing: bool,
+}
+
+/// Whether `rest`, the source after the start of a wiki-link label, reaches `]]` on its line with
+/// nothing in between that could end or change the label: a bracket, a backslash, a tag, an
+/// unfinished code span. A `]]` inside a code span does not count.
+fn wiki_label_closes(rest: &[u8]) -> bool {
+    let mut i = 0;
+    let mut code: Option<usize> = None;
+    while i < rest.len() {
+        match rest[i] {
+            b'`' => {
+                let n = rest[i..].iter().take_while(|&&c| c == b'`').count();
+                code = match code {
+                    None => Some(n),
+                    Some(k) if k == n => None,
+                    k => k,
+                };
+                i += n;
+                continue;
+            }
+            b'\\' | b'<' | b'\n' | b'[' => return false,
+            b']' if code.is_none() => return rest.get(i + 1) == Some(&b']'),
+            _ => {}
+        }
+        i += 1;
+    }
+    false
 }
 
 fn is_blank_quote_line(line: &str) -> bool {

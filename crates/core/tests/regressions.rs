@@ -3166,11 +3166,70 @@ fn wiki_links_parse_in_every_form() {
     );
     assert!(d.links.iter().all(|l| l.wiki && !l.missing));
     assert!(d.wiki_text.is_empty());
-    // An empty label falls back to the note's name. A label with markup in it is not one text
-    // run, so that link stays as written.
-    let d = parse_notes("[[Other|]] [[Note|some *bold* words]]", WikiAs::Link);
-    assert_eq!(d.text.trim_end(), "Other [[Note|some bold words]]");
+    // An empty label falls back to the note's name.
+    let d = parse_notes("[[Other|]]", WikiAs::Link);
     assert_eq!(wiki_links(&d), [pair("Other", "Other")]);
+}
+
+/// The kinds of the spans in a document with the text each covers, in order.
+fn span_kinds(d: &Document) -> Vec<(String, String)> {
+    d.spans
+        .iter()
+        .map(|s| (format!("{:?}", s.kind), span_text(d, s)))
+        .collect()
+}
+
+#[test]
+fn a_wiki_label_may_hold_inline_markup() {
+    let d = parse_notes("x [[Note|a *b* c]] y", WikiAs::Link);
+    assert_eq!(d.text.trim_end(), "x a b c y");
+    assert_eq!(wiki_links(&d), [pair("a b c", "Note")]);
+    let kinds = span_kinds(&d);
+    assert_eq!(kinds.len(), 2, "{kinds:?}");
+    assert_eq!(kinds[1], ("Emphasis".to_string(), "b".to_string()));
+    // The emphasis is the link's child, and the link ends before ` y`.
+    assert_eq!(d.spans[1].parent, 0);
+    assert!(d.links[0].wiki && !d.links[0].missing);
+
+    // Strong, code, a heading, a missing note, the markup first or last, two in a line.
+    let d = parse_notes("[[N#H|**x** and `y`]] then [[M|*z*]] [[K|q *r*]]", WikiAs::Missing);
+    assert_eq!(d.text.trim_end(), "x and y then z q r");
+    assert_eq!(
+        wiki_links(&d),
+        [pair("x and y", "N#H"), pair("z", "M"), pair("q r", "K")]
+    );
+    assert!(d.links.iter().all(|l| l.missing));
+
+    // The text that stays text is the same as for a label with no markup.
+    let d = parse_notes("[[Gone|a *b*]]", WikiAs::Text);
+    assert_eq!(d.text.trim_end(), "[[Gone|a b]]");
+    assert!(d.links.is_empty());
+    let d = parse("[[Note|a *b* c]]");
+    assert!(d.links.is_empty());
+
+    // A heading's anchor comes from the label shown.
+    let d = parse_notes("# [[Note|The *big* one]]", WikiAs::Link);
+    assert_eq!(d.text.trim_end(), "The big one");
+}
+
+#[test]
+fn a_wiki_label_with_markup_that_never_closes_stays_text() {
+    for src in [
+        "[[Note|a *b* c",
+        "[[Note|a *b* [c]]",
+        r"[[Note|a *b*\]]",
+        "[[Note|a `b]]` c",
+        "[[Note|a *b* <i>c</i>]]",
+        "![[Note|a *b* c]]",
+    ] {
+        let d = parse_notes(src, WikiAs::Link);
+        assert_eq!(d.links.iter().filter(|l| l.wiki).count(), 0, "{src:?}");
+    }
+    // Markup that crosses the brackets still leaves a sound document: the link ends where the
+    // outer markup does.
+    let d = parse_notes("*x [[Note|a *b* c]] d*", WikiAs::Link);
+    assert_eq!(wiki_links(&d), [pair("a b c", "Note")]);
+    assert_eq!(d.text.trim_end(), "x a b c d");
 }
 
 #[test]
