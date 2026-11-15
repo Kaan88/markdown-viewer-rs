@@ -9,3 +9,6 @@ NEXT
 - Back and Forward are in the command palette and the Keyboard shortcuts list (Alt+Left,
   Alt+Right).
 - A burst of file changes in the open folder (a git checkout) refreshes the Files pane once.
+- Copying text from a page also puts it on the clipboard as HTML, so pasting into Word,
+  LibreOffice or a mail keeps headings, emphasis, links, lists, tables and code. Plain-text pastes
+  are unchanged.

@@ -31,6 +31,10 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
 - **Back and Forward.** Following a link to another file or to an anchor, a footnote, an outline
   or palette heading, or a backlink remembers where you were; Alt+Left / Alt+Right (or the mouse's
   Back / Forward buttons, or the command palette) return there at the exact scroll position.
+- **Copy keeps the formatting.** Copying a selection (Ctrl+C or Copy in the context menu) puts
+  plain text and HTML on the clipboard together, so a paste into a word processor or a mail keeps
+  headings, emphasis, links, lists, tables and code, and a paste into a text field gets the plain
+  text as before.
 - **Command palette (Ctrl+P):** open tabs, recent files, the open folder's Markdown files,
   commands (`>`) and headings (`#`).
 - **Settings (Ctrl+,):** page width, text size, theme, a page font and a code font (any installed

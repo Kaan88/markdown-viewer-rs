@@ -1528,3 +1528,37 @@ desktop, so no feature below has been seen live, and no budget was measured.
   pane's empty space or its header.
 - No new shot: the visible states are the existing outline shots. Cost: one comparison per frame.
 - NOT verified: a real window.
+
+### Copy as rich text (`f/copy-rich-text`; shared `f/copy-rich-text`)
+
+- Before: a copy put only the selected slice of `Document::text` on the clipboard. That text is
+  unchanged. Now `Workspace::selected_html` builds an HTML fragment for the same range with
+  `mdview_core::rich::selection_html`, from the parsed model (never from the source), and
+  `platform::set_clipboard_html(html, text)` (mdshared-ui) writes both; if that fails the copy
+  falls back to the text alone. Windows: `CF_UNICODETEXT` plus the registered "HTML Format"
+  (`mdshared_ui::cf_html`: UTF-8, ten-digit byte offsets, StartFragment/EndFragment comments).
+  Linux: `text/html` with `text/plain` as its alternative through arboard.
+- The HTML is clipped to the selection: a partly selected paragraph gives that part, a partly
+  selected span is cut at the range, a container (list, quote, table, row) is written only when
+  something in it is selected; in a table row with any selected cell all cells are written (the
+  others empty) so columns keep their place. Mapping: `p`, `h1..h6`, `blockquote` (an alert with
+  its label in bold), `ul`/`ol` (`start` kept), task boxes as ballot-box characters, code, diagram
+  and formula blocks as `pre code` with their source, `hr`, tables with borders, `colspan`,
+  `rowspan` and `text-align`, details as a div with the summary in bold, footnote marks as `sup`,
+  definition lists, figures; inline `em`, `strong`, `del`, `u`, `code`, `kbd`, `sub`, `sup`,
+  `mark`, `small`, `q`, `ruby`/`rt`, `br`. No external resources: an image is its alt text. A link
+  is kept only when it is http, https or mailto. Everything is escaped; raw HTML of the source
+  never reaches the output.
+- The shared CI failure of `f/copy-rich-text`: `mdshared-ui --lib` failed on Windows because two
+  tests (`clipboard_round_trip`, `html_copy_leaves_the_text_readable`) wrote and read the one
+  system clipboard at the same time. Fixed on shared `merge/viewer-next`: both take one lock, and
+  the HTML test now also reads the "HTML Format" back and checks the fragment by the header's
+  offsets (so the CF_HTML write has really run on Windows, on this PC).
+- Decisions: no new menu entry or setting (the existing Copy does it); the body of a closed
+  `<details>` is included when the selection spans it, as in the plain text. "Copy as Markdown"
+  is left out: the model keeps no source positions and the parsed text is not the file's bytes
+  (front matter and math are rewritten first), so a selection cannot be mapped back reliably.
+- No new shot (no new visible state; the status line is the existing "Copied").
+- NOT verified: a real paste into Word, LibreOffice, a mail program or a browser on any system;
+  `text/html` on X11 and Wayland (never run). The app-level `copy()` is not covered by a test,
+  because it would write the owner's clipboard; `selected_html` and the writer are.
