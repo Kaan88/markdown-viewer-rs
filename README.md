@@ -22,7 +22,8 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
 - **Images:** PNG, JPEG, GIF, WebP and SVG. Remote images stay off until you allow them, per
   document or always.
 - **Updates:** an installed mdview (on Linux, the AppImage) looks for a newer version at every
-  launch and asks before it downloads anything. Settings and About turn the look off.
+  launch and asks before it downloads anything; once an update is installed, the bar has a
+  Restart button that starts the new version. Settings and About turn the look off.
 - **Reading:** tabs, a Files pane, an Outline pane, find, zoom, light and dark themes, a focus
   mode, three page widths, back and forward, session restore, and reload when the file changes on
   disk, keeping your place.
@@ -67,9 +68,15 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
 - **Window:** rounded corners (Settings > Window corners: Square, Small or Round; Round, 8 px at
   100 %, is the default). Windows 11 draws them itself; on Wayland the window draws its own shape
   and shadow; where the window is opaque (X11, KDE with a square setting) it stays square.
+- **Window backdrop** (Windows 11, off by default): Settings > Window backdrop lets the system's
+  Mica or Acrylic material show through the title row and tab strip, the bar and the Files and
+  Outline panes. The page, menus and dialogs stay solid.
 - **With mdedit:** Edit in mdedit (Ctrl+E) opens the file in the editor at the line you are
   reading, and when mdedit previews a file here it shows the editor's unsaved text as you type
-  (live preview, up to 2 MiB) and returns to the saved file when the editor closes.
+  (live preview, up to 2 MiB), also for a document that was never saved, and returns to the
+  saved file when the editor closes. The preview follows the editor's caret line by line, inside
+  a long paragraph, list item, code block or table too, and along a paragraph written as one
+  long line.
 - **Task boxes can be ticked.** A click flips `[ ]` and `[x]` in the file, after asking once.
   Nothing else in a document is ever written.
 

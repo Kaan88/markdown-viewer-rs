@@ -11,91 +11,86 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## START HERE: work in progress after mdview 0.3.1 (written 2026-11-14)
+## START HERE: the next release is built on `merge/next-release` (written 2026-11-15)
 
-The released state is `main` (mdview 0.3.1). A large batch of next-release work was started with many
-agents in parallel and then **paused by the owner** (the PC could not carry the load and the token
-cost was too high). Everything is pushed; nothing below is merged into `main`, nothing is released.
-The owner continues from a fresh clone on Windows. Read this section, then
-`docs/next-release/SPECS.md` (the rules every feature follows and one spec per feature).
+The released state is `main` (mdview 0.3.1). **Every feature of the next-release batch is finished
+and merged on the branch `merge/next-release`**, in this repository, in the editor's
+(`Kaan88/markdown-editor-rs`) and in the shared crates (`Kaan88/markdown-shared-rs`). Nothing is
+merged into `main`, no version was bumped, nothing is tagged or published: those three steps are
+the owner's, after looking at the interface.
 
-### How to continue
+### What is on `merge/next-release` (viewer)
 
-- One agent at a time, two at most. The owner asked for fewer agents that keep their context and
-  take the next task, not a fresh agent per task, and no separate reviewer agents: the main session
-  reviews every diff and every screenshot critically before a merge ("app is really good, let's
-  not ruin it").
-- Local builds are allowed again (the earlier "do not build locally" was lifted on 2026-11-14).
-  Keep one shared `CARGO_TARGET_DIR` per repository if several worktrees are used: twenty worktrees
-  with their own `target` filled the disk.
-- CI: push the branch and run `gh workflow run ci.yml --ref <branch>`. Do not poll in a loop and do
-  not use `gh run watch` from many agents: the account's GitHub API quota was exhausted once.
-- Each feature branch carries `docs/next/<key>.md` (README text, DESIGN text, release note,
-  handoff notes) instead of edits to the real docs, so branches merge without doc conflicts. The
-  merge folds that file into README, DESIGN, PLAN, HANDOFF and `docs/release-notes/NEXT.md` and
-  deletes it. Branches whose state is WIP may not have it yet.
-- Merge order into `next`: shared branches into the shared repo's `next` first, then the app
-  branch; set every `mdshared-*` pin to the shared `next` head; keep third-party crates in
-  `Cargo.lock` as on `main`. Central tables (menus, commands, keys, strings, settings rows,
-  `tests/shots.sh`) conflict textually: take the union. Check shortcut clashes after each merge.
-- Reserved shortcuts: word completion Ctrl+Space; column selection Alt+Shift+arrows and Alt+drag;
-  find in folder (viewer) Ctrl+Shift+F; presentation (viewer) F5; history (viewer) Alt+Left/Right.
-- Before any release: the owner looks at the interface; a real update followed by a real Restart is
-  tried by hand on Windows and from an AppImage; budgets in `docs/PLAN.md` are measured (nothing in
-  this batch was measured).
+On top of 0.3.1, each as one merge commit followed by its finishing commits (the sections under
+"Next release work" at the end of this file say what was built, the decisions taken without the
+owner and what was not verified, per feature):
 
-### State of every branch
+Settings on one page; rounded window corners; Back and Forward as commands; watch the open
+folder; the outline follows the page; copy as rich text; copy button on code blocks; footnote and
+link previews on hover; find in folder; export as HTML and print; presentation mode; live preview
+of a document mdedit has not saved; finer scroll sync with mdedit; window backdrop (Mica,
+Acrylic); Restart after an update. And one fix: a close request that comes from the system alone
+(the taskbar's "Close window") now ends the app at once (`App::finish`, called from the
+`CloseRequested` handler; the loop reads an exit asked for in `about_to_wait` only after the next
+event). Tried in a real window: gone 6 ms after a posted `WM_CLOSE`; before, never until the
+pointer moved.
 
-"CI green" means the `ci` workflow passed on Linux and Windows for that exact head. "WIP" means the
-last commit is an interrupted agent's uncommitted work, committed as it was: it may not compile.
-No branch below was reviewed by the main session unless it says so.
+### Pins
 
-| Branch | Feature | Head | State |
-|---|---|---|---|
-| `next` | rounded corners (direct on `next`) | `dec22c5` | CI green; not reviewed; see shared `next` |
-| `feat/restart-after-update` | Restart button after an update | `534abad` | CI green; reviewed; pins shared `30aaa8b`; not merged |
-| `feat/settings-one-page` | Settings dialog on one page, no tabs | `e2d14fd` | CI green; reviewed on screenshots; pins shared `ba9d342`; not merged |
-| `f/history` | back and forward history | `b922dab` | CI green; not reviewed |
-| `f/watch-folder` | watch the open folder | `6926a7d` | CI green; not reviewed |
-| `f/toc-follow` | contents follows the scroll position | `a3d0cce` | last CI run **failed** on an older commit (`94935d6`); head not run |
-| `f/copy-rich-text` | copy as rich text | `acdc51c` | no CI on the app branch; its shared branch failed CI |
-| `f/code-copy-button` | copy button on code blocks | `7301e5f` | **WIP**, no CI |
-| `f/export-print` | export to HTML and print | `a9aa075` | **WIP**, no CI |
-| `f/folder-search` | find in folder | `2e46e15` | **WIP**, no CI |
-| `f/hover-previews` | footnote and link previews on hover | `5a7d9be` | **WIP**, no CI |
-| `f/presentation` | presentation mode | `0eef125` | **WIP**, no CI |
-| `f/live-preview-unsaved` | live preview of a never-saved file (both apps) | `774cea3` | **not started** |
-| `f/finer-sync` | finer scroll sync inside long blocks (both apps) | `774cea3` | **not started** |
+All three `mdshared-*` pins (in `bins/mdv-app`, `crates/core`, `crates/render`) name the head of
+the shared branch `merge/next-release` (`11563a3`), which is shared `merge/viewer-next` and
+`merge/editor-next` merged, plus one change (a single-page settings form may be 720 px tall, so
+the viewer's form with the corners and backdrop rows needs no scrolling in the default window).
+mdedit's `merge/next-release` pins the same commit. The shared `main` is still `ce1345d`; a push
+to it is the owner's. Third-party crates in `Cargo.lock` are as on `main` (a lock refresh moves
+`windows-sys` under `arboard` and `os_pipe` and `base64` under `serde-saphyr`: put those lines
+back, as was done here).
 
-"CI green" on a feature branch may be from an earlier interrupted agent's state of the feature:
-read the diff against the spec before trusting that the feature is complete.
+### What ran on the Windows PC at the head of the branch (2026-11-15)
 
-### The shared repository (Kaan88/markdown-shared-rs)
+- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --release --workspace`: 546 passed, 0 failed, 6 ignored. (An existing test,
+  `engine::tests::two_jobs_share_one_engine`, failed once in an earlier run and passed in every
+  rerun; the cause was not found.)
+- `tests/shots.sh`: 108 pictures rendered from the release build. Looked at by the session: the
+  Settings form (both new rows, no scrolling at 1280x800), find in folder, a slide, a footnote
+  card, the code copy button, the main menu. The workers looked at every new picture of their
+  features.
+- Real windows, by script only: the finer follow against mdedit (code block, long paragraph,
+  one-line paragraph), the backdrop (Mica light and dark, Acrylic dark; captures in
+  `docs/images/frosted-window/`), a start with `--restarted` waiting for the first window to go,
+  the close request above.
+- CI was started for the head of each `merge/next-release` branch; read its result with
+  `gh run list --workflow ci.yml --branch merge/next-release --limit 1` (do not poll).
 
-`main` is `ce1345d` (what mdview 0.3.1 pins). Branches that hold work for the above:
+### Not verified, and what the owner has to do
 
-| Branch | Head | For | State |
-|---|---|---|---|
-| `next` | `e3d381b` | rounded corners (Corners setting, corner mask, client-route corner cut, DWM preference) | CI **failed** at this head; not looked into |
-| `feat/restart-after-update` | `30aaa8b` | Restart button (`relaunch.rs`, `single::wait_gone`, update bar button) | CI green; reviewed |
-| `feat/settings-single-page` | `ba9d342` | `Form::single_page()` for the viewer's Settings | CI green; reviewed |
-| `f/folder-search` | `bfd0aca` | viewer find-in-folder searcher/results | no CI seen; WIP on the viewer side |
-| `f/copy-rich-text` | `8298204` | HTML writer / clipboard formats | CI **failed** |
-| `f/export-print` | `fc1c559` | export helper | no CI seen |
+- **The owner has not looked at any of it.** The interface is approved by eye only. In a real
+  window nobody has seen: presentation mode going full screen, the hover cards with a real
+  pointer, find in folder on a large folder, the Save dialog of Export and the browser opening for
+  Print, a paste of copied text into a word processor, menus and dialogs over a frosted chrome.
+- A real update followed by a click on Restart (it needs a newer build on an https host; the
+  editor's handoff says how to stage one).
+- Linux: nothing of this batch was built or run there, except by CI.
+- Startup time and memory of the whole branch were not measured again (finer sync and the
+  backdrop were measured on their own; see their sections).
+- Then: merge `merge/next-release` into `main` in the shared repository, the viewer and the editor,
+  choose the version numbers, tag (`release.yml` builds the files from a tag `v<version>`).
 
-### Notes from the session
+### Decisions taken without the owner in this session (the features' own are in their sections)
 
-- 0.5.1 / 0.3.1 fixed submenus closing before the pointer reached them (see the release section
-  below). The owner has not yet confirmed it by hand.
-- Restart button: built and reviewed, CI green, but **no real restart was ever performed**. When
-  merging, reword the installed-bar text when Restart is shown (it still says the new version
-  starts the next time the app is opened, next to a button that restarts now).
-- Viewer Settings on one page: reviewed on screenshots. Its `Cargo.lock` also moved `windows-sys`
-  and `base64`; do not carry that. The Linux-only "make default" row was in no screenshot.
-- Rounded corners: owner said "do rounded corners". Work is on `next` in both apps and shared; the
-  apps' `next` CI is green but shared `next` CI failed, and nobody reviewed the result.
-- The Linux worktrees (`~/src/md/wt/*`, `~/src/md/*-next`) and build caches are local to the Linux
-  machine and are not needed: every branch is on GitHub.
+- Find in folder has no key: Ctrl+Shift+F is Focus mode's. Present is Shift+F5: F5 stays Reload.
+- Export and Print are in a tab's menu and the palette, not in the main menu (it would no longer
+  fit an 800 px window).
+- "Copy as Markdown" was left out of copy as rich text.
+- In Settings the rows under Theme are Window corners, then Window backdrop.
+- The Restart button was merged without a real restart ever having been performed.
+
+### Branches
+
+Every feature branch (`f/*`, `feat/*`, `next`) is merged and can be deleted once `main` has the
+work. Local worktrees and build folders of the sessions are under `Desktop\md-wt` on the Windows
+PC (about 30 GB of `target-*` folders); they can be removed.
 
 ## 1. Where the project is
 
@@ -1764,3 +1759,295 @@ desktop, so no feature below has been seen live, and no budget was measured.
   tall slide; remote pictures on a slide; Linux.
 - Left out: speaker notes, transitions, a slide overview, clicking links on a slide (a click
   always goes on), text selection on a slide.
+
+### A document mdedit has not saved (`f/live-preview-unsaved`; shared `f/live-preview-unsaved`)
+
+Merged into `merge/next-release` on 2026-11-15 from the branch `f/frosted-window`, which held all four.
+
+**DESIGN.**
+
+**A document that has no file.** mdedit can hand over a document it has not saved (`?doc`,
+`?title`, `?open` and the text; the shared `docs/SISTER.md` has the wire format).
+
+- It is shown in a tab named as the editor's tab ("Untitled 1"), with the dot of a live tab. The
+  tab's tooltip and the palette say "not saved yet: shown as mdedit has it" in place of a path.
+- Inside, the tab is keyed by a path that cannot exist on disk (under a folder whose name starts
+  with a NUL character, then the document's name and title). Nothing is read from or written to
+  that path, and it is never watched.
+- Relative images and links have nothing to resolve against: an image is drawn as a missing
+  image, and following a relative link says "not a file: <destination>". Absolute paths, web
+  links and anchors inside the document work as usual.
+- Later texts for the same name replace the text in place and keep the place read; the line the
+  editor sends is followed as for a file. A text without `?open` for a name that has no tab does
+  nothing.
+- When the editor says the document was saved (`?doc` with a path), the tab becomes that file's
+  tab: same position in the row, the file is read from disk, the live state carries on if the
+  editor keeps sending. If the file is already open in another tab, the untitled tab is closed
+  and that tab is shown: never two tabs for one file.
+- When the preview ends (`live_off`), or the editor is found gone, the tab stays and keeps the
+  last text, without the dot; if it is the tab in front when the editor goes, the toast is
+  "mdedit closed: this document was not saved". There is no file to fall back to.
+- Not for such a tab: Reload (says "This document has no file yet: it is shown as mdedit has
+  it."), Copy file path and Show in file manager (disabled in the tab menu), the session and the
+  recent list (the tab is left out, so it is not restored), the file watcher, a new window's
+  start folder.
+- Edit in mdedit asks the running editor for the document by its name, at the line being read;
+  with no editor running it says "mdedit is not running" (nothing can be started for a document
+  that has no file).
+
+**Handoff.**
+
+Built:
+
+- `bins/mdv-app/src/workspace.rs`: `Tab.untitled`, `untitled_path`, `is_untitled_path`,
+  `Workspace::document_text`, `document_off`, `document_saved`; the exclusions listed above.
+- `bins/mdv-app/src/app/commands.rs`: `handed_over` routes requests that carry a document; the
+  tab commands for such a tab.
+- `crates/core/src/commands.rs`: the strings `LIVE_EDITOR_GONE_UNSAVED`, `UNTITLED`,
+  `UNTITLED_HINT`, `UNTITLED_NO_FILE`, `EDITOR_NOT_RUNNING`.
+- Argument for shots: `--demo-untitled <file>` shows the text of a file as such a tab.
+- Shots: `untitled-live`, `untitled-live-dark`, `untitled-tab-menu`, `untitled-tip`.
+
+Decisions taken, for the owner to confirm:
+
+- The tab stays with its last text when the preview ends or the editor is gone, instead of
+  closing.
+- The tab is not kept in the session or the recent list.
+- Relative links say "not a file: ..." instead of trying a folder (the editor's working folder
+  would be a guess).
+- `--demo-untitled` was added as a launch argument.
+
+Tried in real windows on Windows 11 together with the editor: see the editor's file of the same
+name. Also seen there: with the editor gone the tab kept its text and the toast appeared.
+
+Budgets, measured on this PC on release builds of the base (`e909adc`) and of this branch, ten
+launches each in turn (`MDVIEW_TRACE=1`, `--scroll-steps`): first frame of `fixtures/showcase.md`
+75 to 82 ms before and 76 to 82 ms after; scroll frame median 0.56 to 0.57 ms before and 0.57
+to 0.61 ms after. Nothing runs for the feature until the editor hands such a document over.
+Not measured: memory.
+
+Not verified: Linux in real windows; "Edit in mdedit" from such a tab in real windows (app-level
+tests only); an older mdedit needs nothing new (it never sends a document).
+
+### Finer scroll sync (`f/finer-sync`; shared `f/finer-sync`)
+
+Merged into `merge/next-release` on 2026-11-15 from the branch `f/frosted-window`, which held all four.
+
+**DESIGN.**
+
+**A line of the file is a place inside its block.** Until now a source line was shown by the
+block it is in: the block's first row went below the top edge, so a caret walking through a
+300-line code block or a long paragraph did not move the page. Now:
+
+- A line of a code block (fenced or indented) is shown exactly: that row of the code.
+- A line of a paragraph or list item written over several lines is shown where its text begins
+  on the page. The page joins and wraps those lines anew, so that is somewhere in a row.
+- A table is shown by its row, a list by its item, as before.
+- With a column (the byte in the line, from 1, which mdedit sends since this release) the place
+  is that far along the line's text: a paragraph written as one long line, which wraps to many
+  rows on the page, is shown at the row the caret is in. Markup that shows nothing (`**`, a
+  link's address) is counted with the text before the next mark, so inside such a line the place
+  can be some words off (not measured how far at worst; marks are 64 bytes apart).
+- A place before the line's first text (an indent, a list marker, a fence) is that first text; a
+  line with no text of its own (a blank line inside a block quote, an image alone on its line)
+  is the nearest line before it; a block with no text at all (a rule) is the block.
+
+**How.** While parsing, the builder notes where lines of the file are in the document's text
+(`Document::marks`, `LineMark { line, col, text }`): one mark for each line a run of text or code
+begins on, and one more every 64 bytes along a line. `Document::text_at_line(line, col)` finds the
+place by a binary search in the marks of the block `block_at_line` gives; the workspace hands it
+to the renderer as `Jump::Text(offset)`, which already existed (find-in-page uses it) and reads
+the row from the lines the layout has. No layout pass is added: the jump measures the same one
+block a jump to its start measured.
+
+**The other way.** `Document::line_at_text(offset)` gives the line and byte of a place in the
+text. "Edit in mdedit" sends the line of the file that is in the first row of the page, and the
+column when that row begins past the line's first text (a row inside a line that wraps), so the
+editor's caret lands in the row that was at the top, not at the paragraph's start.
+
+**A follow moves by a step.** As before, a live update that would move the page by less than one
+arrow-key step (48 logical px) leaves it where it is, in both directions. With places inside
+blocks that is what keeps the page still while the caret moves within the top rows: walking down
+a code block the page moves every second or third line, by that many rows. Typing at the end of
+a document adds rows below; the page moves down when a step's worth has been added and never
+back (tested: 400 letters typed at the end, with line breaks, never move the page up).
+
+**Older builds.** No new key and no new answer. `?col=` was always carried and skipped by a
+viewer that had no use for it, so an mdedit that sends it to an older mdview gets the old
+behaviour (the block's start), and an older mdedit that sends no column to this mdview gets the
+line's beginning.
+
+**Handoff.**
+
+Built:
+
+- `crates/core/src/model.rs`: `Document::marks`, `LineMark`, `text_at_line`, `line_at_text`.
+- `crates/core/src/parse.rs`: `Builder::mark`, `Builder::code_text`, `MARK_GAP`.
+- `bins/mdv-app/src/workspace.rs`: `SourcePlace` (line and column), `scroll_to_line` /
+  `follow_line` / `follow` / `live_text` / `document_text` take it; `top_source_place`,
+  `source_place`.
+- `bins/mdv-app/src/app/commands.rs`: requests give their column, "Edit in mdedit" sends one.
+- Tests: five in `crates/core/tests/core_tests.rs` (the mapping: paragraph, list, code, table,
+  one long line, every fixture), four in `workspace.rs` (a line inside a long block, a place
+  along a wrapped line, a caret walking down and up, typing at the end), one in `app/tests.rs`
+  (a hand-over with a column). `parse_cost` (ignored) prints what a parse costs.
+
+Started by an earlier session (the marks, the two `Document` functions, the plumbing); this
+session renamed the type (it clashed with the history's `Place`), rewrote `text_at_line` as a
+binary search, and took out one thing the earlier session had begun: a smaller step upwards
+(24 px) than downwards. It made an existing test fail
+(`live_text_replaces_the_page_keeps_the_place_and_ends_on_live_off`: a live text whose caret is
+on the line at the top edge moved the page), so the step is the old one in both directions.
+
+Decisions taken, for the owner to confirm:
+
+- Marks are made at every parse, for every document, used or not: 12 bytes for each line of the
+  file that has text, and a parse about 3% longer (below). Making them only when the editor asks
+  would need a second parse.
+- A column is a byte in the line, as the editor's `--goto line:column` already was.
+- The follow step stays 48 px both ways. One consequence: while the caret walks up, its row can
+  be the one just above the top edge for one line before the page follows.
+- No shot: nothing new is visible in a still picture.
+
+Budgets, measured on this PC (Windows 11, release builds):
+
+- Parse, `parse_cost` on 8 MB of `fixtures/showcase.md` repeated: 73.0 / 74.4 ms (min / median of
+  9) before, 75.5 / 78.4 ms after; a second pair of runs 73.4 / 75.8 and 76.1 / 77.1. 8 MB of
+  one-line paragraphs: 36.8 / 37.3 ms before, 37.6 / 38.2 ms after.
+- First frame and scrolling, the release before (`f/live-preview-unsaved`) and after, three runs
+  each of `MDVIEW_TRACE=1 mdview --no-session --scroll-steps 120`: `fixtures/showcase.md` first
+  frame after 73.4 / 74.3 / 75.3 ms before, 73.7 / 73.8 / 80.1 ms after; a scroll frame's own
+  work, median 0.57 ms before and 0.56 to 0.57 ms after (p90 0.83 to 0.88 and 0.84 to 0.89).
+  The 610-line test document: first frame 53.2 to 55.3 ms before, 53.6 to 55.6 ms after; scroll
+  median 0.56 to 0.57 ms before, 0.56 to 0.61 ms after. No difference beyond the runs' own spread.
+
+Tried in real windows on Windows 11: a script started mdedit on a 610-line test
+document with `--run PreviewSideBySide`, which started this mdview beside it (both with scratch
+settings), posted arrow, Home and End keys to the editor's window and saved each window's own
+picture after each. Seen: the caret on line 150, 190 and 230 of a 300-line code block has that
+line of code in the second row of the page each time (before, the page stayed at the block's
+start); the caret at byte 9000 of a 27000-byte one-line paragraph has the row with that word
+second from the top, End shows the paragraph's end, Home its first row; 100 lines up into a
+300-line paragraph the page shows the row that line's text begins in. Not tried in a real window:
+"Edit in mdedit" from a row inside a wrapped line (tested headless), typing with live text on a
+long line, and anything by hand.
+
+Not verified: Linux in real windows (the tests run there on CI; the unix-only test
+`edit_in_mdedit_starts_the_editor_at_the_top_line` was changed to expect a column when the top
+row is inside a wrapped line, and was not run here); a person's judgement of how the following
+feels; right-to-left text; a document over the live-text cap (the line still maps through the
+file on disk).
+
+### Window backdrop (`f/frosted-window`; shared `f/frosted-window`)
+
+Merged into `merge/next-release` on 2026-11-15 from the branch `f/frosted-window`, which held all four.
+
+**DESIGN.**
+
+**The setting.** `backdrop=mica|acrylic` in the session file (`Session::backdrop`, default off;
+the line is written only when it is not off, so a session that never chose it is the file it
+was). The row "Window backdrop" is under Theme in Settings, with the same title, choices and help
+line as mdedit's (`mdshared_app::backdrop::Backdrop::{TITLE, LABELS, HELP}`), and exists only in
+a Windows build. `--backdrop off|mica|acrylic` sets it for a run (for a capture; with
+`--no-session` nothing is saved).
+
+**What is frosted.** The regions Title (title row and tab strip), Bar, Files and Outline. The
+page with its banners and the update bar, menus, the palette, tooltips and dialog cards stay
+opaque; a dialog's dimming and a menu's shadow darken the frosted chrome as they darken the flat
+one.
+
+**When, and how.** As in mdedit, by the same code: `mdshared_ui::frost::Frost` decides (the
+setting, Windows 11 22H2 or later, transparency effects on, no high contrast, no battery saver,
+the calls accepted, the window has the keyboard) and asks the system through
+`frost::WindowSystem`; a frosted region's pixels are marked after it is drawn (`frost::mark`) and
+keyed out in the copy that goes to the window (`frost::key_out` in `App::present`, shifted by the
+client margin). With the setting off the cost is one comparison a frame and no system call.
+
+**Where the code is.** `bins/mdv-app/src/frost.rs` (which regions), `App::sync_frost`, the mark
+in the region loop of `compose`, the key-out in `present`, `App::focused` (set by
+`WindowEvent::Focused`), `Workspace::backdrop` / `set_backdrop`, the row in `settings.rs`.
+
+**Handoff.**
+
+**Built.** As above, plus tests: `session::the_window_backdrop_is_off_unless_chosen_and_then_kept`,
+`frost::tests::the_page_stays_opaque`, and five in `app/frost_tests.rs` on composed frames (the
+chrome marked and the page not, at scale 1 and 1.5, and still so after a scroll; a menu over the
+chrome opaque and its shadow not; the Settings dialog dims without making opaque, and leaves
+nothing behind when closed; unfocused or off: every pixel opaque; the row sits under Theme on
+Windows and is absent elsewhere). Shot `dialog-settings-backdrop` (the row set to Mica; a shot
+has no window, so its chrome is flat).
+
+**Setting off is unchanged.** `tests/shots.sh` against the set of `f/finer-sync`: 67 of 74
+byte-identical. The seven that differ: the five Settings shots (`dialog-settings-light`, `-dark`,
+`-scale-150`, `-760`, `-640`: one more row), `update-installed` (the Restart button's branch:
+the button and the new sentence) and `dialog-recent` (it prints the folder the checkout is in).
+New: `dialog-settings-backdrop`, `update-installed-plain`.
+
+**Seen in a real window** (Windows 11 build 26300, release build, `--no-session` and a scratch
+settings file, started and closed by a script; the window was put above the others for a moment
+and the screen where it is was saved): Mica in the dark and the light theme and Acrylic in the
+dark theme, each with both panes open. The title row, the bar and both panes show the material,
+the page is solid, the text of the chrome is sharp. With the window not in front the chrome was
+the flat colours, the same pixels as with the setting off. `docs/images/frosted-window/` has
+`dark-mica-active.png`, `light-mica-active.png` and `dark-off-active.png` (the Acrylic capture
+shows what was behind the window on this desktop and was not kept).
+
+**Numbers** (release builds, this PC, three runs each of `--scroll-steps 120` on
+`fixtures/showcase.md` with both panes open; "before" is `f/finer-sync`):
+
+| | before | off | Mica | Acrylic |
+|---|---|---|---|---|
+| first frame, ms | 83.2 to 92.6 | 80.8 to 89.8 | 81.9 to 95.6 | 84.2 to 89.8 |
+| scroll frame, own work, ms (median / p90) | 0.53-0.54 / 0.77-0.81 | 0.51-0.54 / 0.77-0.87 | 0.67-0.69 / 0.89-1.05 | 0.66-0.67 / 0.92-0.96 |
+
+Off is the same as before within the runs' spread. On: about 0.14 ms more on a scroll frame, and
+only with the Outline pane open (without it, or with only the Files pane, the figure is the one
+with the setting off: 0.56 to 0.58 ms against 0.57 to 0.59). The Outline pane is repainted while
+the page scrolls (the heading in view is marked in it), and a repainted frosted region is marked
+and keyed out again. Memory was not measured.
+
+**Decisions taken, for the owner to confirm.**
+
+1. Both side panes are frosted, as mdedit's one is.
+2. The row is in the Page group under Theme (mdview's Settings has no View group).
+3. `--backdrop` was added as a launch argument, for captures.
+4. The order on this branch is Restart first, then the backdrop: the shared head this branch
+   pins has the Restart button's bar, so the viewer needs that branch's code to build.
+
+**Not run.** Everything in mdedit's list (transparency effects off, battery saver, high
+contrast, Windows 10, Windows 11 before 22H2, maximized, snapped, a second monitor, scales other
+than 1 in a real window, remote desktop); changing the setting in the dialog by hand; a menu, a
+dialog, the palette or a tooltip over the frosted chrome in a real window (a menu and a dialog
+are tested headless, the palette and tooltips are not); Linux
+(the row is absent and the calls return false; not built there in this session). Nobody has
+looked at it by eye.
+
+### Restart after an update (`feat/restart-after-update`; shared `feat/restart-after-update`)
+
+Merged into `merge/next-release` on 2026-11-15 from the branch `f/frosted-window`, which held all four.
+
+**DESIGN.**
+
+Beside the Restart button the bar now reads "mdview X is installed. Restart to use it." (shared
+`Updates::bar_label_with`). Where there is no file to start (a copy that cannot update itself) it
+keeps "It starts the next time you open mdview." and has no button. Shots `update-installed` and
+`update-installed-plain` show the two.
+
+**Handoff.**
+
+Tried by script on Windows 11 with this branch's release build and a scratch settings file: a
+window was open; a second process without the mark handed its file to that window and returned
+in 0.1 s; a second process started with `--restarted` (what Restart starts) had no window for
+the 3 s the first one stayed open, and opened its own window, with the session's tabs and its
+file, once the first had gone.
+
+Not tried: a real update followed by a click on Restart (it needs a second build with a higher
+version on an https host); the click itself in a real window (`--update-bar installed` has no
+installed file to start); an AppImage.
+
+Found on the way, **not changed** (it is in the released 0.3.1 too and belongs to no feature
+here): a close request that comes from the system (`WM_CLOSE`, as the taskbar's "Close window"
+sends it) sets `App::exit`, but the window goes only at the next event (a pointer move over it
+is enough). Measured on the `main` build: still open 8 s after the request, gone right after a
+posted pointer move. mdedit does not have this: its `CloseRequested` also asks for a frame
+(`self.redraw()`), which is probably all mdview needs in `window_event`.

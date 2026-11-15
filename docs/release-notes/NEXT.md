@@ -23,3 +23,15 @@ NEXT
 - Present (Shift+F5, the "⋯" menu and the command palette) shows a document as full-screen
   slides, cut at its horizontal rules or else at its level 1 and 2 headings; Escape returns to
   the page where you left it.
+- A document that mdedit has not saved yet can be previewed: it appears in a tab under the
+  editor's name, follows the typing, and becomes the file's tab when it is saved. Needs the
+  mdedit of the same release.
+- The side-by-side preview follows the caret inside long paragraphs, lists, code blocks and
+  tables, not only from block to block. Needs the mdedit of the same release for paragraphs
+  written as one long line.
+- Windows 11: an optional frosted window. Settings > Window backdrop (Mica or Acrylic) lets the
+  system material show through the bars and the side panes. Off by default.
+- After an update is installed, the bar has a Restart button that closes mdview and starts the
+  new version.
+- Fixed: "Close window" from the taskbar closed the window only when the pointer next moved
+  over it.

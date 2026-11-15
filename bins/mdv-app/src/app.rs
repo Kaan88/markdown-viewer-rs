@@ -352,6 +352,19 @@ impl App {
         self.sync_theme();
     }
 
+    /// Ends the app: the window's size and the session are saved and the loop is told to stop.
+    /// Once only, however often it is asked.
+    fn finish(&mut self, event_loop: &ActiveEventLoop) {
+        if event_loop.exiting() {
+            return;
+        }
+        self.save_size();
+        if let Err(e) = self.ws.save_session() {
+            eprintln!("mdview: could not save the session: {e}");
+        }
+        event_loop.exit();
+    }
+
     fn redraw(&mut self) {
         self.wants_frame = true;
     }
@@ -1336,15 +1349,14 @@ impl ApplicationHandler<Wake> for App {
         self.woken(wake);
     }
 
-    fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
                 self.exit = true;
-                // A close that comes from the system alone (the taskbar's "Close window") is
-                // followed by no other event, and the window would stay until one came.
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
+                // Ended here, not in `about_to_wait`: the loop reads an exit asked for there only
+                // after the next event, and a close that comes from the system alone (the
+                // taskbar's "Close window") is followed by none, so the window stayed open.
+                self.finish(event_loop);
             }
             WindowEvent::RedrawRequested => {
                 self.wants_frame = false;
@@ -1477,11 +1489,7 @@ impl ApplicationHandler<Wake> for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if self.exit {
-            self.save_size();
-            if let Err(e) = self.ws.save_session() {
-                eprintln!("mdview: could not save the session: {e}");
-            }
-            event_loop.exit();
+            self.finish(event_loop);
             return;
         }
         if self.steps.is_some() && !self.first {
