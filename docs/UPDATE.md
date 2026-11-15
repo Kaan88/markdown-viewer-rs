@@ -296,6 +296,21 @@ test build end to end on KDE Plasma 6.
 Not verified: the Windows files run by hand on a Windows desktop; an installed 0.2.2 updating
 itself to 0.3.0 through the bar; the deb, rpm, tar.gz and PKGBUILD of this exact build installed.
 
+## v0.5.1 (published 2026-11-15 by the release workflow, from the tag at commit a73da37)
+
+Run 43762304418; the `ci` run on the same commit (43761002308) had passed on Linux and Windows.
+Assets: `mdview.exe` (9,197,056 bytes), `mdview-engine.exe` (26,293,248 bytes),
+`mdview-setup-0.5.1.exe`, `mdview-0.5.1-windows-x86_64.zip`,
+`mdview-0.5.1-linux-x86_64.AppImage` (15,579,640 bytes), `mdview-0.5.1-linux-x86_64.tar.gz`,
+`mdview_0.5.1_amd64.deb`, `mdview-0.5.1-1.x86_64.rpm`, `PKGBUILD` and `mdview-update.txt`.
+
+Verified against the live release: the manifest at the latest-download address names 0.5.1 with
+a Windows entry (exe and engine) and a Linux entry; the downloaded `mdview.exe`,
+`mdview-engine.exe` and AppImage have the manifest's three SHA-256 values.
+
+Not verified: any published file run on any desktop (the hands-on tests ran local builds of the
+same source); an installed 0.5.0 updating itself to 0.5.1; the deb, rpm, tar.gz and PKGBUILD.
+
 ## v0.5.0 (published 2026-11-15 by the release workflow, from the tag at commit 6470ece)
 
 Run 43739191926; the `ci` run on the same commit (43737716572) had passed on Linux and Windows.

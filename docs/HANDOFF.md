@@ -11,6 +11,52 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## START HERE: mdview 0.5.1 is released (2026-11-15)
+
+**The released state is `main`, mdview 0.5.1, tag `v0.5.1` at `a73da37`, published with mdedit
+0.7.1 on the owner's word. Shared crates: `main` of markdown-shared-rs at `d955a48`. 0.5.1 holds
+the fixes from a hands-on test of 0.5.0 (`docs/release-notes/0.5.1.md`); the release record is in
+`docs/UPDATE.md`. A plan for a macOS version is in `docs/MACOS.md`; the owner has given that work
+to someone else, nothing of it is built here.** The sections below describe 0.5.0 and 0.4.0 and
+are kept for their detail.
+
+Hands-on test of 0.5.0 on the Windows PC, 2026-11-15, with real mouse and keyboard (about 50
+checks passed in the viewer, more in a pass with both applications). Faults found and fixed in
+0.5.1, each seen working in a real window afterwards:
+- The snap-layouts flyout showed on a maximized window only. Cause: winit moves the client area
+  of an undecorated, not maximized window down by 1 px, and with that strip Windows never starts
+  the flyout. `snap.rs` in the shared crates gives the strip back in `WM_NCCALCSIZE`. The shadow
+  is still drawn (measured over a light background; not told apart from a dark one).
+- The Outline pane's focus ring was not drawn again after Up and Down: `region_sig` for the pane
+  did not include `ui.outline_focus` (`app.rs`).
+- The resize band (8 px) lay over the page scrollbar and the Outline pane's scrollbar at the
+  right edge of a window that is not maximized: `App::resize_band`, 3 px there (`SCROLLBAR_EDGE`).
+- Text without a key name (KEYEVENTF_UNICODE: on-screen keyboards, emoji pickers) was dropped by
+  `key()`: `event_key` in `app/input.rs`.
+- A window that was maximized before "Preview side by side" came back maximized but with the half
+  screen as its normal size: `place::Tiling` keeps the normal rectangle (shared crates).
+
+Passed in real windows: Copy as Markdown, presentation mode (keys, links, selection, the slide
+list), the outline by keyboard, wiki links and embeds, floats, `<abbr>`, ruby, Vue and Svelte,
+find in folder, export, access keys in every menu, and with mdedit: preview, live text, the page
+following the caret down and up, side by side and the return of both windows in six ways,
+"Edit in mdedit". Not tested: picking a snap layout, an external link, Ctrl+plus, scales above
+100 %, a real Escape key (it was posted). For the owner to judge, not changed: "Find in folder"
+with no folder open does nothing and says nothing; Ctrl+Shift+P opens the same box as Ctrl+P; a
+folder handed to a running instance is ignored; the `^id` marker of a block stays visible as
+text; when following mdedit's caret the line sits at the top edge of the page.
+
+How the hands-on tests were done, for the next one: Sonnet workers drove the release builds
+under `Desktop\md-wt` with real mouse and keyboard input from a PowerShell helper (SetCursorPos,
+mouse_event, keybd_event, captures of the application's own window only), one worker at a time
+because pointer and keyboard are shared. Lessons: computer use must not be used (a real Escape
+key aborts the whole Claude session, twice; its open_application started the owner's installed
+mdview), so Escape is posted to the window; the PC has a Turkish Q layout, so characters are
+mapped with VkKeyScanEx; a click 60 ms after a pointer jump is ignored by menus, hover first;
+every key and click checks that the foreground window is the build under test. The logs, the
+captures and the helpers are local files in `C:\Users\kaank\Desktop\md-wt\control-tests\`
+(not in any repository).
+
 ## START HERE: mdview 0.5.0 is released (2026-11-15)
 
 **The released state is `main`, mdview 0.5.0, tag `v0.5.0` at `6470ece`, published with mdedit
