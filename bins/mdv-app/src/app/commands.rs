@@ -681,6 +681,11 @@ impl App {
                     self.ws.live_end_all();
                 }
             }
+            Wake::Preview => {
+                if self.ui.previews.collect() {
+                    self.resolve_card(Instant::now());
+                }
+            }
             Wake::Images => {
                 self.ws.remote_completed();
             }
@@ -867,6 +872,9 @@ impl App {
             } else {
                 at(until);
             }
+        }
+        if let Some(due) = self.card_timer(now) {
+            at(due);
         }
         if let Some(until) = self.toast_until {
             if now >= until {

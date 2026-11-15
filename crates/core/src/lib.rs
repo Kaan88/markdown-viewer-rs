@@ -12,6 +12,7 @@ pub mod links;
 pub mod model;
 mod parse;
 pub mod place;
+pub mod preview;
 pub mod rich;
 pub mod selfupdate;
 pub mod session;

@@ -366,6 +366,9 @@ pub struct Ui {
     pub tip_blocked: Option<Hit>,
     /// The link under the pointer on the page.
     pub link_hint: Option<String>,
+    /// The card for a footnote or link the pointer rests on, and what files showed before.
+    pub card: Option<crate::preview::Card>,
+    pub previews: crate::preview::Cache,
     /// Hover row in the Manage recent dialog.
     pub dlg_hover_row: Option<usize>,
     /// The last left press, for double and triple clicks: when, where, and the count.
@@ -410,6 +413,8 @@ impl Ui {
             tip: None,
             tip_blocked: None,
             link_hint: None,
+            card: None,
+            previews: Default::default(),
             dlg_hover_row: None,
             last_press: None,
             autoscroll_due: None,

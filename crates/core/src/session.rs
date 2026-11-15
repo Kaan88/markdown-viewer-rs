@@ -108,6 +108,9 @@ pub struct Session {
     /// The window's corner radius in logical px: 8 (the default), 4 or 0 (square). The shell
     /// turns it into `mdshared_ui::corners::Corners`; this crate keeps the number.
     pub corners: u8,
+    /// Show a card for a footnote or a link to another place in the page or a local Markdown file
+    /// when the pointer rests on it. On by default.
+    pub previews: bool,
     /// Look for a newer version at launch, at most once a day. On by default.
     pub check_updates: bool,
     /// When the last look for a newer version finished, in seconds since the Unix epoch; 0 for
@@ -161,6 +164,7 @@ impl Default for Session {
             edit_tasks: false,
             animations: true,
             corners: CORNERS_DEFAULT,
+            previews: true,
             check_updates: true,
             update_checked: 0,
             page_font: String::new(),
@@ -198,6 +202,7 @@ impl Session {
                 "corners" => {
                     s.corners = clean_corners(value.trim().parse().unwrap_or(CORNERS_DEFAULT))
                 }
+                "previews" => s.previews = value.trim() != "0",
                 "check_updates" => s.check_updates = value.trim() != "0",
                 "update_checked" => s.update_checked = value.trim().parse().unwrap_or(0),
                 "page_font" => s.page_font = clean_family(value),
@@ -239,6 +244,7 @@ impl Session {
         if self.corners != CORNERS_DEFAULT {
             line("corners", &self.corners.to_string());
         }
+        line("previews", if self.previews { "1" } else { "0" });
         line("check_updates", if self.check_updates { "1" } else { "0" });
         line("update_checked", &self.update_checked.to_string());
         // Only when set, so a session that never chose a font is the file it always was.
@@ -520,5 +526,18 @@ mod window_state_tests {
         assert!(!Session::parse(&s.serialize()).animations);
         s.animations = true;
         assert!(Session::parse(&s.serialize()).animations);
+    }
+
+    #[test]
+    fn previews_are_on_unless_turned_off() {
+        assert!(Session::default().previews);
+        assert!(Session::parse("zoom=100\n").previews);
+        let mut s = Session {
+            previews: false,
+            ..Default::default()
+        };
+        assert!(!Session::parse(&s.serialize()).previews);
+        s.previews = true;
+        assert!(Session::parse(&s.serialize()).previews);
     }
 }

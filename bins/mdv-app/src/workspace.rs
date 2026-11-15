@@ -151,6 +151,9 @@ pub struct Hover {
     /// The pointer is on a line of text: show the text cursor. Off it (a margin, the gap
     /// between blocks, a picture) the arrow stays.
     pub text: bool,
+    /// What a card could show for it: a footnote, a heading of this page, a local Markdown file.
+    /// Always `None` while previews are off.
+    pub preview: Option<crate::preview::Target>,
     /// The code box under the pointer, by the start of its code in the document.
     pub code: Option<u32>,
 }
@@ -2343,6 +2346,64 @@ impl Workspace {
                 || hit.task.is_some(),
             text: hit.on_text,
             code: hit.code.map(|c| c.start),
+            preview: self.preview_target(&hit),
+        }
+    }
+
+    /// Whether resting on a footnote or a link shows a card.
+    pub fn previews(&self) -> bool {
+        self.session.previews
+    }
+
+    pub fn set_previews(&mut self, on: bool) {
+        if self.session.previews == on {
+            return;
+        }
+        self.session.previews = on;
+        self.persist();
+    }
+
+    /// What a card could show for what is under the pointer. Only a footnote mark or a link
+    /// is looked at, and a web address or a wiki-link never has one.
+    fn preview_target(&self, hit: &Hit) -> Option<crate::preview::Target> {
+        use crate::preview::Target;
+        if !self.session.previews {
+            return None;
+        }
+        if let Some(f) = hit.footnote {
+            return Some(Target::Footnote(f));
+        }
+        let doc = self.active_document()?;
+        let info = doc.links.get(hit.link? as usize)?;
+        if info.wiki || info.missing {
+            return None;
+        }
+        let dir = self
+            .active_tab()
+            .and_then(|t| t.path.parent().map(Path::to_path_buf))
+            .unwrap_or_default();
+        match classify_link(doc.str(info.dest), &dir) {
+            LinkAction::Fragment(fragment) => {
+                let block = doc.resolve_fragment(&fragment)?;
+                matches!(
+                    doc.blocks.get(block as usize)?.kind,
+                    mdview_core::model::BlockKind::Heading { .. }
+                )
+                .then_some(Target::Heading(block))
+            }
+            LinkAction::OpenMarkdown { path, fragment } => Some(Target::File { path, fragment }),
+            _ => None,
+        }
+    }
+
+    /// The card's text for a footnote or a heading of the open page; a file's is read apart.
+    pub fn preview_text(&self, target: &crate::preview::Target) -> Option<mdview_core::preview::Preview> {
+        use crate::preview::Target;
+        let doc = self.active_document()?;
+        match target {
+            Target::Footnote(i) => mdview_core::preview::footnote(doc, *i),
+            Target::Heading(b) => mdview_core::preview::heading(doc, *b),
+            Target::File { .. } => None,
         }
     }
 

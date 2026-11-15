@@ -113,6 +113,17 @@ shot hover-open --light --hover 46,63 "$fx/showcase.md"
 shot hover-page --light --hover 640,300 "$fx/showcase.md"
 shot hover-menu --light --menu main --hover 1100,120 "$fx/showcase.md"
 
+# Hover cards: a footnote, a long footnote (cut), a heading of the page, a local file, in both
+# themes; a web address keeps only its hint.
+shot preview-footnote-light --light --size 1000x600 --hover 411,191 "$fx/previews.md"
+shot preview-footnote-dark --dark --size 1000x600 --hover 411,191 "$fx/previews.md"
+shot preview-footnote-long --light --size 1000x600 --hover 288,284 "$fx/previews.md"
+shot preview-heading-light --light --size 1000x600 --hover 390,217 "$fx/previews.md"
+shot preview-heading-dark --dark --size 1000x600 --hover 390,217 "$fx/previews.md"
+shot preview-file-light --light --size 1000x600 --hover 800,217 "$fx/previews.md"
+shot preview-file-dark --dark --size 1000x600 --hover 800,217 "$fx/previews.md"
+shot preview-remote --light --size 1000x600 --hover 240,242 "$fx/previews.md"
+
 # The update bar.
 shot update-available --light --update-bar available "$fx/showcase.md"
 shot update-installing --dark --update-bar installing "$fx/showcase.md"

@@ -80,6 +80,7 @@ impl App {
         }
         // Page hover: the link hint and the cursor.
         let mut link = None;
+        let mut card = None;
         let mut cursor = CursorIcon::Default;
         if let Some(dir) = edge {
             cursor = CursorIcon::from(dir);
@@ -96,6 +97,7 @@ impl App {
                         CursorIcon::Default
                     };
                     link = hover.link;
+                    card = hover.preview;
                 }
                 Some(Hit::Find) => cursor = CursorIcon::Text,
                 Some(Hit::Splitter(_)) => cursor = CursorIcon::ColResize,
@@ -105,6 +107,7 @@ impl App {
         if link != self.ui.link_hint {
             self.ui.link_hint = link;
         }
+        self.update_card(card);
         self.set_cursor(cursor);
         self.redraw();
     }
@@ -319,6 +322,7 @@ impl App {
     pub(super) fn left_press(&mut self) {
         let (x, y) = self.ui.mouse;
         self.ui.tip = None;
+        self.ui.card = None;
         self.ui.tip_blocked = self.ui.hover;
         if let Some(dir) = self.edge_at(x, y) {
             if let Some(w) = &self.window {
@@ -464,6 +468,7 @@ impl App {
     pub(super) fn right_press(&mut self) {
         let (x, y) = self.ui.mouse;
         self.ui.tip = None;
+        self.ui.card = None;
         if self.ui.dialog.is_some() || self.ui.modal() {
             return;
         }
@@ -505,6 +510,7 @@ impl App {
         }
         self.ui.popup = None;
         self.ui.tip = None;
+        self.ui.card = None;
         if back {
             self.ws.go_back();
         } else {
@@ -526,6 +532,7 @@ impl App {
 
     pub(super) fn wheel(&mut self, delta: MouseScrollDelta) {
         let (x, y) = self.ui.mouse;
+        self.ui.card = None;
         // Notches (positive = towards the user = scroll up) and device px.
         let (notches, pixels) = match delta {
             MouseScrollDelta::LineDelta(_, dy) => (dy, None),
@@ -668,6 +675,7 @@ impl App {
     pub(super) fn key_named(&mut self, name: KeyName, typed: Option<&str>) {
         let mods = self.mods;
         self.ui.tip = None;
+        self.ui.card = None;
         self.redraw();
 
         // The palette and the settings dialog take the keyboard before anything else.
