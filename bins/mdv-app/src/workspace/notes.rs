@@ -1221,9 +1221,9 @@ A ref link [x] and [[x]].
             [dir.clone(), dir.join("sub"), dir.join("sub").join("deep")]
         );
         // Too many folders below the root: only the root and the open files' folders.
-        assert_eq!(ws.note_folders(1), [dir.clone()]);
+        assert_eq!(ws.note_folders(1), std::slice::from_ref(&dir));
 
-        let (mut watcher, woken) = watcher_for(&ws);
+        let (watcher, woken) = watcher_for(&ws);
         std::fs::create_dir(dir.join("fresh")).unwrap();
         woken
             .recv_timeout(Duration::from_secs(10))
@@ -1246,7 +1246,7 @@ A ref link [x] and [[x]].
         let a = write(&dir, "A.md", "[[Later]]\n");
         let mut ws = Workspace::new(None);
         ws.open(&a).unwrap();
-        assert_eq!(ws.note_folders(100), [dir.clone()]);
+        assert_eq!(ws.note_folders(100), std::slice::from_ref(&dir));
         let (_watcher, woken) = watcher_for(&ws);
         write(&dir, "Later.md", "# Later\n");
         woken

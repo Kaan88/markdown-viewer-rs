@@ -193,4 +193,9 @@ shot wiki-embeds-light --light --size 900x700 "$fx/wiki-embeds/Embeds.md"
 shot floats-clear-light --light --size 900x700 "$fx/floats-clear.md"
 shot floats-table-light --light --size 900x700 "$fx/floats-table.md"
 
+# More HTML and notes: a wrapping ruby base, a figure with its margin, `<abbr title>` (and its hover card).
+shot render-more-light --light --size 640x640 "$fx/render-more.md"
+shot render-more-narrow-light --light --size 430x560 "$fx/render-more.md"
+shot render-more-abbr-card --light --size 640x640 --hover 89,254 "$fx/render-more.md"
+
 ls "$out" | wc -l

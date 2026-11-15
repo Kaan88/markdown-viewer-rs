@@ -1102,7 +1102,7 @@ fn stylesheet(theme: &Theme) -> String {
     } else {
         format!("{}px", (theme.reading_width + 2.0 * theme.margin) as i64)
     };
-    let _ = write!(
+    let _ = writeln!(
         css,
         ":root{{color-scheme:light;{}--sans:{};--mono:{};--width:{width};--margin:{}px}}\n",
         palette(&crate::theme::LIGHT),
