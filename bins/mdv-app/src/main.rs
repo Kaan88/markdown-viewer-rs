@@ -4,6 +4,7 @@
 mod app;
 mod args;
 mod chrome;
+mod frost;
 mod keys;
 mod overlays;
 mod page;

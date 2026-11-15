@@ -70,6 +70,9 @@ shot dialog-settings-dark --dark --dialog settings "$fx/showcase.md"
 shot dialog-settings-scale-150 --light --scale 1.5 --dialog settings "$fx/showcase.md"
 shot dialog-settings-760 --dark --size 760x800 --dialog settings "$fx/showcase.md"
 shot dialog-settings-640 --light --size 640x800 --dialog settings "$fx/showcase.md"
+# The Window backdrop row (offered on Windows) with a choice made. A shot has no window, so
+# there is no backdrop to show: the chrome is the flat colours.
+shot dialog-settings-backdrop --dark --backdrop mica --dialog settings "$fx/showcase.md"
 
 # The command palette: tabs and recent files, commands by prefix, headings by prefix.
 shot palette-empty-light --light --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"

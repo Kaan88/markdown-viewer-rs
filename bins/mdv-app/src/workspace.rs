@@ -23,6 +23,7 @@
 //! where they are made.
 
 use crate::updater::{self, Offer, Stage, Updates};
+use mdshared_app::backdrop::Backdrop;
 use mdshared_fetch::{Fetcher, State as Fetched};
 use mdview_core::commands::strings;
 use mdview_core::files::{FileStamp, canonical_or_absolute, read_stable, stamp, tab_labels};
@@ -1526,6 +1527,20 @@ impl Workspace {
         }
         self.session.animations = on;
         self.sync_animation();
+        self.persist();
+    }
+
+    /// The "Window backdrop" setting: what the system shows behind the chrome (Windows 11).
+    pub fn backdrop(&self) -> Backdrop {
+        self.session.backdrop
+    }
+
+    pub fn set_backdrop(&mut self, backdrop: Backdrop) {
+        if self.session.backdrop == backdrop {
+            return;
+        }
+        self.session.backdrop = backdrop;
+        self.dirty = true;
         self.persist();
     }
 

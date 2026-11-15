@@ -66,6 +66,9 @@ pub struct Args {
     /// before it has a file (a tab named "Untitled 1", live), for a shot. No editor is
     /// asked or needed.
     pub demo_untitled: Option<PathBuf>,
+    /// `--backdrop <off|mica|acrylic>`: the "Window backdrop" setting for this run, for a
+    /// shot or a capture. With `--no-session` nothing of it is saved.
+    pub backdrop: Option<mdshared_app::backdrop::Backdrop>,
     /// Look for a newer version, print the answer, and exit. No window.
     pub check_update: bool,
     /// Scroll this many wheel steps after the first frame, log timings, and exit.
@@ -134,6 +137,11 @@ impl Args {
                 "--load-remote" => out.load_remote = true,
                 "--update-bar" => out.update_bar = value(&a),
                 "--demo-untitled" => out.demo_untitled = value(&a).map(PathBuf::from),
+                "--backdrop" => {
+                    out.backdrop = value(&a)
+                        .as_deref()
+                        .and_then(mdshared_app::backdrop::Backdrop::parse)
+                }
                 "--check-update" => out.check_update = true,
                 "--maximize" => out.maximize = true,
                 "--follow" => out.follow = true,

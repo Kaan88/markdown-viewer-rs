@@ -1,6 +1,7 @@
 //! Saved state: open tabs, recent files, the place left in each file, folder, theme, zoom and
 //! opaque shell layout.
 
+use mdshared_app::backdrop::Backdrop;
 use mdshared_app::settings::{self, decode_path, encode_path, escape, unescape};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -105,6 +106,8 @@ pub struct Session {
     pub edit_tasks: bool,
     /// Play animated GIF and WebP images. On by default; off shows their first frame.
     pub animations: bool,
+    /// A system backdrop behind the chrome (Windows 11); off is the flat colours.
+    pub backdrop: Backdrop,
     /// Look for a newer version at launch, at most once a day. On by default.
     pub check_updates: bool,
     /// When the last look for a newer version finished, in seconds since the Unix epoch; 0 for
@@ -146,6 +149,7 @@ impl Default for Session {
             page_width: PageWidth::default(),
             edit_tasks: false,
             animations: true,
+            backdrop: Backdrop::Off,
             check_updates: true,
             update_checked: 0,
             page_font: String::new(),
@@ -180,6 +184,7 @@ impl Session {
                 "page_width" => s.page_width = PageWidth::from_name(value).unwrap_or_default(),
                 "edit_tasks" => s.edit_tasks = value.trim() == "1",
                 "animations" => s.animations = value.trim() != "0",
+                "backdrop" => s.backdrop = Backdrop::parse(value).unwrap_or_default(),
                 "check_updates" => s.check_updates = value.trim() != "0",
                 "update_checked" => s.update_checked = value.trim().parse().unwrap_or(0),
                 "page_font" => s.page_font = clean_family(value),
@@ -217,6 +222,10 @@ impl Session {
         line("page_width", self.page_width.name());
         line("edit_tasks", if self.edit_tasks { "1" } else { "0" });
         line("animations", if self.animations { "1" } else { "0" });
+        // Only when chosen, so a session that never turned it on is the file it always was.
+        if self.backdrop != Backdrop::Off {
+            line("backdrop", self.backdrop.key());
+        }
         line("check_updates", if self.check_updates { "1" } else { "0" });
         line("update_checked", &self.update_checked.to_string());
         // Only when set, so a session that never chose a font is the file it always was.
@@ -345,7 +354,7 @@ pub fn default_settings_path() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod window_state_tests {
-    use super::{PageWidth, Session};
+    use super::{Backdrop, PageWidth, Session};
 
     #[test]
     fn page_width_round_trips_and_defaults_to_narrow() {
@@ -474,5 +483,21 @@ mod window_state_tests {
         assert!(!Session::parse(&s.serialize()).animations);
         s.animations = true;
         assert!(Session::parse(&s.serialize()).animations);
+    }
+
+    #[test]
+    fn the_window_backdrop_is_off_unless_chosen_and_then_kept() {
+        let off = Session::default();
+        assert_eq!(off.backdrop, Backdrop::Off);
+        assert!(!off.serialize().contains("backdrop"));
+        for chosen in [Backdrop::Mica, Backdrop::Acrylic] {
+            let s = Session {
+                backdrop: chosen,
+                ..Default::default()
+            };
+            assert_eq!(Session::parse(&s.serialize()).backdrop, chosen);
+        }
+        // A value this build does not know is the default.
+        assert_eq!(Session::parse("backdrop=glass\n").backdrop, Backdrop::Off);
     }
 }

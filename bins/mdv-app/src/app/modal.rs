@@ -245,6 +245,9 @@ impl App {
             (setting::REMOTE_IMAGES, Value::Bool(on)) => self.ws.set_remote_always(on),
             (setting::TICK_BOXES, Value::Bool(on)) => self.ws.set_edit_always(on),
             (setting::ANIMATIONS, Value::Bool(on)) => self.ws.set_animations(on),
+            (setting::BACKDROP, Value::Choice(i)) => {
+                (self.ws).set_backdrop(mdshared_app::backdrop::Backdrop::from_index(i))
+            }
             (setting::CHECK_AT_LAUNCH, Value::Bool(on)) => self.ws.set_checks_updates(on),
             _ => {}
         }

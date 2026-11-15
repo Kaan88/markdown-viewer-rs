@@ -11,7 +11,7 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn app(files: &[&str]) -> App {
+pub(super) fn app(files: &[&str]) -> App {
     let args = Args {
         files: files.iter().map(|f| fixture(f)).collect(),
         dark: Some(true),
