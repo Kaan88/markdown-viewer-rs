@@ -93,6 +93,8 @@ pub(super) struct Pager<'a, 'b> {
 /// The underline size given to a broken wiki-link's run. Nothing else sets one, so a run that
 /// has a size is one to underline with dashes; the value itself is not used.
 const DASHED_UNDERLINE: f32 = 1.0;
+/// The same for an `<abbr title>`'s run, which is underlined with dots.
+const DOTTED_UNDERLINE: f32 = 2.0;
 /// Marks an inline box that reserves space for an image without pixels.
 const RESERVED: u64 = 1 << 32;
 /// Marks a zero-width box that only makes its line taller, to leave room for a ruby annotation.
@@ -433,6 +435,13 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
             if style.underline || style.link {
                 builder.push(StyleProperty::Underline(true), range.clone());
+            }
+            if style.abbr {
+                builder.push(StyleProperty::Underline(true), range.clone());
+                builder.push(
+                    StyleProperty::UnderlineSize(Some(DOTTED_UNDERLINE)),
+                    range.clone(),
+                );
             }
             if style.link || style.accent {
                 builder.push(
@@ -848,11 +857,25 @@ impl<'a, 'b> Pager<'a, 'b> {
                 let baseline = baseline + crate::text::baseline_shift(color, dev);
                 let color = [color[0], color[1], color[2]];
                 let thickness = (dev * 0.065).round().max(1.0);
-                let dashed = run_style
-                    .underline
-                    .as_ref()
-                    .is_some_and(|u| u.size.is_some());
-                if dashed {
+                let size = run_style.underline.as_ref().and_then(|u| u.size);
+                if size == Some(DOTTED_UNDERLINE) {
+                    // Dots as wide as the line is thick, on a grid of the page.
+                    let period = (thickness * 2.0).max(2.0);
+                    let mut x = (gx / period).floor() * period;
+                    while x < gx + advance {
+                        if x >= gx {
+                            decos.push(Paint::Rect {
+                                x,
+                                y: (baseline + dev * 0.13).round(),
+                                w: thickness,
+                                h: thickness,
+                                radius: 0.0,
+                                color,
+                            });
+                        }
+                        x += period;
+                    }
+                } else if size.is_some() {
                     // Dashes on a grid of the page, so neighbouring runs of one link line up.
                     let (dash, period) =
                         (self.px(3.0).round().max(2.0), self.px(5.0).round().max(3.0));

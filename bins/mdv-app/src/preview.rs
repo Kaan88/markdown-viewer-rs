@@ -17,6 +17,8 @@ pub enum Target {
     Footnote(u32),
     /// The heading at this block of the open page.
     Heading(u32),
+    /// The `<abbr title>` span at this index of the open page's spans.
+    Abbr(u32),
     /// A local Markdown file, at a heading when the link names one.
     File {
         path: PathBuf,

@@ -3624,3 +3624,31 @@ fn clears_stay_in_order_and_inside_the_document() {
     }
     assert!(d.clears.iter().all(|c| (c.block as usize) < d.blocks.len()));
 }
+
+#[test]
+fn abbr_with_a_title_is_a_span_and_one_without_is_plain_text() {
+    let d =
+        parse("The <abbr title=\"World Health &amp; Co\">WHO</abbr> and <abbr>NASA</abbr> met.");
+    let abbrs: Vec<_> = d
+        .spans
+        .iter()
+        .filter_map(|s| match s.kind {
+            SpanKind::Abbr(title) => Some((span_text(&d, s), d.str(title).to_string())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        abbrs,
+        vec![("WHO".to_string(), "World Health & Co".to_string())]
+    );
+    assert_eq!(d.block_text(0), "The WHO and NASA met.");
+    // An empty title is no title.
+    let d = parse("a <abbr title=\"\">X</abbr> b");
+    assert!(!d.spans.iter().any(|s| matches!(s.kind, SpanKind::Abbr(_))));
+}
+
+#[test]
+fn time_and_bdo_keep_their_text() {
+    let d = parse("on <time datetime=\"2026-11-15\">15 Nov</time> by <bdo dir=\"rtl\">hand</bdo>.");
+    assert_eq!(d.block_text(0), "on 15 Nov by hand.");
+}

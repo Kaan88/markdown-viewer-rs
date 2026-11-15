@@ -547,6 +547,12 @@ impl<'a> Writer<'a> {
             SpanKind::Quote => tag("q"),
             SpanKind::Ruby => tag("ruby"),
             SpanKind::RubyNote => tag("rt"),
+            SpanKind::Abbr(title) => {
+                let mut open = String::from("<abbr title=\"");
+                escape_into(&mut open, self.doc.str(title), false);
+                open.push_str("\">");
+                (open, "</abbr>".to_string())
+            }
             SpanKind::Link(n) => match self.doc.links.get(n as usize) {
                 Some(link) if !link.wiki && safe_href(self.doc.str(link.dest)) => {
                     let mut open = String::from("<a href=\"");
@@ -1011,7 +1017,8 @@ th,td{border:1px solid var(--border);padding:6px 13px;text-align:left;vertical-a
 th{background:var(--head-bg);font-weight:600}
 summary{cursor:pointer;font-weight:600}
 summary>div,summary>p{display:inline}
-figure{margin-left:0;margin-right:0}
+figure{margin-left:40px;margin-right:40px}
+abbr[title]{text-decoration:underline dotted}
 figcaption{font-size:.875em;color:var(--muted)}
 .dt{font-weight:600;margin-bottom:2px}
 .dd{margin-left:2em}
@@ -1367,5 +1374,18 @@ mod tests {
         let html = export("<details>\n<summary>More</summary>\n\nBody.\n\n</details>\n");
         assert!(html.contains("summary>div,summary>p{display:inline}"));
         assert!(body(&html).contains("<summary>"));
+    }
+
+    #[test]
+    fn an_abbreviation_keeps_its_title_and_a_bare_one_is_plain_text() {
+        let html = export(
+            "The <abbr title=\"A &amp; B\">AB</abbr> and <abbr>CD</abbr> and <time>now</time>.",
+        );
+        assert!(
+            body(&html).contains("<abbr title=\"A &amp; B\">AB</abbr> and CD and now."),
+            "{}",
+            body(&html)
+        );
+        assert!(html.contains("abbr[title]{text-decoration:underline dotted}"));
     }
 }

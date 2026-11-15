@@ -2724,6 +2724,9 @@ impl Workspace {
         if let Some(f) = hit.footnote {
             return Some(Target::Footnote(f));
         }
+        if hit.link.is_none() {
+            return self.abbr_target(hit);
+        }
         let doc = self.active_document()?;
         let info = doc.links.get(hit.link? as usize)?;
         if info.wiki || info.missing {
@@ -2747,6 +2750,24 @@ impl Workspace {
         }
     }
 
+    /// The `<abbr title>` the pointer is on, if it is on text inside one.
+    fn abbr_target(&self, hit: &Hit) -> Option<crate::preview::Target> {
+        use mdview_core::model::SpanKind;
+        if !hit.on_text {
+            return None;
+        }
+        let doc = self.active_document()?;
+        let spans = doc.blocks.get(hit.block as usize)?.spans;
+        // The innermost one: spans come in preorder, so the last that holds the offset is it.
+        (spans.start..spans.end)
+            .rev()
+            .find(|&i| {
+                let s = doc.spans[i as usize];
+                matches!(s.kind, SpanKind::Abbr(_)) && s.start <= hit.offset && hit.offset < s.end
+            })
+            .map(crate::preview::Target::Abbr)
+    }
+
     /// The card's text for a footnote or a heading of the open page; a file's is read apart.
     pub fn preview_text(
         &self,
@@ -2757,6 +2778,7 @@ impl Workspace {
         match target {
             Target::Footnote(i) => mdview_core::preview::footnote(doc, *i),
             Target::Heading(b) => mdview_core::preview::heading(doc, *b),
+            Target::Abbr(i) => mdview_core::preview::abbr(doc, *i),
             Target::File { .. } => None,
         }
     }

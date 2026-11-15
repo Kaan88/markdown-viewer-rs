@@ -2559,6 +2559,13 @@ impl<'a> Builder<'a> {
             Tag::Sub => self.open_html_span(tag, SpanKind::Sub),
             Tag::Sup => self.open_html_span(tag, SpanKind::Sup),
             Tag::Mark => self.open_html_span(tag, SpanKind::Mark),
+            Tag::Abbr => {
+                // A browser marks only an `<abbr>` that has a title; a bare one is plain text.
+                if let Some(title) = html::attr(attrs, "title").filter(|t| !t.trim().is_empty()) {
+                    let title = self.pool(&title);
+                    self.open_html_span(tag, SpanKind::Abbr(title));
+                }
+            }
             Tag::Small => self.open_html_span(tag, SpanKind::Small),
             Tag::Q => {
                 self.open_html_span(tag, SpanKind::Quote);
@@ -2894,6 +2901,7 @@ impl<'a> Builder<'a> {
                 | Tag::Q
                 | Tag::Ruby
                 | Tag::Rt
+                | Tag::Abbr
         );
         if is_span {
             self.close_html_span(tag);

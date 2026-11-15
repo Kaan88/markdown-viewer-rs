@@ -2590,3 +2590,33 @@ fn wiki_labels_with_markup_and_embeds_resolve_beside_the_document() {
     let kept: Vec<&str> = doc.wiki_text.iter().map(|&s| doc.str(s)).collect();
     assert_eq!(kept, ["!missing.png", "!Nowhere"]);
 }
+
+#[test]
+fn resting_on_an_abbreviation_shows_its_title_and_text_beside_it_shows_none() {
+    use crate::preview::Target;
+    let args = Args {
+        files: vec![fixture("render-more.md")],
+        dark: Some(false),
+        files_pane: Some(false),
+        outline_pane: Some(false),
+        no_session: true,
+        ..Args::default()
+    };
+    let mut a = App::new(args, Workspace::new(None), None);
+    a.scale = 1.0;
+    a.size = (1000, 600);
+    a.setup();
+    a.compose();
+    let mut a = a;
+    let mark = hover_point(&mut a, |h| matches!(h.preview, Some(Target::Abbr(_))));
+    rest(&mut a, mark);
+    let p = a.ui.card.as_ref().and_then(|c| c.content.clone()).unwrap();
+    assert_eq!(p.title, "");
+    assert!(
+        p.body == "World Health Organization" || p.body == "Hypertext Markup Language",
+        "{p:?}"
+    );
+    // Away from it, no card.
+    a.pointer_moved(900.0, 500.0);
+    assert!(a.ui.card.is_none());
+}

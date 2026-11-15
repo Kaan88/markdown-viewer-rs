@@ -352,6 +352,8 @@ pub(crate) enum Tag {
     Ruby,
     Rp,
     Rt,
+    /// `<abbr>`: text with a dotted underline when it has a `title`, which a hover card shows.
+    Abbr,
     Dt,
     Dd,
     Figure,
@@ -362,7 +364,7 @@ pub(crate) enum Tag {
 }
 
 impl Tag {
-    pub(crate) const SLOTS: usize = 49;
+    pub(crate) const SLOTS: usize = 50;
 
     /// A distinct small index per element the builder keeps open.
     pub(crate) fn slot(self) -> usize {
@@ -411,6 +413,7 @@ impl Tag {
             Tag::Dd => 46,
             Tag::Figure => 47,
             Tag::FigCaption => 48,
+            Tag::Abbr => 49,
         }
     }
 
@@ -511,6 +514,7 @@ pub(crate) fn classify_tag(name: &str) -> Tag {
         b"ruby" => Tag::Ruby,
         b"rp" => Tag::Rp,
         b"rt" => Tag::Rt,
+        b"abbr" => Tag::Abbr,
         // GitHub's tag filter escapes these tags, so they show as text and their content is ordinary
         // HTML by the time the browser sees it. Nothing here executes either way: the model holds
         // plain text, not markup.

@@ -232,6 +232,8 @@ pub enum SpanKind {
     /// `<rt>` inside a `Ruby`: the annotation for the base text before it, back to the previous
     /// note or the start of the `Ruby`. The renderer draws it small above that base.
     RubyNote,
+    /// `<abbr title>`: the title, in `Document::strings`. An `<abbr>` with no title is plain text.
+    Abbr(StrRef),
 }
 
 /// An inline span. Spans are in preorder within their block and nest through `parent`, so empty

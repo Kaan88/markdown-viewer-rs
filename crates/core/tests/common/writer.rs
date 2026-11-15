@@ -199,6 +199,7 @@ fn inline_range(
             SpanKind::Small => ("<small>".into(), "</small>"),
             SpanKind::Ruby => ("<ruby>".into(), "</ruby>"),
             SpanKind::RubyNote => ("<rt>".into(), "</rt>"),
+            SpanKind::Abbr(_) => ("<abbr>".into(), "</abbr>"),
             SpanKind::Sub => ("<sub>".into(), "</sub>"),
             SpanKind::Sup => ("<sup>".into(), "</sup>"),
             SpanKind::Mark => ("<mark>".into(), "</mark>"),
