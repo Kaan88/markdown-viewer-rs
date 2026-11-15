@@ -116,6 +116,7 @@ shot hover-menu --light --menu main --hover 1100,120 "$fx/showcase.md"
 shot update-available --light --update-bar available "$fx/showcase.md"
 shot update-installing --dark --update-bar installing "$fx/showcase.md"
 shot update-installed --dark --update-bar installed
+shot update-installed-plain --light --update-bar installed-plain
 
 # A document mdedit previews before it has a file: a tab under the editor's name, live, with
 # its images and links shown as missing; its tab menu (no path to copy or show) and its tooltip.
