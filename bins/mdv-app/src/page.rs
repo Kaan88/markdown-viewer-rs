@@ -40,6 +40,10 @@ fn draw_update_bar(c: &mut Ctx, bar: Rect, stage: &Stage) {
         go_hovered: c.hover == Some(Hit::UpdateGo),
         go_pressed: c.pressed == Some(Hit::UpdateGo),
         close_hovered: c.hover == Some(Hit::UpdateClose),
+        // The Restart button is the branch feat/restart-after-update's; not offered here.
+        restart: false,
+        restart_hovered: false,
+        restart_pressed: false,
     };
     let hits = notice::draw_update_bar(c.p, c.pal, bar, &updater::APP, stage, state);
     if let Some(r) = hits.go {
