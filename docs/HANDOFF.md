@@ -1099,6 +1099,17 @@ message row such as "Go to line 25"; icons for the editor's line commands; the r
 hands folders to request receivers, which the viewer's own `mdview_core::single` is not). Shots
 compared with a baseline made before the change: see the commit message.
 
+## Release 0.4.0 (2026-11-15)
+
+The next-release batch, released on the owner's word ("merge everything and make a release")
+together with mdedit 0.6.0; the two need each other for live preview of an unsaved document and
+for the finer follow. What it holds is in `docs/release-notes/0.4.0.md` and, per feature, in the
+sections under "Next release work". All `mdshared-*` pins name shared `main` (`11563a3`).
+Checked before the tag: `cargo test --release --workspace` on the Windows PC and the `ci` run on
+`main` (Linux and Windows). The owner had not looked at the interface when it was tagged, and
+what "START HERE" lists as not verified was still not verified. "Copy as Markdown" is not in it:
+it was never built.
+
 ## Release 0.3.1 (2026-11-14)
 
 One fix, the viewer's side of the editor's 0.5.1: the "Open recent" submenu closed at once when the
