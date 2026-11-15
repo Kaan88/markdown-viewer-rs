@@ -13,6 +13,12 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ## START HERE: the next release is built on `merge/next-release` (written 2026-11-15)
 
+**Update, later on 2026-11-15: the owner asked for the merge.** `main` was fast-forwarded to
+`merge/next-release` in the shared repository (`11563a3`), the viewer (`14aedec`) and the editor
+(`d56c4ee`) and pushed. Where the text below says `main` is behind or that the merge is the
+owner's, that step is done. Still open: the owner's look at the interface, a real update followed
+by Restart, Linux by hand, the version numbers and the tags.
+
 The released state is `main` (mdview 0.3.1). **Every feature of the next-release batch is finished
 and merged on the branch `merge/next-release`**, in this repository, in the editor's
 (`Kaan88/markdown-editor-rs`) and in the shared crates (`Kaan88/markdown-shared-rs`). Nothing is
