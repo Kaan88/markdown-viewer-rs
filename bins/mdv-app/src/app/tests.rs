@@ -2853,3 +2853,248 @@ fn refreshed(a: &mut App) {
     }
     panic!("the search did not end");
 }
+
+// ---- presentation: links, selection and the slide overview --------------------------------------
+
+/// A deck and a neighbour file in a fresh temp folder; returns the deck's path.
+fn deck(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("mdview-deck-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("other.md"), "# Other file\n\nHello.\n").unwrap();
+    let path = dir.join("deck.md");
+    std::fs::write(
+        &path,
+        "# First\n\nGo to [the end](#last-slide), [the web](https://example.com/x) \
+         or [the file](other.md).\n\n---\n\n## Middle\n\nSome middle words to select here, \
+         and a few more of them.\n\n---\n\n## Last slide\n\ndone\n",
+    )
+    .unwrap();
+    path
+}
+
+fn deck_app(path: &Path) -> App {
+    app(&[path.to_str().unwrap()])
+}
+
+/// The first point (device px) of the slide where `want` is true, scanning the window.
+fn find_on_slide(
+    a: &mut App,
+    mut want: impl FnMut(&mut crate::present::Show, f32, f32) -> bool,
+) -> Option<(f32, f32)> {
+    let show = a.ui.present.as_mut()?;
+    for y in (0..800).step_by(6) {
+        for x in (0..1280).step_by(8) {
+            if want(show, x as f32, y as f32) {
+                return Some((x as f32, y as f32));
+            }
+        }
+    }
+    None
+}
+
+/// What a click at the point would follow, when it is a link.
+fn link_is(show: &mut crate::present::Show, x: f32, y: f32, dest: &str) -> bool {
+    show.link_at(x, y) && {
+        show.press_at(x, y);
+        show.release() == crate::present::Release::Link(dest.into())
+    }
+}
+
+#[test]
+fn a_click_on_a_link_on_a_slide_goes_to_the_slide_that_holds_the_target() {
+    let path = deck("fragment");
+    let mut a = deck_app(&path);
+    a.ws.scroll_to(0.0);
+    a.compose();
+    let place = a.ws.scroll();
+    a.command(CommandId::Present);
+    a.compose();
+    // The three links of slide 1 are all there to be found.
+    for dest in ["#last-slide", "https://example.com/x", "other.md"] {
+        assert!(
+            find_on_slide(&mut a, |s, x, y| link_is(s, x, y, dest)).is_some(),
+            "{dest}"
+        );
+    }
+    // An in-document link: the slide with the heading shows, and the page behind stays put.
+    let (x, y) = find_on_slide(&mut a, |s, x, y| link_is(s, x, y, "#last-slide")).unwrap();
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert_eq!(slide_index(&a), 2);
+    assert_eq!(a.ws.scroll(), place);
+    assert!(a.presenting());
+    // A name no slide has is not found; one that a slide has is.
+    key(&mut a, KeyName::Home, None);
+    let show = a.ui.present.as_mut().unwrap();
+    assert!(!show.go_to_fragment("no-such-heading"));
+    assert!(show.go_to_fragment("middle"));
+    assert_eq!(slide_index(&a), 1);
+}
+
+#[test]
+fn a_click_on_a_file_link_on_a_slide_opens_it_and_ends_the_show() {
+    let path = deck("file");
+    let mut a = deck_app(&path);
+    a.command(CommandId::Present);
+    a.compose();
+    let (x, y) = find_on_slide(&mut a, |s, x, y| link_is(s, x, y, "other.md"))
+        .expect("the link to the file");
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert_eq!(a.ws.tab_count(), 2, "the file opened in a tab");
+    assert!(!a.presenting(), "the show was of the other tab");
+}
+
+#[test]
+fn a_link_to_the_web_on_a_slide_is_handed_over_as_the_page_hands_it() {
+    // Not clicked for real (that would start the browser): the click gives the destination as
+    // written, which the shell hands to the workspace, which answers as it does for the page.
+    let path = deck("web");
+    let mut a = deck_app(&path);
+    a.command(CommandId::Present);
+    a.compose();
+    assert!(find_on_slide(&mut a, |s, x, y| link_is(s, x, y, "https://example.com/x")).is_some());
+    assert_eq!(
+        a.ws.open_link("https://example.com/x"),
+        LinkOutcome::OpenUrl("https://example.com/x".into())
+    );
+    // And a scheme the page never follows is not followed from a slide either.
+    assert_eq!(a.ws.open_link("javascript:alert(1)"), LinkOutcome::Ignored);
+}
+
+#[test]
+fn dragging_on_a_slide_selects_text_and_ctrl_c_copies_it_and_a_click_still_goes_on() {
+    let path = deck("select");
+    let mut a = deck_app(&path);
+    a.command(CommandId::Present);
+    a.compose();
+    key(&mut a, KeyName::Right, None);
+    assert_eq!(slide_index(&a), 1);
+    let without = a.screen.pixels.clone();
+    let (x, y) = find_on_slide(&mut a, |s, x, y| s.hit(x, y).is_some_and(|h| h.on_text))
+        .expect("text on the slide");
+    // A drag along the line selects, and does not go on.
+    a.pointer_moved(x + 2.0, y);
+    a.left_press();
+    a.pointer_moved(x + 300.0, y);
+    a.left_release();
+    a.compose();
+    assert_eq!(slide_index(&a), 1);
+    let (from, to) =
+        a.ui.present
+            .as_ref()
+            .unwrap()
+            .selection()
+            .expect("selected");
+    assert!(to > from);
+    assert_ne!(without, a.screen.pixels, "the selection tints the slide");
+    // Ctrl+C puts the text on the clipboard (the tests' stand-in) and says Copied.
+    crate::codebtn::COPIED.with(|c| c.borrow_mut().take());
+    a.mods = Mods {
+        ctrl: true,
+        ..Mods::default()
+    };
+    key(&mut a, KeyName::Char('c'), None);
+    a.mods = Mods::default();
+    let copied = crate::codebtn::COPIED
+        .with(|c| c.borrow_mut().take())
+        .expect("copied");
+    assert!(!copied.is_empty());
+    let slide = a.ui.present.as_ref().unwrap().slide(1).to_string();
+    assert!(slide.contains(copied.trim()), "{copied:?}");
+    assert_eq!(a.ws.status(Instant::now()), Some("Copied"));
+    // A plain click drops the selection and goes on.
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert_eq!(slide_index(&a), 2);
+    assert_eq!(a.ui.present.as_ref().unwrap().selection(), None);
+    // Ctrl+A takes the whole text of the slide.
+    a.mods = Mods {
+        ctrl: true,
+        ..Mods::default()
+    };
+    key(&mut a, KeyName::Char('a'), None);
+    a.mods = Mods::default();
+    assert!(a.ui.present.as_ref().unwrap().selection().is_some());
+}
+
+#[test]
+fn the_overview_lists_the_slides_and_enter_goes_to_one() {
+    let mut a = app(&["slides.md"]);
+    a.command(CommandId::Present);
+    a.compose();
+    key(&mut a, KeyName::Right, None);
+    key(&mut a, KeyName::Right, None);
+    assert_eq!(slide_index(&a), 2);
+    // G opens the list, on the slide showing, with a row per slide: number and title.
+    key(&mut a, KeyName::Char('g'), Some("g"));
+    let show = a.ui.present.as_ref().unwrap();
+    assert!(show.overview_open());
+    assert_eq!(show.overview_selected(), Some(2));
+    assert_eq!(
+        show.titles(),
+        ["Quarterly review", "What changed", "Numbers", "Thank you"]
+    );
+    // Keys go to the list, not to the slides.
+    key(&mut a, KeyName::Down, None);
+    assert_eq!(a.ui.present.as_ref().unwrap().overview_selected(), Some(3));
+    assert_eq!(slide_index(&a), 2);
+    // Enter goes there and closes the list.
+    key(&mut a, KeyName::Enter, None);
+    assert_eq!(slide_index(&a), 3);
+    assert!(!a.ui.present.as_ref().unwrap().overview_open());
+    // Escape closes only the list; the show stays.
+    key(&mut a, KeyName::Char('g'), Some("g"));
+    key(&mut a, KeyName::Escape, None);
+    assert!(a.presenting());
+    assert!(!a.ui.present.as_ref().unwrap().overview_open());
+    assert_eq!(slide_index(&a), 3);
+    // Typing narrows the list: a word of the title finds its slide.
+    key(&mut a, KeyName::Char('g'), Some("g"));
+    type_text(&mut a, "numb");
+    key(&mut a, KeyName::Enter, None);
+    assert_eq!(slide_index(&a), 2);
+    // Present still leaves from inside the list.
+    key(&mut a, KeyName::Char('g'), Some("g"));
+    a.mods = Mods {
+        shift: true,
+        ..Mods::default()
+    };
+    key(&mut a, KeyName::F(5), None);
+    a.mods = Mods::default();
+    assert!(!a.presenting());
+}
+
+#[test]
+fn the_overview_is_drawn_over_the_slide_and_a_click_on_a_row_goes_there() {
+    let mut a = app(&["slides.md"]);
+    a.command(CommandId::Present);
+    a.compose();
+    let plain = a.screen.pixels.clone();
+    key(&mut a, KeyName::Char('g'), Some("g"));
+    assert_ne!(plain, a.screen.pixels, "the list is on screen");
+    // The pointer over the fourth row selects it, a click chooses it.
+    let row = {
+        let show = a.ui.present.as_mut().unwrap();
+        (100..700)
+            .step_by(4)
+            .find_map(|y| {
+                show.overview_move(640.0, y as f32);
+                (show.overview_selected() == Some(3)).then_some(y as f32)
+            })
+            .expect("a row for slide 4")
+    };
+    a.pointer_moved(640.0, row);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert_eq!(slide_index(&a), 3);
+    assert!(!a.ui.present.as_ref().unwrap().overview_open());
+}

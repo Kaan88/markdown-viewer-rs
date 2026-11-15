@@ -442,6 +442,10 @@ impl App {
     pub(super) fn left_release(&mut self) {
         let (x, y) = self.ui.mouse;
         self.ui.autoscroll_due = None;
+        if self.presenting() {
+            self.present_release();
+            return;
+        }
         if self.ui.modal() {
             self.modal_release();
             return;
@@ -707,7 +711,7 @@ impl App {
 
         // A presentation takes the keyboard before anything else.
         if self.presenting() {
-            self.present_key(name, mods);
+            self.present_key(name, mods, typed);
             return;
         }
         // The palette and the settings dialog take the keyboard before anything else.

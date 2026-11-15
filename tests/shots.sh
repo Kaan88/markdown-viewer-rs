@@ -188,5 +188,7 @@ shot present-table-dark --dark --present 3 "$fx/slides.md"
 shot present-small-light --light --size 700x500 --present 2 "$fx/slides.md"
 shot present-large-dark --dark --size 1920x1080 --present 2 "$fx/slides.md"
 shot present-scale-150 --light --scale 1.5 --present 3 "$fx/slides.md"
+shot present-overview-dark --dark --present 3 --present-overview "$fx/slides.md"
+shot present-select-light --light --present 2 --present-select "$fx/slides.md"
 
 ls "$out" | wc -l

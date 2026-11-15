@@ -10,6 +10,8 @@
 use crate::gfx::{Face, Painter, Rect, mix};
 use crate::panes::{draw_scrollbar, scrollbar};
 use crate::theme::Palette;
+use mdshared_ui::keys::{KeyName, Mods};
+use mdshared_ui::palette::{Entry, Outcome, Palette as List};
 use mdview_core::Document;
 use mdview_render::{DocumentRenderer, Options, Theme};
 use std::hash::{Hash, Hasher};
@@ -57,6 +59,40 @@ struct Laid {
     height: f32,
 }
 
+/// A button that went down on a slide: where the selection starts, and the link under it.
+#[derive(Clone, Copy)]
+struct Press {
+    anchor: u32,
+    link: Option<u32>,
+    moved: bool,
+}
+
+/// What a button coming up on a slide meant.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Release {
+    /// Nothing was pressed on the slide.
+    Nothing,
+    /// A drag selected text; it stays selected.
+    Selected,
+    /// A plain click: the slide goes on.
+    Advance,
+    /// A click on a link: its destination as written (a wiki-link after `wiki:`).
+    Link(String),
+}
+
+/// What a key or button did in the slide overview.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Overview {
+    /// The overview is not open.
+    Closed,
+    /// The list stays open.
+    Open,
+    /// A slide was chosen; the overview closed and the slide is showing.
+    Went,
+    /// The overview closed without a choice.
+    Dismissed,
+}
+
 pub struct Show {
     /// The tab the slides come from, and the revision of its text they were cut from.
     pub tab: usize,
@@ -80,6 +116,15 @@ pub struct Show {
     pub was_fullscreen: bool,
     /// The signature of what is on screen.
     drawn: Option<u64>,
+    /// The selected text of the slide: offsets into its document's text, in order.
+    selection: Option<(u32, u32)>,
+    press: Option<Press>,
+    /// Where the slide's bitmap is on screen, device px (set by every draw).
+    origin: (i32, i32),
+    /// The list of slides, while it is open: the shell's palette widget, a slide per row.
+    overview: Option<List>,
+    /// Counts what the overview did, so a changed list is drawn.
+    overview_rev: u32,
 }
 
 impl Show {
@@ -104,6 +149,11 @@ impl Show {
             cursor_hidden: false,
             was_fullscreen: false,
             drawn: None,
+            selection: None,
+            press: None,
+            origin: (0, 0),
+            overview: None,
+            overview_rev: 0,
         })
     }
 
@@ -123,6 +173,8 @@ impl Show {
         self.index = self.index.min(self.slides.len() - 1);
         self.parsed = None;
         self.laid = None;
+        self.selection = None;
+        self.press = None;
         self.generation = self.generation.wrapping_add(1);
         true
     }
@@ -164,6 +216,8 @@ impl Show {
         }
         self.index = i;
         self.scroll = 0.0;
+        self.selection = None;
+        self.press = None;
         true
     }
 
@@ -318,6 +372,8 @@ impl Show {
             (self.counter_alpha(now, animate) * 16.0).round() as u32,
             self.slides.len(),
             pal.dark,
+            self.selection,
+            self.overview.is_some().then_some(self.overview_rev),
         )
             .hash(&mut h);
         h.finish()
@@ -355,6 +411,18 @@ impl Show {
         let x = ((w - bmp.width as i32) / 2).max(0);
         let y = ((h as f32 - rows) / 2.0).floor().max(0.0) as i32;
         p.blit(bmp, 0, bmp.height as i32, x, y);
+        self.origin = (x, y);
+        if let Some((from, to)) = self.selection {
+            let (lo, hi) = (y, y + rows as i32);
+            let a = if pal.dark { 0.42 } else { 0.30 };
+            for r in self.renderer.selection_rects(doc, &laid.options, from, to) {
+                let top = (y as f32 + r.y - self.scroll).round() as i32;
+                let bottom = (y as f32 + r.y + r.h - self.scroll).round() as i32;
+                let left = (x as f32 + r.x).round() as i32;
+                let right = (x as f32 + r.x + r.w).round() as i32;
+                p.fill_dev(left, top.max(lo), right, bottom.min(hi), pal.selection, a);
+            }
+        }
         let scale = p.scale;
         let (lw, lh) = (w as f32 / scale, h as f32 / scale);
         let area = Rect::new(0.0, 0.0, lw, lh);
@@ -374,6 +442,267 @@ impl Show {
                 mix(pal.popup, pal.text, alpha),
             );
         }
+        if let Some(list) = self.overview.as_mut() {
+            // The caret is drawn solid: a blinking one would need a timer.
+            list.draw(p, pal, area, 0.0, true);
+        }
+    }
+
+    // ---- selecting and clicking ----------------------------------------------------------------
+
+    /// What is under the pointer, `x, y` in device px of the window.
+    pub fn hit(&mut self, x: f32, y: f32) -> Option<mdview_render::Hit> {
+        let (Some((_, doc)), Some(laid)) = (self.parsed.as_ref(), self.laid.as_ref()) else {
+            return None;
+        };
+        let (px, py) = (
+            x - self.origin.0 as f32,
+            y - self.origin.1 as f32 + self.scroll,
+        );
+        self.renderer
+            .hit_test(doc, &laid.options, px, py.clamp(0.0, laid.total))
+    }
+
+    /// Whether a link is under the pointer.
+    pub fn link_at(&mut self, x: f32, y: f32) -> bool {
+        self.hit(x, y).is_some_and(|h| h.link.is_some())
+    }
+
+    /// The left button went down at `x, y` (device px).
+    pub fn press_at(&mut self, x: f32, y: f32) {
+        self.selection = None;
+        let hit = self.hit(x, y);
+        self.press = Some(Press {
+            anchor: hit.map_or(0, |h| h.offset),
+            link: hit.and_then(|h| h.link),
+            moved: false,
+        });
+    }
+
+    /// The pointer moved with the button down: extends the selection. True when it changed.
+    pub fn drag_to(&mut self, x: f32, y: f32) -> bool {
+        let Some(press) = self.press else {
+            return false;
+        };
+        let Some(hit) = self.hit(x, y) else {
+            return false;
+        };
+        if hit.offset == press.anchor && !press.moved {
+            return false;
+        }
+        if let Some(press) = self.press.as_mut() {
+            press.moved = true;
+        }
+        let selection = Some((press.anchor.min(hit.offset), press.anchor.max(hit.offset)));
+        let changed = self.selection != selection;
+        self.selection = selection;
+        changed
+    }
+
+    /// Whether the button is down on the slide.
+    pub fn pressing(&self) -> bool {
+        self.press.is_some()
+    }
+
+    /// The left button came up.
+    pub fn release(&mut self) -> Release {
+        let Some(press) = self.press.take() else {
+            return Release::Nothing;
+        };
+        if press.moved {
+            return Release::Selected;
+        }
+        self.selection = None;
+        let link = press.link.and_then(|i| {
+            let (_, doc) = self.parsed.as_ref()?;
+            let l = doc.links.get(i as usize)?;
+            let dest = doc.str(l.dest);
+            Some(if l.wiki {
+                format!("{}{dest}", crate::workspace::WIKI_SCHEME)
+            } else {
+                dest.to_string()
+            })
+        });
+        match link {
+            Some(dest) => Release::Link(dest),
+            None => Release::Advance,
+        }
+    }
+
+    /// The selected text of the slide, as the page copies it.
+    pub fn selected_text(&self) -> Option<String> {
+        let (from, to) = self.selection?;
+        let (_, doc) = self.parsed.as_ref()?;
+        doc.text.get(from as usize..to as usize).map(str::to_string)
+    }
+
+    /// The selection as an HTML fragment, to go beside the text on the clipboard.
+    pub fn selected_html(&self) -> Option<String> {
+        let (from, to) = self.selection?;
+        let (_, doc) = self.parsed.as_ref()?;
+        mdview_core::rich::selection_html(doc, from, to)
+    }
+
+    /// Selects the whole text of the slide (Ctrl+A). False when it has none.
+    pub fn select_all(&mut self) -> bool {
+        if self.parsed.as_ref().map(|p| p.0) != Some(self.index) {
+            self.parsed = Some((self.index, mdview_core::parse(&self.slides[self.index])));
+        }
+        let len = self
+            .parsed
+            .as_ref()
+            .map_or(0, |(_, doc)| doc.text.len() as u32);
+        self.selection = (len > 0).then_some((0, len));
+        self.selection.is_some()
+    }
+
+    #[cfg(test)]
+    pub fn selection(&self) -> Option<(u32, u32)> {
+        self.selection
+    }
+
+    /// Goes to the slide that holds the anchor `fragment` (as a link wrote it): this one first,
+    /// then the others in order. False when no slide has it.
+    pub fn go_to_fragment(&mut self, fragment: &str) -> bool {
+        let n = self.slides.len();
+        for k in 0..n {
+            let i = (self.index + k) % n;
+            let found = match self.parsed.as_ref() {
+                Some((at, doc)) if *at == i => doc.resolve_fragment(fragment).is_some(),
+                _ => mdview_core::parse(&self.slides[i])
+                    .resolve_fragment(fragment)
+                    .is_some(),
+            };
+            if found {
+                self.go(i);
+                return true;
+            }
+        }
+        false
+    }
+
+    // ---- the overview --------------------------------------------------------------------------
+
+    /// The title of each slide: its first heading, else its first line of text.
+    pub fn titles(&self) -> Vec<String> {
+        self.slides
+            .iter()
+            .map(|slide| {
+                let doc = mdview_core::parse(slide);
+                let title = match doc.headings.first() {
+                    Some(h) => doc.str(h.title).to_string(),
+                    None => doc
+                        .text
+                        .lines()
+                        .map(str::trim)
+                        .find(|l| !l.is_empty())
+                        .unwrap_or_default()
+                        .to_string(),
+                };
+                title.chars().take(120).collect()
+            })
+            .collect()
+    }
+
+    pub fn overview_open(&self) -> bool {
+        self.overview.is_some()
+    }
+
+    /// Opens the list of slides, on the one showing.
+    pub fn open_overview(&mut self) {
+        let mut list = List::new();
+        let entries = self
+            .titles()
+            .into_iter()
+            .enumerate()
+            .map(|(i, title)| {
+                let title = if title.is_empty() {
+                    "(no title)".to_string()
+                } else {
+                    title
+                };
+                Entry::new(i as u32, format!("{}. {title}", i + 1))
+            })
+            .collect();
+        list.set_placeholder("Go to slide: a number or a word of its title");
+        list.set_entries(entries);
+        list.open("");
+        for _ in 0..self.index {
+            list.key(&KeyName::Down, Mods::default(), None);
+        }
+        self.overview = Some(list);
+        self.overview_rev = self.overview_rev.wrapping_add(1);
+    }
+
+    fn overview_outcome(&mut self, out: Outcome) -> Overview {
+        match out {
+            Outcome::Chosen(id) => {
+                self.overview = None;
+                self.go(id as usize);
+                Overview::Went
+            }
+            Outcome::Closed => {
+                self.overview = None;
+                Overview::Dismissed
+            }
+            Outcome::None | Outcome::Unused => Overview::Open,
+            _ => {
+                self.overview_rev = self.overview_rev.wrapping_add(1);
+                Overview::Open
+            }
+        }
+    }
+
+    /// A key while the overview is open: Up and Down move, Enter goes to the slide, Escape closes
+    /// the list, anything typed narrows it.
+    pub fn overview_key(&mut self, name: &KeyName, mods: Mods, typed: Option<&str>) -> Overview {
+        let Some(list) = self.overview.as_mut() else {
+            return Overview::Closed;
+        };
+        let out = list.key(name, mods, typed);
+        self.overview_outcome(out)
+    }
+
+    /// The pointer moved, `x, y` in logical px.
+    pub fn overview_move(&mut self, x: f32, y: f32) {
+        if let Some(list) = self.overview.as_mut()
+            && list.pointer_move(x, y)
+        {
+            self.overview_rev = self.overview_rev.wrapping_add(1);
+        }
+    }
+
+    pub fn overview_press(&mut self, x: f32, y: f32, mods: Mods) -> Overview {
+        let Some(list) = self.overview.as_mut() else {
+            return Overview::Closed;
+        };
+        let out = list.press(x, y, mods, 1);
+        self.overview_outcome(out)
+    }
+
+    pub fn overview_release(&mut self, x: f32, y: f32) -> Overview {
+        let Some(list) = self.overview.as_mut() else {
+            return Overview::Closed;
+        };
+        let out = list.release(x, y);
+        self.overview_outcome(out)
+    }
+
+    /// The wheel, `dy` logical px towards the end.
+    pub fn overview_wheel(&mut self, x: f32, y: f32, dy: f32) {
+        if let Some(list) = self.overview.as_mut()
+            && list.contains(x, y)
+            && list.wheel(dy)
+        {
+            self.overview_rev = self.overview_rev.wrapping_add(1);
+        }
+    }
+
+    /// The slide number (0-based) the overview's row is on, for tests.
+    #[cfg(test)]
+    pub fn overview_selected(&self) -> Option<usize> {
+        let id = self.overview.as_ref()?.selected_id()?;
+        Some(id as usize)
     }
 }
 

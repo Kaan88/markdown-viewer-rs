@@ -345,6 +345,12 @@ impl App {
             self.present_begin();
             if let Some(show) = self.ui.present.as_mut() {
                 show.go(n - 1);
+                if a.present_select {
+                    show.select_all();
+                }
+                if a.present_overview {
+                    show.open_overview();
+                }
             }
         }
         if let Some(stage) = &a.update_bar {
