@@ -292,9 +292,17 @@ fn untitled_path(doc: &str, title: &str) -> PathBuf {
     [UNTITLED_ROOT, doc, title].iter().collect()
 }
 
-/// Whether `path` is, or lies under, the key of a tab that has no file.
+/// Whether `path` is, or lies under, the key of a tab that has no file. The key's first part
+/// is looked for anywhere in the path: where a path that does not start at the root is made
+/// absolute (Linux), the working folder comes before it. No file's path has that part.
 fn is_untitled_path(path: &Path) -> bool {
-    path.starts_with(UNTITLED_ROOT)
+    (path.components()).any(|c| c.as_os_str() == UNTITLED_ROOT)
+}
+
+/// The key in `path`, without what making it absolute put before it.
+fn untitled_key(path: &Path) -> Option<PathBuf> {
+    let at = (path.components()).position(|c| c.as_os_str() == UNTITLED_ROOT)?;
+    Some(path.components().skip(at).collect())
 }
 
 /// What a tab decided about its document's remote images.
@@ -805,7 +813,7 @@ impl Workspace {
     /// Recent either way. A file the reader has had open before starts where they left it. A
     /// file that cannot be read sets the status and opens nothing.
     pub fn open(&mut self, path: &Path) -> Result<usize, String> {
-        let path = canonical_or_absolute(path);
+        let path = untitled_key(path).unwrap_or_else(|| canonical_or_absolute(path));
         if let Some(index) = self.tabs.iter().position(|t| same_file(&t.path, &path)) {
             self.recents.add(path);
             self.activate(index);
@@ -4949,6 +4957,11 @@ A line of text here.
         assert!(is_untitled_path(&key) && is_untitled_path(&key.parent().unwrap().join("pic.png")));
         assert_eq!(file_name(&key), "Untitled 1");
         assert!(!is_untitled_path(Path::new("/home/u/Untitled 1")));
+        // Made absolute (as Linux does with it), it is still the key.
+        let absolute = Path::new("/home/u").join(&key);
+        assert!(is_untitled_path(&absolute));
+        assert_eq!(untitled_key(&absolute), Some(key.clone()));
+        assert_eq!(untitled_key(Path::new("/home/u/a.md")), None);
         // Nothing on disk answers to it, on any system: no file name holds a NUL.
         assert!(std::fs::metadata(&key).is_err() && !key.exists());
         assert_eq!(stamp(&key), FileStamp::Missing);
