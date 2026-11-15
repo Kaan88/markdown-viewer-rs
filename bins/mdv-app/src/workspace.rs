@@ -4592,10 +4592,12 @@ mod tests {
         assert_eq!(top.line, 3);
         let top_col = top.column.expect("past the line's first text");
         assert!(top_col < column && column - top_col < 400, "{top_col}");
-        // At the paragraph's first row no column is named.
+        // At the paragraph's first row no column is named. The line puts the paragraph's top a
+        // few pixels below the page's, where the probe 4 px down is a pixel or two from the
+        // title above (on a Mac's fonts it is above that edge): a little further into the row.
         assert!(ws.scroll_to_line(3));
         settle(&mut ws);
-        ws.scroll_by(JUMP_MARGIN);
+        ws.scroll_by(JUMP_MARGIN + 6.0);
         settle(&mut ws);
         let first = SourcePlace {
             line: 3,

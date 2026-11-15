@@ -1182,9 +1182,13 @@ fn html_presentation_attributes_are_honoured() {
 
     // `align="justify"` stretches every line but the last to the column.
     let text = "word ".repeat(60);
-    let ragged = ink_columns(&page(&format!("<p>{text}</p>\n"))).1;
-    let justified = ink_columns(&page(&format!("<p align=\"justify\">{text}</p>\n"))).1;
-    assert!(justified > ragged, "{justified} against {ragged}");
+    // The widest ragged line may itself reach the column (it does in Helvetica's metrics, on a
+    // Mac), so the check is that the lines moved and that the justified ones reach the column.
+    let ragged = page(&format!("<p>{text}</p>\n"));
+    let justified = page(&format!("<p align=\"justify\">{text}</p>\n"));
+    assert_ne!(ragged.bitmap.pixels, justified.bitmap.pixels);
+    let justified = ink_columns(&justified).1;
+    assert!(justified >= ink_columns(&ragged).1, "{justified}");
     assert!(justified + 4 >= 780 - LIGHT.margin as usize, "{justified}");
 }
 

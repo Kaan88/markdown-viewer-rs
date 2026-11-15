@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "d140991216e5a4cbe57cb67a55ffd8e6f0b4f8bf" }
+mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "2fc4c6bedc762b46529db38c3ec588d093f0b1d4" }
 memchr = "2.8"
 pulldown-cmark = { version = "=0.13.6", default-features = false }
 regex-syntax = { version = "0.8", default-features = false, features = ["unicode-perl"] }
