@@ -268,6 +268,33 @@ pub struct Tab {
     live: bool,
     /// The newest text received and not parsed yet, and the line to follow.
     live_pending: Option<(String, Option<u32>)>,
+    /// The tab shows a document the editor has not saved yet, known by this name of the
+    /// editor's; there is no file. `path` is then a key that no file can have
+    /// ([`untitled_path`]), and `missing` is set, which keeps the text when the tab is idle and
+    /// keeps its place out of the session. See [`Workspace::document_text`].
+    untitled: Option<String>,
+}
+
+/// The first component of the key of a tab that has no file. No file name can hold a NUL, on
+/// any system, so nothing on disk is ever read, watched or written under it.
+const UNTITLED_ROOT: &str = "\0mdedit";
+
+/// The key of the tab for the editor's document `doc`, shown as `title`: not a file's path, but
+/// shaped like one, so the title is its last part (which the tab's label and the window's title
+/// are made from) and a relative link or image resolves into a folder that cannot exist.
+fn untitled_path(doc: &str, title: &str) -> PathBuf {
+    let plain = |c: char| !c.is_control() && !matches!(c, '/' | '\\');
+    let title: String = title.chars().filter(|&c| plain(c)).collect();
+    let title = match title.trim() {
+        "" => strings::UNTITLED,
+        title => title,
+    };
+    [UNTITLED_ROOT, doc, title].iter().collect()
+}
+
+/// Whether `path` is, or lies under, the key of a tab that has no file.
+fn is_untitled_path(path: &Path) -> bool {
+    path.starts_with(UNTITLED_ROOT)
 }
 
 /// What a tab decided about its document's remote images.
@@ -305,6 +332,7 @@ impl Tab {
             links_checked: 0,
             live: false,
             live_pending: None,
+            untitled: None,
         }
     }
 
@@ -331,9 +359,29 @@ impl Tab {
         self.live
     }
 
-    /// The file was deleted (its last text is still shown) or could not be found.
+    /// The file was deleted (its last text is still shown) or could not be found. A document
+    /// that has no file yet is not missing one.
     pub fn is_missing(&self) -> bool {
-        self.missing
+        self.missing && self.untitled.is_none()
+    }
+
+    /// The tab shows a document the editor has not saved yet: there is no file, and
+    /// [`path`](Self::path) is only a key.
+    pub fn is_untitled(&self) -> bool {
+        self.untitled.is_some()
+    }
+
+    /// The editor's name for the document this tab shows, while it has no file.
+    pub fn untitled_doc(&self) -> Option<&str> {
+        self.untitled.as_deref()
+    }
+
+    /// What the tab is, in words: the file's path, or that there is no file yet.
+    pub fn describe(&self) -> String {
+        match self.untitled {
+            Some(_) => format!("{} ({})", file_name(&self.path), strings::UNTITLED_HINT),
+            None => self.path.display().to_string(),
+        }
     }
 
     #[allow(dead_code)] // Workspace API the shell does not call yet.
@@ -519,8 +567,14 @@ impl Workspace {
         let Some(path) = self.session_path.as_deref() else {
             return Ok(());
         };
-        self.session.tabs = self.tabs.iter().map(|t| t.path.clone()).collect();
-        self.session.active = self.active.unwrap_or(0);
+        // A document that has no file is not something to come back to: it is left out, and
+        // the active tab counts among the files.
+        let files = |tabs: &[Tab]| tabs.iter().filter(|t| t.untitled.is_none()).count();
+        self.session.tabs = (self.tabs.iter())
+            .filter(|t| t.untitled.is_none())
+            .map(|t| t.path.clone())
+            .collect();
+        self.session.active = self.active.map_or(0, |i| files(&self.tabs[..i]));
         self.session.recent = self.recents.clone();
         self.session.theme = self.choice;
         self.session.zoom = self.zoom;
@@ -697,9 +751,11 @@ impl Workspace {
         std::mem::take(&mut self.watch_dirty)
     }
 
-    /// Every open tab's file, loaded or not.
+    /// Every open tab's file, loaded or not. A document that has no file has none to watch.
     pub fn watched_paths(&self) -> impl Iterator<Item = &Path> {
-        self.tabs.iter().map(|t| t.path.as_path())
+        (self.tabs.iter())
+            .filter(|t| t.untitled.is_none())
+            .map(|t| t.path.as_path())
     }
 
     // ---- tabs --------------------------------------------------------------------------------
@@ -755,6 +811,10 @@ impl Workspace {
             self.activate(index);
             self.persist();
             return Ok(index);
+        }
+        if is_untitled_path(&path) {
+            // The key of a tab that has no file, and the tab is gone: nothing to read.
+            return Err(String::new());
         }
         match read_stable(&path) {
             Ok(loaded) => {
@@ -1104,6 +1164,13 @@ impl Workspace {
         let Some(tab) = self.tabs.get_mut(index) else {
             return false;
         };
+        if tab.untitled.is_some() {
+            // No file to read: the page is what the editor last sent.
+            if manual {
+                self.message(strings::UNTITLED_NO_FILE);
+            }
+            return false;
+        }
         if tab.doc.is_none() {
             self.load(index);
             self.dirty = true;
@@ -1261,19 +1328,144 @@ impl Workspace {
     }
 
     /// The editor is gone without a `live_off`: every live tab reads its file again, and one toast
-    /// says so. False when no tab was live.
+    /// says so. A document that has no file keeps the text it was last sent. False when no tab
+    /// was live.
     pub fn live_end_all(&mut self) -> bool {
         let live: Vec<usize> = (0..self.tabs.len())
             .filter(|&i| self.tabs[i].live)
             .collect();
         for &index in &live {
             self.tabs[index].live_pending = None;
-            self.reload_tab(index, false);
+            if self.tabs[index].untitled.is_some() {
+                self.tabs[index].live = false;
+                self.dirty = true;
+            } else {
+                self.reload_tab(index, false);
+            }
         }
         if !live.is_empty() {
-            self.message(strings::LIVE_EDITOR_GONE);
+            let unsaved = self.active_tab().is_some_and(Tab::is_untitled);
+            self.message(match unsaved {
+                true => strings::LIVE_EDITOR_GONE_UNSAVED,
+                false => strings::LIVE_EDITOR_GONE,
+            });
         }
         !live.is_empty()
+    }
+
+    // ---- a document the editor has not saved yet ----------------------------------------------
+
+    /// The editor sent the document it calls `doc`, which has no file: its `text` as it is now
+    /// (if given), the name its tab has there, and the caret's line. `open` is the editor's
+    /// "Preview in mdview": the document gets a tab if it has none, and that tab is shown. Without
+    /// `open` only a tab that already shows the document takes anything; nothing is opened and no
+    /// tab is switched, as for a file's live text. False when nothing took it.
+    ///
+    /// The tab's text is the editor's and nothing else: no file is read, watched or written for
+    /// it, a link or image given relative to the document finds nothing, and the tab is not
+    /// part of the session. It ends as a snapshot when the editor says the text is over
+    /// ([`document_off`](Self::document_off)) or is gone, and becomes a file's tab when the editor
+    /// saves the document ([`document_saved`](Self::document_saved)).
+    pub fn document_text(
+        &mut self,
+        doc: &str,
+        title: Option<&str>,
+        text: Option<String>,
+        line: Option<u32>,
+        open: bool,
+    ) -> bool {
+        let found = self.untitled_tab(doc);
+        let index = match found {
+            Some(index) => index,
+            None if open && text.is_some() => {
+                let title = title.unwrap_or(strings::UNTITLED);
+                let mut tab = Tab::unloaded(untitled_path(doc, title));
+                tab.untitled = Some(doc.to_string());
+                tab.missing = true;
+                // An empty page until the text is parsed, at the next frame.
+                tab.set_document(parse_bytes(b""), FileStamp::Missing);
+                self.tabs.push(tab);
+                self.relabel();
+                self.tabs.len() - 1
+            }
+            None => return false,
+        };
+        // The editor's tab was given another name.
+        if let Some(title) = title {
+            let path = untitled_path(doc, title);
+            if self.tabs[index].path != path {
+                self.tabs[index].path = path;
+                self.relabel();
+            }
+        }
+        if open {
+            self.activate(index);
+        }
+        match text {
+            Some(text) => self.tabs[index].live_pending = Some((text, line)),
+            None => {
+                if self.active == Some(index)
+                    && let Some(line) = line
+                {
+                    self.follow_line(line);
+                }
+            }
+        }
+        if found.is_none() {
+            self.persist();
+        }
+        self.dirty = true;
+        true
+    }
+
+    /// The editor no longer sends the text of `doc` (the preview was stopped, or its tab there
+    /// was closed): the tab keeps showing what it was last sent, without the live mark.
+    pub fn document_off(&mut self, doc: &str) -> bool {
+        let Some(index) = self.untitled_tab(doc) else {
+            return false;
+        };
+        let tab = &mut self.tabs[index];
+        tab.live_pending = None;
+        let was = std::mem::take(&mut tab.live);
+        self.dirty = true;
+        was
+    }
+
+    /// The editor saved `doc` as the file `path`: the tab that showed the document is that
+    /// file's tab from now on, read from disk, with the reader's place kept. If the file already
+    /// has a tab, that one stays and the document's tab closes, so the file is never open twice.
+    pub fn document_saved(&mut self, doc: &str, path: &Path) -> bool {
+        let Some(index) = self.untitled_tab(doc) else {
+            return false;
+        };
+        let path = canonical_or_absolute(path);
+        let twin =
+            (self.tabs.iter()).position(|t| t.untitled.is_none() && same_file(&t.path, &path));
+        if let Some(twin) = twin {
+            let shown = self.active == Some(index);
+            self.close(index);
+            if shown {
+                self.activate(twin - usize::from(twin > index));
+            }
+            return true;
+        }
+        let tab = &mut self.tabs[index];
+        tab.path = path.clone();
+        tab.untitled = None;
+        tab.missing = false;
+        tab.live_pending = None;
+        self.recents.add(path);
+        self.relabel();
+        // The file is the newest text now; reading it ends the live state as a save always did.
+        self.reload_tab(index, false);
+        self.persist();
+        self.dirty = true;
+        true
+    }
+
+    /// The tab that shows the editor's document `doc`, which has no file.
+    fn untitled_tab(&self, doc: &str) -> Option<usize> {
+        (self.tabs.iter()).position(|t| t.untitled.as_deref() == Some(doc))
     }
 
     /// Whether any tab shows the editor's text.
@@ -2340,7 +2532,7 @@ impl Workspace {
             link,
             has_selection: self.has_selection(),
             source,
-            editable: self.active_tab().is_some_and(|t| !t.is_missing()),
+            editable: (self.active_tab()).is_some_and(|t| !t.is_missing() && !t.is_untitled()),
         }
     }
 
@@ -2494,6 +2686,13 @@ impl Workspace {
         match classify_link(destination, &doc_dir) {
             LinkAction::Fragment(fragment) => self.jump_fragment(&fragment),
             LinkAction::External(url) => LinkOutcome::OpenUrl(url),
+            // A document that has no file has no folder either: a link given relative to it
+            // names nothing.
+            LinkAction::OpenMarkdown { path, .. } | LinkAction::OtherLocalFile(path)
+                if is_untitled_path(&path) =>
+            {
+                LinkOutcome::Refused(self.refuse(format!("not a file: {destination}")))
+            }
             LinkAction::OpenMarkdown { path, fragment } => self.open_markdown(&path, fragment),
             LinkAction::OtherLocalFile(_) => {
                 LinkOutcome::Refused(self.refuse(strings::ONLY_MARKDOWN_LINKS.to_string()))
@@ -4707,5 +4906,65 @@ A line of text here.
         // Without a session nothing is remembered, so nothing is looked up at launch.
         assert!(!Workspace::new(None).update_check_due(99 * day));
         _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_document_without_a_file_is_not_part_of_the_session() {
+        let dir = temp_dir("untitled-session");
+        let a = write(&dir, "a.md", "# A\n");
+        let b = write(&dir, "b.md", "# B\n");
+        let settings = dir.join("settings.ini");
+        {
+            let mut ws = Workspace::new(Some(settings.clone()));
+            ws.open(&a).unwrap();
+            assert!(ws.document_text(
+                "mdedit-1-1",
+                Some("Untitled 1"),
+                Some("# U\n".into()),
+                None,
+                true
+            ));
+            ws.open(&b).unwrap();
+            ws.move_tab(1, 2);
+            // a.md, b.md, Untitled 1; the document is the one showing.
+            ws.activate(2);
+            ws.apply_live();
+            assert!(ws.tabs()[2].is_untitled() && ws.tabs()[2].is_live());
+            assert!(!ws.recents().iter().any(|p| is_untitled_path(p)));
+            ws.save_session().unwrap();
+        }
+        let ws = Workspace::new(Some(settings.clone()));
+        let tabs: Vec<&Path> = ws.tabs().iter().map(Tab::path).collect();
+        assert_eq!(tabs, [a.as_path(), b.as_path()]);
+        // The active tab counts among the files: the last one, nearest to where the reader was.
+        assert_eq!(ws.active(), Some(1));
+        let text = std::fs::read_to_string(&settings).unwrap();
+        assert!(!text.contains("Untitled") && !text.contains('\0'), "{text}");
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_key_of_a_tab_without_a_file_is_no_files_path() {
+        let key = untitled_path("mdedit-1-1", "Untitled 1");
+        assert!(is_untitled_path(&key) && is_untitled_path(&key.parent().unwrap().join("pic.png")));
+        assert_eq!(file_name(&key), "Untitled 1");
+        assert!(!is_untitled_path(Path::new("/home/u/Untitled 1")));
+        // Nothing on disk answers to it, on any system: no file name holds a NUL.
+        assert!(std::fs::metadata(&key).is_err() && !key.exists());
+        assert_eq!(stamp(&key), FileStamp::Missing);
+        assert!(read_stable(&key).is_err());
+        // A name that would not do as the last part of a path is tidied, never trusted.
+        assert_eq!(file_name(&untitled_path("d", "a/b\\c\n")), "abc");
+        assert_eq!(file_name(&untitled_path("d", "  ")), "Untitled");
+        // Two documents of the same name are different tabs.
+        assert_ne!(
+            untitled_path("d1", "Untitled 1"),
+            untitled_path("d2", "Untitled 1")
+        );
+        // Opening the key of a tab that is gone opens nothing and says nothing (Back, after the
+        // tab was closed).
+        let mut ws = Workspace::new(None);
+        assert_eq!(ws.open(&key), Err(String::new()));
+        assert_eq!(ws.status(Instant::now()), None);
     }
 }

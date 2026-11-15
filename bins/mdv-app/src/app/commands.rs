@@ -203,7 +203,31 @@ impl App {
         let Some(path) = self.ws.tab(index).map(|t| t.path().to_path_buf()) else {
             return;
         };
+        // A document mdedit has not saved yet: there is no file to name or show, and the
+        // editor is asked for it by the name it gave.
+        let untitled = (self.ws.tab(index)).and_then(|t| {
+            Some((
+                t.untitled_doc()?.to_string(),
+                self.ws.labels().get(index)?.clone(),
+            ))
+        });
         match id {
+            C::CopyFilePath | C::ShowInFileManager if untitled.is_some() => {
+                self.ws
+                    .set_status(mdview_core::commands::strings::UNTITLED_NO_FILE);
+            }
+            C::EditInMdedit if untitled.is_some() => {
+                let (doc, title) = untitled.unwrap_or_default();
+                let request = Request {
+                    line: self.ws.source_line(index),
+                    from: Some("mdview".into()),
+                    ..Request::document(doc, title)
+                };
+                if !mdshared_app::sister::send("mdedit", &request) {
+                    self.ws
+                        .set_status(mdview_core::commands::strings::EDITOR_NOT_RUNNING);
+                }
+            }
             C::CloseTab => {
                 self.ws.close(index);
             }
@@ -353,6 +377,7 @@ impl App {
     pub(super) fn start_dir(&self) -> Option<PathBuf> {
         self.ws
             .active_tab()
+            .filter(|t| !t.is_untitled())
             .and_then(|t| t.path().parent().map(Path::to_path_buf))
             .or_else(|| self.ws.folder().map(Path::to_path_buf))
     }
@@ -580,6 +605,15 @@ impl App {
     pub(super) fn handed_over(&mut self, requests: Vec<Request>) {
         let mut follow: Option<&Request> = None;
         for request in &requests {
+            if let Some(doc) = request.doc.as_deref() {
+                // A document mdedit has not saved: by its name, not by a path. Saved, it
+                // comes with its file, and is then followed like any file.
+                if request.path.as_os_str().is_empty() {
+                    self.handed_document(doc, request);
+                    continue;
+                }
+                self.ws.document_saved(doc, &request.path);
+            }
             if request.live_off {
                 self.ws.live_off(&request.path);
             } else if let Some(text) = &request.text {
@@ -606,6 +640,18 @@ impl App {
             w.set_minimized(false);
             w.focus_window();
         }
+    }
+
+    /// What the editor asked for the document `doc`, which has no file: to show it (`open`),
+    /// its text as it is now, the caret's line, or that its text is over.
+    fn handed_document(&mut self, doc: &str, request: &Request) {
+        if request.live_off {
+            self.ws.document_off(doc);
+            return;
+        }
+        let title = request.title.as_deref();
+        let text = request.text.clone();
+        (self.ws).document_text(doc, title, text, request.line, request.open);
     }
 
     /// Moves and resizes the window to `rect` (physical screen px), or says it cannot be done.

@@ -1369,6 +1369,12 @@ fn shot(mut app: App, path: &Path) -> i32 {
         (lw as f32 * app.scale).round() as u32,
         (lh as f32 * app.scale).round() as u32,
     );
+    // A document mdedit has not saved, as its "Preview in mdview" would hand it over.
+    if let Some(text) =
+        (app.args.demo_untitled.as_deref()).and_then(|file| std::fs::read_to_string(file).ok())
+    {
+        (app.ws).document_text("mdedit-0-1", Some("Untitled 1"), Some(text), None, true);
+    }
     app.compose();
     if let Some(px) = app.args.scroll {
         app.ws.scroll_to(px * app.scale);

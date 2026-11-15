@@ -62,6 +62,10 @@ pub struct Args {
     /// Show the update bar at this stage (`available`, `installing` or `installed`) with a
     /// made-up version, for a shot. Nothing is looked up or downloaded.
     pub update_bar: Option<String>,
+    /// `--demo-untitled <file>`: show the text of `file` as a document mdedit previews
+    /// before it has a file (a tab named "Untitled 1", live), for a shot. No editor is
+    /// asked or needed.
+    pub demo_untitled: Option<PathBuf>,
     /// Look for a newer version, print the answer, and exit. No window.
     pub check_update: bool,
     /// Scroll this many wheel steps after the first frame, log timings, and exit.
@@ -129,6 +133,7 @@ impl Args {
                 "--focus-mode" => out.focus_mode = true,
                 "--load-remote" => out.load_remote = true,
                 "--update-bar" => out.update_bar = value(&a),
+                "--demo-untitled" => out.demo_untitled = value(&a).map(PathBuf::from),
                 "--check-update" => out.check_update = true,
                 "--maximize" => out.maximize = true,
                 "--follow" => out.follow = true,

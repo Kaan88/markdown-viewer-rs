@@ -117,6 +117,13 @@ shot update-available --light --update-bar available "$fx/showcase.md"
 shot update-installing --dark --update-bar installing "$fx/showcase.md"
 shot update-installed --dark --update-bar installed
 
+# A document mdedit previews before it has a file: a tab under the editor's name, live, with
+# its images and links shown as missing; its tab menu (no path to copy or show) and its tooltip.
+shot untitled-live --light --demo-untitled "$fx/images.md" "$fx/tables.md"
+shot untitled-live-dark --dark --demo-untitled "$fx/showcase.md"
+shot untitled-tab-menu --light --menu tab --demo-untitled "$fx/images.md" "$fx/tables.md"
+shot untitled-tip --dark --hover 70,18 --demo-untitled "$fx/images.md"
+
 # A menu taller than its window: kept below the title row, scrolling, and scrolled to its end.
 shot menu-tall-main --light --size 1000x520 --menu main
 shot menu-tall-main-end --light --size 1000x520 --menu main-end

@@ -248,7 +248,7 @@ pub fn tooltip(hit: Hit, ws: &Workspace, maximized: bool) -> Option<String> {
         }
     };
     Some(match hit {
-        Hit::Tab(i) => ws.tab(i)?.path().display().to_string(),
+        Hit::Tab(i) => ws.tab(i)?.describe(),
         Hit::TabClose(_) => with("Close tab", CommandId::CloseTab),
         Hit::NewTab => with("Open files", CommandId::OpenFiles),
         Hit::LeaveFocus => "Leave focus mode (Escape)".into(),
