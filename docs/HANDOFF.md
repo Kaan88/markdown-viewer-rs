@@ -11,6 +11,30 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## START HERE: mdview 0.5.0 is released (2026-11-15)
+
+**The released state is `main`, mdview 0.5.0, tag `v0.5.0` at `6470ece`, published with mdedit
+0.7.0 the same day (the owner's instruction: finish the remaining items, then release). Shared
+crates: `main` of markdown-shared-rs at `065cbdc`. What 0.5.0 added is in "After 0.4.0: gaps
+closed" below and in `docs/release-notes/0.5.0.md`; the release record is in `docs/UPDATE.md`.
+The owner has not looked at any of the new interface work.** The text under the next heading
+describes 0.4.0 and is kept for its detail.
+
+Measured on the Windows PC on 2026-11-15 (plain `--release` build of the 0.5.0 source,
+`--no-session`, median of 5 warm runs): window shown 51 ms with no file, 81 ms with
+`showcase.md`, 104 ms with a 5 MB document (its page is fully refined after 1.27 s); private
+bytes about 3 s after start 12.4, 25.2 and 38.6 MiB. A build with `opt-level = "s"` for the whole
+workspace is 2.0 MB smaller (`mdview.exe` 7,087,104 against 9,066,496 bytes) and 5 to 17 % slower,
+with the same memory: the profile stays as it is. Not measured: scroll and idle CPU, cold launch,
+engine job time, the static dist build.
+
+Known open points: `<bdo>` is not built (the text layout has no per-range direction); no key
+opens a menu, so access keys need a menu opened by mouse and Alt; the Recent menu has no access
+keys; on Linux one test of the page following the caret upward allows one row of slack and the
+cause is not found; the KDE blur was never run; the snap-layouts flyout was checked by window
+messages only. Not planned by decision of the session, the owner may overrule: speaker notes and
+slide transitions, the system accent colour, Mica Alt.
+
 ## START HERE: mdview 0.4.0 is released (2026-11-15)
 
 **Later on 2026-11-15, not released: branch `f/adopt-shared` holds the gaps closed after 0.4.0 (Copy as
