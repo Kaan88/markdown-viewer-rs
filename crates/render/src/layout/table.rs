@@ -11,6 +11,7 @@
 //! their cells. [`content_width`] and [`column_widths`] hold that arithmetic, which the height
 //! estimate uses as well.
 
+use super::floats::band;
 use super::inline::Inline;
 use super::pager::{Pager, Txt};
 use super::paint::Paint;
@@ -61,7 +62,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
         }
         let table_attrs = self.doc.attrs_of(b).copied();
-        let (column_left, full) = (left, width);
+        let full = width;
         let row_count = rows.len();
         // Row heights the document asks for, in device px; a cell's `height` counts for its row.
         let mut asked_heights = vec![0f32; row_count];
@@ -141,6 +142,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
         }
         if columns == 0 || row_count == 0 {
+            self.clear_floats(left, full);
             self.captions(&captions, left, full, left + full / 2.0);
             return;
         }
@@ -246,17 +248,33 @@ impl<'a, 'b> Pager<'a, 'b> {
         // wider than the room it stands in; `align`, its own or that of a `<div>` or `<center>`
         // around it, then says where in that room it stands.
         let min_total: f32 = asks.iter().map(|ask| ask.min).sum();
-        let width = match table_attrs.and_then(|a| a.width) {
-            Some(asked) => {
-                let asked = match asked {
-                    Length::Px(px) => self.px(px as f32),
-                    Length::Percent(p) => full * f32::from(p) / 100.0,
-                };
-                asked.max(self.px(40.0)).max(min_total + 2.0 * hr).round()
+        let asked = table_attrs.and_then(|a| a.width).map(|asked| match asked {
+            Length::Px(px) => (self.px(px as f32), 0.0),
+            Length::Percent(p) => (0.0, f32::from(p) / 100.0),
+        });
+        let floor = self.px(40.0).max(min_total + 2.0 * hr);
+        let table_width = |room: f32| {
+            match asked {
+                Some((px, share)) => (px + room * share).max(floor).round(),
+                None => content_width(&asks, room - 2.0 * hr).ceil() + 2.0 * hr,
             }
-            None => content_width(&asks, full - 2.0 * hr).ceil() + 2.0 * hr,
-        }
-        .min(full);
+            .min(room)
+        };
+        // Beside open floats the table keeps the width it has in a free column. It stands in the
+        // room they leave when that holds it, centred or aligned in that room, and otherwise
+        // starts below them, in the full column.
+        let (column_left, full, left) = if self.floats.is_empty() {
+            (left, full, left)
+        } else {
+            let (lo, hi) = band(&self.floats, left, left + full, self.y, f32::MAX);
+            if table_width(full) <= hi - lo {
+                (lo, hi - lo, lo)
+            } else {
+                self.clear_floats(left, full);
+                (left, full, left)
+            }
+        };
+        let width = table_width(full);
         let align = match table_attrs.map_or(Align::None, |a| a.align) {
             Align::None => self.inherited_align(b),
             align => align,

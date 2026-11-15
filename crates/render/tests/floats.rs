@@ -154,10 +154,12 @@ fn the_blocks_after_a_floated_image_run_beside_it_and_then_full_width() {
 #[test]
 fn a_block_that_cannot_narrow_starts_below_the_float() {
     let options = options(780.0, 1.0);
-    let doc = mdview_core::parse(
+    // Wider than the 484 px the image leaves of the 700 px column.
+    let wide = "a sentence that is long enough to keep this cell on one line";
+    let doc = mdview_core::parse(&format!(
         "<img src=\"assets/tall.png\" width=\"200\" align=\"right\">\n\nBeside.\n\n\
-         | a | b |\n|---|---|\n| one | two |\n\nAfter.\n",
-    );
+         | a | b |\n|---|---|\n| {wide} | {wide} |\n\nAfter.\n"
+    ));
     let page = render(&doc, &options);
     // 0 the image, 1 the paragraph, 2 the table.
     let table = page.blocks[2];
@@ -890,5 +892,101 @@ fn clears_lay_out_the_same_whatever_order_the_blocks_were_measured_in() {
         &full,
         &jumped.layout_exact(&doc, &options).clone(),
         "jumped",
+    );
+}
+
+/// The first and last column of `columns` in `row` that differ from the page's background.
+fn painted(
+    r: &mdview_render::Rendered,
+    row: usize,
+    columns: std::ops::Range<usize>,
+) -> Option<(usize, usize)> {
+    let width = r.bitmap.width as usize;
+    let at = |x: usize| &r.bitmap.pixels[(row * width + x) * 4..][..4];
+    let background = at(1).to_vec();
+    let first = columns.clone().find(|&x| at(x) != background.as_slice())?;
+    let last = columns.rev().find(|&x| at(x) != background.as_slice())?;
+    Some((first, last))
+}
+
+/// The first row of top-level block `index` with anything drawn in `columns`, and what is drawn.
+fn first_painted(
+    r: &mdview_render::Rendered,
+    index: usize,
+    columns: std::ops::Range<usize>,
+) -> (usize, (usize, usize)) {
+    rows_of(r, index)
+        .find_map(|row| painted(r, row, columns.clone()).map(|p| (row, p)))
+        .expect("the block is drawn")
+}
+
+#[test]
+fn a_table_that_fits_beside_a_float_stands_beside_it() {
+    let options = options(780.0, 1.0);
+    // The image is 200 wide and 280 tall, so 484 px of the 700 px column are left.
+    let doc = |side: &str, table: &str| {
+        mdview_core::parse(&format!(
+            "<img src=\"assets/tall.png\" width=\"200\" align=\"{side}\">\n\nBeside.\n\n{table}\n\nAfter.\n\nLast.\n"
+        ))
+    };
+    let small = "| a | b |\n|---|---|\n| one | two |";
+    // 0 the image, 1 Beside, 2 the table, 3 After, 4 Last.
+    let page = render(&doc("right", small), &options);
+    let image_bottom = page.blocks[0].y + 280.0;
+    let (row, (first, last)) = first_painted(&page, 2, 0..530);
+    assert!(
+        (row as f32) < image_bottom,
+        "the table starts level with the image: {row}"
+    );
+    assert!(
+        first < 60 && last < 540,
+        "at the left, short of the image: {first}..{last}"
+    );
+    // The text after it still runs beside the image.
+    assert!((ink_top(&page, 3) as f32) < image_bottom);
+
+    // At the left it stands after the image and its gap.
+    let page = render(&doc("left", small), &options);
+    let (row, (first, _)) = first_painted(&page, 2, 200..780);
+    assert!(
+        (row as f32) < page.blocks[0].y + 280.0 && first >= 200,
+        "{row} {first}"
+    );
+
+    // One that is too wide, or asks for the full width, starts below the image.
+    let wide = "a sentence that is long enough to keep this cell on one line";
+    for table in [
+        format!("| a | b |\n|---|---|\n| {wide} | {wide} |"),
+        "<table width=\"100%\"><tr><td>x</td></tr></table>".to_string(),
+    ] {
+        let page = render(&doc("right", &table), &options);
+        let (row, _) = first_painted(&page, 2, 0..530);
+        assert!(
+            row as f32 >= page.blocks[0].y + 280.0,
+            "below the image: {row} for {table}"
+        );
+    }
+}
+
+#[test]
+fn a_table_beside_a_float_lays_out_the_same_in_every_order() {
+    let options = options(780.0, 1.0);
+    let mut md = String::from("<img src=\"assets/tall.png\" width=\"200\" align=\"right\">\n\n");
+    for i in 0..3 {
+        md.push_str(&format!("Paragraph {i}. {WORDS}\n\n"));
+    }
+    md.push_str("| a | b |\n|---|---|\n| one | two |\n\n");
+    for i in 3..30 {
+        md.push_str(&format!("Paragraph {i}. {WORDS}\n\n"));
+    }
+    let doc = mdview_core::parse(&md);
+    let full = eager(&doc, &options);
+    let mut renderer = DocumentRenderer::new();
+    renderer.layout(&doc, &options);
+    refine_all(&mut renderer, &doc, &options);
+    same_positions(
+        &full,
+        &renderer.layout_exact(&doc, &options).clone(),
+        "refined",
     );
 }

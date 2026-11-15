@@ -311,11 +311,9 @@ impl<'a, 'b> Pager<'a, 'b> {
                 });
                 self.y += h + self.px(16.0);
             }
-            BlockKind::Table => {
-                // A table keeps its width: it starts below any float.
-                self.clear_floats(left, width);
-                self.table(b, left, width);
-            }
+            // A table keeps its width: it stands beside a float when it fits there, else it
+            // starts below (`table` decides).
+            BlockKind::Table => self.table(b, left, width),
             BlockKind::TableRow { .. } | BlockKind::TableCell { .. } => {
                 // Only reached outside a table, which the model's shape promise rules out.
                 self.blocks(b, left, width, color, depth + 1);
