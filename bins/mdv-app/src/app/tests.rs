@@ -3368,3 +3368,46 @@ fn underlines_follow_how_the_menu_was_opened_and_alt_shows_them() {
     a.ui.popup.as_mut().unwrap().show_access();
     assert!(a.ui.popup.as_ref().unwrap().access);
 }
+
+/// In a restored window the vertical scrollbars at the right edge (the page with the Outline pane
+/// closed, the Outline pane's list) can be grabbed: the resize band over their track is only the
+/// outermost pixels, which the thumb does not cover, and the rest of the right edge, the corners
+/// and the other edges still resize.
+#[test]
+fn the_scrollbar_at_the_right_edge_is_not_covered_by_the_resize_band() {
+    use winit::window::ResizeDirection as D;
+    let mut a = app(&["everything.md"]);
+    let (w, h) = a.logical();
+    // The Outline pane at the window's edge.
+    let track = rect(&a, Hit::ScrollBar(Scroller::Pane(Side::Outline)));
+    assert!((track.right() - w).abs() < 0.5, "the bar is at the edge");
+    let y = track.cy();
+    for dx in [4.0, 6.0, 7.5, 11.0] {
+        assert_eq!(a.resize_band(w - dx, y), None, "outline, {dx} px in");
+        assert_eq!(
+            a.hit_at(w - dx, y),
+            Some(Hit::ScrollBar(Scroller::Pane(Side::Outline)))
+        );
+    }
+    assert_eq!(a.resize_band(w - 1.0, y), Some(D::East));
+    assert_eq!(a.resize_band(w - 6.0, h - 4.0), Some(D::SouthEast));
+    assert_eq!(a.resize_band(w - 6.0, 2.0), Some(D::NorthEast));
+    assert_eq!(a.resize_band(2.0, y), Some(D::West));
+    assert_eq!(a.resize_band(w / 2.0, h - 2.0), Some(D::South));
+    assert_eq!(a.resize_band(w / 2.0, 2.0), Some(D::North));
+    // The page with the Outline pane closed.
+    click(&mut a, Hit::Bar(BarItem::Outline));
+    let track = rect(&a, Hit::ScrollBar(Scroller::Page));
+    assert!((track.right() - w).abs() < 0.5, "the bar is at the edge");
+    let y = track.cy();
+    for dx in [4.0, 6.0, 7.5, 11.0] {
+        assert_eq!(a.resize_band(w - dx, y), None, "page, {dx} px in");
+        assert_eq!(
+            a.hit_at(w - dx, y),
+            Some(Hit::ScrollBar(Scroller::Page))
+        );
+    }
+    assert_eq!(a.resize_band(w - 1.0, y), Some(D::East));
+    // With no scrollbar beside the point the old band stands.
+    assert_eq!(a.resize_band(w - 6.0, 24.0), Some(D::East));
+}
