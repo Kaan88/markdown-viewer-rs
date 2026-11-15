@@ -935,7 +935,13 @@ fn the_main_menu_holds_what_people_use_while_reading_and_fits_the_window() {
     a.open_popup(PopupKind::Main);
     a.compose();
     let p = a.ui.popup.as_ref().expect("the menu");
-    let labels: Vec<_> = p.menu.items.iter().map(|i| i.label.as_str()).collect();
+    let shown: Vec<String> = p
+        .menu
+        .items
+        .iter()
+        .map(|i| mdshared_ui::menu::parse_access(&i.label).text)
+        .collect();
+    let labels: Vec<&str> = shown.iter().map(String::as_str).collect();
     for gone in [
         "Always load remote images",
         "Tick task boxes without asking",
@@ -2117,7 +2123,7 @@ fn export_and_print_are_in_the_tab_menu_and_the_palette_and_need_a_document() {
             .iter()
             .find(|i| i.id == Act::TabCmd(id, 0))
             .unwrap_or_else(|| panic!("{id:?} is not in the tab menu"));
-        assert_eq!(item.label, label);
+        assert_eq!(mdshared_ui::menu::parse_access(&item.label).text, label);
         assert!(item.enabled);
         assert!(!overlays::command_icon(id).is_empty());
     }
@@ -2632,7 +2638,7 @@ fn the_page_menu_offers_copy_as_markdown_after_copy_and_greyed_without_a_selecti
             .iter()
             .position(|i| matches!(i.id, crate::ui::Act::Cmd(CommandId::CopyMarkdown)))
             .expect("the item");
-        assert_eq!(items[at].label, "Copy as Markdown");
+        assert_eq!(items[at].label, "Copy as &Markdown");
         assert_eq!(items[at].enabled, has);
         assert!(matches!(items[at - 1].id, crate::ui::Act::Copy));
     }
@@ -3187,4 +3193,142 @@ fn resting_on_an_abbreviation_shows_its_title_and_text_beside_it_shows_none() {
     // Away from it, no card.
     a.pointer_moved(900.0, 500.0);
     assert!(a.ui.card.is_none());
+}
+
+// ---- access keys in menus ------------------------------------------------------------------------
+
+/// The access key of every item of a menu, each item having one, no two the same.
+fn assert_distinct_access_keys(items: &[crate::menu::Item<Act>], what: &str) {
+    let mut seen: Vec<char> = Vec::new();
+    for item in items {
+        let key = mdshared_ui::menu::access_key_of(&item.label)
+            .unwrap_or_else(|| panic!("{what}: {:?} has no access key", item.label));
+        let lower: String = key.to_lowercase().collect();
+        let key = lower.chars().next().unwrap();
+        assert!(!seen.contains(&key), "{what}: {key} is used twice");
+        seen.push(key);
+        let plain = mdshared_ui::menu::parse_access(&item.label).text;
+        assert!(
+            plain.to_lowercase().contains(key),
+            "{what}: {:?} does not contain its key",
+            item.label
+        );
+    }
+}
+
+#[test]
+fn every_menu_with_fixed_labels_has_one_access_key_per_item() {
+    use crate::workspace::PageContext;
+    let a = app(&["showcase.md", "tables.md"]);
+    let main = overlays::main_menu(&a.ws, &a.ui, 0.0, 0.0);
+    assert_distinct_access_keys(&main.items, "main menu");
+    assert_distinct_access_keys(&overlays::tab_menu(&a.ws, 0, 0.0, 0.0).items, "tab menu");
+    assert_distinct_access_keys(
+        &overlays::find_menu(true, true, 0.0, 0.0).items,
+        "find menu",
+    );
+    // Every combination of what the page menu offers.
+    for link in [None, Some("https://example.com".to_string())] {
+        for source in [
+            None,
+            Some((mdview_render::SourceKind::Formula, "x".to_string())),
+            Some((mdview_render::SourceKind::Diagram, "a-->b".to_string())),
+        ] {
+            let ctx = PageContext {
+                link: link.clone(),
+                source,
+                has_selection: true,
+                editable: true,
+            };
+            let menu = overlays::page_menu(&ctx, 0.0, 0.0);
+            assert_distinct_access_keys(&menu.items, "page menu");
+        }
+    }
+}
+
+#[test]
+fn the_recent_menu_stays_out_of_access_keys_because_its_labels_are_file_names() {
+    let mut a = app(&["showcase.md"]);
+    a.open_popup(PopupKind::Recent);
+    a.compose();
+    let p = a.ui.popup.as_ref().expect("the menu");
+    assert!(
+        p.menu.items.iter().all(|i| !i.label.contains('&')),
+        "no marks were added to it"
+    );
+    // A letter does nothing in it.
+    key(&mut a, KeyName::Char('m'), Some("m"));
+    assert!(a.ui.popup.is_some());
+}
+
+#[test]
+fn a_letter_picks_the_marked_item_of_the_open_menu_like_enter() {
+    let mut a = app(&["showcase.md", "tables.md"]);
+    click(&mut a, Hit::Bar(BarItem::More));
+    assert_eq!(a.ui.popup_kind(), Some(PopupKind::Main));
+    let tabs = a.ws.tab_count();
+    // "Close &all tabs", typed in capitals too.
+    key(&mut a, KeyName::Char('a'), Some("A"));
+    assert!(a.ui.popup.is_none(), "the menu closed");
+    assert_eq!(a.ws.tab_count(), 0, "{tabs} tabs were closed");
+
+    // A letter nothing is marked with changes nothing.
+    let mut a = app(&["showcase.md"]);
+    click(&mut a, Hit::Bar(BarItem::More));
+    key(&mut a, KeyName::Char('j'), Some("j"));
+    assert_eq!(a.ui.popup_kind(), Some(PopupKind::Main));
+
+    // With Ctrl held it is a shortcut, not an access key: the menu stays and nothing is closed.
+    a.mods = Mods {
+        ctrl: true,
+        shift: false,
+        alt: false,
+    };
+    key(&mut a, KeyName::Char('a'), Some("a"));
+    a.mods = Mods::default();
+    assert_eq!(a.ui.popup_kind(), Some(PopupKind::Main));
+    assert_eq!(a.ws.tab_count(), 1);
+}
+
+#[test]
+fn an_access_key_of_a_submenu_item_opens_the_submenu_with_the_item_highlighted() {
+    let mut a = app(&["showcase.md"]);
+    click(&mut a, Hit::Bar(BarItem::More));
+    key(&mut a, KeyName::Char('r'), Some("r"));
+    let p = a.ui.popup.as_ref().expect("still open");
+    assert!(p.sub.is_some(), "Open recent opened beside the menu");
+}
+
+#[test]
+fn a_disabled_item_is_not_picked_by_its_letter() {
+    let mut a = app(&["showcase.md"]);
+    // No folder is open: "Find in folder" is disabled.
+    click(&mut a, Hit::Bar(BarItem::More));
+    key(&mut a, KeyName::Char('f'), Some("f"));
+    assert_eq!(a.ui.popup_kind(), Some(PopupKind::Main));
+    assert!(a.ui.palette.is_none());
+}
+
+#[test]
+fn underlines_follow_how_the_menu_was_opened_and_alt_shows_them() {
+    let mut a = app(&["showcase.md"]);
+    // By the pointer: hidden.
+    click(&mut a, Hit::Bar(BarItem::More));
+    assert!(!a.ui.popup.as_ref().unwrap().access);
+    a.ui.popup = None;
+    // Opened while Alt is held: shown.
+    a.mods = Mods {
+        ctrl: false,
+        shift: false,
+        alt: true,
+    };
+    a.open_popup(PopupKind::Main);
+    assert!(a.ui.popup.as_ref().unwrap().access);
+    a.mods = Mods::default();
+    // A menu from the pointer shows them once Alt is pressed.
+    a.ui.popup = None;
+    a.open_popup(PopupKind::Main);
+    assert!(!a.ui.popup.as_ref().unwrap().access);
+    a.ui.popup.as_mut().unwrap().show_access();
+    assert!(a.ui.popup.as_ref().unwrap().access);
 }

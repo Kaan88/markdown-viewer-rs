@@ -749,6 +749,13 @@ impl App {
                     }
                 }
                 KeyName::Escape => self.ui.popup = None,
+                // A letter picks the item marked with it, as Enter would (menus that read no
+                // access keys answer None and the key does nothing, as before).
+                KeyName::Char(ch) if !mods.ctrl && !mods.alt => {
+                    if let Some(act) = p.menu.access_key(ch) {
+                        self.choose(act, true);
+                    }
+                }
                 _ => {}
             }
             return;

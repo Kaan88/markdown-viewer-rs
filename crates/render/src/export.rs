@@ -1336,6 +1336,24 @@ mod tests {
     }
 
     #[test]
+    fn vue_and_svelte_code_blocks_are_highlighted() {
+        let vue = "```vue\n<template><p :id=\"id\">{{ msg }}</p></template>\n<script setup lang=\"ts\">\nconst msg = 'hi'\n</script>\n```\n";
+        let svelte = "```svelte\n<script>\n  let n = 0;\n</script>\n{#if n > 1}<b on:click={() => n++}>{n}</b>{/if}\n```\n";
+        for (md, lang) in [(vue, "vue"), (svelte, "svelte")] {
+            let html = export(md);
+            let b = body(&html);
+            assert!(b.contains(&format!("<pre data-lang=\"{lang}\">")), "{b}");
+            // More than one colour: markup, script and expressions are told apart.
+            let colours: std::collections::HashSet<&str> = b
+                .split("color:#")
+                .skip(1)
+                .filter_map(|s| s.get(..6))
+                .collect();
+            assert!(colours.len() >= 3, "{lang}: {colours:?}");
+        }
+    }
+
+    #[test]
     fn a_formula_or_diagram_without_the_engine_keeps_its_source() {
         // Whether or not the engine is installed where the tests run, the source is not lost.
         let html = export("$$\nx^2\n$$\n\n```mermaid\ngraph TD; A-->B\n```\n");

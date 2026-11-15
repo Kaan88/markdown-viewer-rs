@@ -51,6 +51,7 @@ shot empty-dark --dark
 # Every menu, in both themes where it matters; `cascade` is Open recent beside the main menu.
 shot menu-main-light --light --menu main "$fx/showcase.md"
 shot menu-main-dark --dark --menu main "$fx/showcase.md"
+shot menu-main-keys --light --menu main-keys "$fx/showcase.md"
 shot menu-recent --light --menu recent "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
 shot menu-cascade-light --light --menu cascade "$fx/showcase.md" "$fx/tables.md"
 shot menu-cascade-dark --dark --menu cascade "$fx/showcase.md" "$fx/tables.md"

@@ -285,6 +285,19 @@ pub fn tooltip(hit: Hit, ws: &Workspace, maximized: bool) -> Option<String> {
 
 // ---- title row -------------------------------------------------------------------------------
 
+/// The maximize button in a window `w` logical px wide: second from the right, below the top
+/// resize band (which answers with its resize cursor and press first) unless maximized.
+pub fn max_button_rect(w: f32, maximized: bool) -> Rect {
+    let b = win_button_rect(w - WIN_BTN_W, 0);
+    // A maximized window has no resize band.
+    let top = if maximized {
+        0.0
+    } else {
+        mdshared_ui::window::EDGE
+    };
+    Rect::new(b.x, top, b.w, (b.h - top).max(0.0))
+}
+
 /// Draws the title row into `r` (the full window width, `TITLE_H` tall).
 pub fn draw_title(c: &mut Ctx, ws: &Workspace, ui: &Ui, r: Rect, maximized: bool) {
     let pal = *c.pal;
@@ -640,6 +653,23 @@ fn draw_find(c: &mut Ctx, ui: &mut Ui, frame: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maximize_button_rect_is_the_drawn_button_below_the_resize_band() {
+        let w = 1280.0;
+        let drawn = win_button_rect(w - WIN_BTN_W, 0);
+        let r = max_button_rect(w, false);
+        assert_eq!((r.x, r.w, r.right()), (drawn.x, drawn.w, drawn.right()));
+        assert_eq!(r.y, mdshared_ui::window::EDGE);
+        assert_eq!(r.bottom(), drawn.bottom());
+        // The close button is to its right, so the rectangle ends before the window's right edge.
+        assert!(r.right() < w);
+        // Maximized: no band, the whole button.
+        assert_eq!(max_button_rect(w, true), drawn);
+        // The point the user sees as the button is inside it, the top band is not.
+        assert!(r.contains(drawn.cx(), drawn.cy()));
+        assert!(!r.contains(drawn.cx(), 2.0));
+    }
 
     fn text() -> BarText {
         BarText {

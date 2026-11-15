@@ -370,7 +370,11 @@ impl App {
             PopupKind::Recent => overlays::recent_menu(&self.ws, x, y, right),
             _ => return,
         };
-        self.ui.popup = Some(Popup::new(kind, menu));
+        let mut popup = Popup::new(kind, menu);
+        if self.mods.alt {
+            popup.show_access();
+        }
+        self.ui.popup = Some(popup);
         self.ui.tip = None;
     }
 

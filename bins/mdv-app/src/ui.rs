@@ -217,18 +217,33 @@ pub struct Popup {
     pub sub: Option<Menu<Act>>,
     /// The submenu item the pointer rests on and when its submenu opens by itself.
     pub dwell: Option<(usize, Instant)>,
+    /// The marked letters of the items are underlined: the menu was opened with Alt held, or Alt
+    /// was pressed since (the Windows convention; a menu opened with the pointer shows none).
+    pub access: bool,
 }
 
 /// How long the pointer rests on an item that leads to a submenu before it opens, as in Windows.
 pub const SUBMENU_DWELL: Duration = Duration::from_millis(300);
 
 impl Popup {
-    pub fn new(kind: PopupKind, menu: Menu<Act>) -> Popup {
+    pub fn new(kind: PopupKind, mut menu: Menu<Act>) -> Popup {
+        menu.set_access_visible(false);
         Popup {
             kind,
             menu,
             sub: None,
             dwell: None,
+            access: false,
+        }
+    }
+
+    /// Underlines the access keys of the menu and its submenu (a menu that does not read access
+    /// keys has none to show).
+    pub fn show_access(&mut self) {
+        self.access = true;
+        self.menu.set_access_visible(true);
+        if let Some(s) = self.sub.as_mut() {
+            s.set_access_visible(true);
         }
     }
 

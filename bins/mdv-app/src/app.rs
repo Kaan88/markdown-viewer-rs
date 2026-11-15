@@ -169,6 +169,9 @@ struct App {
     /// Device px.
     size: (u32, u32),
     maximized: bool,
+    /// The maximize button's rectangle last given to the snap-layouts hook (`None` is a value
+    /// too: "not answering"); the outer `None` is "nothing given yet".
+    snap_sent: Option<Option<Rect>>,
     /// The window's drop shadow (Linux: KWin's protocol, or the client-drawn margin where the
     /// compositor has none); `None` everywhere else. With the margin, `size` is the CONTENT size
     /// (the surface minus the margin on every side) and `present` puts the content inside it.
@@ -264,6 +267,7 @@ impl App {
             scale: 1.0,
             size: (1, 1),
             maximized: false,
+            snap_sent: None,
             shadow: None,
             frost: crate::frost::Frost::default(),
             focused: true,
@@ -429,12 +433,22 @@ impl App {
             return;
         };
         #[cfg(windows)]
-        let handle = hwnd(&window);
+        let mut sys = mdshared_ui::frost::WindowSystem(hwnd(&window));
+        // KDE Plasma (Wayland) blurs behind the window by a request on its own connection; other
+        // desktops answer "not available".
         #[cfg(not(windows))]
-        let handle = None;
-        let _ = &window;
-        let mut sys = mdshared_ui::frost::WindowSystem(handle);
-        if self.frost.sync(want, self.focused, &self.pal, &mut sys) {
+        let mut sys = mdshared_ui::frost::BlurSystem(&window);
+        let changed = self.frost.sync(want, self.focused, &self.pal, &mut sys);
+        // The window's pixels carry alpha while the chrome is frosted (the client-drawn margin of
+        // the shadow needs it too), or the compositor blurs behind an opaque rectangle. Patched
+        // softbuffer; Windows does not use it.
+        #[cfg(not(windows))]
+        if let Some(surface) = self.surface.as_mut() {
+            surface.set_premultiplied_alpha(
+                self.frost.wants_alpha() || self.shadow.as_ref().is_some_and(|s| s.wants_alpha()),
+            );
+        }
+        if changed {
             // Every mark goes: the regions put theirs back when they are drawn frosted.
             for px in self.screen.pixels.as_chunks_mut::<4>().0 {
                 px[3] = 255;
@@ -736,6 +750,7 @@ impl App {
                     p.kind,
                     (p.menu.hover, p.menu.scroll().to_bits()),
                     p.menu.items.len(),
+                    p.access,
                     p.sub
                         .as_ref()
                         .map(|s| (s.hover, s.items.len(), s.scroll().to_bits())),
@@ -994,6 +1009,7 @@ impl App {
 
     fn draw(&mut self) {
         let (mut damage, mut times) = self.compose();
+        self.sync_snap();
         if std::mem::take(&mut self.expose) {
             damage = vec![(0, 0, self.screen.width as i32, self.screen.height as i32)];
         }
@@ -1201,6 +1217,25 @@ impl App {
             .flat_map(|v| v.iter())
             .find(|(h, _)| *h == hit)
             .map(|(_, r)| *r)
+    }
+
+    /// Tells the system where the maximize button is, so Windows 11 shows the snap-layouts flyout
+    /// over it; `None` while the title row's buttons are not there to be pressed: a dialog, the
+    /// settings or the palette over it, a presentation, full screen. Runs after every composed
+    /// frame, which every resize, maximize and scale change brings, and sends only a change.
+    fn sync_snap(&mut self) {
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        let covered = self.ui.dialog.is_some()
+            || self.ui.modal()
+            || self.ui.present.is_some()
+            || window.fullscreen().is_some();
+        let rect = (!covered).then(|| chrome::max_button_rect(self.logical().0, self.maximized));
+        if self.snap_sent != Some(rect) {
+            self.snap_sent = Some(rect);
+            mdshared_ui::snap::set_maximize_button_rect(&window, rect);
+        }
     }
 
     fn edge_at(&self, x: f32, y: f32) -> Option<ResizeDirection> {
@@ -1484,7 +1519,17 @@ impl ApplicationHandler<Wake> for App {
                 }
                 self.redraw();
             }
-            WindowEvent::ModifiersChanged(m) => self.mods = Mods::from_winit(m.state()),
+            WindowEvent::ModifiersChanged(m) => {
+                self.mods = Mods::from_winit(m.state());
+                // Alt shows the underlined access keys of an open menu.
+                if self.mods.alt
+                    && let Some(p) = self.ui.popup.as_mut()
+                    && !p.access
+                {
+                    p.show_access();
+                    self.redraw();
+                }
+            }
             WindowEvent::CursorMoved {
                 position: PhysicalPosition { x, y },
                 ..
@@ -1616,6 +1661,12 @@ fn shot(mut app: App, path: &Path) -> i32 {
     let page = app.areas.page;
     match app.args.menu {
         Some(ShotMenu::Main) => app.open_popup(PopupKind::Main),
+        Some(ShotMenu::MainKeys) => {
+            app.open_popup(PopupKind::Main);
+            if let Some(p) = app.ui.popup.as_mut() {
+                p.show_access();
+            }
+        }
         Some(ShotMenu::MainEnd) => {
             app.open_popup(PopupKind::Main);
             if let Some(p) = app.ui.popup.as_mut() {

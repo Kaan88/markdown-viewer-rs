@@ -25,6 +25,20 @@ fn cmd(id: C, label: &str, icon: &'static str) -> Item<Act> {
         .icon(icon)
 }
 
+/// A label from the command table with its first `key` made the access key (`Print`, `r`: `P&rint`).
+/// The table's labels differ by platform, so they are marked by letter, not written out; the text
+/// is escaped first, so a `&` in it stays a `&`.
+fn mark(label: &str, key: char) -> String {
+    let label = mdshared_ui::menu::escape_access(label);
+    match label
+        .char_indices()
+        .find(|(_, c)| mdshared_ui::menu::same_letter(key, *c))
+    {
+        Some((i, _)) => format!("{}&{}", &label[..i], &label[i..]),
+        None => label,
+    }
+}
+
 /// The icon a command has wherever it is listed (the main menu, the command palette).
 pub fn command_icon(id: C) -> &'static str {
     match id {
@@ -70,41 +84,41 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
     // What people use while reading; the preferences (page width, remote images, task boxes,
     // animations, the default app) are in Settings.
     let items = vec![
-        cmd(C::OpenFiles, "Open files…", glyph::OPEN),
-        cmd(C::OpenFolder, "Open folder…", glyph::FOLDER_OPEN),
-        Item::new(Act::RecentMenu, "Open recent")
+        cmd(C::OpenFiles, "&Open files…", glyph::OPEN),
+        cmd(C::OpenFolder, "Open fol&der…", glyph::FOLDER_OPEN),
+        Item::new(Act::RecentMenu, "Open &recent")
             .icon(glyph::RECENT)
             .hint("›")
             .enabled(!ws.recents().is_empty()),
-        cmd(C::Refresh, "Reload", glyph::RELOAD)
+        cmd(C::Refresh, "Re&load", glyph::RELOAD)
             .sep()
             .enabled(has_tab),
-        cmd(C::EditInMdedit, "Edit in mdedit", glyph::EDIT).enabled(can_edit),
-        cmd(C::CloseTab, "Close tab", glyph::CLOSE).enabled(has_tab),
-        cmd(C::CloseAllTabs, "Close all tabs", glyph::CLOSE_ALL).enabled(has_tab),
-        cmd(C::ZoomIn, "Zoom in", glyph::ZOOM).sep(),
-        cmd(C::ZoomOut, "Zoom out", glyph::ZOOM_OUT),
+        cmd(C::EditInMdedit, "Edit in &mdedit", glyph::EDIT).enabled(can_edit),
+        cmd(C::CloseTab, "&Close tab", glyph::CLOSE).enabled(has_tab),
+        cmd(C::CloseAllTabs, "Close &all tabs", glyph::CLOSE_ALL).enabled(has_tab),
+        cmd(C::ZoomIn, "Zoom &in", glyph::ZOOM).sep(),
+        cmd(C::ZoomOut, "Zoom ou&t", glyph::ZOOM_OUT),
         Item::new(
             Act::Cmd(C::ZoomReset),
-            format!("Reset zoom ({}%)", ws.zoom()),
+            format!("Reset &zoom ({}%)", ws.zoom()),
         )
         .hint(keys::hint(C::ZoomReset))
         .icon(glyph::ZOOM_RESET),
-        cmd(C::ToggleFiles, "Files pane", glyph::SIDEBAR)
+        cmd(C::ToggleFiles, "File&s pane", glyph::SIDEBAR)
             .sep()
             .checked(ui.panes.files && !ui.focus_mode),
-        cmd(C::ToggleOutline, "Outline pane", glyph::OUTLINE)
+        cmd(C::ToggleOutline, "O&utline pane", glyph::OUTLINE)
             .checked(ui.panes.outline && !ui.focus_mode),
-        cmd(C::FocusMode, "Focus reading mode", glyph::FULLSCREEN).checked(ui.focus_mode),
-        cmd(C::Present, "Present", glyph::PLAY).enabled(can_edit),
-        cmd(C::CommandPalette, "Command palette…", glyph::SEARCH).sep(),
-        cmd(C::FindInFolder, "Find in folder…", glyph::SEARCH).enabled(ws.folder().is_some()),
-        cmd(C::Settings, "Settings…", command_icon(C::Settings)),
-        cmd(C::ShowShortcuts, "Keyboard shortcuts", glyph::KEYBOARD).sep(),
-        cmd(C::About, "About mdview", glyph::INFO),
-        cmd(C::Exit, "Exit", glyph::POWER).sep(),
+        cmd(C::FocusMode, "Focus r&eading mode", glyph::FULLSCREEN).checked(ui.focus_mode),
+        cmd(C::Present, "Prese&nt", glyph::PLAY).enabled(can_edit),
+        cmd(C::CommandPalette, "Command &palette…", glyph::SEARCH).sep(),
+        cmd(C::FindInFolder, "&Find in folder…", glyph::SEARCH).enabled(ws.folder().is_some()),
+        cmd(C::Settings, "Settin&gs…", command_icon(C::Settings)),
+        cmd(C::ShowShortcuts, "&Keyboard shortcuts", glyph::KEYBOARD).sep(),
+        cmd(C::About, "A&bout mdview", glyph::INFO),
+        cmd(C::Exit, "E&xit", glyph::POWER).sep(),
     ];
-    Menu::new(items, x, y, true)
+    Menu::new(items, x, y, true).access_keys(true)
 }
 
 /// How far below the top of a placed menu the row of item `index` starts, from the shared
@@ -154,21 +168,24 @@ pub fn tab_menu(ws: &Workspace, index: usize, x: f32, y: f32) -> Menu<Act> {
     // A document mdedit has not saved yet has no path to copy and no place to show.
     let has_file = ws.tab(index).is_some_and(|t| !t.is_untitled());
     let items = vec![
-        Item::new(Act::TabCmd(C::CloseTab, index), "Close tab").icon(glyph::CLOSE),
-        Item::new(Act::TabCmd(C::CloseOtherTabs, index), "Close other tabs")
+        Item::new(Act::TabCmd(C::CloseTab, index), "&Close tab").icon(glyph::CLOSE),
+        Item::new(Act::TabCmd(C::CloseOtherTabs, index), "Close &other tabs")
             .icon(glyph::CLOSE_OTHERS)
             .enabled(many),
-        Item::new(Act::TabCmd(C::CloseAllTabs, index), "Close all tabs").icon(glyph::CLOSE_ALL),
-        Item::new(Act::TabCmd(C::EditInMdedit, index), "Edit in mdedit")
+        Item::new(Act::TabCmd(C::CloseAllTabs, index), "Close &all tabs").icon(glyph::CLOSE_ALL),
+        Item::new(Act::TabCmd(C::EditInMdedit, index), "Edit in &mdedit")
             .icon(glyph::EDIT)
             .enabled(ws.tab(index).is_some_and(|t| !t.is_missing()))
             .sep(),
-        Item::new(Act::TabCmd(C::CopyFilePath, index), "Copy file path")
+        Item::new(Act::TabCmd(C::CopyFilePath, index), "Copy file &path")
             .icon(glyph::COPY)
             .enabled(has_file),
         Item::new(
             Act::TabCmd(C::ShowInFileManager, index),
-            mdview_core::commands::command(C::ShowInFileManager).label,
+            mark(
+                mdview_core::commands::command(C::ShowInFileManager).label,
+                'f',
+            ),
         )
         .icon(glyph::FOLDER_OPEN)
         .enabled(has_file),
@@ -176,31 +193,31 @@ pub fn tab_menu(ws: &Workspace, index: usize, x: f32, y: f32) -> Menu<Act> {
         // would no longer fit the default window without scrolling.
         Item::new(
             Act::TabCmd(C::ExportHtml, index),
-            mdview_core::commands::command(C::ExportHtml).label,
+            mark(mdview_core::commands::command(C::ExportHtml).label, 'e'),
         )
         .icon(glyph::DOWNLOAD)
         .enabled(exportable)
         .sep(),
         Item::new(
             Act::TabCmd(C::Print, index),
-            mdview_core::commands::command(C::Print).label,
+            mark(mdview_core::commands::command(C::Print).label, 'r'),
         )
         .icon(glyph::OPEN_WITH)
         .enabled(exportable),
     ];
-    Menu::new(items, x, y, false)
+    Menu::new(items, x, y, false).access_keys(true)
 }
 
 pub fn page_menu(ctx: &PageContext, x: f32, y: f32) -> Menu<Act> {
     let mut items = Vec::new();
     if let Some(link) = &ctx.link {
-        items.push(Item::new(Act::OpenLink(link.clone()), "Open link").icon(glyph::OPEN_WITH));
-        items.push(Item::new(Act::CopyLink(link.clone()), "Copy link address").icon(glyph::LINK));
+        items.push(Item::new(Act::OpenLink(link.clone()), "&Open link").icon(glyph::OPEN_WITH));
+        items.push(Item::new(Act::CopyLink(link.clone()), "Copy &link address").icon(glyph::LINK));
     }
     if let Some((kind, text)) = &ctx.source {
         let label = match kind {
-            SourceKind::Formula => "Copy formula source",
-            SourceKind::Diagram => "Copy diagram source",
+            SourceKind::Formula => "Copy formula &source",
+            SourceKind::Diagram => "Copy diagram &source",
         };
         let mut item = Item::new(Act::CopySource(*kind, text.clone()), label).icon(glyph::COPY);
         if !items.is_empty() {
@@ -209,7 +226,7 @@ pub fn page_menu(ctx: &PageContext, x: f32, y: f32) -> Menu<Act> {
         items.push(item);
     }
     let first = items.is_empty();
-    let mut copy = Item::new(Act::Copy, "Copy")
+    let mut copy = Item::new(Act::Copy, "&Copy")
         .hint("Ctrl+C")
         .icon(glyph::COPY)
         .enabled(ctx.has_selection);
@@ -217,39 +234,39 @@ pub fn page_menu(ctx: &PageContext, x: f32, y: f32) -> Menu<Act> {
         copy = copy.sep();
     }
     items.push(copy);
-    items.push(cmd(C::CopyMarkdown, "Copy as Markdown", glyph::COPY).enabled(ctx.has_selection));
+    items.push(cmd(C::CopyMarkdown, "Copy as &Markdown", glyph::COPY).enabled(ctx.has_selection));
     items.push(
-        Item::new(Act::SelectAll, "Select all")
+        Item::new(Act::SelectAll, "Select &all")
             .hint("Ctrl+A")
             .icon(glyph::SELECT_ALL),
     );
-    items.push(cmd(C::Find, "Find…", glyph::SEARCH).sep());
-    items.push(cmd(C::Refresh, "Reload", glyph::RELOAD));
-    items.push(cmd(C::EditInMdedit, "Edit in mdedit", glyph::EDIT).enabled(ctx.editable));
-    Menu::new(items, x, y, false)
+    items.push(cmd(C::Find, "&Find…", glyph::SEARCH).sep());
+    items.push(cmd(C::Refresh, "&Reload", glyph::RELOAD));
+    items.push(cmd(C::EditInMdedit, "&Edit in mdedit", glyph::EDIT).enabled(ctx.editable));
+    Menu::new(items, x, y, false).access_keys(true)
 }
 
 /// The find box's menu: the editing commands a text box has everywhere.
 pub fn find_menu(has_text: bool, has_selection: bool, x: f32, y: f32) -> Menu<Act> {
     let items = vec![
-        Item::new(Act::Edit(EditAct::Cut), "Cut")
+        Item::new(Act::Edit(EditAct::Cut), "Cu&t")
             .hint("Ctrl+X")
             .icon(glyph::CUT)
             .enabled(has_selection),
-        Item::new(Act::Edit(EditAct::Copy), "Copy")
+        Item::new(Act::Edit(EditAct::Copy), "&Copy")
             .hint("Ctrl+C")
             .icon(glyph::COPY)
             .enabled(has_selection),
-        Item::new(Act::Edit(EditAct::Paste), "Paste")
+        Item::new(Act::Edit(EditAct::Paste), "&Paste")
             .hint("Ctrl+V")
             .icon(glyph::PASTE),
-        Item::new(Act::Edit(EditAct::SelectAll), "Select all")
+        Item::new(Act::Edit(EditAct::SelectAll), "Select &all")
             .hint("Ctrl+A")
             .icon(glyph::SELECT_ALL)
             .enabled(has_text)
             .sep(),
     ];
-    Menu::new(items, x, y, false)
+    Menu::new(items, x, y, false).access_keys(true)
 }
 
 // ---- dialogs ---------------------------------------------------------------------------------
