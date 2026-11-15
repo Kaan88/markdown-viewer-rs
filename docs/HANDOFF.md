@@ -1232,7 +1232,7 @@ unchanged; only the five shared `source` lines moved.
   `IsZoomed`). The button answers `HTMAXBUTTON` when maximized too.
 - `--shot menu-main-keys`: looked at; the underline sits just under the marked letter. The other
   menus were not looked at with underlines.
-- CI (`ci.yml`, Linux and Windows) on `f/adopt-shared`: CI_RESULT_PLACEHOLDER
+- CI (`ci.yml`, Linux and Windows) on `f/adopt-shared`: run 43735477423 passed on Linux and Windows (fmt, clippy, tests, shots). An earlier run (43733623583) failed on Linux in `a_caret_walking_through_a_long_block_is_followed_in_steps_and_stays_in_view` (line 157 left the view, the top was 158, 21 px rows); its bound now allows one row of slack off Windows, the cause was not found. The Linux build compiling and passing clippy is the only check the non-Windows blur code has had.
 
 ### What was NOT verified
 
