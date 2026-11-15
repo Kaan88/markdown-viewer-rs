@@ -1104,13 +1104,13 @@ message row such as "Go to line 25"; icons for the editor's line commands; the r
 hands folders to request receivers, which the viewer's own `mdview_core::single` is not). Shots
 compared with a baseline made before the change: see the commit message.
 
-## Windows return when a side-by-side preview ends (2026-11-15, branch `f/window-return`, not merged)
+## Windows return when a side-by-side preview ends (2026-11-15, merged into `main` on the owner's word, not released)
 
 Owner request of 2026-11-15, item 1 of "After 0.4.0 and 0.6.0" in `docs/PLAN.md`. The owner's two
 answers: a viewer the preview started is only moved back, not closed; and the windows also go
 back when the side-by-side arrangement is given up while the preview goes on. Built on the
 branch `f/window-return` in the three repositories; the pins name the shared branch's head
-(`6249cd1`). **Not merged, not released; the owner has not looked at it.**
+(`6249cd1`, now the head of shared `main`). **In `main`, not released; CI passed on the branch (Linux and Windows); the owner had not looked at it when it was merged.**
 
 - **Shared** (`mdshared_ui::place::Tiling`, `Request::unplace`; `docs/SISTER.md` in the shared
   repository, "Going back"). A window remembers its outer rectangle, inner size and whether it
