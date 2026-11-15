@@ -2558,7 +2558,12 @@ impl Workspace {
         else {
             return false;
         };
-        if (top.round() - tab.scroll).abs() < min_move {
+        // The page stays for a move under `min_move`. A move up is under it only while the target
+        // is still in view: `top` leaves the target `margin` below the top edge, so a move up of
+        // `margin` or more puts the target's own row above the edge, and the page follows.
+        let by = top.round() - tab.scroll;
+        // (And a move down is under it only while the target is above the bottom edge.)
+        if by.abs() < min_move && -by < margin && by < height - 2.0 * margin {
             self.renderer.set_top(tab.scroll);
             return false;
         }
@@ -4604,21 +4609,32 @@ mod tests {
             assert!(shown, "line {line} is not near the top");
         }
         assert!((10..55).contains(&moves), "{moves}");
-        // Up again: the page never goes forward, and the caret's line is never a whole step
-        // above the top of the page: the page follows before that. In rows that is two, with
-        // rows of 20 or 21 px (the fonts, and so the rows, differ by system).
-        let allowed = (LINE_STEP / row).floor() as u32;
-        for line in (110..159).rev() {
+        // Up again: the page never goes forward, and the caret's line is never above the top of
+        // the page: the page follows as soon as it would be. It still does not move on every
+        // line: a move puts the line a margin below the edge, which a row or two of walking up
+        // uses. (`row` is measured above: the fonts, and so the rows, differ by system.)
+        let mut up_moves = 0;
+        let lines = 110..159;
+        let count = lines.len() as u32;
+        for line in lines.rev() {
             let before = ws.scroll();
-            ws.follow(&path, line);
+            let moved = ws.follow(&path, line);
             settle(&mut ws);
             assert!(ws.scroll() <= before, "line {line}");
+            assert_eq!(moved, ws.scroll() != before, "line {line}");
+            up_moves += moved as u32;
             let top = ws.top_source_line().unwrap();
             assert!(
-                top <= line + allowed,
+                top <= line,
                 "line {line} left the view: the top is {top}, a row is {row} px"
             );
         }
+        let rows_per_move = (JUMP_MARGIN / row).floor() as u32 + 1;
+        assert!(
+            up_moves <= count / rows_per_move + 2,
+            "{up_moves} moves for {count} lines of {row} px"
+        );
+        assert!(up_moves >= count / 6, "{up_moves}");
         _ = std::fs::remove_dir_all(&dir);
     }
 

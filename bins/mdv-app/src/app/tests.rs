@@ -1162,10 +1162,19 @@ fn live_text_replaces_the_page_keeps_the_place_and_ends_on_live_off() {
     assert!(a.ws.active_tab().unwrap().is_live());
     assert!(page_text(&a).contains("A new heading"));
     assert!(page_text(&a).contains("Tail added in the editor"));
+    // The line sent is the one whose row is at the top of the page, and its first row may be
+    // hidden above the edge (a line that wraps): the page then moves up to show it, by less
+    // than one step and never down. A line fully in view keeps the page still.
+    let moved_up = before - a.ws.scroll();
     assert!(
-        (a.ws.scroll() - before).abs() < 2.0,
+        (0.0..48.0 * a.scale).contains(&moved_up) || moved_up.abs() < 2.0,
         "the reader stays where they were: {before} -> {}",
         a.ws.scroll()
+    );
+    let now = a.ws.top_source_line().unwrap();
+    assert!(
+        now <= top && top - now < 4,
+        "the top line was {top}, is {now}"
     );
     // A follow without text does not end it, and does not change the text.
     a.handed_over(vec![Request {
