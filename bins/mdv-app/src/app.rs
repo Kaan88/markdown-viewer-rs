@@ -512,12 +512,12 @@ impl App {
         let tab = self.ws.active();
         if current != self.last_heading || tab != self.last_heading_tab {
             // The outline follows the page, except while the pointer is on it or its size is not
-            // known yet (not drawn): then the row is revealed on a later frame.
-            let shown = self.areas.outline.is_some();
-            let done = !shown
-                // Above the first heading nothing is current: the outline returns to its top.
-                || panes::follow_outline_row(&mut self.ui, current.unwrap_or(0));
-            if done {
+            // known yet (not drawn): then the row is revealed on a later frame. A hidden outline
+            // is left as it is, and catches up on the frame that shows it again.
+            if self.areas.outline.is_none() {
+                // Nothing to move.
+            } else if panes::follow_outline_row(&mut self.ui, current.unwrap_or(0)) {
+                // Above the first heading nothing is current: the outline is at its top.
                 self.last_heading = current;
                 self.last_heading_tab = tab;
             } else if self.ui.panes.outline_view <= 0.0

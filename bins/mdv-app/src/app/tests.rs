@@ -1449,3 +1449,24 @@ fn a_click_on_an_outline_row_jumps_and_the_highlight_matches() {
     );
     assert!(outline_row_visible(&a, 20));
 }
+
+#[test]
+fn an_outline_hidden_while_the_page_scrolled_catches_up_when_shown() {
+    let mut a = app(&["everything.md"]);
+    a.pointer_moved(900.0, 400.0);
+    a.compose();
+    a.command(CommandId::ToggleOutline);
+    a.compose();
+    assert!(a.areas.outline.is_none());
+    a.ws.scroll_to(a.ws.total_height() * 0.9);
+    a.compose();
+    let i = a.ws.current_heading().expect("a heading at 90%");
+    assert_eq!(
+        a.ui.panes.outline_scroll, 0.0,
+        "a hidden outline is left alone"
+    );
+    a.command(CommandId::ToggleOutline);
+    a.compose();
+    a.compose();
+    assert!(outline_row_visible(&a, i));
+}

@@ -26,6 +26,11 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
 - **Reading:** tabs, a Files pane, an Outline pane, find, zoom, light and dark themes, a focus
   mode, three page widths, back and forward, session restore, and reload when the file changes on
   disk, keeping your place.
+- **The outline follows the page:** the heading of the section at the top of the window is
+  highlighted and its row is kept in view; the list stays put while the pointer is on it.
+- **Back and Forward.** Following a link to another file or to an anchor, a footnote, an outline
+  or palette heading, or a backlink remembers where you were; Alt+Left / Alt+Right (or the mouse's
+  Back / Forward buttons, or the command palette) return there at the exact scroll position.
 - **Command palette (Ctrl+P):** open tabs, recent files, the open folder's Markdown files,
   commands (`>`) and headings (`#`).
 - **Settings (Ctrl+,):** page width, text size, theme, a page font and a code font (any installed

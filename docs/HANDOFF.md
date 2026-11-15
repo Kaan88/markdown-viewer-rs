@@ -1475,3 +1475,56 @@ repository, docs/LINUX.md "Rounded window corners") and wired here the same way 
   nothing else on the scroll path; with Square or without a margin nothing runs. The KDE route
   change moves the default KDE window from KWin's shadow to the client-drawn one (a larger buffer
   by the 36 px margin on each side), which was not timed.
+
+### Merge branch `merge/next-release` (2026-11-15, the Windows PC)
+
+The features below were merged one after another into `merge/next-release` (viewer) on top of
+main 0.3.1 with settings-one-page, rounded corners, history and watch-folder; the shared crates
+they need are on the shared branch `merge/viewer-next`. Each feature is one merge commit followed
+by its finishing commits, so `git diff <commit before the merge>..<last commit of the feature>`
+shows one feature. Everything here was built and tested on Windows in debug builds (fmt, clippy
+`-D warnings`, the workspace tests, `tests/shots.sh` with `MDVIEW_EXE` set to the debug binary,
+every new picture looked at). Nothing was driven in a real window: another worker was using the
+desktop, so no feature below has been seen live, and no budget was measured.
+
+### Back and forward history (`f/history`)
+
+- Already there since 0.2.x: one history for the window, up to 100 places (file and scroll
+  position), Alt+Left / Alt+Right and mouse buttons 4/5. It is window-wide and not per tab on
+  purpose: a link to another file opens it in a new tab (or switches to it), so a per-tab history
+  would never hold the jump. Back switches to that file's tab, opening it again if it was closed,
+  and restores the scroll. Recorded by links (same-file anchor, other Markdown file, wiki links),
+  footnote jumps, outline and palette `#` headings, backlinks. A jump that did not move the reader
+  is not recorded; a new jump drops what Forward held; vanished files are skipped; not persisted.
+- Built: commands `Back` and `Forward` (menu None, so the Keyboard shortcuts dialog lists them), in
+  the command palette (greyed when there is nowhere to go), icons BACK / FORWARD, shot
+  `palette-history-light`.
+- Decisions: no toolbar buttons (no natural place) and no main-menu rows (the menu would no longer
+  fit the default 800 px window without scrolling).
+- Left out: history of find-in-document matches, persistence.
+
+### Watch the open folder (`f/watch-folder`)
+
+- Already there: OS notifications (`mdshared_app::watch::FileWatcher`, the `notify` crate) for the
+  parent folders of open files and notes and for the Files pane's root and expanded folders while
+  the pane is shown. Built: a wake no longer checks at once, it sets `watch_due` 150 ms ahead
+  (`WATCH_DEBOUNCE`) and the timer runs one check (`watch_check`: tabs reload, note index,
+  `tree.refresh()`), so a git checkout causes one check. Nothing polls, no thread was added.
+- NOT verified: a real window, real watcher timing on Windows or Linux. Left out: a poll fallback
+  when the OS watcher cannot start.
+
+### The outline follows the page (`f/toc-follow`)
+
+- Already there: the highlight of the current heading (`Workspace::current_heading`, a binary
+  search over the known heading positions) and `reveal_outline_row`. Built: `panes::follow_outline_row`
+  and `last_heading_tab` in `App`. The outline scrolls by the least amount that shows the current
+  row; it does not move while the pointer is on one of its rows, a backlink or its scrollbar, or
+  while that scrollbar is dragged, and catches up on the first frame after the pointer leaves; the
+  same when it was not drawn yet, after a tab switch (the heading index is tracked per tab), and
+  when it was hidden while the page scrolled (fixed after the merge: the branch marked a hidden
+  outline as done, so showing it again did not bring the row into view). Above the first heading
+  nothing is current and the outline returns to its top.
+- Decisions: "the pointer is on the outline" means on a row, a backlink or the scrollbar, not the
+  pane's empty space or its header.
+- No new shot: the visible states are the existing outline shots. Cost: one comparison per frame.
+- NOT verified: a real window.
