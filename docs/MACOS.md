@@ -1,4 +1,4 @@
-# A macOS version: plan (2026-11-15, nothing built)
+# A macOS version: plan (2026-11-15; stage 1 under way on the runners)
 
 A plan for porting mdview and mdedit to macOS. Nothing here is built, and nothing has been
 compiled for macOS. It rests on a read of all three repositories on 2026-11-15 (shared crates at
@@ -21,6 +21,41 @@ shared crates `065cbdc`). Fixes from the hands-on tests of that day are on the b
 real windows on Windows and green in CI, but not merged to `main` and not released. They touch
 key handling (`event_key`), the resize band and the window procedure, which the port also
 touches: check whether they have been merged, and if not, build the port on top of them.
+
+## Progress
+
+**Stage 1, 2026-11-15: on the runners**, on the branch `f/macos` in all three repositories,
+built on `main` (mdview 0.5.1, mdedit 0.7.1; the control fixes are merged there). The shared
+crates' branch is pinned by both apps. Nothing has been run on the owner's Mac, and no window
+has been opened on a Mac yet.
+
+- CI has a `macos` job on `macos-15` (Apple Silicon) and `macos-15-intel` (`macos-13`, named
+  above, is retired). Build, clippy and tests in all three; the screenshot suite of both apps
+  runs there and its pictures are artifacts of the run. They cannot be downloaded into a cloud
+  session (the artifact host is refused by its network), so they are looked at from the run's
+  page in a browser.
+- What changed: see the commit messages on `f/macos`. In short: zbus and the portal only on
+  Linux; `open`/`open -R`; dark mode from `AppleInterfaceStyle`; `/usr/lib/libcurl.4.dylib`;
+  `~/Library/Application Support`; FSEvents; names without case (`paths::NAMES_IGNORE_CASE`);
+  greyscale text; update platforms `macos-aarch64` and `macos-x86_64` read from
+  `<name>-update-macos.txt`, the parser skips keys of unknown platforms, no self-update on a Mac;
+  the other app found as `<name>.app` beside this bundle or in `/Applications` and
+  `~/Applications` (from stage 4, as it was small); macOS font fallbacks; the editor pastes a
+  picture (PNG, or TIFF made PNG) and copied files through `NSPasteboard`; the key without
+  modifiers is read on macOS too.
+- State of the runs: all three build and pass clippy on both Macs, and both apps' screenshot
+  suites run there. The last test failures found there are fixed in the latest commits, whose
+  runs were not finished when this was written: see the Actions page of each repository.
+- Found on the runners: FSEvents keeps a file's "created" flag on later events for it, so a
+  write into a new file woke a listed folder; on macOS a listing event now wakes only when the
+  folder's own modification time moved. Two viewer tests held on one font's pixels and failed
+  in Helvetica's metrics; they no longer do.
+- Found in the code, for stage 2: rfd already runs its panels on the main thread when called
+  from a helper thread while the app is running (`dispatch2::run_on_main`), so the dialogs may
+  need no change. To be seen in a real window.
+- Not done in stage 1: the page and interface font stacks still name no Mac family (they reach
+  the system's sans-serif and monospace); the editor's memory and CPU read-outs; the update bar
+  opening the download page; everything of stages 2 to 6.
 
 ## Decisions (the owner, 2026-11-15)
 
