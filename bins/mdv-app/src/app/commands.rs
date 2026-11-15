@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::ui::EditAct;
+use crate::workspace::SourcePlace;
 
 use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
@@ -218,8 +219,10 @@ impl App {
             }
             C::EditInMdedit if untitled.is_some() => {
                 let (doc, title) = untitled.unwrap_or_default();
+                let at = self.ws.source_place(index);
                 let request = Request {
-                    line: self.ws.source_line(index),
+                    line: at.map(|at| at.line),
+                    column: at.and_then(|at| at.column),
                     from: Some("mdview".into()),
                     ..Request::document(doc, title)
                 };
@@ -246,8 +249,10 @@ impl App {
                 platform::reveal_in_file_manager(&path);
             }
             C::EditInMdedit => {
+                let at = self.ws.source_place(index);
                 let request = Request {
-                    line: self.ws.source_line(index),
+                    line: at.map(|at| at.line),
+                    column: at.and_then(|at| at.column),
                     from: Some("mdview".into()),
                     ..Request::new(path)
                 };
@@ -618,19 +623,19 @@ impl App {
                 self.ws.live_off(&request.path);
             } else if let Some(text) = &request.text {
                 // Of several texts that arrive together the last is the one shown.
-                self.ws.live_text(&request.path, text.clone(), request.line);
+                (self.ws).live_text(&request.path, text.clone(), SourcePlace::of(request));
             } else if request.follow {
                 follow = Some(request);
             } else if self.ws.open(&request.path).is_ok()
-                && let Some(line) = request.line
+                && let Some(at) = SourcePlace::of(request)
             {
-                self.ws.scroll_to_line(line);
+                self.ws.scroll_to_line(at);
             }
         }
         if let Some(request) = follow
-            && let Some(line) = request.line
+            && let Some(at) = SourcePlace::of(request)
         {
-            self.ws.follow(&request.path, line);
+            self.ws.follow(&request.path, at);
         }
         if let Some(rect) = requests.iter().rev().find_map(|r| r.place) {
             self.place(rect);
@@ -651,7 +656,7 @@ impl App {
         }
         let title = request.title.as_deref();
         let text = request.text.clone();
-        (self.ws).document_text(doc, title, text, request.line, request.open);
+        (self.ws).document_text(doc, title, text, SourcePlace::of(request), request.open);
     }
 
     /// Moves and resizes the window to `rect` (physical screen px), or says it cannot be done.

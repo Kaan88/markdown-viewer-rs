@@ -454,6 +454,10 @@ struct Front {
     original_lines: u32,
 }
 
+/// How far along one line of the file the next mark is ([`Builder::mark`]): a line longer
+/// than this is a paragraph written as one line, which wraps to several on the page.
+const MARK_GAP: usize = 64;
+
 fn count_lines(bytes: &[u8]) -> u32 {
     // A plain loop: the compiler turns it into a vector count, which beats one search per line.
     bytes.iter().filter(|&&b| b == b'\n').count() as u32
@@ -465,6 +469,10 @@ struct Builder<'a> {
     front: Front,
     /// Where the event being handled starts in `src`: the place of any block it opens.
     event_at: usize,
+    /// The last mark's place in `src`, with its line and the byte in it ([`Builder::mark`]).
+    mark_src: usize,
+    mark_line: u32,
+    mark_col: u32,
     /// The line breaks of `src` not yet counted, the next one's offset (`usize::MAX` for none),
     /// and how many breaks lie before `counted_to`. Blocks open in order, so one walk over the
     /// breaks finds every block's line.
@@ -557,6 +565,9 @@ impl<'a> Builder<'a> {
             restore,
             front,
             event_at: 0,
+            mark_src: 0,
+            mark_line: 0,
+            mark_col: 0,
             breaks,
             next_break,
             counted_to: 0,
@@ -647,6 +658,55 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Notes that what the file has at `at` is at `text` in the document's text
+    /// ([`LineMark`]): once for each line a piece of text starts on, and again along a line
+    /// every [`MARK_GAP`] bytes, so a file of short lines pays one mark a line.
+    fn mark(&mut self, at: usize, text: usize) {
+        let line = self.line_of(at);
+        let col = if line == self.mark_line && at >= self.mark_src {
+            if at - self.mark_src < MARK_GAP {
+                return;
+            }
+            self.mark_col as usize + (at - self.mark_src)
+        } else {
+            let at = at.min(self.src.len());
+            at - memchr::memrchr(b'\n', &self.src.as_bytes()[..at]).map_or(0, |i| i + 1)
+        };
+        (self.mark_src, self.mark_line, self.mark_col) = (at, line, col as u32);
+        self.doc.marks.push(LineMark {
+            line,
+            col: col as u32,
+            text: text as u32,
+        });
+    }
+
+    /// The text of a code block: its lines are the file's, so each gets its mark.
+    fn code_text(&mut self, t: &str, at: usize) {
+        let start = self.doc.text.len();
+        self.mark(at, start);
+        self.push_str_restored(t);
+        let pushed = &self.doc.text.as_bytes()[start..];
+        if memchr::memchr(b'\n', &pushed[..pushed.len().saturating_sub(1)]).is_none() {
+            return;
+        }
+        // Several lines in one piece: the line after each break. The place in the file is
+        // not known exactly (an indented block drops its indent), the line is.
+        let mut line = self.mark_line;
+        let last = pushed.len() - 1;
+        let breaks: Vec<usize> = memchr::memchr_iter(b'\n', &pushed[..last]).collect();
+        for i in breaks {
+            line += 1;
+            self.doc.marks.push(LineMark {
+                line,
+                col: 0,
+                text: (start + i + 1) as u32,
+            });
+        }
+        // The next piece is on a later line, so it gets its own mark.
+        self.mark_line = line;
+        self.mark_src = usize::MAX;
+    }
+
     fn event(&mut self, event: Event<'a>, range: Range<usize>) {
         self.event_at = range.start;
         if self.image_depth > 0 {
@@ -672,13 +732,14 @@ impl<'a> Builder<'a> {
             Event::Start(tag) => self.start(tag, range),
             Event::End(TagEnd::HtmlBlock) => self.end_html_block(),
             Event::End(_) => self.end(),
-            Event::Text(t) if self.in_code_block => self.push_str_restored(&t),
+            Event::Text(t) if self.in_code_block => self.code_text(&t, range.start),
             Event::Text(t) => self.md_text(&t, range),
             Event::Code(t) => {
                 self.begin_inline();
                 self.flush_run();
                 self.note_heading_text(&t);
                 let start = self.doc.text.len();
+                self.mark(range.start, start);
                 self.push_str_restored(&t);
                 self.push_atom_like(SpanKind::Code, start);
             }
@@ -1767,6 +1828,7 @@ impl<'a> Builder<'a> {
         self.flush_run();
         self.note_heading_text(t);
         let start = self.doc.text.len();
+        self.mark(self.event_at, start);
         self.push_str_restored(t);
         let oversize =
             (self.doc.text.len() - start > MAX_EQUATION_BYTES).then_some(Oversize::Equation);
@@ -1805,6 +1867,7 @@ impl<'a> Builder<'a> {
         if self.run_start.is_none() {
             self.run_start = Some(at);
         }
+        self.mark(range.start, at);
         if escaped && let Some(c) = t.chars().next() {
             self.escapes.push((at, at + c.len_utf8()));
         }

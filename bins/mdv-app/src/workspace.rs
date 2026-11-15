@@ -267,7 +267,7 @@ pub struct Tab {
     /// The page shows text the editor sent, not the file's. See [`Workspace::live_text`].
     live: bool,
     /// The newest text received and not parsed yet, and the line to follow.
-    live_pending: Option<(String, Option<u32>)>,
+    live_pending: Option<(String, Option<SourcePlace>)>,
     /// The tab shows a document the editor has not saved yet, known by this name of the
     /// editor's; there is no file. `path` is then a key that no file can have
     /// ([`untitled_path`]), and `missing` is set, which keeps the text when the tab is idle and
@@ -303,6 +303,29 @@ fn is_untitled_path(path: &Path) -> bool {
 fn untitled_key(path: &Path) -> Option<PathBuf> {
     let at = (path.components()).position(|c| c.as_os_str() == UNTITLED_ROOT)?;
     Some(path.components().skip(at).collect())
+}
+
+/// A place in a file as the editor names it: the line, counting from 1, and where the
+/// editor says it, the byte in that line, counting from 1 too (what `column` of a request
+/// is). A line alone is its beginning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SourcePlace {
+    pub line: u32,
+    pub column: Option<u32>,
+}
+
+impl From<u32> for SourcePlace {
+    fn from(line: u32) -> SourcePlace {
+        SourcePlace { line, column: None }
+    }
+}
+
+impl SourcePlace {
+    /// The place a request names, if it names a line.
+    pub fn of(request: &mdshared_app::sister::Request) -> Option<SourcePlace> {
+        let column = request.column;
+        request.line.map(|line| SourcePlace { line, column })
+    }
 }
 
 /// What a tab decided about its document's remote images.
@@ -1286,7 +1309,7 @@ impl Workspace {
     /// The tab then shows this text instead of the file's until it is told `live_text` is over
     /// ([`live_off`](Self::live_off)), the file changes on disk (the editor saved: the file is
     /// the newest text again), the reader reloads (F5), or the tab closes.
-    pub fn live_text(&mut self, path: &Path, text: String, line: Option<u32>) -> bool {
+    pub fn live_text(&mut self, path: &Path, text: String, line: Option<SourcePlace>) -> bool {
         let path = canonical_or_absolute(path);
         let Some(tab) = self
             .tabs
@@ -1379,7 +1402,7 @@ impl Workspace {
         doc: &str,
         title: Option<&str>,
         text: Option<String>,
-        line: Option<u32>,
+        line: Option<SourcePlace>,
         open: bool,
     ) -> bool {
         let found = self.untitled_tab(doc);
@@ -2422,68 +2445,95 @@ impl Workspace {
 
     // ---- source lines ------------------------------------------------------------------------
 
-    /// Scrolls the showing document to the block that source line `line` (counting from 1) is in:
-    /// the line that block starts on goes just below the top edge. A line past the end gives the
-    /// last block. False when there is no document or layout yet.
-    pub fn scroll_to_line(&mut self, line: u32) -> bool {
-        self.jump_to_line(line, 0.0)
+    /// Scrolls the showing document to source line `line` (counting from 1): the line of the
+    /// page that shows it goes just below the top edge. That is the line inside a paragraph,
+    /// a list item or a code block, not the block's first (`Document::text_at_line`), the
+    /// row of a table, and with a column the place along a line that wraps. A line past the
+    /// end gives the last block. False when there is no document or layout yet.
+    pub fn scroll_to_line(&mut self, line: impl Into<SourcePlace>) -> bool {
+        self.jump_to_line(line.into(), 0.0)
     }
 
     /// [`scroll_to_line`](Self::scroll_to_line) for another window's live updates: the page stays
     /// put when the move would be under one arrow-key step, so a caret moving inside what is
     /// already in view does not make the page tremble.
-    pub fn follow_line(&mut self, line: u32) -> bool {
+    pub fn follow_line(&mut self, line: impl Into<SourcePlace>) -> bool {
         let step = LINE_STEP * self.viewport.map_or(1.0, |v| v.scale);
-        self.jump_to_line(line, step)
+        self.jump_to_line(line.into(), step)
     }
 
-    fn jump_to_line(&mut self, line: u32, min_move: f32) -> bool {
+    fn jump_to_line(&mut self, at: SourcePlace, min_move: f32) -> bool {
         let Some(doc) = self.active_document() else {
             return false;
         };
-        let Some(block) = doc.block_at_line(line) else {
+        let Some(block) = doc.block_at_line(at.line) else {
             return false;
         };
-        // The line of text the block starts with, when it has any; a rule has none.
+        // The text written at that line of the block, when it has any; a rule has none.
+        // The page's line that holds it is one the layout already has: nothing is laid
+        // out for this that a jump to the block's start would not lay out.
         let text = doc.blocks[block as usize].text;
         let target = if text.is_empty() {
             Jump::Block(block)
         } else {
-            Jump::Text(text.start)
+            let col = at.column.map_or(0, |c| c.saturating_sub(1));
+            Jump::Text(doc.text_at_line(at.line, col).unwrap_or(text.start))
         };
         self.jump(target, min_move)
     }
 
-    /// The source line of the block at the top of the page, counting from 1; `None` without a
-    /// document or layout. This is the first line of text in view, found as a pointer at the top
-    /// of the page would find it, so a long list or table gives the item and not the whole.
+    /// The source line at the top of the page, counting from 1; `None` without a document or
+    /// layout. This is the first line of text in view, found as a pointer at the top of the
+    /// page would find it, so a long list or table gives the item and not the whole, and a
+    /// long paragraph or code block the line of it that is there.
+    #[cfg(test)]
     pub fn top_source_line(&mut self) -> Option<u32> {
+        self.top_source_place().map(|at| at.line)
+    }
+
+    /// [`top_source_line`](Self::top_source_line), and where the page's top line begins
+    /// along a line of the file that wraps to several on the page: the column is given only
+    /// when that is past the line's first text.
+    pub fn top_source_place(&mut self) -> Option<SourcePlace> {
         let viewport = self.viewport?;
         let (x, y) = (viewport.width as f32 / 2.0, 4.0 * viewport.scale);
         let hit = self.hit(x, y);
+        // Where the same line of the page begins: the nearest text from its left.
+        let begins = hit.and_then(|_| self.hit(0.0, y));
         let doc = self.active_document()?;
-        // The hit's own block is the page's: the offset finds the innermost one.
-        let block = match hit {
-            Some(hit) => doc.block_at(hit.offset).unwrap_or(hit.block),
-            None => self.layout()?.block_at(self.scroll())?.block,
+        let Some(hit) = hit else {
+            let block = self.layout()?.block_at(self.scroll())?.block;
+            return doc.blocks.get(block as usize).map(|b| b.line.into());
         };
-        doc.blocks.get(block as usize).map(|b| b.line)
+        // The hit's own block is the page's: the offset finds the innermost one, and the
+        // line of the file that is written there.
+        let Some((line, _)) = doc.line_at_text(hit.offset) else {
+            return doc.blocks.get(hit.block as usize).map(|b| b.line.into());
+        };
+        let first = doc.text_at_line(line, 0);
+        let column = begins
+            .filter(|b| first.is_some_and(|first| first < b.offset))
+            .and_then(|b| doc.line_at_text(b.offset))
+            .filter(|&(l, _)| l == line)
+            .map(|(_, col)| col + 1);
+        Some(SourcePlace { line, column })
     }
 
-    /// The source line tab `index` is at, for opening the same place in the editor: the top of the
+    /// The place tab `index` is at, for opening the same place in the editor: the top of the
     /// page for the showing tab, the place it was left at for another.
-    pub fn source_line(&mut self, index: usize) -> Option<u32> {
+    pub fn source_place(&mut self, index: usize) -> Option<SourcePlace> {
         if self.active == Some(index) {
-            return self.top_source_line();
+            return self.top_source_place();
         }
         let tab = self.tabs.get(index)?;
         let block = tab.keep?.block;
-        tab.doc.as_ref()?.blocks.get(block as usize).map(|b| b.line)
+        let block = tab.doc.as_ref()?.blocks.get(block as usize)?;
+        Some(block.line.into())
     }
 
     /// A live update from the editor for `path`: scrolls to `line`, and only when `path` is the
     /// showing file. Opens nothing and switches no tab.
-    pub fn follow(&mut self, path: &Path, line: u32) -> bool {
+    pub fn follow(&mut self, path: &Path, line: impl Into<SourcePlace>) -> bool {
         let path = canonical_or_absolute(path);
         self.active_tab()
             .is_some_and(|tab| same_file(tab.path(), &path))
@@ -4073,6 +4123,192 @@ mod tests {
         // A real change of place goes through.
         assert!(ws.follow(&other, 503));
         assert!(ws.scroll() > first);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The line of the file that is shown just below the top edge, where a jump puts its
+    /// target (the first row of text under the margin), and the byte in it.
+    fn line_below_the_edge(ws: &mut Workspace) -> Option<(u32, u32)> {
+        let hit = ws.hit(120.0, JUMP_MARGIN + 6.0)?;
+        ws.active_document()?.line_at_text(hit.offset)
+    }
+
+    /// `# Title`, a code block of `count` lines (`code line i` is on line `4 + i`), a
+    /// paragraph of `count` lines written one under the other (`para line i` is on line
+    /// `count + 6 + i`), and a closing paragraph.
+    fn long_blocks(count: usize) -> String {
+        let code: String = (0..count).map(|i| format!("code line {i}\n")).collect();
+        let para: String = (0..count)
+            .map(|i| format!("para line {i} is written here and goes on for a while,\n"))
+            .collect();
+        format!("# Title\n\n```\n{code}```\n\n{para}\nThe end.\n")
+    }
+
+    #[test]
+    fn a_line_inside_a_long_block_is_shown_itself_not_the_blocks_start() {
+        let dir = temp_dir("fine-lines");
+        let path = write(&dir, "doc.md", &long_blocks(300));
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        // Line 204 is `code line 200`: exactly that line of the code goes below the edge.
+        assert!(ws.scroll_to_line(204));
+        settle(&mut ws);
+        assert_eq!(line_below_the_edge(&mut ws).map(|at| at.0), Some(204));
+        let in_code = ws.scroll();
+        // One line down is one line of the page down: nothing like the whole block.
+        assert!(ws.scroll_to_line(205));
+        settle(&mut ws);
+        let step = ws.scroll() - in_code;
+        assert!((10.0..40.0).contains(&step), "{step}");
+        // A paragraph written over many lines: the page's line that holds the file's line.
+        // Its lines are joined and wrapped anew, so the line asked for begins somewhere in
+        // the row below the edge, or was the row above's last word.
+        assert!(ws.scroll_to_line(306 + 150));
+        settle(&mut ws);
+        let (line, _) = line_below_the_edge(&mut ws).unwrap();
+        assert!((455..=456).contains(&line), "{line}");
+        assert!(ws.scroll() > in_code + 1000.0);
+        // And back: what is at the top of the page is a line near it, not the paragraph's
+        // first.
+        let top = ws.top_source_line().unwrap();
+        assert!((453..=456).contains(&top), "{top}");
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_place_along_a_line_that_wraps_is_shown_at_its_row() {
+        let dir = temp_dir("fine-columns");
+        let words: Vec<String> = (0..2000).map(|n| format!("word{n:04}")).collect();
+        let text = format!("# Title\n\n{}\n\nThe end.\n", words.join(" "));
+        let path = write(&dir, "doc.md", &text);
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        // The line alone is its beginning.
+        assert!(ws.scroll_to_line(3));
+        settle(&mut ws);
+        let start = ws.scroll();
+        assert_eq!(line_below_the_edge(&mut ws).map(|at| at.0), Some(3));
+        // Word 1500 begins at byte 9 * 1500 of line 3: the row that holds it goes below the
+        // edge, a long way into the paragraph.
+        let column = 9 * 1500 + 1;
+        assert!(ws.scroll_to_line(SourcePlace {
+            line: 3,
+            column: Some(column),
+        }));
+        settle(&mut ws);
+        assert!(ws.scroll() > start + 500.0, "{}", ws.scroll());
+        let (line, col) = line_below_the_edge(&mut ws).unwrap();
+        assert_eq!(line, 3);
+        // The pointer is over that row: within a row's worth of text of the place.
+        assert!(col.abs_diff(column) < 200, "{col} for {column}");
+        // What "Edit in mdedit" would ask for from here is in the row at the very top: the
+        // same line, and a column on the row before.
+        let top = ws.top_source_place().unwrap();
+        assert_eq!(top.line, 3);
+        let top_col = top.column.expect("past the line's first text");
+        assert!(top_col < column && column - top_col < 400, "{top_col}");
+        // At the paragraph's first row no column is named.
+        assert!(ws.scroll_to_line(3));
+        settle(&mut ws);
+        ws.scroll_by(JUMP_MARGIN);
+        settle(&mut ws);
+        let first = SourcePlace {
+            line: 3,
+            column: None,
+        };
+        assert_eq!(ws.top_source_place(), Some(first));
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_caret_walking_through_a_long_block_is_followed_in_steps_and_stays_in_view() {
+        let dir = temp_dir("fine-follow");
+        let path = write(&dir, "doc.md", &long_blocks(300));
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        assert!(ws.follow(&path, 104));
+        settle(&mut ws);
+        // Down, a line at a time: the page never goes back, moves by a step or more when
+        // it moves, and the caret's line stays in the top rows of the page.
+        let mut moves = 0;
+        for line in 105..160 {
+            let before = ws.scroll();
+            let moved = ws.follow(&path, line);
+            settle(&mut ws);
+            let by = ws.scroll() - before;
+            assert_eq!(moved, by != 0.0);
+            assert!(by == 0.0 || by >= LINE_STEP, "line {line}: {by}");
+            assert!(by < 3.0 * LINE_STEP, "line {line}: {by}");
+            moves += moved as u32;
+            let shown = (0..4).any(|row| {
+                let y = JUMP_MARGIN + 6.0 + row as f32 * 20.0;
+                let hit = ws.hit(120.0, y);
+                let doc = ws.active_document().unwrap();
+                hit.and_then(|h| doc.line_at_text(h.offset)).map(|at| at.0) == Some(line)
+            });
+            assert!(shown, "line {line} is not near the top");
+        }
+        assert!((10..55).contains(&moves), "{moves}");
+        // Up again: the page never goes forward, and the caret's line is never more than
+        // the one row above the edge that the step allows.
+        for line in (110..159).rev() {
+            let before = ws.scroll();
+            ws.follow(&path, line);
+            settle(&mut ws);
+            assert!(ws.scroll() <= before, "line {line}");
+            let top = ws.top_source_line().unwrap();
+            assert!(
+                top <= line + 1,
+                "line {line} left the view: the top is {top}"
+            );
+        }
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn typing_at_the_end_of_a_document_does_not_move_the_page_back_and_forth() {
+        let dir = temp_dir("fine-end");
+        let mut text = paragraphs_by_line(120);
+        let path = write(&dir, "doc.md", &text);
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        // The editor's caret is in the last paragraph, which it types on: letter by
+        // letter, wrapping to new rows, then new lines of the same paragraph.
+        text.truncate(text.trim_end().len());
+        let line = |text: &str| text.lines().count() as u32;
+        ws.follow(&path, line(&text));
+        settle(&mut ws);
+        let mut last = ws.scroll();
+        let mut moves = 0;
+        for i in 0..400 {
+            text.push_str(match i {
+                _ if i % 90 == 89 => "\n",
+                _ if i % 6 == 5 => " ",
+                _ => "x",
+            });
+            let column = (text.len() - text.rfind('\n').map_or(0, |at| at + 1)) as u32 + 1;
+            let at = SourcePlace {
+                line: line(&text),
+                column: Some(column),
+            };
+            assert!(ws.live_text(&path, text.clone(), Some(at)));
+            ws.apply_live();
+            ws.paint(800, 600, 1.0).unwrap();
+            let now = ws.scroll();
+            assert!(
+                now >= last,
+                "step {i}: the page went back from {last} to {now}"
+            );
+            moves += (now != last) as u32;
+            last = now;
+        }
+        // A few rows were added below the last paragraph: the page moved a few times at
+        // most, never at every letter.
+        assert!(moves <= 12, "{moves}");
         _ = std::fs::remove_dir_all(&dir);
     }
 

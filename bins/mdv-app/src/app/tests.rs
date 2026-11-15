@@ -863,7 +863,12 @@ fn edit_in_mdedit_starts_the_editor_at_the_top_line() {
     }
     let args = std::fs::read_to_string(&record).unwrap_or_default();
     let path = a.ws.active_tab().unwrap().path().display().to_string();
-    assert_eq!(args, format!("--goto\n{top}\n--from\nmdview\n{path}\n"));
+    // The column goes with the line only when the top row begins inside a line that wraps.
+    let goto = match a.ws.top_source_place().unwrap().column {
+        Some(column) => format!("{top}:{column}"),
+        None => top.to_string(),
+    };
+    assert_eq!(args, format!("--goto\n{goto}\n--from\nmdview\n{path}\n"));
     // SAFETY: as above.
     unsafe { std::env::remove_var("MD_SISTER_MDEDIT") };
     _ = std::fs::remove_dir_all(&dir);
@@ -948,6 +953,43 @@ fn page_text(a: &App) -> String {
         .unwrap()
         .text
         .to_string()
+}
+
+#[test]
+fn a_hand_over_with_a_column_shows_the_row_of_a_wrapped_line() {
+    let (mut a, dir, file) = live_app("column");
+    // One paragraph written as a single line of 3000 words, as the editor has it.
+    let words: Vec<String> = (0..3000).map(|n| format!("word{n:04}")).collect();
+    let text = format!("# Title\n\n{}\n\nThe end.\n", words.join(" "));
+    let place = |line, column| Request {
+        follow: true,
+        line: Some(line),
+        column,
+        ..Request::new(&file)
+    };
+    a.handed_over(vec![Request {
+        text: Some(text),
+        ..place(3, None)
+    }]);
+    a.compose();
+    let start = a.ws.scroll();
+    // The caret far along the line: the page follows into the paragraph, to the row that
+    // holds that place, and a caret further along is further down.
+    a.handed_over(vec![place(3, Some(9 * 1000 + 1))]);
+    a.compose();
+    let middle = a.ws.scroll();
+    assert!(middle > start + 200.0, "{start} {middle}");
+    let at = a.ws.top_source_place().unwrap();
+    assert_eq!(at.line, 3);
+    assert!(at.column.is_some_and(|c| c < 9001 && c > 8000), "{at:?}");
+    a.handed_over(vec![place(3, Some(9 * 2500 + 1))]);
+    a.compose();
+    assert!(a.ws.scroll() > middle + 200.0);
+    // Without a column (an older mdedit) the line is its beginning, as before.
+    a.handed_over(vec![place(3, None)]);
+    a.compose();
+    assert_eq!(a.ws.scroll(), start);
+    _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
