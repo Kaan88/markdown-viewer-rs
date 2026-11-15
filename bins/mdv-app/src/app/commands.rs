@@ -66,12 +66,13 @@ impl App {
             }
             Hit::FilesFolder | Hit::FilesOpenFolder => self.command(C::OpenFolder),
             Hit::OutlineRow(i) => {
-                if let Some(block) = self.ws.outline().get(i).map(|e| e.block) {
-                    self.ws.outline_jump(block);
-                }
+                self.ui.outline_focus = Some(i);
+                self.outline_enter(i);
             }
             Hit::BacklinkRow(i) => {
-                self.ws.open_backlink(i);
+                let at = self.ws.outline().len() + i;
+                self.ui.outline_focus = Some(at);
+                self.outline_enter(at);
             }
             Hit::EmptyOpen => self.command(C::OpenFiles),
             Hit::RemoteLoad => self.ws.allow_remote(false),
@@ -578,6 +579,9 @@ impl App {
                 self.ws.zoom_reset();
             }
             C::ToggleFiles | C::ToggleOutline => {
+                if id == C::ToggleOutline {
+                    self.ui.outline_focus = None;
+                }
                 let p = &mut self.ui.panes;
                 if self.ui.focus_mode {
                     self.ui.focus_mode = false;
@@ -595,6 +599,7 @@ impl App {
                     self.ui.tree.refresh();
                 }
             }
+            C::FocusOutline => self.focus_outline(),
             C::FocusMode => {
                 self.ui.focus_mode = !self.ui.focus_mode;
                 self.ui.popup = None;
@@ -637,6 +642,88 @@ impl App {
             }
         }
         self.redraw();
+    }
+
+    /// Puts the keyboard in the Outline pane: opens the pane if it is closed and focuses the
+    /// current heading (the first row when there is none).
+    pub(super) fn focus_outline(&mut self) {
+        if self.ui.focus_mode || !self.ui.panes.outline {
+            self.command(C::ToggleOutline);
+        }
+        self.ui.find_focused = false;
+        let total = self.outline_rows();
+        if total == 0 {
+            self.ui.outline_focus = None;
+            self.ws.set_status("The outline is empty");
+            return;
+        }
+        let at = self.ws.current_heading().unwrap_or(0).min(total - 1);
+        self.ui.outline_focus = Some(at);
+        self.reveal_focused_outline();
+    }
+
+    /// How many rows the outline pane has: the headings, then the backlinks.
+    pub(super) fn outline_rows(&self) -> usize {
+        self.ws.outline().len() + self.ws.backlinks().len()
+    }
+
+    pub(super) fn reveal_focused_outline(&mut self) {
+        if let Some(i) = self.ui.outline_focus {
+            let headings = self.ws.outline().len();
+            panes::reveal_outline_item(&mut self.ui, i, headings);
+        }
+    }
+
+    /// What Enter (or a click) on outline row `i` does: a heading is gone to, a backlink opened.
+    /// Opening a backlink changes the document, so the keyboard goes back to the page.
+    pub(super) fn outline_enter(&mut self, i: usize) {
+        let headings = self.ws.outline().len();
+        if let Some(block) = self.ws.outline().get(i).map(|e| e.block) {
+            self.ws.outline_jump(block);
+        } else {
+            self.ws.open_backlink(i - headings);
+            self.ui.outline_focus = None;
+        }
+    }
+
+    /// Keys for the focused Outline pane. True when the key was used.
+    pub(super) fn outline_key(&mut self, name: &KeyName, mods: Mods) -> bool {
+        let Some(at) = self.ui.outline_focus else {
+            return false;
+        };
+        let total = self.outline_rows();
+        if !self.ui.panes.outline || total == 0 {
+            self.ui.outline_focus = None;
+            return false;
+        }
+        if mods.ctrl || mods.alt {
+            return false;
+        }
+        let at = at.min(total - 1);
+        let page = ((self.ui.panes.outline_view / panes::ROW) as usize)
+            .saturating_sub(1)
+            .max(1);
+        let next = match name {
+            KeyName::Up => at.saturating_sub(1),
+            KeyName::Down => (at + 1).min(total - 1),
+            KeyName::Home => 0,
+            KeyName::End => total - 1,
+            KeyName::PageUp => at.saturating_sub(page),
+            KeyName::PageDown => (at + page).min(total - 1),
+            KeyName::Enter => {
+                self.ui.outline_focus = Some(at);
+                self.outline_enter(at);
+                return true;
+            }
+            KeyName::Escape => {
+                self.ui.outline_focus = None;
+                return true;
+            }
+            _ => return false,
+        };
+        self.ui.outline_focus = Some(next);
+        self.reveal_focused_outline();
+        true
     }
 
     /// Escape peels one layer: a menu, a dialog, the find box, focus mode, the find, the selection.

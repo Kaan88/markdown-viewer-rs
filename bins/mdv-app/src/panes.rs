@@ -235,6 +235,9 @@ pub fn draw_outline(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
         let hit = Hit::OutlineRow(i);
         let selected = current == Some(i);
         row_fill(c, rr, hit, selected);
+        if ui.outline_focus == Some(i) {
+            focus_mark(c, rr);
+        }
         let x = r.x + 18.0 + (e.level.saturating_sub(base).min(5)) as f32 * 14.0;
         let top = e.level == base;
         let color = if selected || top {
@@ -275,6 +278,9 @@ pub fn draw_outline(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
             let rr = Rect::new(r.x + 6.0, y, r.w - 12.0, BACKLINK_ROW - 2.0);
             let hit = Hit::BacklinkRow(i);
             row_fill(c, rr, hit, false);
+            if ui.outline_focus == Some(entries.len() + i) {
+                focus_mark(c, rr);
+            }
             let x = r.x + 18.0;
             let width = rr.right() - x - 8.0;
             c.p.text(Face::Ui, 13.0, x, y + 14.0, &b.shown, pal.text, width);
@@ -352,5 +358,43 @@ pub fn reveal_outline_row(ui: &mut Ui, index: usize) {
         *s = (top - ROW).max(0.0);
     } else if top + ROW > *s + view {
         *s = top + 2.0 * ROW - view;
+    }
+}
+
+/// The mark of the row the keyboard is on: an accent outline and a bar at its left edge.
+fn focus_mark(c: &mut Ctx, rr: Rect) {
+    let a = c.pal.accent;
+    c.p.fill(Rect::new(rr.x, rr.y, rr.w, 1.0), a);
+    c.p.fill(Rect::new(rr.x, rr.bottom() - 1.0, rr.w, 1.0), a);
+    c.p.fill(Rect::new(rr.x, rr.y, 1.0, rr.h), a);
+    c.p.fill(Rect::new(rr.right() - 1.0, rr.y, 1.0, rr.h), a);
+    c.p.rbox(
+        Rect::new(rr.x + 2.0, rr.y + 4.0, 3.0, (rr.h - 8.0).max(0.0)),
+        1.5,
+        a,
+    );
+}
+
+/// Scrolls the outline pane so its keyboard-focused item is visible. `i` counts the headings
+/// first, then the backlinks (`headings` of them come before the first).
+pub fn reveal_outline_item(ui: &mut Ui, i: usize, headings: usize) {
+    let view = ui.panes.outline_view;
+    if view <= 0.0 {
+        return;
+    }
+    let (top, h) = if i < headings {
+        (i as f32 * ROW, ROW)
+    } else {
+        let list_end = headings.max(1) as f32 * ROW;
+        (
+            list_end + BACKLINKS_HEAD + (i - headings) as f32 * BACKLINK_ROW,
+            BACKLINK_ROW,
+        )
+    };
+    let s = &mut ui.panes.outline_scroll;
+    if top < *s {
+        *s = top.max(0.0);
+    } else if top + h > *s + view {
+        *s = top + h - view;
     }
 }

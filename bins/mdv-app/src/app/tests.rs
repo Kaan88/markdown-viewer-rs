@@ -2628,3 +2628,119 @@ fn the_page_menu_offers_copy_as_markdown_after_copy_and_greyed_without_a_selecti
         assert!(matches!(items[at - 1].id, crate::ui::Act::Copy));
     }
 }
+
+#[test]
+fn the_outline_pane_is_walked_with_the_keyboard_only_once_focused() {
+    let mut a = app(&["everything.md"]);
+    // Not focused: Down is the page's.
+    key(&mut a, KeyName::Down, None);
+    assert_eq!(a.ui.outline_focus, None);
+    assert!(a.ws.scroll() > 0.0, "the page took the key");
+
+    a.command(CommandId::FocusOutline);
+    a.compose();
+    let total = a.ws.outline().len();
+    assert!(total > 20);
+    let first = a.ui.outline_focus.expect("a focused row");
+    let page = a.ws.scroll();
+
+    key(&mut a, KeyName::Down, None);
+    assert_eq!(a.ui.outline_focus, Some(first + 1));
+    assert_eq!(a.ws.scroll(), page, "the page did not move");
+    key(&mut a, KeyName::Up, None);
+    key(&mut a, KeyName::Up, None);
+    assert_eq!(a.ui.outline_focus, Some(first.saturating_sub(1)));
+    key(&mut a, KeyName::End, None);
+    assert_eq!(a.ui.outline_focus, Some(total - 1));
+    assert!(
+        outline_row_visible(&a, total - 1),
+        "End reveals the last row"
+    );
+    key(&mut a, KeyName::Down, None);
+    assert_eq!(a.ui.outline_focus, Some(total - 1), "no wrapping");
+    key(&mut a, KeyName::Home, None);
+    assert_eq!(a.ui.outline_focus, Some(0));
+    assert!(outline_row_visible(&a, 0));
+    key(&mut a, KeyName::PageDown, None);
+    let n = a.ui.outline_focus.unwrap();
+    assert!(n > 1 && n < total, "a page of rows: {n}");
+    assert!(outline_row_visible(&a, n));
+    key(&mut a, KeyName::PageUp, None);
+    assert_eq!(a.ui.outline_focus, Some(0));
+
+    // Enter goes to the heading and keeps the keyboard in the pane.
+    key(&mut a, KeyName::End, None);
+    key(&mut a, KeyName::Up, None);
+    let target = a.ui.outline_focus.unwrap();
+    key(&mut a, KeyName::Enter, None);
+    a.compose();
+    a.compose();
+    let now = a.ws.current_heading().expect("a current heading");
+    assert!(
+        now == target || a.ws.scroll() == a.ws.max_scroll(),
+        "went to {now}, wanted {target}"
+    );
+    assert_eq!(a.ui.outline_focus, Some(target));
+
+    // Escape gives the keyboard back to the page.
+    key(&mut a, KeyName::Escape, None);
+    assert_eq!(a.ui.outline_focus, None);
+    a.ws.scroll_to(0.0);
+    key(&mut a, KeyName::Down, None);
+    assert!(a.ws.scroll() > 0.0, "Down is the page's again");
+}
+
+#[test]
+fn the_outline_focus_follows_clicks_and_other_panes() {
+    let mut a = app(&["everything.md"]);
+    click(&mut a, Hit::OutlineRow(2));
+    assert_eq!(a.ui.outline_focus, Some(2));
+    // A click on the page, or the find box, takes the keyboard back.
+    a.pointer_moved(400.0, 400.0);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert_eq!(a.ui.outline_focus, None);
+    click(&mut a, Hit::OutlineRow(2));
+    a.command(CommandId::Find);
+    key(&mut a, KeyName::Down, None);
+    assert_eq!(a.ui.outline_focus, None);
+    // Shortcuts still work with the pane focused.
+    click(&mut a, Hit::OutlineRow(1));
+    a.mods.ctrl = true;
+    key(&mut a, KeyName::Down, None);
+    a.mods.ctrl = false;
+    assert_eq!(a.ui.outline_focus, Some(1));
+    // Closing the pane drops the focus; the command opens it again.
+    a.command(CommandId::ToggleOutline);
+    assert_eq!(a.ui.outline_focus, None);
+    assert!(!a.ui.panes.outline);
+    a.command(CommandId::FocusOutline);
+    assert!(a.ui.panes.outline);
+    assert!(a.ui.outline_focus.is_some());
+}
+
+#[test]
+fn the_keyboard_walks_on_from_the_headings_into_the_backlinks_and_enter_opens_one() {
+    let mut a = app(&["wiki/Home.md"]);
+    a.set_folder(fixture("wiki"));
+    a.ws.index_notes_now();
+    a.compose();
+    let headings = a.ws.outline().len();
+    let links = a.ws.backlinks().len();
+    assert!(links >= 4);
+    a.command(CommandId::FocusOutline);
+    key(&mut a, KeyName::End, None);
+    assert_eq!(a.ui.outline_focus, Some(headings + links - 1));
+    assert!(a.hit_rect(Hit::BacklinkRow(links - 1)).is_some());
+    key(&mut a, KeyName::Up, None);
+    key(&mut a, KeyName::Up, None);
+    assert_eq!(a.ui.outline_focus, Some(headings + links - 3));
+    let before = a.ws.active_tab().unwrap().path().to_path_buf();
+    key(&mut a, KeyName::Enter, None);
+    assert_ne!(a.ws.active_tab().unwrap().path(), before);
+    assert_eq!(
+        a.ui.outline_focus, None,
+        "the keyboard went back to the page"
+    );
+}

@@ -26,6 +26,9 @@ pub enum CommandId {
     ZoomReset,
     ToggleFiles,
     ToggleOutline,
+    /// Put the keyboard in the Outline pane (opening it if need be): Up and Down move between
+    /// its rows, Enter goes to the row, Escape gives the keyboard back to the page.
+    FocusOutline,
     FocusMode,
     /// Show the document as slides, full screen.
     Present,
@@ -280,6 +283,7 @@ pub const COMMANDS: &[Command] = &[
         "Make mdview the default for Markdown files",
         &[],
     ),
+    cmd(C::FocusOutline, Menu::None, "Focus outline", &[]),
     // No default key: Ctrl+Shift+F is Focus reading mode's. Reached from the menu and the palette.
     cmd(C::FindInFolder, Menu::None, "Find in folder…", &[]),
     cmd(C::Present, Menu::None, "Present", &[K("Shift+F5")]),

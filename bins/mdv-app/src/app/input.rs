@@ -359,6 +359,15 @@ impl App {
         ) {
             self.ui.find_focused = false;
         }
+        // Likewise the Outline pane's rows: a click anywhere but on them gives the keyboard back.
+        if !matches!(
+            hit,
+            Hit::OutlineRow(_)
+                | Hit::BacklinkRow(_)
+                | Hit::ScrollBar(Scroller::Pane(Side::Outline))
+        ) {
+            self.ui.outline_focus = None;
+        }
         let clicks = self.click_count(x, y);
         self.redraw();
         match hit {
@@ -755,6 +764,12 @@ impl App {
         }
         if mods.alt && !mods.ctrl && matches!(name, KeyName::Left | KeyName::Right) {
             self.travel(name == KeyName::Left);
+            return;
+        }
+        if self.ui.find_focused {
+            self.ui.outline_focus = None;
+        }
+        if self.outline_key(&name, mods) {
             return;
         }
         if self.ui.find_focused && self.find_key(&name, mods, typed) {

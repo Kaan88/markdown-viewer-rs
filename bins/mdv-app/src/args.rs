@@ -57,6 +57,8 @@ pub struct Args {
     pub scroll: Option<f32>,
     pub menu: Option<ShotMenu>,
     pub dialog: Option<ShotDialog>,
+    /// `--outline-focus <n>`: the keyboard on row n (from 0) of the Outline pane, for a shot.
+    pub outline_focus: Option<usize>,
     /// `--palette <query>`: the command palette open with this text (an empty one is `""`).
     pub palette: Option<String>,
     /// `--folder-search <query>`: Find in folder open with this text, searched to the end.
@@ -194,6 +196,7 @@ impl Args {
                         _ => None,
                     }
                 }
+                "--outline-focus" => out.outline_focus = value(&a).and_then(|v| v.parse().ok()),
                 "--palette" => out.palette = value(&a),
                 "--folder-search" => out.folder_search = value(&a),
                 "--dialog" => {
@@ -256,6 +259,7 @@ mod tests {
         assert_eq!(a.files_pane, Some(false));
         let a = parse("--shot x.png --palette >zoom --dialog settings");
         assert_eq!(a.palette.as_deref(), Some(">zoom"));
+        assert_eq!(parse("--outline-focus 3").outline_focus, Some(3));
         assert_eq!(a.dialog, Some(ShotDialog::Settings));
     }
 

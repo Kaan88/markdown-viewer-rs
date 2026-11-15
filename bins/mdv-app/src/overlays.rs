@@ -48,7 +48,7 @@ pub fn command_icon(id: C) -> &'static str {
         C::ZoomOut => glyph::ZOOM_OUT,
         C::ZoomReset => glyph::ZOOM_RESET,
         C::ToggleFiles => glyph::SIDEBAR,
-        C::ToggleOutline => glyph::OUTLINE,
+        C::ToggleOutline | C::FocusOutline => glyph::OUTLINE,
         C::FocusMode => glyph::FULLSCREEN,
         C::Present => glyph::PLAY,
         C::ShowShortcuts => glyph::KEYBOARD,

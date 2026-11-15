@@ -1620,6 +1620,11 @@ fn shot(mut app: App, path: &Path) -> i32 {
         Some(ShotDialog::Settings) => app.open_settings(),
         None => {}
     }
+    if let Some(n) = app.args.outline_focus {
+        app.compose();
+        app.ui.outline_focus = Some(n);
+        app.reveal_focused_outline();
+    }
     if let Some(query) = app.args.palette.clone() {
         app.open_palette(&query);
     }
