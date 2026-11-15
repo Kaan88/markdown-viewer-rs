@@ -789,6 +789,16 @@ pub fn parse_bytes(bytes: &[u8]) -> Document {
 
 /// [`parse_bytes`] with wiki-links: see [`crate::parse_wiki`].
 pub fn parse_bytes_wiki(bytes: &[u8], wiki: &mut dyn FnMut(&str) -> WikiAs) -> Document {
+    parse_bytes_wiki_embeds(bytes, &mut |note, embed| {
+        if embed { WikiAs::Text } else { wiki(note) }
+    })
+}
+
+/// [`parse_bytes_wiki`] with embeds: see [`crate::parse_wiki_embeds`].
+pub fn parse_bytes_wiki_embeds(
+    bytes: &[u8],
+    wiki: &mut dyn FnMut(&str, bool) -> WikiAs,
+) -> Document {
     if bytes.len() > MAX_FILE_BYTES {
         return Document {
             warnings: vec![Warning::FileTooLarge],
@@ -796,7 +806,7 @@ pub fn parse_bytes_wiki(bytes: &[u8], wiki: &mut dyn FnMut(&str) -> WikiAs) -> D
         };
     }
     let (text, invalid) = crate::files::decode(bytes);
-    let mut doc = crate::parse_wiki(&text, wiki);
+    let mut doc = crate::parse_wiki_embeds(&text, wiki);
     if invalid {
         doc.warnings.push(Warning::InvalidUtf8);
     }

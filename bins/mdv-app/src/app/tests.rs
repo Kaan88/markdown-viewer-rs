@@ -2572,3 +2572,21 @@ fn a_tab_is_found_by_its_file_or_by_the_editors_name_for_it() {
     assert!(!a.ws.shows(std::path::Path::new("no-such.md"), None));
     assert!(!a.ws.shows(std::path::Path::new(""), Some("mdedit-1-2")));
 }
+
+#[test]
+fn wiki_labels_with_markup_and_embeds_resolve_beside_the_document() {
+    let a = app(&["wiki-embeds/Embeds.md"]);
+    let doc = a.ws.active_document().expect("the document is open");
+    // Four labels, the note embed and its labelled twin: each one link to Target.
+    let wiki: Vec<_> = doc.links.iter().filter(|l| l.wiki).collect();
+    assert_eq!(wiki.len(), 6);
+    assert!(wiki.iter().all(|l| !l.missing));
+    assert!(doc.text.contains("a b c has emphasis inside one link"));
+    // The picture that is there is an image; the two that are not stay as written.
+    assert_eq!(doc.images.len(), 1);
+    assert_eq!(doc.str(doc.images[0].src), "../assets/badge.png");
+    assert!(doc.text.contains("![[missing.png]] and ![[Nowhere]]"));
+    // The embeds left as text are remembered, so the document is parsed again when they appear.
+    let kept: Vec<&str> = doc.wiki_text.iter().map(|&s| doc.str(s)).collect();
+    assert_eq!(kept, ["!missing.png", "!Nowhere"]);
+}

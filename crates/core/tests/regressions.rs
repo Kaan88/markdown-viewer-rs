@@ -3192,7 +3192,10 @@ fn a_wiki_label_may_hold_inline_markup() {
     assert!(d.links[0].wiki && !d.links[0].missing);
 
     // Strong, code, a heading, a missing note, the markup first or last, two in a line.
-    let d = parse_notes("[[N#H|**x** and `y`]] then [[M|*z*]] [[K|q *r*]]", WikiAs::Missing);
+    let d = parse_notes(
+        "[[N#H|**x** and `y`]] then [[M|*z*]] [[K|q *r*]]",
+        WikiAs::Missing,
+    );
     assert_eq!(d.text.trim_end(), "x and y then z q r");
     assert_eq!(
         wiki_links(&d),
@@ -3230,6 +3233,106 @@ fn a_wiki_label_with_markup_that_never_closes_stays_text() {
     let d = parse_notes("*x [[Note|a *b* c]] d*", WikiAs::Link);
     assert_eq!(wiki_links(&d), [pair("a b c", "Note")]);
     assert_eq!(d.text.trim_end(), "x a b c d");
+}
+
+/// Parses with embeds asked about: `pictures` are the files that are there, `notes` the notes.
+fn parse_embeds(src: &str, pictures: &[&str], notes: &[&str]) -> Document {
+    mdview_core::parse_wiki_embeds(src, &mut |name, embed| {
+        if embed && mdview_core::links::is_image_name(name) {
+            if pictures.contains(&name) {
+                WikiAs::Link
+            } else {
+                WikiAs::Text
+            }
+        } else if notes.contains(&name) {
+            WikiAs::Link
+        } else if embed {
+            WikiAs::Missing
+        } else {
+            WikiAs::Text
+        }
+    })
+}
+
+#[test]
+fn an_embed_of_a_picture_that_is_there_shows_the_picture() {
+    let d = parse_embeds(
+        "a ![[pic.png]] b ![[sub/My Pic.SVG|alt words]] c",
+        &["pic.png", "sub/My Pic.SVG"],
+        &[],
+    );
+    assert_eq!(d.text.trim_end(), "a  b  c");
+    assert_eq!(d.images.len(), 2);
+    assert_eq!(d.str(d.images[0].src), "pic.png");
+    assert_eq!(d.str(d.images[0].alt), "");
+    assert_eq!(d.str(d.images[1].src), "sub/My Pic.SVG");
+    assert_eq!(d.str(d.images[1].alt), "alt words");
+    // It is the image `![](pic.png)` makes: the same atom in the same place.
+    let plain = parse("a ![](pic.png) b");
+    assert_eq!(plain.images.len(), 1);
+    assert_eq!(plain.text.trim_end(), "a  b");
+    let kinds = |d: &Document| {
+        d.spans
+            .iter()
+            .map(|s| (s.kind, s.start, s.end))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        kinds(&parse_embeds("a ![[pic.png]] b", &["pic.png"], &[])),
+        kinds(&plain)
+    );
+    // A size is not a label, and the picture keeps its own size.
+    let d = parse_embeds("![[pic.png|200]] ![[pic.png|200x100]]", &["pic.png"], &[]);
+    assert!(
+        d.images
+            .iter()
+            .all(|i| d.str(i.alt).is_empty() && i.width.is_none())
+    );
+}
+
+#[test]
+fn an_embed_of_a_note_is_a_link_to_it() {
+    let d = parse_embeds("see ![[Note]] and ![[Note#Part|the part]]", &[], &["Note"]);
+    assert_eq!(d.text.trim_end(), "see Note and the part");
+    assert_eq!(
+        wiki_links(&d),
+        [pair("Note", "Note"), pair("the part", "Note#Part")]
+    );
+    assert!(d.links.iter().all(|l| l.wiki && !l.missing));
+    assert!(d.images.is_empty());
+    // The same links as without the `!`.
+    let plain = parse_embeds("see [[Note]]", &[], &["Note"]);
+    assert_eq!(wiki_links(&plain)[0], pair("Note", "Note"));
+}
+
+#[test]
+fn an_embed_that_is_not_found_stays_text() {
+    for src in [
+        "![[gone.png]]",
+        "![[Gone]]",
+        "![[Gone|x]]",
+        "![[pic.png#h]]",
+        r"\![[pic.png]]",
+    ] {
+        let d = parse_embeds(src, &["pic.png"], &["Note"]);
+        assert!(d.links.is_empty() && d.images.is_empty(), "{src:?}");
+        assert_eq!(d.text.trim_end(), src.replace(r"\!", "!"), "{src:?}");
+    }
+    // What stayed text because the application said so is remembered as an embed.
+    let d = mdview_core::parse_wiki_embeds("![[a.png]] [[b]]", &mut |_, _| WikiAs::Text);
+    let kept: Vec<&str> = d.wiki_text.iter().map(|&s| d.str(s)).collect();
+    assert_eq!(kept, ["!a.png", "b"]);
+    // `parse_wiki`, which knows no embeds, leaves them as written.
+    let d = parse_notes("![[Note]] ![[pic.png]]", WikiAs::Link);
+    assert!(d.links.is_empty() && d.images.is_empty());
+    assert_eq!(d.text.trim_end(), "![[Note]] ![[pic.png]]");
+    // Nothing is made in code, inside a link or from a `!` that belongs to another run.
+    let d = parse_embeds(
+        "`![[pic.png]]` [x ![[pic.png]]](u) **a!**[[Note]]",
+        &["pic.png"],
+        &["Note"],
+    );
+    assert!(d.images.is_empty());
 }
 
 #[test]

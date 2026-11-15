@@ -21,9 +21,10 @@ use super::{LinkOutcome, Reveal, Workspace, read_stable, same_file};
 use mdshared_app::notes::{Config, Indexer, NoteIndex, resolve_in_folder};
 use mdshared_app::wikilink::parse_target;
 use mdview_core::limits::{BACKLINKS_SHOWN, notes_config};
+use mdview_core::links::is_image_name;
 use mdview_core::links::{LinkAction, classify_link};
 use mdview_core::model::{SpanKind, WikiAs};
-use mdview_core::{Document, parse_bytes_wiki};
+use mdview_core::{Document, parse_bytes_wiki_embeds};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -235,10 +236,13 @@ impl Workspace {
                     WikiAs::Text => reparse = true,
                 }
             }
-            reparse |= doc
-                .wiki_text
-                .iter()
-                .any(|&note| decide.answer(doc.str(note)) != WikiAs::Text);
+            reparse |= doc.wiki_text.iter().any(|&note| {
+                // `!name` is an embed that stayed text.
+                match doc.str(note).strip_prefix('!') {
+                    Some(name) => decide.answer_embed(name) != WikiAs::Text,
+                    None => decide.answer(doc.str(note)) != WikiAs::Text,
+                }
+            });
         }
         if reparse && !tab.missing {
             return self.parse_again(index);
@@ -466,7 +470,13 @@ pub(super) fn parse_document(
     bytes: &[u8],
 ) -> Document {
     let mut decide = Decider::new(notes, folder_open, path);
-    parse_bytes_wiki(bytes, &mut |note| decide.answer(note))
+    parse_bytes_wiki_embeds(bytes, &mut |note, embed| {
+        if embed {
+            decide.answer_embed(note)
+        } else {
+            decide.answer(note)
+        }
+    })
 }
 
 /// Answers what each `[[note]]` of one document is. A note that is found is a link. One that is
@@ -509,6 +519,23 @@ impl<'a> Decider<'a> {
         };
         self.answers.insert(note.to_string(), answer);
         answer
+    }
+
+    /// What `![[name]]` becomes. A picture's name is `Link` when the file is there, below the
+    /// folder of the document (the way `![](name)` would find it), and `Text` when not: an embed
+    /// is never drawn as a missing link. Any other name is asked as a note is, and the parser
+    /// makes a link of a found one.
+    fn answer_embed(&mut self, name: &str) -> WikiAs {
+        if !is_image_name(name) {
+            return self.answer(name);
+        }
+        let relative = !name.starts_with(['/', '\\']) && !name.contains(':');
+        let there = relative
+            && self
+                .path
+                .parent()
+                .is_some_and(|dir| dir.join(name).is_file());
+        if there { WikiAs::Link } else { WikiAs::Text }
     }
 
     fn find(&mut self, note: &str) -> bool {

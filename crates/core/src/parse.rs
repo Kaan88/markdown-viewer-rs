@@ -6,6 +6,7 @@ use crate::limits::{
     MAX_BLOCK_DEPTH, MAX_COLSPAN, MAX_DECODED_BYTES, MAX_DIAGRAM_BYTES, MAX_EQUATION_BYTES,
     MAX_HTML_DEPTH, MAX_HTML_LENGTH_PX, MAX_IMAGE_DIMENSION_PX, MAX_ROWSPAN, Oversize,
 };
+use crate::links::is_image_name;
 use crate::model::*;
 use crate::slug::Slugger;
 use pulldown_cmark::{
@@ -39,6 +40,18 @@ pub fn parse(src: &str) -> Document {
 /// text, so `[[x]](url)`, `[[x]][ref]` and `[[x]]` with a definition for `x` keep their meaning,
 /// and nothing in code or inside another link is touched.
 pub fn parse_wiki(src: &str, wiki: &mut dyn FnMut(&str) -> WikiAs) -> Document {
+    parse_wiki_embeds(src, &mut |note, embed| {
+        if embed { WikiAs::Text } else { wiki(note) }
+    })
+}
+
+/// [`parse_wiki`] that also asks about embeds: `wiki(name, true)` for `![[name]]`. Where `name`
+/// ends in a picture extension (see [`crate::links::is_image_name`]) `Link` means the file is
+/// there and the embed is the picture, as `![](name)` would be; for any other name `Link` makes
+/// a link to the note, as `[[name]]` would. Anything else leaves the embed as written (a
+/// `Missing` note too: an embed is never drawn as a missing link). An embed left as text is
+/// remembered in `wiki_text` as `!name`.
+pub fn parse_wiki_embeds(src: &str, wiki: &mut dyn FnMut(&str, bool) -> WikiAs) -> Document {
     let src = src.strip_prefix('\u{FEFF}').unwrap_or(src);
     if src.len() > MAX_DECODED_BYTES {
         return Document {
@@ -167,7 +180,7 @@ fn parse_with_checks(
     mut restore: bool,
     rejected: Vec<usize>,
     front: Front,
-    wiki: &mut dyn FnMut(&str) -> WikiAs,
+    wiki: &mut dyn FnMut(&str, bool) -> WikiAs,
 ) -> Document {
     // Hiding swaps in characters from U+E003 upward. A document that already uses any character
     // from that private-use block would have its own text rewritten by `restore`, so such a
@@ -200,7 +213,7 @@ fn build_checked(
     restore: bool,
     literal: bool,
     front: Front,
-    wiki: &mut dyn FnMut(&str) -> WikiAs,
+    wiki: &mut dyn FnMut(&str, bool) -> WikiAs,
 ) -> Result<Document, Vec<usize>> {
     let mut b = Builder::new(src, restore, literal, front, wiki);
     let mut gate = MathGate {
@@ -493,7 +506,7 @@ struct Builder<'a> {
     escapes: Vec<(usize, usize)>,
     link_hits: Vec<(usize, usize, LinkKind)>,
     /// Says what each `[[note]]` becomes.
-    wiki: &'a mut dyn FnMut(&str) -> WikiAs,
+    wiki: &'a mut dyn FnMut(&str, bool) -> WikiAs,
     /// A wiki-link changed the heading's text, so its anchor comes from the text shown.
     heading_wiki: bool,
     /// The span of a wiki-link whose label holds markup (`[[Note|a *b* c]]`) while its closing
@@ -561,7 +574,7 @@ impl<'a> Builder<'a> {
         restore: bool,
         literal_alerts: bool,
         front: Front,
-        wiki: &'a mut dyn FnMut(&str) -> WikiAs,
+        wiki: &'a mut dyn FnMut(&str, bool) -> WikiAs,
     ) -> Self {
         let mut breaks = memchr::memchr_iter(b'\n', src.as_bytes());
         let next_break = breaks.next().unwrap_or(usize::MAX);
@@ -2067,9 +2080,13 @@ impl<'a> Builder<'a> {
                 break;
             };
             let closed = b[close] == b']' && b.get(close + 1) == Some(&b']');
+            // A `!` right before is an embed when it is in this run and not escaped; one that is
+            // not stays text, brackets and all.
+            let bang = open > 0 && b[open - 1] == b'!';
+            let embed = bang && open > start && !escaped(open - 1);
             let plain = !(escaped(open) || escaped(open + 1) || escaped(close))
                 && !escaped(close + 1)
-                && !(open > 0 && b[open - 1] == b'!');
+                && !(bang && !embed);
             if !closed || !plain {
                 // `[[[x]]` opens at its second bracket: the next pair may start one before a
                 // bracket that directly follows this pair.
@@ -2088,26 +2105,46 @@ impl<'a> Builder<'a> {
             if target.note.contains("://") {
                 continue;
             }
-            let missing = match (self.wiki)(target.note) {
-                WikiAs::Link => false,
-                WikiAs::Missing => true,
+            let dest = match target.heading {
+                Some(heading) => format!("{}#{heading}", target.note),
+                None => target.note.to_string(),
+            };
+            let picture = embed && target.heading.is_none() && is_image_name(target.note);
+            let answer = (self.wiki)(target.note, embed);
+            let (kind, missing) = match answer {
+                WikiAs::Link if picture => {
+                    // A size (`|200`, `|200x100`) is not a label; the picture keeps its own.
+                    let sized = |l: &str| {
+                        l.split('x')
+                            .all(|n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
+                    };
+                    let alt = target.label.filter(|l| !sized(l)).unwrap_or("");
+                    (HitKind::Image(alt.to_string()), false)
+                }
+                // A picture's name with a heading names no note.
+                WikiAs::Link if embed && is_image_name(target.note) => continue,
+                WikiAs::Link => (HitKind::Link, false),
+                // An embed is never drawn as a missing link.
+                WikiAs::Missing if !embed => (HitKind::Link, true),
+                WikiAs::Missing => continue,
                 WikiAs::Text => {
-                    let note = target.note.to_string();
+                    let note = if embed {
+                        format!("!{}", target.note)
+                    } else {
+                        target.note.to_string()
+                    };
                     let note = self.pool(&note);
                     self.doc.wiki_text.push(note);
                     continue;
                 }
             };
-            let dest = match target.heading {
-                Some(heading) => format!("{}#{heading}", target.note),
-                None => target.note.to_string(),
-            };
             out.push(WikiHit {
-                start: open,
+                start: if embed { open - 1 } else { open },
                 end: close + 2,
                 shown: target.display(),
                 dest,
                 missing,
+                kind,
             });
         }
         out
@@ -2129,7 +2166,11 @@ impl<'a> Builder<'a> {
         let floor = self.text_floor;
         let before = self.src.get(..floor)?;
         // The source must really end where this run does (an HTML text has no such place).
-        if !before.ends_with(if label_head.is_empty() { "|" } else { label_head }) {
+        if !before.ends_with(if label_head.is_empty() {
+            "|"
+        } else {
+            label_head
+        }) {
             return None;
         }
         if !wiki_label_closes(&self.src.as_bytes()[floor..]) {
@@ -2140,7 +2181,7 @@ impl<'a> Builder<'a> {
             None => target.note.to_string(),
         };
         let note = target.note.to_string();
-        let missing = match (self.wiki)(&note) {
+        let missing = match (self.wiki)(&note, false) {
             WikiAs::Link => false,
             WikiAs::Missing => true,
             WikiAs::Text => {
@@ -2267,9 +2308,25 @@ impl<'a> Builder<'a> {
                 (_, Some(_)) => {
                     let w = wiki.next().expect("peeked");
                     self.doc.text.push_str(piece(pos, w.start));
-                    let at = self.doc.text.len();
-                    self.doc.text.push_str(&w.shown);
-                    link(self, &w.dest, at, Some(w.missing));
+                    match &w.kind {
+                        HitKind::Link => {
+                            let at = self.doc.text.len();
+                            self.doc.text.push_str(&w.shown);
+                            link(self, &w.dest, at, Some(w.missing));
+                        }
+                        HitKind::Image(alt) => {
+                            let src = self.pool(&w.dest);
+                            let alt = self.pool(alt);
+                            let idx = self.doc.images.len() as u32;
+                            self.doc.images.push(ImageInfo {
+                                src,
+                                alt,
+                                ..ImageInfo::default()
+                            });
+                            self.atom_end = self.doc.text.len();
+                            self.push_atom_like(SpanKind::Image(idx), self.doc.text.len());
+                        }
+                    }
                     pos = w.end;
                 }
                 _ => break,
@@ -3024,6 +3081,15 @@ struct WikiHit {
     shown: String,
     dest: String,
     missing: bool,
+    kind: HitKind,
+}
+
+/// What a [`WikiHit`] becomes.
+enum HitKind {
+    /// A link showing the label or the note's name.
+    Link,
+    /// A picture, with this alt text (often empty).
+    Image(String),
 }
 
 /// A wiki-link label that goes on after the end of a text run, to open when the run is done: how
