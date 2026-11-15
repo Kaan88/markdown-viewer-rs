@@ -3,3 +3,7 @@ Fixes found by hands-on testing.
 ## Fixed
 
 - The Outline pane's focus ring now moves at once on Up, Down, Home, End, Page Up and Page Down, and disappears at once when Escape gives the focus back to the page; before, it was only repainted after the next Enter or other event.
+- In a restored (not maximized) window the page scrollbar, and the Outline pane's scrollbar, can be grabbed again at the window's right edge: the resize border over them is now only the outermost 3 px, so the thumb used to start a resize instead of a scroll.
+- Text typed without a key name (an on-screen keyboard, the emoji picker, some key-remapping tools) now reaches the find box, the command palette and the other text fields; before, it was dropped.
+- The Windows 11 snap layouts flyout now appears when the pointer rests on the maximize button of a restored window, not only a maximized one.
+- A maximized window keeps its normal size after being snapped side by side and then restored.

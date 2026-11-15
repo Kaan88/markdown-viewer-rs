@@ -3402,10 +3402,7 @@ fn the_scrollbar_at_the_right_edge_is_not_covered_by_the_resize_band() {
     let y = track.cy();
     for dx in [4.0, 6.0, 7.5, 11.0] {
         assert_eq!(a.resize_band(w - dx, y), None, "page, {dx} px in");
-        assert_eq!(
-            a.hit_at(w - dx, y),
-            Some(Hit::ScrollBar(Scroller::Page))
-        );
+        assert_eq!(a.hit_at(w - dx, y), Some(Hit::ScrollBar(Scroller::Page)));
     }
     assert_eq!(a.resize_band(w - 1.0, y), Some(D::East));
     // With no scrollbar beside the point the old band stands.
@@ -3430,10 +3427,7 @@ fn text_without_a_key_name_still_gets_a_key_so_that_it_is_typed() {
     );
     assert_eq!(event_key(&packet, &packet, Some("\r"), none), None);
     assert_eq!(event_key(&packet, &packet, None, none), None);
-    let ctrl = Mods {
-        ctrl: true,
-        ..none
-    };
+    let ctrl = Mods { ctrl: true, ..none };
     assert_eq!(event_key(&packet, &packet, Some("\u{e9}"), ctrl), None);
 
     // And the text lands in the find box and the palette.
