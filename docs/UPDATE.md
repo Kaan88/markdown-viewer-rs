@@ -295,3 +295,20 @@ test build end to end on KDE Plasma 6.
 
 Not verified: the Windows files run by hand on a Windows desktop; an installed 0.2.2 updating
 itself to 0.3.0 through the bar; the deb, rpm, tar.gz and PKGBUILD of this exact build installed.
+
+## v0.4.0 (published 2026-11-15 by the release workflow, from the tag at commit 09e1dc5)
+
+Run 43701583085; the `ci` run on the same commit (43700520349) had passed on Linux and Windows.
+Assets: `mdview.exe` (9,052,160 bytes), `mdview-engine.exe`, `mdview-setup-0.4.0.exe`,
+`mdview-0.4.0-windows-x86_64.zip`, `mdview-0.4.0-linux-x86_64.AppImage` (15,510,008 bytes),
+`mdview-0.4.0-linux-x86_64.tar.gz`, `mdview_0.4.0_amd64.deb`, `mdview-0.4.0-1.x86_64.rpm`,
+`PKGBUILD` and `mdview-update.txt`.
+
+Verified against the live release: the manifest at the latest-download address names 0.4.0 with
+a Windows entry (exe and engine) and a Linux entry; the downloaded `mdview.exe`,
+`mdview-engine.exe` and AppImage have the manifest's three SHA-256 values.
+
+Not verified: any published file run on any desktop; an installed 0.3.1 updating itself to 0.4.0
+and the new Restart button after it (0.3.1 has no Restart button; the first real use is the
+update after 0.4.0); the installer, zip, deb, rpm, tar.gz and PKGBUILD installed. The owner had
+not looked at the interface of this release when it was published.

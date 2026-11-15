@@ -11,7 +11,12 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## START HERE: the next release is built on `merge/next-release` (written 2026-11-15)
+## START HERE: mdview 0.4.0 is released (2026-11-15)
+
+**The released state is `main`, mdview 0.4.0, tag `v0.4.0` at `09e1dc5`, published with mdedit
+0.6.0 on the owner's word; see "Release 0.4.0" below and `docs/UPDATE.md`.** The text that
+follows was written before the merge and the release: read "0.3.1" as the release before, and
+its list of what was not verified as still open. Nothing is in progress.
 
 **Update, later on 2026-11-15: the owner asked for the merge.** `main` was fast-forwarded to
 `merge/next-release` in the shared repository (`11563a3`), the viewer (`14aedec`) and the editor
