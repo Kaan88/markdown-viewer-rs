@@ -99,6 +99,8 @@ pub enum Hit {
     Splitter(Side),
     ScrollBar(Scroller),
     Page,
+    /// The copy button of the code block under the pointer.
+    CopyCode,
     EmptyOpen,
     EmptyRecent(usize),
     /// The bar over a page that holds remote images back.
@@ -134,6 +136,7 @@ impl Hit {
             }
             Hit::ScrollBar(Scroller::Page)
             | Hit::Page
+            | Hit::CopyCode
             | Hit::EmptyOpen
             | Hit::EmptyRecent(_)
             | Hit::RemoteLoad
@@ -369,6 +372,9 @@ pub struct Ui {
     pub last_press: Option<(Instant, (f32, f32), u32)>,
     /// When the next auto-scroll step of a selection drag is due.
     pub autoscroll_due: Option<Instant>,
+    /// The code block whose copy button shows a check mark (by the start of its code), and until
+    /// when.
+    pub copied: Option<(u32, Instant)>,
 }
 
 impl Ui {
@@ -407,6 +413,7 @@ impl Ui {
             dlg_hover_row: None,
             last_press: None,
             autoscroll_due: None,
+            copied: None,
         }
     }
 

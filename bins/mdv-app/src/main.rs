@@ -4,6 +4,7 @@
 mod app;
 mod args;
 mod chrome;
+mod codebtn;
 mod keys;
 mod overlays;
 mod page;

@@ -61,6 +61,8 @@ pub struct Args {
     pub palette: Option<String>,
     /// Logical pointer position.
     pub hover: Option<(f32, f32)>,
+    /// Show the copy button of the code block under `--hover` with its check mark (for shots).
+    pub copied: bool,
     pub focus_mode: bool,
     /// Load the first document's remote images without showing the bar (for checks).
     pub load_remote: bool,
@@ -158,6 +160,7 @@ impl Args {
                 "--find" => out.find = value(&a),
                 "--scroll" => out.scroll = value(&a).and_then(|v| v.parse().ok()),
                 "--scroll-steps" => out.scroll_steps = value(&a).and_then(|v| v.parse().ok()),
+                "--copied" => out.copied = true,
                 "--hover" => out.hover = value(&a).and_then(|v| pair(&v, ',')),
                 "--menu" => {
                     out.menu = match value(&a).as_deref() {

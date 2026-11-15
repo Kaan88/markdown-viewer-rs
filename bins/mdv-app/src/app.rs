@@ -460,7 +460,19 @@ impl App {
                     0
                 };
                 let update = self.ws.update_bar().map(|stage| format!("{stage:?}"));
-                sig((common, self.ws.active(), missing, drag, recents, update))
+                // The code box whose copy button shows, and its check mark.
+                let vr = page::viewport(&self.ws, self.areas.page);
+                let code = crate::codebtn::spot(&mut self.ws, &self.ui, vr, self.scale)
+                    .map(|c| (c.start, self.ui.copied.is_some_and(|(s, _)| s == c.start)));
+                sig((
+                    common,
+                    self.ws.active(),
+                    missing,
+                    drag,
+                    recents,
+                    update,
+                    code,
+                ))
             }
         }
     }
@@ -1465,6 +1477,21 @@ fn shot(mut app: App, path: &Path) -> i32 {
     }
     if let Some((x, y)) = app.args.hover {
         app.pointer_moved(x, y);
+        // A control that shows only under the pointer (the code block's copy button) is on screen
+        // after the first frame: the pointer is over it from then on.
+        if app.args.copied || app.ui.hover == Some(Hit::Page) {
+            app.compose();
+            if app.hit_at(x, y) != app.ui.hover {
+                app.pointer_moved(x, y);
+            }
+        }
+        if app.args.copied {
+            app.compose();
+            let vr = page::viewport(&app.ws, app.areas.page);
+            if let Some(spot) = crate::codebtn::spot(&mut app.ws, &app.ui, vr, app.scale) {
+                app.ui.copied = Some((spot.start, Instant::now() + crate::codebtn::COPIED_FOR));
+            }
+        }
         if let Some(t) = app.ui.tip.as_mut() {
             t.shown = true;
         }

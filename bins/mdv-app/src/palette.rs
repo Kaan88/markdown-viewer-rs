@@ -255,6 +255,7 @@ fn commands(ws: &Workspace) -> (Vec<Entry>, Vec<Target>) {
             | C::CloseTab
             | C::CloseAllTabs
             | C::CopyFilePath
+            | C::CopyCodeBlock
             | C::ShowInFileManager
             | C::EditInMdedit => has_tab,
             C::CloseOtherTabs | C::NextTab | C::PreviousTab => many,

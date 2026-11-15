@@ -1621,3 +1621,57 @@ fn the_tables_fixture_keeps_its_tables_inside_what_holds_them() {
         assert!(rendered.content_height > 1000.0, "{width}");
     }
 }
+
+#[test]
+fn a_point_in_a_code_box_reports_its_box_and_code() {
+    let doc = mdview_core::parse(
+        "Intro.\n\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```\n\n- item\n\n  ```\n  nested\n  ```\n\nAfter.\n\n    indented\n",
+    );
+    let options = narrow(500.0);
+    let mut renderer = DocumentRenderer::new();
+    renderer.layout(&doc, &options);
+    renderer.view_frame(&doc, &options, 0.0, 800.0);
+    let total = renderer.page_layout().unwrap().total_height();
+    let mut found: Vec<mdview_render::Code> = Vec::new();
+    let mut outside = 0;
+    let mut y = 2.0;
+    while y < total {
+        let mut x = 2.0;
+        while x < 500.0 {
+            if let Some(hit) = renderer.hit_test(&doc, &options, x, y) {
+                match hit.code {
+                    Some(code) => {
+                        // The point is inside the box it reports, in page coordinates.
+                        let r = code.rect;
+                        assert!(x >= r.x && x <= r.x + r.w, "{x} in {r:?}");
+                        assert!(y >= r.y && y <= r.y + r.h, "{y} in {r:?}");
+                        if !found.contains(&code) {
+                            found.push(code);
+                        }
+                    }
+                    None => outside += 1,
+                }
+            }
+            x += 7.0;
+        }
+        y += 3.0;
+    }
+    let texts: Vec<&str> = found
+        .iter()
+        .map(|c| doc.text[c.start as usize..c.end as usize].trim_end_matches('\n'))
+        .collect();
+    assert_eq!(
+        texts,
+        [
+            "fn main() {\n    println!(\"hi\");\n}",
+            "nested",
+            "indented"
+        ],
+        "{found:?}"
+    );
+    // The paragraphs around them are not code.
+    assert!(outside > 0);
+    // The same box is found again from a point just inside its corner.
+    let again = renderer.hit_test(&doc, &options, found[0].rect.x + 5.0, found[0].rect.y + 5.0);
+    assert_eq!(again.and_then(|h| h.code), Some(found[0]));
+}

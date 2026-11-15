@@ -143,5 +143,11 @@ shot frame-round-light-2x --light --size 520x360 --scale 2 --frame round "$fx/sh
 shot frame-round-dark-2x --dark --size 520x360 --scale 2 --frame round "$fx/showcase.md"
 shot frame-small-light --light --size 520x360 --frame small "$fx/showcase.md"
 shot frame-square-light --light --size 520x360 --frame square "$fx/showcase.md"
+# The copy button of a code block: under the pointer in the block, with its tip on the button, and
+# with its check mark after a copy.
+shot code-copy-light --light --scroll 400 --hover 700,420 "$fx/showcase.md"
+shot code-copy-tip-light --light --scroll 400 --hover 971,339 "$fx/showcase.md"
+shot code-copy-done-dark --dark --scroll 400 --hover 971,339 --copied "$fx/showcase.md"
+shot code-copy-dark --dark --scroll 1200 --hover 640,475 "$fx/showcase.md"
 
 ls "$out" | wc -l

@@ -52,7 +52,7 @@ pub fn command_icon(id: C) -> &'static str {
         C::FocusMode => glyph::FULLSCREEN,
         C::ShowShortcuts => glyph::KEYBOARD,
         C::About => glyph::INFO,
-        C::CopyFilePath => glyph::COPY,
+        C::CopyFilePath | C::CopyCodeBlock => glyph::COPY,
         C::EditInMdedit => glyph::EDIT,
         C::MakeDefault => glyph::CHECK,
         C::Escape => "",

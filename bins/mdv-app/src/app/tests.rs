@@ -1470,3 +1470,112 @@ fn an_outline_hidden_while_the_page_scrolled_catches_up_when_shown() {
     a.compose();
     assert!(outline_row_visible(&a, i));
 }
+
+/// A page point inside a code box, and one outside any, found by scanning the first screen.
+fn code_and_plain_points(a: &mut App) -> ((f32, f32), (f32, f32)) {
+    let vr = page::viewport(&a.ws, a.areas.page);
+    let (mut code, mut plain) = (None, None);
+    let mut y = vr.y + 4.0;
+    while y < vr.bottom() - 4.0 {
+        let x = vr.x + vr.w * 0.5;
+        match a.ws.code_spot((x - vr.x) * a.scale, (y - vr.y) * a.scale) {
+            Some(_) => code = code.or(Some((x, y))),
+            None => plain = plain.or(Some((x, y))),
+        }
+        y += 6.0;
+    }
+    (code.expect("a code block on screen"), plain.unwrap())
+}
+
+#[test]
+fn a_code_block_shows_a_copy_button_under_the_pointer_only() {
+    let mut a = app(&["showcase.md"]);
+    a.ui.panes.outline = false;
+    a.compose();
+    a.ws.scroll_to(300.0);
+    a.compose();
+    let (code, plain) = code_and_plain_points(&mut a);
+    assert!(a.hit_rect(Hit::CopyCode).is_none());
+    // On the text of a paragraph: no button.
+    a.pointer_moved(plain.0, plain.1);
+    a.compose();
+    assert!(a.hit_rect(Hit::CopyCode).is_none());
+    // In a code block: a button at its top right, inside it.
+    a.pointer_moved(code.0, code.1);
+    a.compose();
+    let vr = page::viewport(&a.ws, a.areas.page);
+    let spot =
+        a.ws.code_spot((code.0 - vr.x) * a.scale, (code.1 - vr.y) * a.scale)
+            .unwrap();
+    let button = rect(&a, Hit::CopyCode);
+    let (bx, by) = (vr.x + spot.rect.x, vr.y + spot.rect.y);
+    assert!(button.x >= bx && button.right() <= bx + spot.rect.w);
+    assert!(button.y >= by && button.bottom() <= by + spot.rect.h);
+    assert!(button.right() > bx + spot.rect.w - 12.0, "{button:?}");
+    // On the button it stays, with its tip.
+    a.pointer_moved(button.cx(), button.cy());
+    a.compose();
+    assert_eq!(a.ui.hover, Some(Hit::CopyCode));
+    assert!(a.hit_rect(Hit::CopyCode).is_some());
+    assert_eq!(
+        a.ui.tip.as_ref().map(|t| t.text.as_str()),
+        Some("Copy code")
+    );
+    // Back out to the paragraph: gone. A menu over the page hides it as well.
+    a.pointer_moved(plain.0, plain.1);
+    a.compose();
+    assert!(a.hit_rect(Hit::CopyCode).is_none());
+    a.pointer_moved(code.0, code.1);
+    a.compose();
+    assert!(a.hit_rect(Hit::CopyCode).is_some());
+    a.ui.mouse = (code.0, code.1);
+    a.right_press();
+    a.compose();
+    assert!(a.hit_rect(Hit::CopyCode).is_none());
+}
+
+#[test]
+fn the_copy_button_follows_the_page_when_it_scrolls() {
+    let mut a = app(&["showcase.md"]);
+    a.ui.panes.outline = false;
+    a.compose();
+    a.ws.scroll_to(300.0);
+    a.compose();
+    let (code, _) = code_and_plain_points(&mut a);
+    a.pointer_moved(code.0, code.1);
+    a.compose();
+    let before = rect(&a, Hit::CopyCode);
+    // The wheel moves the page under a resting pointer; the button is drawn for what is there now.
+    a.ws.scroll_to(a.ws.scroll() + 20.0);
+    a.compose();
+    let after = a.hit_rect(Hit::CopyCode);
+    if let Some(after) = after {
+        assert!(after.y < before.y, "{before:?} -> {after:?}");
+    }
+}
+
+#[test]
+fn copy_code_block_takes_the_first_block_in_view_without_its_last_newline() {
+    let mut a = app(&["showcase.md"]);
+    a.ws.scroll_to(300.0);
+    a.compose();
+    let text = a.ws.code_in_reach().expect("a code block in view");
+    assert!(!text.ends_with('\n'));
+    assert!(!text.is_empty());
+    // The same text from the box itself.
+    let (code, _) = code_and_plain_points(&mut a);
+    let vr = page::viewport(&a.ws, a.areas.page);
+    let spot =
+        a.ws.code_spot((code.0 - vr.x) * a.scale, (code.1 - vr.y) * a.scale)
+            .unwrap();
+    assert_eq!(a.ws.code_text(spot.start).as_deref(), Some(text.as_str()));
+}
+
+#[test]
+fn copy_code_block_is_a_palette_command() {
+    use crate::palette::Target;
+    let mut a = app(&["showcase.md"]);
+    a.open_palette(">copy code");
+    a.compose();
+    assert!(listed(&a).contains(&Target::Cmd(CommandId::CopyCodeBlock)));
+}

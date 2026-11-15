@@ -3,7 +3,7 @@
 //! footnote reference or a `<details>` summary.
 
 use super::inline::Inline;
-use super::{DocumentRenderer, Hit, Options, Source};
+use super::{Code, DocumentRenderer, Hit, Options, Source};
 use crate::text::Brush;
 use mdview_core::model::{BlockKind, Document, NONE, SpanKind};
 use parley::{Cluster, ClusterSide, Layout};
@@ -50,6 +50,12 @@ pub(super) struct SourceBox {
     pub(super) w: f32,
     pub(super) h: f32,
     pub(super) source: Source,
+}
+
+impl Code {
+    pub(super) fn shift(&mut self, dy: f32) {
+        self.rect.y += dy;
+    }
 }
 
 impl SourceBox {
@@ -117,6 +123,20 @@ impl DocumentRenderer {
             .iter()
             .find(|b| x >= b.x && x <= b.x + b.w && local >= b.y && local <= b.y + b.h)
             .map(|b| b.source);
+        // The code box under the point, in page coordinates.
+        let top = span.y - cached.phase;
+        let code = cached
+            .codes
+            .iter()
+            .find(|c| {
+                let r = c.rect;
+                x >= r.x && x <= r.x + r.w && local >= r.y && local <= r.y + r.h
+            })
+            .map(|c| {
+                let mut code = *c;
+                code.rect.y += top;
+                code
+            });
         // A little slack around the box, which is a small target.
         let slack = 3.0 * options.scale;
         let task = cached
@@ -157,6 +177,7 @@ impl DocumentRenderer {
             details: None,
             task,
             source,
+            code,
             on_text,
         };
         if let Some(inner) = doc.block_at(offset) {
@@ -233,6 +254,7 @@ impl DocumentRenderer {
                     details: None,
                     task: None,
                     source: None,
+                    code: None,
                     on_text: false,
                 });
             }
