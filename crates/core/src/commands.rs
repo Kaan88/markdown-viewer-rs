@@ -50,6 +50,10 @@ pub enum CommandId {
     /// Copy the code of the block at the selection, or the first one in view. In no menu bar menu:
     /// the command palette and the code box's own button offer it.
     CopyCodeBlock,
+    /// Save the document as one self-contained HTML file.
+    ExportHtml,
+    /// Hand the document to the default browser to print.
+    Print,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,6 +173,8 @@ pub const COMMANDS: &[Command] = &[
     )),
     cmd(C::ManageRecent, Menu::File, "Manage recent files…", &[]),
     cmd(C::ClearRecent, Menu::File, "Clear recent files", &[]),
+    sep(cmd(C::ExportHtml, Menu::File, "Export as HTML…", &[])),
+    cmd(C::Print, Menu::File, "Print (opens in browser)", &[]),
     sep(cmd(
         C::CloseTab,
         Menu::File,

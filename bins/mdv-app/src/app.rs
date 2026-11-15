@@ -48,6 +48,7 @@ use winit::window::{CursorIcon, ResizeDirection, Theme as WinTheme, Window, Wind
 
 mod cards;
 mod commands;
+mod export;
 mod input;
 mod modal;
 #[cfg(test)]
@@ -98,6 +99,8 @@ pub enum Wake {
     /// A file or folder dialog, which runs on a helper thread off Windows, was closed.
     #[cfg(not(windows))]
     Dialog(DialogAnswer),
+    /// Export as HTML or Print made progress on its helper thread.
+    Export(export::Progress),
 }
 
 /// What a closed file dialog chose.
@@ -136,6 +139,8 @@ struct App {
     /// request is ignored until its answer arrives.
     #[cfg(not(windows))]
     dialog_open: bool,
+    /// An export or print is under way on its helper thread; a second request waits for it.
+    exporting: bool,
     incoming: Option<Receiver<Request>>,
     watcher: Option<FileWatcher>,
     /// The folders the watcher follows for the Files pane: the tree's root and expanded folders
@@ -219,6 +224,7 @@ impl App {
             proxy: None,
             #[cfg(not(windows))]
             dialog_open: false,
+            exporting: false,
             incoming: None,
             watcher: None,
             watch_due: None,

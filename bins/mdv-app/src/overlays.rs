@@ -55,6 +55,8 @@ pub fn command_icon(id: C) -> &'static str {
         C::CopyFilePath | C::CopyCodeBlock => glyph::COPY,
         C::EditInMdedit => glyph::EDIT,
         C::MakeDefault => glyph::CHECK,
+        C::ExportHtml => glyph::DOWNLOAD,
+        C::Print => glyph::OPEN_WITH,
         C::Escape => "",
     }
 }
@@ -77,6 +79,8 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
             .sep()
             .enabled(has_tab),
         cmd(C::EditInMdedit, "Edit in mdedit", glyph::EDIT).enabled(can_edit),
+        cmd(C::ExportHtml, "Export as HTML…", glyph::DOWNLOAD).enabled(has_tab),
+        cmd(C::Print, "Print (opens in browser)", glyph::OPEN_WITH).enabled(has_tab),
         cmd(C::CloseTab, "Close tab", glyph::CLOSE).enabled(has_tab),
         cmd(C::CloseAllTabs, "Close all tabs", glyph::CLOSE_ALL).enabled(has_tab),
         cmd(C::ZoomIn, "Zoom in", glyph::ZOOM).sep(),

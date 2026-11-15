@@ -2013,3 +2013,101 @@ fn find_in_folder_starts_with_the_find_boxes_text_and_is_in_the_menu_and_the_pal
             .is_some_and(|p| p.folder_running() || p.palette.query() == "alpha")
     );
 }
+
+// ---- export and print -------------------------------------------------------------------------
+
+#[test]
+fn export_and_print_are_in_the_menu_and_the_palette_and_need_a_document() {
+    use crate::palette::Target;
+    let a = app(&["showcase.md"]);
+    let items = overlays::main_menu(&a.ws, &a.ui, 0.0, 0.0).items;
+    for (id, label) in [
+        (C::ExportHtml, "Export as HTML…"),
+        (C::Print, "Print (opens in browser)"),
+    ] {
+        let item = items
+            .iter()
+            .find(|i| i.id == Act::Cmd(id))
+            .unwrap_or_else(|| panic!("{id:?} is not in the main menu"));
+        assert_eq!(item.label, label);
+        assert!(item.enabled);
+        assert!(!overlays::command_icon(id).is_empty());
+    }
+    let empty = app(&[]);
+    let items = overlays::main_menu(&empty.ws, &empty.ui, 0.0, 0.0).items;
+    for id in [C::ExportHtml, C::Print] {
+        let item = items.iter().find(|i| i.id == Act::Cmd(id)).unwrap();
+        assert!(!item.enabled, "{id:?} needs a document");
+    }
+    let mut a = a;
+    a.command(C::CommandPalette);
+    a.compose();
+    type_text(&mut a, ">export");
+    assert!(listed(&a).contains(&Target::Cmd(C::ExportHtml)));
+    key(&mut a, KeyName::Escape, None);
+    a.command(C::CommandPalette);
+    a.compose();
+    type_text(&mut a, ">print");
+    assert!(listed(&a).contains(&Target::Cmd(C::Print)));
+}
+
+#[test]
+fn the_exported_page_is_the_active_document_in_the_readers_page_look() {
+    let mut a = app(&["showcase.md"]);
+    a.ws.set_page_width(PageWidth::Wide);
+    let job = a.export_job().expect("a document is open");
+    let html = job.page(false);
+    assert!(html.starts_with("<!DOCTYPE html>"));
+    assert!(
+        html.contains("<h1 id="),
+        "the page has the document's headings"
+    );
+    assert!(html.contains("--width:1080px"), "the chosen page width");
+    assert!(
+        html.contains("--bg:#fbfbfb"),
+        "the light theme, whatever the window shows"
+    );
+    assert!(!html.contains("window.print"));
+    assert!(job.page(true).contains("window.print"));
+    // Nothing without a document.
+    assert!(app(&[]).export_job().is_none());
+}
+
+#[test]
+fn a_second_export_waits_and_the_answers_clear_and_report() {
+    use export::Progress;
+    let mut a = app(&["showcase.md"]);
+    // No event loop in this test, so there is no helper thread to start: nothing runs.
+    a.command(C::ExportHtml);
+    a.command(C::Print);
+    assert!(!a.exporting);
+    a.exporting = true;
+    a.command(C::ExportHtml);
+    assert_eq!(
+        a.ws.status(Instant::now()),
+        Some("Another export is still running")
+    );
+    a.export_progress(Progress::Working);
+    assert_eq!(a.ws.status(Instant::now()), Some("Exporting…"));
+    assert!(a.exporting);
+    a.export_progress(Progress::Saved(PathBuf::from("/x/read me.html")));
+    assert!(!a.exporting);
+    assert_eq!(
+        a.ws.status(Instant::now()),
+        Some("Exported to read me.html")
+    );
+    for (progress, text) in [
+        (Progress::Printing, Some("Opened in the browser to print")),
+        (
+            Progress::Failed("Could not save the HTML file"),
+            Some("Could not save the HTML file"),
+        ),
+        (Progress::Cancelled, None),
+    ] {
+        a.exporting = true;
+        a.ws.clear_status();
+        a.export_progress(progress);
+        assert!(!a.exporting);
+        assert_eq!(a.ws.status(Instant::now()), text);
+    }
+}

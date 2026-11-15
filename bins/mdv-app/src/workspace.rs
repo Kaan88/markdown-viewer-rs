@@ -1745,6 +1745,24 @@ impl Workspace {
         self.remote_wake = Some(Arc::new(wake));
     }
 
+    /// The page's look for a saved or printed copy: always the light theme, with the reader's
+    /// fonts and page width. Nothing about the window or the zoom goes into it.
+    pub fn export_theme(&self) -> Theme {
+        let mut theme = LIGHT.with_fonts(&self.session.page_font, &self.session.code_font);
+        match self.session.page_width {
+            PageWidth::Narrow => {}
+            PageWidth::Wide => theme.reading_width = WIDE_PAGE,
+            PageWidth::Full => theme.reading_width = f32::MAX,
+        }
+        theme
+    }
+
+    /// Whether the active document's remote images are loaded: "always" is on, or the reader
+    /// allowed this tab. A copy of the page links them then, and shows their alt text otherwise.
+    pub fn remote_images_allowed(&self) -> bool {
+        self.session.remote_images || self.active_tab().is_some_and(|t| t.remote.allowed)
+    }
+
     /// Whether remote images load in every document without asking.
     pub fn remote_always(&self) -> bool {
         self.session.remote_images
