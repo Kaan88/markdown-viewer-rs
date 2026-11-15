@@ -34,6 +34,9 @@ pub enum CommandId {
     NextTab,
     PreviousTab,
     Escape,
+    /// Back and Forward through the places links, footnotes and the outline jumped from.
+    Back,
+    Forward,
     CloseOtherTabs,
     CopyFilePath,
     ShowInFileManager,
@@ -270,6 +273,8 @@ pub const COMMANDS: &[Command] = &[
         "Previous tab",
         &[K("Ctrl+Shift+Tab")],
     ),
+    cmd(C::Back, Menu::None, "Back", &[K("Alt+Left")]),
+    cmd(C::Forward, Menu::None, "Forward", &[K("Alt+Right")]),
     cmd(
         C::Escape,
         Menu::None,

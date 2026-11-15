@@ -593,14 +593,11 @@ impl Workspace {
         self.forward.clear();
     }
 
-    // Queries for Back and Forward (the mouse buttons call `go_back` and `go_forward` directly);
-    // only the tests ask for now, and a button that greys out would too.
-    #[allow(dead_code)]
+    /// Whether Back and Forward have somewhere to go (the command palette greys them out).
     pub fn can_go_back(&self) -> bool {
         !self.back.is_empty()
     }
 
-    #[allow(dead_code)] // see `can_go_back`
     pub fn can_go_forward(&self) -> bool {
         !self.forward.is_empty()
     }
