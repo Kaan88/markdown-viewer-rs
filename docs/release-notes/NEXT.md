@@ -16,3 +16,5 @@ NEXT
   in the command palette.
 - Resting the pointer on a footnote, or on a link to a heading or to another local Markdown file,
   shows a small card with its text; a setting turns it off.
+- Find in folder searches the Markdown files of the open folder and opens a result at its match
+  (menu "Find in folder..." and the command palette).

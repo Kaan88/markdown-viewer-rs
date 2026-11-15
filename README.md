@@ -43,6 +43,11 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
   text; on a link to a heading of the same page, the heading and the first lines under it; on a
   link to another local Markdown file, its title and first lines. Web addresses keep their hint at
   the bottom left. Settings > "Preview footnotes and links on hover" turns the cards off.
+- **Find in folder** searches the Markdown files of the open folder for a text and lists the
+  matching lines by file, with the match marked. Enter or a click opens the file at the match,
+  highlighted as the find in the page does. It runs on a background thread, results stream in,
+  and Escape or a new query cancels it. It is in the "⋯" menu and the command palette
+  (`>find in folder`); it has no key yet.
 - **Command palette (Ctrl+P):** open tabs, recent files, the open folder's Markdown files,
   commands (`>`) and headings (`#`).
 - **Settings (Ctrl+,):** page width, text size, theme, a page font and a code font (any installed

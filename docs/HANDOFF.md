@@ -1632,7 +1632,44 @@ desktop, so no feature below has been seen live, and no budget was measured.
   `preview-heading-light`, `preview-heading-dark`, `preview-file-light`, `preview-file-dark`,
   `preview-remote`. Existing shots that changed: the five `dialog-settings-*` (the new row) and
   `files-pane`, `both-panes` (the two new fixtures are listed in the pane).
-- One run of `tests/shots.sh` stopped after `preview-footnote-light` with no message; it could
-  not be reproduced (6 more full runs and 125 single preview shots were clean and identical).
+- One run of `tests/shots.sh` stopped after `preview-footnote-light` with no message: another
+  worker's cleanup on the same PC had killed that mdview process. Not a fault of the app (6 more
+  full runs and 125 single preview shots were clean and identical).
 - NOT verified: a real window (the 500 ms rest, the thread's wake, the card following real pointer
   moves), Linux. Cost: `Hover::preview` is one link lookup when the pointer is on a link or mark.
+
+### Find in folder (`f/folder-search`; shared `f/folder-search`)
+
+- The card is the command palette's card as a literal list (`mdshared_ui::palette`:
+  `set_literal`, heading and note rows, `Entry::marks`, `append_entries`, `set_footer`,
+  `label_of`): the query box, rows grouped under the file's path (a heading row with its match
+  count), each row one matching line with the match in the accent colour and `Line N` at the
+  right, a footer ("Searching… 12 files", then "31 matches in 6 files", ", N files skipped",
+  "Searched N files" when nothing matched). Up and Down skip the headings; Enter or a click opens
+  the row; Escape or a click outside closes.
+- The query is what the find in the page takes (case-insensitive, the same folding, no options),
+  searched in the Markdown source line by line (`mdview_core::find::line_matcher`). The box starts
+  with the find box's text. Typing starts a new search at once and cancels the old one.
+- What is searched (`mdshared_app::foldersearch`, written for both apps): the files the Files pane
+  lists, with its rules (dot names, the hidden attribute on Windows, `target`, `node_modules`,
+  links to folders not followed, depth 32), folders first, sorted by name. A file over 16 MiB,
+  unreadable or holding a NUL is skipped and counted. Caps: 200 lines per file, 2000 in all, then
+  the last row says "More results are not shown. Narrow the search."
+- Choosing a row opens the file (or switches to its tab), puts the query in the find box and makes
+  current the first match in the block that source line is in (`Workspace::find_set_at_line`);
+  when that block has no match on the page (the query was in markup) the page scrolls to the line.
+  It is a jump: Back returns. Without a folder the command says "Open a folder to search it".
+- The thread exists only during a search; nothing is built until the command is used.
+- State at the merge: an unbuilt WIP that compiled and passed its tests as it was; nothing had to
+  be changed beyond the merge conflicts (icon table, module list, tests).
+- Decisions: **no default key.** Ctrl+Shift+F was reserved for this feature but is Focus reading
+  mode's since 0.2 and a regression test pins it; moving Focus mode would change existing
+  behaviour, so the owner decides. The command is `Menu::None` in the table, in the "⋯" menu
+  (greyed without a folder) and in the palette. No search options (the viewer's find has none).
+  The palette card is reused instead of a new panel.
+- Shots: `folder-search-light`, `folder-search-dark`, `folder-search-none-light`. Existing shots
+  that changed: the eight with the main menu open (`menu-main-*`, `menu-cascade-*`,
+  `menu-tall-main*`, `hover-menu`, `scale-150-menu`): one more row.
+- NOT verified: a real window (streaming on screen, typing while a search runs), a huge folder,
+  Linux. Left out: results updating while files change; the exact match inside a long paragraph
+  (the first of the paragraph is taken); the editor adopting `foldersearch`.
