@@ -14,6 +14,26 @@ const INSET: f32 = 6.0;
 /// How long the check mark shows after a copy.
 pub const COPIED_FOR: Duration = Duration::from_millis(1500);
 
+/// Puts copied code on the clipboard. The tests keep it in [`COPIED`] instead: a test run must
+/// not replace what the person at this machine has copied.
+pub fn to_clipboard(text: &str) -> bool {
+    #[cfg(test)]
+    {
+        COPIED.with(|c| *c.borrow_mut() = Some(text.to_string()));
+        true
+    }
+    #[cfg(not(test))]
+    {
+        mdshared_ui::platform::set_clipboard_text(text)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What the last copy of a test would have put on the clipboard.
+    pub static COPIED: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
 /// The code box under the pointer, when the button shows: the pointer is on the page (or on the
 /// button itself) with nothing open over it and no drag going. `vr` is the page viewport in
 /// logical px. Costs nothing unless the pointer is over the page.

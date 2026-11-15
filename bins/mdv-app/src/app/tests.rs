@@ -1579,3 +1579,60 @@ fn copy_code_block_is_a_palette_command() {
     a.compose();
     assert!(listed(&a).contains(&Target::Cmd(CommandId::CopyCodeBlock)));
 }
+
+#[test]
+fn a_click_on_the_copy_button_copies_the_code_and_shows_a_check_for_a_while() {
+    let mut a = app(&["showcase.md"]);
+    a.ui.panes.outline = false;
+    a.compose();
+    a.ws.scroll_to(300.0);
+    a.compose();
+    let (code, _) = code_and_plain_points(&mut a);
+    a.pointer_moved(code.0, code.1);
+    a.compose();
+    let vr = page::viewport(&a.ws, a.areas.page);
+    let spot =
+        a.ws.code_spot((code.0 - vr.x) * a.scale, (code.1 - vr.y) * a.scale)
+            .unwrap();
+    let expected = a.ws.code_text(spot.start).unwrap();
+    crate::codebtn::COPIED.with(|c| c.borrow_mut().take());
+    click(&mut a, Hit::CopyCode);
+    let copied = crate::codebtn::COPIED.with(|c| c.borrow_mut().take());
+    assert_eq!(copied.as_deref(), Some(expected.as_str()));
+    assert!(expected.starts_with("fn main() {") && expected.ends_with('}'));
+    // The press on the button is not the start of a selection on the page.
+    assert!(a.ws.selected_text().is_none());
+    assert!(a.ui.drag.is_none());
+    // The check mark is for this block, and the loop wakes to take it away.
+    let (start, until) = a.ui.copied.expect("the check mark shows");
+    assert_eq!(start, spot.start);
+    let now = Instant::now();
+    assert!(a.timers(now).is_some_and(|t| t <= until));
+    assert!(a.ui.copied.is_some());
+    a.timers(until + std::time::Duration::from_millis(1));
+    assert!(a.ui.copied.is_none());
+    assert!(a.wants_frame, "the button is drawn again without its check");
+}
+
+#[test]
+fn copy_code_block_copies_the_selected_block_or_says_there_is_none() {
+    let mut a = app(&["showcase.md"]);
+    a.ws.scroll_to(300.0);
+    a.compose();
+    let text = a.ws.code_in_reach().unwrap();
+    crate::codebtn::COPIED.with(|c| c.borrow_mut().take());
+    a.command(CommandId::CopyCodeBlock);
+    assert_eq!(
+        crate::codebtn::COPIED.with(|c| c.borrow_mut().take()),
+        Some(text)
+    );
+    assert_eq!(a.ws.status(Instant::now()), Some("Code copied"));
+    // A page without code in view: nothing is copied and the status says so.
+    a.ws.scroll_to(0.0);
+    a.compose();
+    if a.ws.code_in_reach().is_none() {
+        a.command(CommandId::CopyCodeBlock);
+        assert!(crate::codebtn::COPIED.with(|c| c.borrow().is_none()));
+        assert_eq!(a.ws.status(Instant::now()), Some("No code block in view"));
+    }
+}

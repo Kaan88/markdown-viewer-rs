@@ -35,6 +35,10 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
   plain text and HTML on the clipboard together, so a paste into a word processor or a mail keeps
   headings, emphasis, links, lists, tables and code, and a paste into a text field gets the plain
   text as before.
+- **Copy button on code blocks.** Point at a code block and a small copy button appears at its top
+  right; a click copies the block's code exactly (without the newline that ends its last line) and
+  the button shows a check mark for a moment. "Copy code block" in the command palette copies the
+  block the selection starts in, else the first code block in view.
 - **Command palette (Ctrl+P):** open tabs, recent files, the open folder's Markdown files,
   commands (`>`) and headings (`#`).
 - **Settings (Ctrl+,):** page width, text size, theme, a page font and a code font (any installed

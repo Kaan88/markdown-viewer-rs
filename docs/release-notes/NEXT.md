@@ -12,3 +12,5 @@ NEXT
 - Copying text from a page also puts it on the clipboard as HTML, so pasting into Word,
   LibreOffice or a mail keeps headings, emphasis, links, lists, tables and code. Plain-text pastes
   are unchanged.
+- Code blocks have a copy button: point at one and click to copy its code, or use "Copy code block"
+  in the command palette.

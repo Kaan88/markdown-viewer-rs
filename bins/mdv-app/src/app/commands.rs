@@ -200,7 +200,7 @@ impl App {
             return;
         };
         if let Some(text) = self.ws.code_text(spot.start)
-            && platform::set_clipboard_text(&text)
+            && crate::codebtn::to_clipboard(&text)
         {
             self.ui.copied = Some((spot.start, Instant::now() + crate::codebtn::COPIED_FOR));
         }
@@ -210,7 +210,7 @@ impl App {
     pub(super) fn copy_code_block(&mut self) {
         match self.ws.code_in_reach() {
             Some(text) => {
-                if platform::set_clipboard_text(&text) {
+                if crate::codebtn::to_clipboard(&text) {
                     self.ws.set_status("Code copied");
                 }
             }

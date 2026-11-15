@@ -1562,3 +1562,34 @@ desktop, so no feature below has been seen live, and no budget was measured.
 - NOT verified: a real paste into Word, LibreOffice, a mail program or a browser on any system;
   `text/html` on X11 and Wayland (never run). The app-level `copy()` is not covered by a test,
   because it would write the owner's clipboard; `selected_html` and the writer are.
+
+### Copy button on code blocks (`f/code-copy-button`)
+
+- Built: the pager records each code box (`mdview_render::Code`: rect, text range, label width)
+  beside the lines, and a hit test reports it in `Hit::code`. `Workspace::code_spot`, `code_text`,
+  `code_in_reach`. `bins/mdv-app/src/codebtn.rs` holds the geometry, the drawing and the spot under
+  the pointer; `Hit::CopyCode`; `Ui::copied` (which block shows the check, until when); the page
+  region's signature includes the spot and the check. Command `CopyCodeBlock` ("Copy code block",
+  `Menu::None`, no key): the block the selection starts in, else the first code block in view;
+  status "Code copied" or "No code block in view".
+- Look: 24 x 24 logical px, 6 px in from the block's top and right edges, the code background with
+  a hairline edge, the shared COPY glyph (muted; text colour when hovered), CHECK in the accent
+  colour for 1.5 s after a copy (`codebtn::COPIED_FOR`), tooltip "Copy code". It is drawn over the
+  page, never part of the layout. It shows for the box under the pointer (also beside the text in
+  the box) and while the pointer is on the button; not while a menu, dialog, the palette or a drag
+  is open or going, and not for boxes shorter than 36 px or narrower than 72 px. The block's
+  language label is in the same corner and gives way while the button shows. When the top of a tall
+  block has scrolled out, the button stays at the top of the viewport, inside the block.
+- The copied text is the block's source from the document: exact, tabs kept, the newline that ends
+  the last line dropped.
+- Added after the merge (the branch was an unbuilt WIP; it compiled and its tests passed as it
+  was): `codebtn::to_clipboard`, which the tests replace with a thread-local, so the click path is
+  now tested without writing the real clipboard (the exact text, no selection started by the
+  press, the check mark and the timer that removes it), and the command's two statuses.
+- Decisions: no setting; no button on Mermaid or math blocks (their pictures have "Copy source" in
+  the context menu); `--hover` over the page in a shot now composes once and moves again so a
+  control that shows only under the pointer is hovered (existing shots are byte-identical).
+- Shots: `code-copy-light`, `code-copy-tip-light`, `code-copy-done-dark`, `code-copy-dark`.
+- Cost: nothing unless the pointer is over the page; with it there, two hit tests per page frame
+  (signature and draw), also while the wheel scrolls under a resting pointer. Not measured.
+- NOT verified: a real window (the real clipboard write of the click, the 1.5 s timer on screen).
