@@ -34,7 +34,7 @@ use super::hit::FloatBox;
 use super::inline::{ImageBox, Inline};
 use super::pager::{Pager, Wrap};
 use super::paint::Paint;
-use mdview_core::model::{Align, BlockKind, Document, ImageAlign, SpanKind};
+use mdview_core::model::{Align, BlockKind, Clear, Document, ImageAlign, SpanKind};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -234,6 +234,23 @@ impl<'a, 'b> Pager<'a, 'b> {
         let y = self.y;
         for float in &self.floats {
             if float.bottom > y && float.x0 < left + width && float.x1 > left {
+                self.y = self.y.max(float.bottom + below);
+            }
+        }
+    }
+
+    /// Moves `self.y` below the open floats at `side` (`<br clear>`): the block that asked starts
+    /// where the usual gap below them ends. Floats at the other side stay as they are.
+    pub(super) fn clear_side(&mut self, side: Clear) {
+        let below = self.px(BELOW);
+        let y = self.y;
+        for float in &self.floats {
+            let hit = match side {
+                Clear::Left => float.left,
+                Clear::Right => !float.left,
+                Clear::Both => true,
+            };
+            if hit && float.bottom > y {
                 self.y = self.y.max(float.bottom + below);
             }
         }

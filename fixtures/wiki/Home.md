@@ -16,7 +16,7 @@ The start of a small set of notes that link to each other with wiki-links.
 [[Recipes]] in a code block
 ```
 
-![[Recipes]] is an embed, which stays as written.
+![[Recipes]] is an embed of a note, shown as a link to it.
 
 ## Table
 

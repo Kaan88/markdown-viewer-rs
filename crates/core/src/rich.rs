@@ -364,6 +364,12 @@ impl Writer<'_> {
             SpanKind::Quote => tag("q"),
             SpanKind::Ruby => tag("ruby"),
             SpanKind::RubyNote => tag("rt"),
+            SpanKind::Abbr(title) => {
+                let mut open = String::from("<abbr title=\"");
+                escape_into(&mut open, self.doc.str(title), false);
+                open.push_str("\">");
+                (open, "</abbr>".to_string())
+            }
             SpanKind::Link(n) => match self.doc.links.get(n as usize) {
                 Some(link) if !link.wiki && safe_href(self.doc.str(link.dest)) => {
                     let mut open = String::from("<a href=\"");

@@ -21,9 +21,10 @@ use super::{LinkOutcome, Reveal, Workspace, read_stable, same_file};
 use mdshared_app::notes::{Config, Indexer, NoteIndex, resolve_in_folder};
 use mdshared_app::wikilink::parse_target;
 use mdview_core::limits::{BACKLINKS_SHOWN, notes_config};
+use mdview_core::links::is_image_name;
 use mdview_core::links::{LinkAction, classify_link};
 use mdview_core::model::{SpanKind, WikiAs};
-use mdview_core::{Document, parse_bytes_wiki};
+use mdview_core::{Document, parse_bytes_wiki_embeds};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -169,6 +170,45 @@ impl Workspace {
         }
     }
 
+    /// The folders whose listing the watcher should follow for the notes' sake, so that a file or
+    /// a folder created, removed or renamed in one wakes the window: the open folder and every
+    /// folder below it that holds an indexed note, and the folder of each open file (a note made
+    /// beside the document is looked for there). Following files alone is not enough: a new
+    /// entry is not a file the watcher knows, so only a followed listing hears of it. At most
+    /// `max` folders below the open one, else none of those: the wakes then come only from
+    /// the open files and the Files tree. Memory only, in path order.
+    pub fn note_folders(&self, max: usize) -> Vec<PathBuf> {
+        let mut folders = std::collections::BTreeSet::new();
+        for path in self.watched_paths() {
+            folders.extend(path.parent().map(Path::to_path_buf));
+        }
+        if let (Some(root), Some(index)) = (self.session.folder.as_deref(), &self.notes.index)
+            && Some(root) == Some(index.root())
+        {
+            let mut below = std::collections::BTreeSet::new();
+            for note in index.notes() {
+                let mut dir = note.path.parent();
+                while let Some(d) = dir
+                    && d != root
+                    && d.starts_with(root)
+                    && below.insert(d.to_path_buf())
+                {
+                    dir = d.parent();
+                }
+                if below.len() > max {
+                    below.clear();
+                    break;
+                }
+            }
+            folders.extend(below);
+            folders.insert(root.to_path_buf());
+        } else if let Some(root) = self.session.folder.as_deref() {
+            // Before the index is ready the folder itself is already followed.
+            folders.insert(root.to_path_buf());
+        }
+        folders.into_iter().collect()
+    }
+
     /// The Markdown files of the open folder as the note index lists them (paths and the path
     /// below the folder, `/` between parts), at most `max`, in path order. The index is built on
     /// its own thread, so this reads memory only; it is empty until the index is ready, and with
@@ -230,15 +270,19 @@ impl Workspace {
                     continue;
                 };
                 match decide.answer(target.note) {
+                    WikiAs::Link if dangling(doc, link.dest) => missing.push(i),
                     WikiAs::Link => {}
                     WikiAs::Missing => missing.push(i),
                     WikiAs::Text => reparse = true,
                 }
             }
-            reparse |= doc
-                .wiki_text
-                .iter()
-                .any(|&note| decide.answer(doc.str(note)) != WikiAs::Text);
+            reparse |= doc.wiki_text.iter().any(|&note| {
+                // `!name` is an embed that stayed text.
+                match doc.str(note).strip_prefix('!') {
+                    Some(name) => decide.answer_embed(name) != WikiAs::Text,
+                    None => decide.answer(doc.str(note)) != WikiAs::Text,
+                }
+            });
         }
         if reparse && !tab.missing {
             return self.parse_again(index);
@@ -316,7 +360,7 @@ impl Workspace {
         let Some(target) = parse_target(target) else {
             return LinkOutcome::Ignored;
         };
-        let fragment = target.last_heading().map(mdview_core::slug::slug_of);
+        let fragment = fragment_of(&target);
         if target.note.is_empty() {
             return match fragment {
                 Some(fragment) => self.jump_fragment(&fragment),
@@ -466,13 +510,59 @@ pub(super) fn parse_document(
     bytes: &[u8],
 ) -> Document {
     let mut decide = Decider::new(notes, folder_open, path);
-    parse_bytes_wiki(bytes, &mut |note| decide.answer(note))
+    let mut document = parse_bytes_wiki_embeds(bytes, &mut |note, embed| {
+        if embed {
+            decide.answer_embed(note)
+        } else {
+            decide.answer(note)
+        }
+    });
+    // A link into this document whose heading or block is not on the page.
+    let gone: Vec<usize> = document
+        .links
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.wiki && dangling(&document, l.dest))
+        .map(|(i, _)| i)
+        .collect();
+    for i in gone {
+        document.links[i].missing = true;
+    }
+    document
+}
+
+/// Where a wiki-link target leads inside its note, as `Reveal::Anchor` takes it: a heading's slug,
+/// or `^id` for an Obsidian block reference (`#^id`, the last part of a `#a#^id` path).
+fn fragment_of(target: &mdshared_app::wikilink::WikiTarget) -> Option<String> {
+    if let Some(heading) = target.last_heading() {
+        return Some(mdview_core::slug::slug_of(heading));
+    }
+    let id = target
+        .heading?
+        .rsplit('#')
+        .next()?
+        .trim()
+        .strip_prefix('^')?;
+    (!id.is_empty()).then(|| format!("^{id}"))
+}
+
+/// Whether the wiki-link `dest` leads into `doc` itself (no note named) to a heading or block the
+/// page does not have.
+fn dangling(doc: &Document, dest: mdview_core::model::StrRef) -> bool {
+    let Some(target) = parse_target(doc.str(dest)) else {
+        return false;
+    };
+    if !target.note.is_empty() {
+        return false;
+    }
+    fragment_of(&target).is_some_and(|fragment| doc.resolve_fragment(&fragment).is_none())
 }
 
 /// Answers what each `[[note]]` of one document is. A note that is found is a link. One that is
 /// not is a link to a missing note when a folder is open, and stays text when none is: a file
 /// read on its own is ordinary Markdown first, where `[[nodiscard]]` is not a note. A link into
-/// the same document (an empty name) follows the same rule, since its heading is not known yet.
+/// the same document (an empty name) is always a link, since it needs only the document; whether
+/// its heading or block is there is settled after the parse (`dangling`).
 struct Decider<'a> {
     notes: &'a Notes,
     folder_open: bool,
@@ -501,7 +591,9 @@ impl<'a> Decider<'a> {
         if let Some(&known) = self.answers.get(note) {
             return known;
         }
-        let found = note.is_empty() && self.folder_open || !note.is_empty() && self.find(note);
+        // A link into this very document needs no other file, so it is a link with no folder
+        // open too; one whose heading is not on the page is marked missing once the page is known.
+        let found = note.is_empty() || self.find(note);
         let answer = match (found, self.folder_open) {
             (true, _) => WikiAs::Link,
             (false, true) => WikiAs::Missing,
@@ -509,6 +601,23 @@ impl<'a> Decider<'a> {
         };
         self.answers.insert(note.to_string(), answer);
         answer
+    }
+
+    /// What `![[name]]` becomes. A picture's name is `Link` when the file is there, below the
+    /// folder of the document (the way `![](name)` would find it), and `Text` when not: an embed
+    /// is never drawn as a missing link. Any other name is asked as a note is, and the parser
+    /// makes a link of a found one.
+    fn answer_embed(&mut self, name: &str) -> WikiAs {
+        if !is_image_name(name) {
+            return self.answer(name);
+        }
+        let relative = !name.starts_with(['/', '\\']) && !name.contains(':');
+        let there = relative
+            && self
+                .path
+                .parent()
+                .is_some_and(|dir| dir.join(name).is_file());
+        if there { WikiAs::Link } else { WikiAs::Text }
     }
 
     fn find(&mut self, note: &str) -> bool {
@@ -636,7 +745,8 @@ mod tests {
         let (mut ws, dir) = fixture();
         ws.open(&dir.join("Home.md")).unwrap();
         show(&mut ws);
-        assert_eq!(wiki_links(&ws).len(), 12);
+        // Twelve written as `[[..]]` and the `![[Recipes]]` embed, which is a link to the note.
+        assert_eq!(wiki_links(&ws).len(), 13);
         assert_eq!(missing(&ws), ["Shopping list", "the budget", "Nowhere"]);
 
         // Hovering shows the file a link leads to, or that there is none.
@@ -973,5 +1083,178 @@ A ref link [x] and [[x]].
         ws.set_folder(None);
         show(&mut ws);
         assert!(ws.backlinks().is_empty() && ws.notes_stats().is_none());
+    }
+
+    /// Forty paragraphs, so that the one after them is below the first screen.
+    fn long_note(tail: &str) -> String {
+        let mut text = String::from("# Top\n\n");
+        for n in 0..40 {
+            text.push_str(&format!("Paragraph number {n} of filler text.\n\n"));
+        }
+        text.push_str(tail);
+        text
+    }
+
+    #[test]
+    fn a_block_reference_opens_the_note_at_the_block_that_carries_the_id() {
+        let dir = temp_dir("blocks");
+        let a = write(
+            &dir,
+            "A.md",
+            "[[B#^deep-one]] and [[B#^nothing]] and [[B]]\n",
+        );
+        write(
+            &dir,
+            "B.md",
+            &long_note("The point of it all. ^deep-one\n\nAfter.\n"),
+        );
+        let mut ws = Workspace::new(None);
+        ws.set_folder(Some(dir.clone()));
+        ws.index_notes_now();
+        ws.open(&a).unwrap();
+        show(&mut ws);
+
+        // An id that is on no block leaves the note at its top.
+        assert_eq!(ws.open_link("wiki:B#^nothing"), LinkOutcome::OpenedTab(1));
+        show(&mut ws);
+        assert_eq!(ws.scroll(), 0.0);
+        assert!(ws.activate(0));
+        show(&mut ws);
+
+        assert_eq!(ws.open_link("wiki:B#^deep-one"), LinkOutcome::OpenedTab(1));
+        show(&mut ws);
+        assert!(
+            ws.scroll() > 300.0,
+            "scrolled to the block: {}",
+            ws.scroll()
+        );
+        assert!(ws.status_line().is_none());
+    }
+
+    #[test]
+    fn a_block_reference_in_the_same_note_scrolls_to_it_and_a_missing_one_is_refused() {
+        let dir = temp_dir("blocks-same");
+        let text = long_note(
+            "See [[#^later]] and [[#^gone]] here.
+
+- an item ^later
+",
+        );
+        let a = write(&dir, "A.md", &text);
+        let mut ws = Workspace::new(None);
+        ws.open(&a).unwrap();
+        show(&mut ws);
+        // No folder is open, and a link into this page is a link all the same; the one whose
+        // block is not on the page is drawn as missing.
+        assert_eq!(
+            wiki_links(&ws),
+            [("^later".to_string(), false), ("^gone".to_string(), true)]
+        );
+        assert_eq!(ws.scroll(), 0.0);
+        ws.scroll_home();
+        show(&mut ws);
+        assert_eq!(ws.open_link("wiki:#^later"), LinkOutcome::Scrolled);
+        show(&mut ws);
+        assert!(ws.scroll() > 300.0, "{}", ws.scroll());
+        assert!(matches!(
+            ws.open_link("wiki:#^gone"),
+            LinkOutcome::Refused(_)
+        ));
+    }
+
+    #[test]
+    fn a_link_to_a_heading_of_this_page_needs_no_folder() {
+        let dir = temp_dir("heading-self");
+        let text =
+            long_note("## The Last Part\n\nSee [[#The Last Part]] and [[#No Such Heading]].\n");
+        let a = write(&dir, "A.md", &text);
+        let mut ws = Workspace::new(None);
+        ws.open(&a).unwrap();
+        show(&mut ws);
+        assert!(ws.folder().is_none());
+        assert_eq!(
+            wiki_links(&ws),
+            [
+                ("The Last Part".to_string(), false),
+                ("No Such Heading".to_string(), true)
+            ]
+        );
+        assert_eq!(ws.open_link("wiki:#The Last Part"), LinkOutcome::Scrolled);
+        assert!(matches!(
+            ws.open_link("wiki:#No Such Heading"),
+            LinkOutcome::Refused(_)
+        ));
+        // `[[nodiscard]]` and its like stay text, as before.
+        let b = write(&dir, "B.md", "C++ attr: [[nodiscard]] int f();\n");
+        ws.open(&b).unwrap();
+        show(&mut ws);
+        assert!(wiki_links(&ws).is_empty());
+    }
+
+    /// The watcher as the window sets it: the open files and notes, and the note folders.
+    fn watcher_for(
+        ws: &Workspace,
+    ) -> (
+        mdview_core::watch::FileWatcher,
+        std::sync::mpsc::Receiver<()>,
+    ) {
+        let (send, woken) = std::sync::mpsc::channel();
+        let mut watcher =
+            mdview_core::watch::FileWatcher::new(move || _ = send.send(())).expect("a watcher");
+        watcher.set_files(ws.watched_paths().chain(ws.note_files(100)));
+        watcher.set_folders(ws.note_folders(100).iter().map(PathBuf::as_path));
+        (watcher, woken)
+    }
+
+    #[test]
+    fn a_new_folder_below_the_open_one_wakes_the_watcher_even_with_the_pane_closed() {
+        let dir = temp_dir("watch-folder");
+        let a = write(&dir, "A.md", "[[B]]\n");
+        write(&dir, "sub/deep/C.md", "# C\n");
+        let mut ws = Workspace::new(None);
+        ws.set_folder(Some(dir.clone()));
+        ws.index_notes_now();
+        ws.open(&a).unwrap();
+        let folders = ws.note_folders(100);
+        assert_eq!(
+            folders,
+            [dir.clone(), dir.join("sub"), dir.join("sub").join("deep")]
+        );
+        // Too many folders below the root: only the root and the open files' folders.
+        assert_eq!(ws.note_folders(1), std::slice::from_ref(&dir));
+
+        let (watcher, woken) = watcher_for(&ws);
+        std::fs::create_dir(dir.join("fresh")).unwrap();
+        woken
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the new folder wakes");
+        watcher.woken();
+        // A note made in a folder that holds notes wakes as well, and once the index has it
+        // the new folder is followed too.
+        write(&dir, "fresh/D.md", "# D\n");
+        ws.index_notes_now();
+        assert!(ws.note_folders(100).contains(&dir.join("fresh")));
+        write(&dir, "sub/E.md", "# E\n");
+        woken
+            .recv_timeout(Duration::from_secs(10))
+            .expect("a note in a folder below the root wakes");
+    }
+
+    #[test]
+    fn a_note_made_beside_a_document_wakes_the_watcher_with_no_folder_open() {
+        let dir = temp_dir("watch-beside");
+        let a = write(&dir, "A.md", "[[Later]]\n");
+        let mut ws = Workspace::new(None);
+        ws.open(&a).unwrap();
+        assert_eq!(ws.note_folders(100), std::slice::from_ref(&dir));
+        let (_watcher, woken) = watcher_for(&ws);
+        write(&dir, "Later.md", "# Later\n");
+        woken
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the new note wakes");
+        // What the window does then: it asks again, and the text becomes a link.
+        ws.notes_changed();
+        show(&mut ws);
+        assert_eq!(wiki_links(&ws), [("Later".to_string(), false)]);
     }
 }

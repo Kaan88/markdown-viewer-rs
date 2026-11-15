@@ -123,7 +123,10 @@ impl<'a, 'b> Pager<'a, 'b> {
                 };
                 self.estimate_children(m, b, width - indent) + gap
             }
-            BlockKind::Figure { .. } => self.estimate_children(m, b, width) + self.px(12.0),
+            BlockKind::Figure { .. } => {
+                let margin = self.figure_margin(width);
+                self.estimate_children(m, b, width - 2.0 * margin) + self.px(12.0)
+            }
             BlockKind::CodeBlock { .. } => self.estimate_code(m, b, width),
             BlockKind::Diagram { oversize, .. } => self
                 .estimate_diagram(b, width, oversize.is_some())

@@ -948,8 +948,8 @@ fn a_figure_caption_is_smaller_and_follows_the_figure_alignment() {
         "smaller than the body text: {left:?} {body:?}"
     );
     assert!(
-        (left.x - body.x).abs() < 1.0,
-        "left aligned by default: {left:?} {body:?}"
+        (left.x - body.x - 40.0).abs() < 1.0,
+        "left aligned by default, in the 40 px margin: {left:?} {body:?}"
     );
     assert!(
         centred.x > left.x + 40.0,
@@ -1674,4 +1674,72 @@ fn a_point_in_a_code_box_reports_its_box_and_code() {
     // The same box is found again from a point just inside its corner.
     let again = renderer.hit_test(&doc, &options, found[0].rect.x + 5.0, found[0].rect.y + 5.0);
     assert_eq!(again.and_then(|h| h.code), Some(found[0]));
+}
+
+#[test]
+fn a_ruby_base_is_not_broken_across_lines_and_its_note_stays_over_it() {
+    let words =
+        "A line of plain words before <ruby>wide base<rt>note</rt></ruby> and a tail of words.";
+    let plain = "A line of plain words before wide base and a tail of words.";
+    let (with, without) = (mdview_core::parse(words), mdview_core::parse(plain));
+    let mut split_without = false;
+    for width in (160..420).step_by(7) {
+        let options = narrow(width as f32);
+        let mut renderer = DocumentRenderer::new();
+        let rects = rects_of(&mut renderer, &with, &options, "wide base");
+        assert_eq!(
+            rects.len(),
+            1,
+            "the base is on one line at {width}: {rects:?}"
+        );
+        let note = rects_of(&mut renderer, &with, &options, "note")[0];
+        assert!(
+            note.y + note.h <= rects[0].y + rects[0].h,
+            "{note:?} {rects:?}"
+        );
+        let mut other = DocumentRenderer::new();
+        split_without |= rects_of(&mut other, &without, &options, "wide base").len() > 1;
+        // The break after the base is still possible: the line is never wider than the column.
+        let tail = rects_of(&mut renderer, &with, &options, "tail")[0];
+        assert!(tail.x + tail.w <= width as f32, "{tail:?} at {width}");
+    }
+    assert!(
+        split_without,
+        "the same words do break when there is no ruby"
+    );
+}
+
+#[test]
+fn a_figure_keeps_a_40_px_margin_at_each_side_and_a_narrow_column_keeps_its_content() {
+    let doc = mdview_core::parse(
+        "<figure><figcaption>Caption words here</figcaption></figure>\n\n\
+         <div align=\"right\"><figure align=\"right\"><figcaption>Caption words here</figcaption></figure></div>\n\n\
+         Caption words here\n",
+    );
+    let options = narrow(500.0);
+    let mut renderer = DocumentRenderer::new();
+    renderer.layout(&doc, &options);
+    let rect = |renderer: &mut DocumentRenderer, nth: usize| {
+        let from = doc.text.match_indices("Caption").nth(nth).unwrap().0 as u32;
+        renderer.selection_rects(&doc, &options, from, from + 18)[0]
+    };
+    let (figure, right, body) = (
+        rect(&mut renderer, 0),
+        rect(&mut renderer, 1),
+        rect(&mut renderer, 2),
+    );
+    assert!(
+        (figure.x - body.x - 40.0).abs() < 1.0,
+        "{figure:?} {body:?}"
+    );
+    // Aligned right, the caption ends 40 px before the column's right edge.
+    assert!(right.x + right.w <= 500.0 - 40.0 + 1.0, "{right:?}");
+
+    // A column too narrow for two margins still holds the caption's words.
+    let tight = narrow(120.0);
+    let mut renderer = DocumentRenderer::new();
+    renderer.layout(&doc, &tight);
+    let from = doc.text.find("Caption").unwrap() as u32;
+    let rects = renderer.selection_rects(&doc, &tight, from, from + 18);
+    assert!(rects.iter().all(|r| r.w > 5.0), "{rects:?}");
 }

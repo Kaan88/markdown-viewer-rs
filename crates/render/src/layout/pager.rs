@@ -14,7 +14,7 @@ use mdview_core::model::{Align, BlockKind, Dir, Document, ImageAlign, Length, NO
 use parley::{
     Alignment, AlignmentOptions, Cluster, FontContext, FontFamily, FontStyle, FontWeight,
     InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, OverflowWrap,
-    PositionedLayoutItem, StyleProperty, VerticalAlign,
+    PositionedLayoutItem, StyleProperty, TextWrapMode, VerticalAlign,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -93,10 +93,14 @@ pub(super) struct Pager<'a, 'b> {
 /// The underline size given to a broken wiki-link's run. Nothing else sets one, so a run that
 /// has a size is one to underline with dashes; the value itself is not used.
 const DASHED_UNDERLINE: f32 = 1.0;
+/// The same for an `<abbr title>`'s run, which is underlined with dots.
+const DOTTED_UNDERLINE: f32 = 2.0;
 /// Marks an inline box that reserves space for an image without pixels.
 const RESERVED: u64 = 1 << 32;
 /// Marks a zero-width box that only makes its line taller, to leave room for a ruby annotation.
 const SPACER: u64 = 1 << 33;
+/// The longest ruby base (in characters) that is kept on one line.
+const RUBY_WHOLE_MAX: usize = 40;
 
 fn brush(c: Color) -> Brush {
     [c[0], c[1], c[2], 255]
@@ -226,6 +230,12 @@ impl<'a, 'b> Pager<'a, 'b> {
     }
 
     pub(super) fn block(&mut self, b: u32, left: f32, width: f32, color: Color, depth: usize) {
+        if !self.floats.is_empty()
+            && !self.doc.clears.is_empty()
+            && let Some(side) = self.doc.clear_of(b)
+        {
+            self.clear_side(side);
+        }
         let kind = self.doc.blocks[b as usize].kind;
         match kind {
             BlockKind::Paragraph { align } => self.paragraph(b, left, width, color, align),
@@ -305,11 +315,9 @@ impl<'a, 'b> Pager<'a, 'b> {
                 });
                 self.y += h + self.px(16.0);
             }
-            BlockKind::Table => {
-                // A table keeps its width: it starts below any float.
-                self.clear_floats(left, width);
-                self.table(b, left, width);
-            }
+            // A table keeps its width: it stands beside a float when it fits there, else it
+            // starts below (`table` decides).
+            BlockKind::Table => self.table(b, left, width),
             BlockKind::TableRow { .. } | BlockKind::TableCell { .. } => {
                 // Only reached outside a table, which the model's shape promise rules out.
                 self.blocks(b, left, width, color, depth + 1);
@@ -327,7 +335,8 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
             BlockKind::DefDesc => self.definition(b, left, width, color, depth),
             BlockKind::Figure { .. } => {
-                self.blocks(b, left, width, color, depth + 1);
+                let margin = self.figure_margin(width);
+                self.blocks(b, left + margin, width - 2.0 * margin, color, depth + 1);
                 self.y += self.px(12.0);
             }
             BlockKind::FigCaption => {
@@ -427,6 +436,13 @@ impl<'a, 'b> Pager<'a, 'b> {
             if style.underline || style.link {
                 builder.push(StyleProperty::Underline(true), range.clone());
             }
+            if style.abbr {
+                builder.push(StyleProperty::Underline(true), range.clone());
+                builder.push(
+                    StyleProperty::UnderlineSize(Some(DOTTED_UNDERLINE)),
+                    range.clone(),
+                );
+            }
             if style.link || style.accent {
                 builder.push(
                     StyleProperty::Brush(brush(self.theme.accent)),
@@ -481,6 +497,22 @@ impl<'a, 'b> Pager<'a, 'b> {
                 builder.push(
                     StyleProperty::FontSize(txt.size * style.size_factor()),
                     range.clone(),
+                );
+            }
+        }
+        // A ruby base is kept whole, as a browser keeps it: no line break falls inside it, so its
+        // annotation sits over one line. parley reads the mode of the atom before a break, so the
+        // last character is left out and a break after the base stays possible. A base too long
+        // to hold on one line stays breakable.
+        for note in &inline.notes {
+            let base = &inline.text[note.base.clone()];
+            let Some((last, _)) = base.char_indices().next_back() else {
+                continue;
+            };
+            if last > 0 && base.chars().count() <= RUBY_WHOLE_MAX {
+                builder.push(
+                    StyleProperty::TextWrapMode(TextWrapMode::NoWrap),
+                    note.base.start..note.base.start + last,
                 );
             }
         }
@@ -825,11 +857,25 @@ impl<'a, 'b> Pager<'a, 'b> {
                 let baseline = baseline + crate::text::baseline_shift(color, dev);
                 let color = [color[0], color[1], color[2]];
                 let thickness = (dev * 0.065).round().max(1.0);
-                let dashed = run_style
-                    .underline
-                    .as_ref()
-                    .is_some_and(|u| u.size.is_some());
-                if dashed {
+                let size = run_style.underline.as_ref().and_then(|u| u.size);
+                if size == Some(DOTTED_UNDERLINE) {
+                    // Dots as wide as the line is thick, on a grid of the page.
+                    let period = (thickness * 2.0).max(2.0);
+                    let mut x = (gx / period).floor() * period;
+                    while x < gx + advance {
+                        if x >= gx {
+                            decos.push(Paint::Rect {
+                                x,
+                                y: (baseline + dev * 0.13).round(),
+                                w: thickness,
+                                h: thickness,
+                                radius: 0.0,
+                                color,
+                            });
+                        }
+                        x += period;
+                    }
+                } else if size.is_some() {
                     // Dashes on a grid of the page, so neighbouring runs of one link line up.
                     let (dash, period) =
                         (self.px(3.0).round().max(2.0), self.px(5.0).round().max(3.0));

@@ -113,6 +113,8 @@ struct Picture {
     height: f32,
     /// From the top to the text baseline.
     baseline: f32,
+    /// The same drawn for the dark page, when it differs and could be drawn.
+    dark: Option<String>,
 }
 
 impl<'a> Writer<'a> {
@@ -243,6 +245,20 @@ impl<'a> Writer<'a> {
             }
             BlockKind::ThematicBreak => self.out.push_str("<hr>\n"),
             BlockKind::Table => {
+                // A table is placed by `align` (its own, or that of the `<div>`, `<center>` or
+                // `<figure>` around it), which a browser does with auto margins.
+                let own = doc.attrs_of(i).map_or(Align::None, |a| a.align);
+                let align = if own == Align::None {
+                    self.inherited_align(i)
+                } else {
+                    own
+                };
+                let margin = match align {
+                    Align::Center => "margin-left:auto;margin-right:auto;",
+                    Align::Right => "margin-left:auto;margin-right:0;",
+                    _ => "",
+                };
+                let attrs = self.attrs_styled(i, None, margin);
                 self.holder(i, &format!("<table{attrs}>\n"), "</table>\n", false);
             }
             BlockKind::TableRow { .. } => self.holder(i, "<tr>", "</tr>\n", false),
@@ -260,11 +276,29 @@ impl<'a> Writer<'a> {
                 if rowspan > 1 {
                     let _ = write!(open, " rowspan=\"{rowspan}\"");
                 }
+                // A cell that states no `align` or `valign` takes its row's, and `width` is the
+                // column's asked width.
+                let own = doc.attrs_of(i);
+                let row = doc.attrs_of(b.parent);
+                let align = if align == Align::None {
+                    row.map_or(Align::None, |a| a.align)
+                } else {
+                    align
+                };
                 let mut style = String::new();
                 if let Some(css) = align_css(align) {
                     style.push_str(css);
                 }
-                if let Some(v) = doc.attrs_of(i).and_then(|a| a.valign) {
+                match own.and_then(|a| a.width) {
+                    Some(Length::Px(p)) => {
+                        let _ = write!(style, "width:{p}px;");
+                    }
+                    Some(Length::Percent(p)) => {
+                        let _ = write!(style, "width:{p}%;");
+                    }
+                    None => {}
+                }
+                if let Some(v) = own.and_then(|a| a.valign).or(row.and_then(|a| a.valign)) {
                     style.push_str(match v {
                         mdview_core::model::VAlign::Top => "vertical-align:top;",
                         mdview_core::model::VAlign::Middle => "vertical-align:middle;",
@@ -325,10 +359,33 @@ impl<'a> Writer<'a> {
         self.out.push_str(close);
     }
 
+    /// The `align` of the nearest `<div>`, `<center>` or `<figure>` around block `i` that states
+    /// one: what a table with no `align` of its own is placed by.
+    fn inherited_align(&self, i: u32) -> Align {
+        let mut b = i;
+        loop {
+            let block = &self.doc.blocks[b as usize];
+            if let BlockKind::Figure { align } | BlockKind::Div { align } = block.kind
+                && align != Align::None
+            {
+                return align;
+            }
+            if block.parent == NONE {
+                return Align::None;
+            }
+            b = block.parent;
+        }
+    }
+
     /// ` dir`, ` style` of a block from its alignment and its HTML attributes.
     fn attrs(&self, i: u32, align: Option<Align>) -> String {
+        self.attrs_styled(i, align, "")
+    }
+
+    /// `attrs` with `extra` CSS declarations added to the style.
+    fn attrs_styled(&self, i: u32, align: Option<Align>, extra: &str) -> String {
         let mut s = String::new();
-        let mut style = String::new();
+        let mut style = String::from(extra);
         if let Some(a) = self.doc.attrs_of(i) {
             match a.dir {
                 Some(Dir::Rtl) => s.push_str(" dir=\"rtl\""),
@@ -336,7 +393,9 @@ impl<'a> Writer<'a> {
                 Some(Dir::Auto) => s.push_str(" dir=\"auto\""),
                 None => {}
             }
-            if let Some(css) = align_css(a.align) {
+            // A table is placed by margins (see `BlockKind::Table`), not by `text-align`.
+            let table = matches!(self.doc.blocks[i as usize].kind, BlockKind::Table);
+            if let Some(css) = align_css(a.align).filter(|_| !table) {
                 style.push_str(css);
             }
             if let Some(Length::Px(p)) = a.width {
@@ -373,28 +432,56 @@ impl<'a> Writer<'a> {
             self.out.push('"');
         }
         self.out.push_str("><code>");
+        // Coloured for the light page, and for the dark one too where the two lists agree: the
+        // dark colour rides along as `--d`, which the dark style rules put to use.
         let tokens = if lang.is_empty() || note.is_some() {
             None
         } else {
-            highlight::tokens(source, Some(lang), self.opts.theme.is_dark())
+            highlight::tokens(source, Some(lang), false)
         };
         match tokens {
-            Some(tokens) => highlighted(&mut self.out, source, &tokens),
+            Some(tokens) => {
+                let dark = highlight::tokens(source, Some(lang), true);
+                highlighted(&mut self.out, source, &tokens, dark.as_deref());
+            }
             None => escape_into(&mut self.out, source, false),
         }
         self.out.push_str("</code></pre>\n");
     }
 
     fn figure_picture(&mut self, p: &Picture, alt: &str, class: &str) {
-        let _ = write!(
-            self.out,
-            "<p class=\"{class}\"><img src=\"{}\" width=\"{}\" height=\"{}\" alt=\"",
-            p.uri,
-            px(p.width),
-            px(p.height)
-        );
-        escape_into(&mut self.out, alt, false);
-        self.out.push_str("\"></p>\n");
+        let _ = write!(self.out, "<p class=\"{class}\">");
+        self.picture_imgs(p, "", "", alt);
+        self.out.push_str("</p>\n");
+    }
+
+    /// The `<img>` of a drawn picture: one, or a light one and a dark one of which the page
+    /// shows the one the reader's browser asks for.
+    fn picture_imgs(&mut self, p: &Picture, class: &str, style: &str, alt: &str) {
+        let both = [("lt", Some(&p.uri)), ("dk", p.dark.as_ref())];
+        for (scheme, uri) in both {
+            let Some(uri) = uri else {
+                continue;
+            };
+            self.out.push_str("<img");
+            let scheme = if p.dark.is_some() { scheme } else { "" };
+            let classes = [class, scheme].join(" ");
+            if !classes.trim().is_empty() {
+                let _ = write!(self.out, " class=\"{}\"", classes.trim());
+            }
+            let _ = write!(
+                self.out,
+                " src=\"{uri}\" width=\"{}\" height=\"{}\"",
+                px(p.width),
+                px(p.height)
+            );
+            if !style.is_empty() {
+                let _ = write!(self.out, " style=\"{style}\"");
+            }
+            self.out.push_str(" alt=\"");
+            escape_into(&mut self.out, alt, false);
+            self.out.push_str("\">");
+        }
     }
 
     /// A formula drawn by the engine, once per source and style.
@@ -404,8 +491,9 @@ impl<'a> Writer<'a> {
             return found.clone();
         }
         let size = self.opts.theme.body_size * if display { 1.15 } else { 1.0 } * 2.0;
-        let drawn = crate::engine::render_math(source, display, size, self.opts.theme.text);
-        let picture = drawn.and_then(|d| picture_of(&d));
+        let drawn = crate::engine::render_math(source, display, size, crate::theme::LIGHT.text);
+        let dark = crate::engine::render_math(source, display, size, crate::theme::DARK.text);
+        let picture = with_dark(drawn.and_then(|d| picture_of(&d)), dark);
         self.pictures.insert(key, picture.clone());
         picture
     }
@@ -415,8 +503,9 @@ impl<'a> Writer<'a> {
         if let Some(found) = self.pictures.get(&key) {
             return found.clone();
         }
-        let drawn = crate::engine::render_mermaid(source, 2.0, self.opts.theme.is_dark());
-        let picture = drawn.and_then(|d| picture_of(&d));
+        let drawn = crate::engine::render_mermaid(source, 2.0, false);
+        let dark = crate::engine::render_mermaid(source, 2.0, true);
+        let picture = with_dark(drawn.and_then(|d| picture_of(&d)), dark);
         self.pictures.insert(key, picture.clone());
         picture
     }
@@ -473,16 +562,9 @@ impl<'a> Writer<'a> {
                 let source = doc.text[cs as usize..ce as usize].trim();
                 if let Some(p) = self.formula(source, display) {
                     // The baseline sits on the text's: the part of the picture below it hangs down.
-                    let _ = write!(
-                        self.out,
-                        "<img class=\"math\" src=\"{}\" width=\"{}\" height=\"{}\" style=\"vertical-align:-{}px\" alt=\"",
-                        p.uri,
-                        px(p.width),
-                        px(p.height),
-                        px((p.height - p.baseline).max(0.0))
-                    );
-                    escape_into(&mut self.out, source, false);
-                    self.out.push_str("\">");
+                    let style =
+                        format!("vertical-align:-{}px", px((p.height - p.baseline).max(0.0)));
+                    self.picture_imgs(&p, "math", &style, source);
                     continue;
                 }
             }
@@ -547,6 +629,12 @@ impl<'a> Writer<'a> {
             SpanKind::Quote => tag("q"),
             SpanKind::Ruby => tag("ruby"),
             SpanKind::RubyNote => tag("rt"),
+            SpanKind::Abbr(title) => {
+                let mut open = String::from("<abbr title=\"");
+                escape_into(&mut open, self.doc.str(title), false);
+                open.push_str("\">");
+                (open, "</abbr>".to_string())
+            }
             SpanKind::Link(n) => match self.doc.links.get(n as usize) {
                 Some(link) if !link.wiki && safe_href(self.doc.str(link.dest)) => {
                     let mut open = String::from("<a href=\"");
@@ -574,22 +662,40 @@ impl<'a> Writer<'a> {
     fn image(&mut self, info: &ImageInfo) {
         let doc = self.doc;
         let alt = doc.str(info.alt);
-        let themed = if self.opts.theme.is_dark() {
-            doc.str(info.dark_src)
-        } else {
-            doc.str(info.light_src)
-        };
-        let src = if themed.is_empty() {
-            doc.str(info.src)
-        } else {
-            themed
-        };
-        let Some(uri) = self.image_uri(src.trim()) else {
+        let (light, dark) = (doc.str(info.light_src), doc.str(info.dark_src));
+        let plain = doc.str(info.src);
+        // A picture made for each scheme is written twice, and the page shows the one the
+        // reader's browser asks for; any other image once.
+        let pick = |themed: &'a str| if themed.is_empty() { plain } else { themed };
+        let Some(uri) = self.image_uri(pick(light).trim()) else {
             escape_into(&mut self.out, alt, true);
             return;
         };
-        self.out.push_str("<img src=\"");
-        escape_into(&mut self.out, &uri, false);
+        let dark_uri = if light.is_empty() && dark.is_empty() {
+            None
+        } else {
+            self.image_uri(pick(dark).trim()).filter(|d| *d != uri)
+        };
+        match dark_uri {
+            Some(dark_uri) => {
+                self.image_tag(info, &uri, "lt");
+                self.image_tag(info, &dark_uri, "dk");
+            }
+            None => self.image_tag(info, &uri, ""),
+        }
+    }
+
+    /// One `<img>` for `info` with the address `uri`; `scheme` is its class when there is a
+    /// twin for the other colour scheme.
+    fn image_tag(&mut self, info: &ImageInfo, uri: &str, scheme: &str) {
+        let doc = self.doc;
+        let alt = doc.str(info.alt);
+        self.out.push_str("<img");
+        if !scheme.is_empty() {
+            let _ = write!(self.out, " class=\"{scheme}\"");
+        }
+        self.out.push_str(" src=\"");
+        escape_into(&mut self.out, uri, false);
         self.out.push_str("\" alt=\"");
         escape_into(&mut self.out, alt, false);
         self.out.push('"');
@@ -713,7 +819,19 @@ fn picture_of(d: &DecodedImage) -> Option<Picture> {
         width: d.width as f32 / 2.0,
         height: d.height as f32 / 2.0,
         baseline: d.baseline as f32 / 2.0,
+        dark: None,
     })
+}
+
+/// `picture` with the drawing for the dark page, if there is one and it is not the same pixels.
+fn with_dark(picture: Option<Picture>, dark: Option<DecodedImage>) -> Option<Picture> {
+    let mut picture = picture?;
+    if let Some(dark) = dark.and_then(|d| picture_of(&d))
+        && dark.uri != picture.uri
+    {
+        picture.dark = Some(dark.uri);
+    }
+    Some(picture)
 }
 
 fn png_bytes(d: &DecodedImage) -> Option<Vec<u8>> {
@@ -791,22 +909,37 @@ fn escape_into(out: &mut String, text: &str, breaks: bool) {
     mdview_core::rich::escape_html(out, text, if breaks { Some("<br>\n") } else { None });
 }
 
-/// The source with each run of one colour in a `<span>`.
-fn highlighted(out: &mut String, source: &str, tokens: &[highlight::Token]) {
+/// The source with each run of one colour in a `<span>`. `dark` is the same source coloured for
+/// the dark page: when its tokens cover the same ranges, each run also carries its dark colour as
+/// `--d`, which the page's dark style puts to use.
+fn highlighted(
+    out: &mut String,
+    source: &str,
+    tokens: &[highlight::Token],
+    dark: Option<&[highlight::Token]>,
+) {
+    let dark = dark.filter(|d| {
+        d.len() == tokens.len() && d.iter().zip(tokens).all(|(a, b)| a.range == b.range)
+    });
+    type Run = ((Color, Option<Color>), usize);
     let mut at = 0;
-    let mut run: Option<(Color, usize)> = None;
-    let flush = |out: &mut String, run: &mut Option<(Color, usize)>, end: usize| {
-        if let Some((c, start)) = run.take() {
+    let mut run: Option<Run> = None;
+    let flush = |out: &mut String, run: &mut Option<Run>, end: usize| {
+        if let Some(((c, d), start)) = run.take() {
             let _ = write!(
                 out,
-                "<span style=\"color:#{:02x}{:02x}{:02x}\">",
+                "<span style=\"color:#{:02x}{:02x}{:02x}",
                 c[0], c[1], c[2]
             );
+            if let Some(d) = d {
+                let _ = write!(out, ";--d:#{:02x}{:02x}{:02x}", d[0], d[1], d[2]);
+            }
+            out.push_str("\">");
             escape_into(out, &source[start..end], false);
             out.push_str("</span>");
         }
     };
-    for t in tokens {
+    for (i, t) in tokens.iter().enumerate() {
         let (s, e) = (t.range.start, t.range.end);
         if s < at
             || e > source.len()
@@ -820,11 +953,12 @@ fn highlighted(out: &mut String, source: &str, tokens: &[highlight::Token]) {
             flush(out, &mut run, at);
             escape_into(out, &source[at..s], false);
         }
+        let colors = (t.color, dark.map(|d| d[i].color));
         match run {
-            Some((c, _)) if c == t.color => {}
+            Some((c, _)) if c == colors => {}
             _ => {
                 flush(out, &mut run, s);
-                run = Some((t.color, s));
+                run = Some((colors, s));
             }
         }
         at = e;
@@ -925,18 +1059,10 @@ fn css_families(list: &str) -> String {
         .join(", ")
 }
 
-fn stylesheet(theme: &Theme) -> String {
+/// The colour variables of one palette: the page's colours and the five alerts'.
+fn palette(theme: &Theme) -> String {
     use mdview_core::model::AlertKind::*;
-    let alert = |k| {
-        let (c, bg) = theme.alert(k);
-        (hex(c), hex(bg))
-    };
     let mut css = String::new();
-    let width = if theme.reading_width >= 100_000.0 {
-        "none".to_string()
-    } else {
-        format!("{}px", (theme.reading_width + 2.0 * theme.margin) as i64)
-    };
     let vars = [
         ("bg", hex(theme.bg)),
         ("text", hex(theme.text)),
@@ -948,12 +1074,7 @@ fn stylesheet(theme: &Theme) -> String {
         ("head-bg", hex(theme.head_bg)),
         ("tint", hex(theme.tint)),
         ("mark", hex(theme.mark())),
-        ("sans", css_families(theme.sans)),
-        ("mono", css_families(theme.mono)),
-        ("width", width),
-        ("margin", format!("{}px", theme.margin as i64)),
     ];
-    css.push_str(":root{");
     for (k, v) in &vars {
         let _ = write!(css, "--{k}:{v};");
     }
@@ -964,11 +1085,39 @@ fn stylesheet(theme: &Theme) -> String {
         ("warning", Warning),
         ("caution", Caution),
     ] {
-        let (c, bg) = alert(kind);
-        let _ = write!(css, "--{name}:{c};--{name}-bg:{bg};");
+        let (c, bg) = theme.alert(kind);
+        let _ = write!(css, "--{name}:{};--{name}-bg:{};", hex(c), hex(bg));
     }
-    css.push_str("}\n");
+    css
+}
+
+/// The page's style sheet. The colours are the viewer's light palette, and under
+/// `prefers-color-scheme: dark` its dark palette, whichever of the two the viewer showed when
+/// the file was made: the page follows the reader's browser. Fonts and widths are the viewer's.
+/// Printing keeps the light palette.
+fn stylesheet(theme: &Theme) -> String {
+    let mut css = String::new();
+    let width = if theme.reading_width >= 100_000.0 {
+        "none".to_string()
+    } else {
+        format!("{}px", (theme.reading_width + 2.0 * theme.margin) as i64)
+    };
+    let _ = writeln!(
+        css,
+        ":root{{color-scheme:light;{}--sans:{};--mono:{};--width:{width};--margin:{}px}}\n",
+        palette(&crate::theme::LIGHT),
+        css_families(theme.sans),
+        css_families(theme.mono),
+        theme.margin as i64
+    );
     css.push_str(STYLE);
+    let _ = write!(
+        css,
+        "@media screen and (prefers-color-scheme:dark){{\n:root{{color-scheme:dark;{}}}\n\
+         span[style*=\"--d:\"]{{color:var(--d)!important}}\n\
+         .lt{{display:none}}.dk{{display:inline}}\n}}\n",
+        palette(&crate::theme::DARK)
+    );
     css
 }
 
@@ -985,6 +1134,7 @@ h6{font-size:15px;margin:8px 0 6px}
 p,ul,ol,pre,table,blockquote,figure,details,.alert,.dt,.dd{margin:0 0 12px}
 p.math,p.diagram{text-align:center;margin:10px 0 18px}
 img{max-width:100%;height:auto}
+.dk{display:none}
 a{color:var(--accent)}
 hr{border:0;border-top:1px solid var(--border);margin:16px 0}
 ul,ol{padding-left:2em}
@@ -1011,7 +1161,8 @@ th,td{border:1px solid var(--border);padding:6px 13px;text-align:left;vertical-a
 th{background:var(--head-bg);font-weight:600}
 summary{cursor:pointer;font-weight:600}
 summary>div,summary>p{display:inline}
-figure{margin-left:0;margin-right:0}
+figure{margin-left:40px;margin-right:40px}
+abbr[title]{text-decoration:underline dotted}
 figcaption{font-size:.875em;color:var(--muted)}
 .dt{font-weight:600;margin-bottom:2px}
 .dd{margin-left:2em}
@@ -1319,7 +1470,7 @@ mod tests {
             },
         ];
         let mut out = String::new();
-        highlighted(&mut out, source, &tokens);
+        highlighted(&mut out, source, &tokens, None);
         assert_eq!(
             out,
             "<span style=\"color:#010203\">ab</span> <span style=\"color:#090909\">cd</span>"
@@ -1367,5 +1518,162 @@ mod tests {
         let html = export("<details>\n<summary>More</summary>\n\nBody.\n\n</details>\n");
         assert!(html.contains("summary>div,summary>p{display:inline}"));
         assert!(body(&html).contains("<summary>"));
+    }
+
+    #[test]
+    fn an_abbreviation_keeps_its_title_and_a_bare_one_is_plain_text() {
+        let html = export(
+            "The <abbr title=\"A &amp; B\">AB</abbr> and <abbr>CD</abbr> and <time>now</time>.",
+        );
+        assert!(
+            body(&html).contains("<abbr title=\"A &amp; B\">AB</abbr> and CD and now."),
+            "{}",
+            body(&html)
+        );
+        assert!(html.contains("abbr[title]{text-decoration:underline dotted}"));
+    }
+
+    #[test]
+    fn a_table_is_placed_and_its_columns_sized_by_the_html_attributes() {
+        let html = export(
+            "<table width=\"50%\" align=\"center\"><tr align=\"center\"><td width=\"30\">a</td>\
+             <td align=\"right\" valign=\"bottom\">b</td><td width=\"25%\">c</td></tr>\
+             <tr valign=\"middle\"><td>d</td></tr></table>\n",
+        );
+        let b = body(&html);
+        assert!(
+            b.contains("<table style=\"margin-left:auto;margin-right:auto;width:50%;\">"),
+            "{b}"
+        );
+        // A cell that states no `align` takes its row's; `width` is the column's.
+        assert!(
+            b.contains("<td style=\"text-align:center;width:30px;\">a</td>"),
+            "{b}"
+        );
+        assert!(
+            b.contains("<td style=\"text-align:right;vertical-align:bottom;\">b</td>"),
+            "{b}"
+        );
+        assert!(
+            b.contains("<td style=\"text-align:center;width:25%;\">c</td>"),
+            "{b}"
+        );
+        assert!(
+            b.contains("<td style=\"vertical-align:middle;\">d</td>"),
+            "{b}"
+        );
+    }
+
+    #[test]
+    fn a_table_in_center_or_an_aligned_div_is_placed_as_the_viewer_does() {
+        let b = export("<center>\n\n| a |\n|---|\n| b |\n\n</center>\n");
+        assert!(
+            body(&b).contains("<table style=\"margin-left:auto;margin-right:auto;\">"),
+            "{}",
+            body(&b)
+        );
+        let b = export("<div align=\"right\">\n\n| a |\n|---|\n| b |\n\n</div>\n");
+        assert!(
+            body(&b).contains("<table style=\"margin-left:auto;margin-right:0;\">"),
+            "{}",
+            body(&b)
+        );
+        // Its own `align` wins over the one around it; a plain table has no margins of its own.
+        let b = export(
+            "<div align=\"right\"><table align=\"left\"><tr><td>x</td></tr></table></div>\n",
+        );
+        assert!(
+            body(&b).contains("<table>") && !body(&b).contains("margin"),
+            "{}",
+            body(&b)
+        );
+        let b = export("| a |\n|---|\n| b |\n");
+        assert!(body(&b).contains("<table>"), "{}", body(&b));
+    }
+
+    #[test]
+    fn the_page_follows_the_readers_colour_scheme_whichever_theme_made_it() {
+        for theme in [LIGHT, crate::theme::DARK] {
+            let _engine = crate::engine::TEST_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let doc = parse("```rust\nfn main() {}\n```\n");
+            let html = export_html(
+                &doc,
+                &ExportOptions {
+                    title: "",
+                    theme,
+                    base_dir: None,
+                    remote_images: false,
+                    print: false,
+                },
+            );
+            let light = html
+                .find(":root{color-scheme:light;--bg:#fbfbfb;")
+                .expect("light root");
+            let dark = html
+                .find("@media screen and (prefers-color-scheme:dark){")
+                .expect("a dark block");
+            assert!(light < dark);
+            let block = &html[dark..html[dark..]
+                .find("</style>")
+                .map_or(html.len(), |e| dark + e)];
+            assert!(
+                block.contains(":root{color-scheme:dark;--bg:#202020;--text:#e4e4e4;"),
+                "{block}"
+            );
+            assert!(block.contains("--note:#60cdff;") && block.contains("--caution:#f85149;"));
+            assert!(block.contains("span[style*=\"--d:\"]{color:var(--d)!important}"));
+            // The code carries both colours, the page being one file for both.
+            assert!(body(&html).contains(";--d:#"), "{}", body(&html));
+        }
+    }
+
+    #[test]
+    fn printing_keeps_the_light_palette_and_a_themed_picture_is_written_for_each_scheme() {
+        let dir = scratch("themed");
+        std::fs::write(dir.join("light.png"), PIXEL).unwrap();
+        let mut other = PIXEL.to_vec();
+        *other.last_mut().unwrap() ^= 1;
+        std::fs::write(dir.join("dark.png"), &other).unwrap();
+        let md = "<picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"dark.png\">\
+                  <source media=\"(prefers-color-scheme: light)\" srcset=\"light.png\">\
+                  <img src=\"light.png\" alt=\"themed\"></picture>\n\n![plain](light.png)\n";
+        let html = export_with(md, Some(&dir), false);
+        let b = body(&html);
+        assert!(
+            b.contains("<img class=\"lt\" src=\"data:image/png;base64,"),
+            "{b}"
+        );
+        assert!(
+            b.contains("<img class=\"dk\" src=\"data:image/png;base64,"),
+            "{b}"
+        );
+        // An image with no twin is written once and carries no scheme class.
+        assert!(b.contains("<img src=\"data:image/png;base64,"), "{b}");
+        assert_eq!(b.matches("alt=\"themed\"").count(), 2);
+        assert!(html.contains(".dk{display:none}"));
+        assert!(html.contains(".lt{display:none}.dk{display:inline}"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn highlight_runs_carry_the_dark_colour_when_both_lists_agree() {
+        let source = "ab cd";
+        let token = |range, color| highlight::Token { range, color };
+        let light = vec![token(0..2, [1, 2, 3]), token(3..5, [4, 5, 6])];
+        let dark = vec![token(0..2, [7, 8, 9]), token(3..5, [7, 8, 9])];
+        let mut out = String::new();
+        highlighted(&mut out, source, &light, Some(&dark));
+        assert_eq!(
+            out,
+            "<span style=\"color:#010203;--d:#070809\">ab</span> \
+             <span style=\"color:#040506;--d:#070809\">cd</span>"
+        );
+        // Lists that do not cover the same ranges leave the light colours alone.
+        let other = vec![token(0..1, [7, 8, 9])];
+        let mut out = String::new();
+        highlighted(&mut out, source, &light, Some(&other));
+        assert!(!out.contains("--d"), "{out}");
     }
 }

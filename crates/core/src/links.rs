@@ -12,6 +12,17 @@ pub fn is_markdown_path(path: &Path) -> bool {
     })
 }
 
+/// Whether a file name ends in an extension of a picture the viewer shows: what a wiki embed
+/// (`![[picture.png]]`) may be.
+pub fn is_image_name(name: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(stem, ext)| {
+        !stem.is_empty()
+            && ["png", "jpg", "jpeg", "gif", "webp", "svg"]
+                .iter()
+                .any(|e| ext.eq_ignore_ascii_case(e))
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkAction {
     /// Scroll within the current document. Every fragment here is as the link wrote it, still

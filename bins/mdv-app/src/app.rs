@@ -79,6 +79,8 @@ const CLICK_SLOP: f32 = 4.0;
 /// The watcher follows the indexed notes of the open folder up to this many, so a note saved
 /// anywhere in it refreshes the backlinks. A larger folder is refreshed by the other wakes only.
 const WATCHED_NOTES: usize = 5_000;
+/// The most folders below the open one that are followed, for a note or a folder made in them.
+const WATCHED_NOTE_FOLDERS: usize = 1_000;
 
 /// How long a file watcher wake waits for the rest of a burst of changes.
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -946,7 +948,7 @@ impl App {
     /// so an idle window costs no CPU.
     /// Keeps the watcher on the folders the Files pane lists, so a file created, removed or renamed
     /// there shows without a refresh. A closed pane watches nothing.
-    fn watch_tree(&mut self) {
+    fn watch_tree(&mut self, files_changed: bool) {
         let Some(w) = self.watcher.as_mut() else {
             return;
         };
@@ -962,8 +964,13 @@ impl App {
         } else {
             Vec::new()
         };
-        if dirs != self.tree_dirs {
-            w.set_folders(dirs.iter().map(PathBuf::as_path));
+        // The folders the notes need are asked for only when the open files or the index changed
+        // (`files_changed`), not on every pass.
+        if dirs != self.tree_dirs || files_changed {
+            let notes = self.ws.note_folders(WATCHED_NOTE_FOLDERS);
+            let all: std::collections::BTreeSet<&Path> =
+                dirs.iter().chain(&notes).map(PathBuf::as_path).collect();
+            w.set_folders(all);
             self.tree_dirs = dirs;
         }
     }
@@ -1543,16 +1550,15 @@ impl ApplicationHandler<Wake> for App {
             event_loop.set_control_flow(ControlFlow::Poll);
             return;
         }
-        if self.ws.take_watch_changed()
-            && let Some(w) = self.watcher.as_mut()
-        {
+        let files_changed = self.ws.take_watch_changed();
+        if files_changed && let Some(w) = self.watcher.as_mut() {
             w.set_files(
                 self.ws
                     .watched_paths()
                     .chain(self.ws.note_files(WATCHED_NOTES)),
             );
         }
-        self.watch_tree();
+        self.watch_tree(files_changed);
         // The tab the window was placed for is closed: the side-by-side arrangement is over.
         if self.tiling.is_some()
             && let Some((path, doc)) = &self.placed_for

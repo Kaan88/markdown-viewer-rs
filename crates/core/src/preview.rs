@@ -1,7 +1,7 @@
 //! What a hover card shows: a footnote's text, or a heading with the first lines under it. Plain
 //! text taken from a parsed document, short enough for a small card; the shell lays it out.
 
-use crate::model::{BlockKind, Document, NONE};
+use crate::model::{BlockKind, Document, NONE, SpanKind};
 
 /// The longest body kept, in characters. A card shows a few lines, so more is never read.
 pub const MAX_BODY_CHARS: usize = 360;
@@ -27,6 +27,21 @@ pub fn footnote(doc: &Document, index: u32) -> Option<Preview> {
     cut(&mut body);
     (!body.is_empty()).then(|| Preview {
         title: format!("Footnote {}", f.number),
+        body,
+    })
+}
+
+/// An `<abbr title>`: its title as a card with no title line of its own. `None` when span `index`
+/// is not one.
+pub fn abbr(doc: &Document, index: u32) -> Option<Preview> {
+    let span = doc.spans.get(index as usize)?;
+    let SpanKind::Abbr(title) = span.kind else {
+        return None;
+    };
+    let mut body: String = doc.str(title).trim().to_string();
+    cut(&mut body);
+    (!body.is_empty()).then(|| Preview {
+        title: String::new(),
         body,
     })
 }

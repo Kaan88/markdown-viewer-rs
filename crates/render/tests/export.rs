@@ -81,14 +81,18 @@ fn formulas_and_diagrams_are_pictures_when_the_engine_is_there() {
         return;
     }
     let math = page("math.md", false);
-    assert!(math.contains("<img class=\"math\" src=\"data:image/png;base64,"));
-    assert!(math.contains("<p class=\"math\"><img src=\"data:image/png;base64,"));
+    // Each picture is there twice, for a light and a dark page (classes `lt` and `dk`).
+    assert!(math.contains("<img class=\"math lt\" src=\"data:image/png;base64,"));
+    assert!(math.contains("<img class=\"math dk\" src=\"data:image/png;base64,"));
+    assert!(math.contains("<p class=\"math\"><img class=\"lt\" src=\"data:image/png;base64,"));
     assert!(
         math.contains("alt=\"E = mc^2\""),
         "the source stays as the alt text"
     );
     let diagrams = page("diagrams.md", false);
-    assert!(diagrams.contains("<p class=\"diagram\"><img src=\"data:image/png;base64,"));
+    assert!(
+        diagrams.contains("<p class=\"diagram\"><img class=\"lt\" src=\"data:image/png;base64,")
+    );
 }
 
 #[test]

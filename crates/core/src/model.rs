@@ -232,6 +232,8 @@ pub enum SpanKind {
     /// `<rt>` inside a `Ruby`: the annotation for the base text before it, back to the previous
     /// note or the start of the `Ruby`. The renderer draws it small above that base.
     RubyNote,
+    /// `<abbr title>`: the title, in `Document::strings`. An `<abbr>` with no title is plain text.
+    Abbr(StrRef),
 }
 
 /// An inline span. Spans are in preorder within their block and nest through `parent`, so empty
@@ -311,6 +313,23 @@ pub struct BlockAttrs {
     pub width: Option<Length>,
     pub height: Option<Length>,
     pub marker: Option<ListMarker>,
+}
+
+/// Which floats a block starts below: what `<br clear="left|right|all">` asks of the content
+/// after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Clear {
+    Left,
+    Right,
+    Both,
+}
+
+/// A block that starts below the floated images at one side or both. Sorted by `block`; use
+/// `Document::clear_of`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClearAt {
+    pub block: u32,
+    pub side: Clear,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -408,6 +427,8 @@ pub struct Document {
     pub anchors: Vec<Anchor>,
     pub footnotes: Vec<Footnote>,
     pub block_attrs: Vec<BlockAttrs>,
+    /// Blocks that start below floated images (`<br clear>`); almost always empty.
+    pub clears: Vec<ClearAt>,
     pub warnings: Vec<Warning>,
     /// The note names of the `[[target]]`s that were left as text (`WikiAs::Text`), so the
     /// application can tell when one of them would be a link now.
@@ -448,6 +469,12 @@ impl Document {
             .binary_search_by_key(&block, |a| a.block)
             .ok()?;
         Some(&self.block_attrs[i])
+    }
+
+    /// Which floats `block` starts below, if it was asked to.
+    pub fn clear_of(&self, block: u32) -> Option<Clear> {
+        let i = self.clears.binary_search_by_key(&block, |c| c.block).ok()?;
+        Some(self.clears[i].side)
     }
 
     /// Direct children of `parent`, or the top-level blocks for `NONE`.
@@ -500,6 +527,44 @@ impl Document {
             .find(|(n, _)| *n == f)
             .or_else(|| names().find(|(n, _)| n.to_lowercase() == f.to_lowercase()))
             .map(|(_, b)| b)
+            // Then a block id, which an Obsidian link writes as `^id`.
+            .or_else(|| f.strip_prefix('^').and_then(|id| self.resolve_block_id(id)))
+    }
+
+    /// The block that carries the Obsidian block id `id` (what follows the `^` of a `[[Note#^id]]`):
+    /// a paragraph, list item text or heading whose text ends in ` ^id`. A paragraph that holds
+    /// only `^id` names the block before it (Obsidian's way to name a table or a quote). An id is
+    /// letters, digits and hyphens. Looked up when asked; nothing is indexed.
+    pub fn resolve_block_id(&self, id: &str) -> Option<u32> {
+        if id.is_empty() || !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') {
+            return None;
+        }
+        let at = (0..self.blocks.len() as u32).find(|&i| {
+            let block = &self.blocks[i as usize];
+            if !matches!(
+                block.kind,
+                BlockKind::Paragraph { .. } | BlockKind::Plain | BlockKind::Heading { .. }
+            ) {
+                return false;
+            }
+            let before = self
+                .block_text(i)
+                .trim_end()
+                .strip_suffix(id)
+                .and_then(|rest| rest.strip_suffix('^'));
+            before.is_some_and(|rest| rest.is_empty() || rest.ends_with(char::is_whitespace))
+        })?;
+        let block = self.blocks[at as usize];
+        let alone = matches!(block.kind, BlockKind::Paragraph { .. })
+            && self.block_text(at).trim().len() == id.len() + 1;
+        if alone {
+            // The id on a line of its own names the block before it.
+            let previous = self.children(block.parent).take_while(|&c| c != at).last();
+            if let Some(previous) = previous {
+                return Some(previous);
+            }
+        }
+        Some(at)
     }
 
     /// Everything a later engine job has to do, in document order. Oversize items keep their source
@@ -789,6 +854,16 @@ pub fn parse_bytes(bytes: &[u8]) -> Document {
 
 /// [`parse_bytes`] with wiki-links: see [`crate::parse_wiki`].
 pub fn parse_bytes_wiki(bytes: &[u8], wiki: &mut dyn FnMut(&str) -> WikiAs) -> Document {
+    parse_bytes_wiki_embeds(bytes, &mut |note, embed| {
+        if embed { WikiAs::Text } else { wiki(note) }
+    })
+}
+
+/// [`parse_bytes_wiki`] with embeds: see [`crate::parse_wiki_embeds`].
+pub fn parse_bytes_wiki_embeds(
+    bytes: &[u8],
+    wiki: &mut dyn FnMut(&str, bool) -> WikiAs,
+) -> Document {
     if bytes.len() > MAX_FILE_BYTES {
         return Document {
             warnings: vec![Warning::FileTooLarge],
@@ -796,7 +871,7 @@ pub fn parse_bytes_wiki(bytes: &[u8], wiki: &mut dyn FnMut(&str) -> WikiAs) -> D
         };
     }
     let (text, invalid) = crate::files::decode(bytes);
-    let mut doc = crate::parse_wiki(&text, wiki);
+    let mut doc = crate::parse_wiki_embeds(&text, wiki);
     if invalid {
         doc.warnings.push(Warning::InvalidUtf8);
     }

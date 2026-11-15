@@ -11,6 +11,8 @@ use mdview_core::model::{AlertKind, BlockKind, ListMarker};
 /// tight text already leaves makes the 16 px between groups.
 pub(super) const DEFINITION_INDENT: f32 = 16.0;
 pub(super) const DEFINITION_GAP: f32 = 12.0;
+/// Logical px of side margin on a `<figure>`, as the browser default and GitHub give it.
+pub(super) const FIGURE_MARGIN: f32 = 40.0;
 
 impl<'a, 'b> Pager<'a, 'b> {
     pub(super) fn quote(
@@ -197,6 +199,12 @@ impl<'a, 'b> Pager<'a, 'b> {
                 self.emit(&inline, layout, left, y + self.px(1.0), size);
             }
         }
+    }
+
+    /// The side margin of a `<figure>` in a column `width` wide: 40 px, less in a narrow column so
+    /// that the content keeps at least half of it.
+    pub(super) fn figure_margin(&self, width: f32) -> f32 {
+        self.px(FIGURE_MARGIN).min((width / 4.0).max(0.0))
     }
 
     /// A `<dd>`: indented under its term, with a gap after it before the next group.
