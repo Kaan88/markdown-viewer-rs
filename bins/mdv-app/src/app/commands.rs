@@ -193,7 +193,11 @@ impl App {
 
     pub(super) fn copy(&mut self) {
         if let Some(text) = self.ws.selected_text()
-            && platform::set_clipboard_text(&text)
+            && (self
+                .ws
+                .selected_html()
+                .is_some_and(|html| platform::set_clipboard_html(&html, &text))
+                || platform::set_clipboard_text(&text))
         {
             self.ws.set_status("Copied");
         }
