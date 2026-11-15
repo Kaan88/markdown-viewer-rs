@@ -2706,6 +2706,42 @@ fn the_outline_pane_is_walked_with_the_keyboard_only_once_focused() {
 }
 
 #[test]
+fn the_outline_ring_is_drawn_again_at_once_on_every_key() {
+    let mut a = app(&["everything.md"]);
+    a.command(CommandId::FocusOutline);
+    a.compose();
+    let outline = crate::app::Region::Outline.index();
+    // Each key that moves the row changes what the pane looks like, so the pane's cached
+    // bitmap must be dropped and drawn again: its signature has to change with the focus.
+    let mut seen = a.sigs[outline];
+    for name in [
+        KeyName::Down,
+        KeyName::Down,
+        KeyName::Up,
+        KeyName::End,
+        KeyName::Home,
+        KeyName::PageDown,
+    ] {
+        let before = a.ui.outline_focus;
+        key(&mut a, name.clone(), None);
+        assert_ne!(a.ui.outline_focus, before, "{name:?} moved the row");
+        assert_ne!(a.sigs[outline], seen, "{name:?} repaints the outline pane");
+        seen = a.sigs[outline];
+    }
+    // Escape takes the ring away at once.
+    key(&mut a, KeyName::Escape, None);
+    assert_eq!(a.ui.outline_focus, None);
+    assert_ne!(a.sigs[outline], seen, "Escape repaints the outline pane");
+    // So does a click on the page.
+    a.command(CommandId::FocusOutline);
+    a.compose();
+    seen = a.sigs[outline];
+    a.ui.outline_focus = None;
+    a.compose();
+    assert_ne!(a.sigs[outline], seen, "losing the focus repaints the pane");
+}
+
+#[test]
 fn the_outline_focus_follows_clicks_and_other_panes() {
     let mut a = app(&["everything.md"]);
     click(&mut a, Hit::OutlineRow(2));

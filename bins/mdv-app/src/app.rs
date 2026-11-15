@@ -556,6 +556,7 @@ impl App {
                     backlinks,
                     self.ws.current_heading(),
                     ui.panes.outline_scroll.to_bits(),
+                    ui.outline_focus,
                     drag,
                 ))
             }
