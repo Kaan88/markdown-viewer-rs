@@ -266,8 +266,8 @@ mod tests {
         let a = parse("--shot x.png --palette >zoom --dialog settings");
         assert_eq!(a.palette.as_deref(), Some(">zoom"));
         assert_eq!(parse("--outline-focus 3").outline_focus, Some(3));
-        let a = parse("--present 2 --present-overview --present-select");
-        assert!(a.present_overview && a.present_select && a.present == Some(2));
+        let p = parse("--present 2 --present-overview --present-select");
+        assert!(p.present_overview && p.present_select && p.present == Some(2));
         assert_eq!(a.dialog, Some(ShotDialog::Settings));
     }
 
