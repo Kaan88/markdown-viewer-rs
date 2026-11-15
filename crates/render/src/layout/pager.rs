@@ -333,7 +333,8 @@ impl<'a, 'b> Pager<'a, 'b> {
             }
             BlockKind::DefDesc => self.definition(b, left, width, color, depth),
             BlockKind::Figure { .. } => {
-                self.blocks(b, left, width, color, depth + 1);
+                let margin = self.figure_margin(width);
+                self.blocks(b, left + margin, width - 2.0 * margin, color, depth + 1);
                 self.y += self.px(12.0);
             }
             BlockKind::FigCaption => {
