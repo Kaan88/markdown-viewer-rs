@@ -527,6 +527,44 @@ impl Document {
             .find(|(n, _)| *n == f)
             .or_else(|| names().find(|(n, _)| n.to_lowercase() == f.to_lowercase()))
             .map(|(_, b)| b)
+            // Then a block id, which an Obsidian link writes as `^id`.
+            .or_else(|| f.strip_prefix('^').and_then(|id| self.resolve_block_id(id)))
+    }
+
+    /// The block that carries the Obsidian block id `id` (what follows the `^` of a `[[Note#^id]]`):
+    /// a paragraph, list item text or heading whose text ends in ` ^id`. A paragraph that holds
+    /// only `^id` names the block before it (Obsidian's way to name a table or a quote). An id is
+    /// letters, digits and hyphens. Looked up when asked; nothing is indexed.
+    pub fn resolve_block_id(&self, id: &str) -> Option<u32> {
+        if id.is_empty() || !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') {
+            return None;
+        }
+        let at = (0..self.blocks.len() as u32).find(|&i| {
+            let block = &self.blocks[i as usize];
+            if !matches!(
+                block.kind,
+                BlockKind::Paragraph { .. } | BlockKind::Plain | BlockKind::Heading { .. }
+            ) {
+                return false;
+            }
+            let before = self
+                .block_text(i)
+                .trim_end()
+                .strip_suffix(id)
+                .and_then(|rest| rest.strip_suffix('^'));
+            before.is_some_and(|rest| rest.is_empty() || rest.ends_with(char::is_whitespace))
+        })?;
+        let block = self.blocks[at as usize];
+        let alone = matches!(block.kind, BlockKind::Paragraph { .. })
+            && self.block_text(at).trim().len() == id.len() + 1;
+        if alone {
+            // The id on a line of its own names the block before it.
+            let previous = self.children(block.parent).take_while(|&c| c != at).last();
+            if let Some(previous) = previous {
+                return Some(previous);
+            }
+        }
+        Some(at)
     }
 
     /// Everything a later engine job has to do, in document order. Oversize items keep their source

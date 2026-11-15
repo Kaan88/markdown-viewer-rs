@@ -231,6 +231,7 @@ impl Workspace {
                     continue;
                 };
                 match decide.answer(target.note) {
+                    WikiAs::Link if dangling(doc, link.dest) => missing.push(i),
                     WikiAs::Link => {}
                     WikiAs::Missing => missing.push(i),
                     WikiAs::Text => reparse = true,
@@ -320,7 +321,7 @@ impl Workspace {
         let Some(target) = parse_target(target) else {
             return LinkOutcome::Ignored;
         };
-        let fragment = target.last_heading().map(mdview_core::slug::slug_of);
+        let fragment = fragment_of(&target);
         if target.note.is_empty() {
             return match fragment {
                 Some(fragment) => self.jump_fragment(&fragment),
@@ -470,19 +471,59 @@ pub(super) fn parse_document(
     bytes: &[u8],
 ) -> Document {
     let mut decide = Decider::new(notes, folder_open, path);
-    parse_bytes_wiki_embeds(bytes, &mut |note, embed| {
+    let mut document = parse_bytes_wiki_embeds(bytes, &mut |note, embed| {
         if embed {
             decide.answer_embed(note)
         } else {
             decide.answer(note)
         }
-    })
+    });
+    // A link into this document whose heading or block is not on the page.
+    let gone: Vec<usize> = document
+        .links
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.wiki && dangling(&document, l.dest))
+        .map(|(i, _)| i)
+        .collect();
+    for i in gone {
+        document.links[i].missing = true;
+    }
+    document
+}
+
+/// Where a wiki-link target leads inside its note, as `Reveal::Anchor` takes it: a heading's slug,
+/// or `^id` for an Obsidian block reference (`#^id`, the last part of a `#a#^id` path).
+fn fragment_of(target: &mdshared_app::wikilink::WikiTarget) -> Option<String> {
+    if let Some(heading) = target.last_heading() {
+        return Some(mdview_core::slug::slug_of(heading));
+    }
+    let id = target
+        .heading?
+        .rsplit('#')
+        .next()?
+        .trim()
+        .strip_prefix('^')?;
+    (!id.is_empty()).then(|| format!("^{id}"))
+}
+
+/// Whether the wiki-link `dest` leads into `doc` itself (no note named) to a heading or block the
+/// page does not have.
+fn dangling(doc: &Document, dest: mdview_core::model::StrRef) -> bool {
+    let Some(target) = parse_target(doc.str(dest)) else {
+        return false;
+    };
+    if !target.note.is_empty() {
+        return false;
+    }
+    fragment_of(&target).is_some_and(|fragment| doc.resolve_fragment(&fragment).is_none())
 }
 
 /// Answers what each `[[note]]` of one document is. A note that is found is a link. One that is
 /// not is a link to a missing note when a folder is open, and stays text when none is: a file
 /// read on its own is ordinary Markdown first, where `[[nodiscard]]` is not a note. A link into
-/// the same document (an empty name) follows the same rule, since its heading is not known yet.
+/// the same document (an empty name) is always a link, since it needs only the document; whether
+/// its heading or block is there is settled after the parse (`dangling`).
 struct Decider<'a> {
     notes: &'a Notes,
     folder_open: bool,
@@ -511,7 +552,9 @@ impl<'a> Decider<'a> {
         if let Some(&known) = self.answers.get(note) {
             return known;
         }
-        let found = note.is_empty() && self.folder_open || !note.is_empty() && self.find(note);
+        // A link into this very document needs no other file, so it is a link with no folder
+        // open too; one whose heading is not on the page is marked missing once the page is known.
+        let found = note.is_empty() || self.find(note);
         let answer = match (found, self.folder_open) {
             (true, _) => WikiAs::Link,
             (false, true) => WikiAs::Missing,
@@ -1001,5 +1044,111 @@ A ref link [x] and [[x]].
         ws.set_folder(None);
         show(&mut ws);
         assert!(ws.backlinks().is_empty() && ws.notes_stats().is_none());
+    }
+
+    /// Forty paragraphs, so that the one after them is below the first screen.
+    fn long_note(tail: &str) -> String {
+        let mut text = String::from("# Top\n\n");
+        for n in 0..40 {
+            text.push_str(&format!("Paragraph number {n} of filler text.\n\n"));
+        }
+        text.push_str(tail);
+        text
+    }
+
+    #[test]
+    fn a_block_reference_opens_the_note_at_the_block_that_carries_the_id() {
+        let dir = temp_dir("blocks");
+        let a = write(
+            &dir,
+            "A.md",
+            "[[B#^deep-one]] and [[B#^nothing]] and [[B]]\n",
+        );
+        write(
+            &dir,
+            "B.md",
+            &long_note("The point of it all. ^deep-one\n\nAfter.\n"),
+        );
+        let mut ws = Workspace::new(None);
+        ws.set_folder(Some(dir.clone()));
+        ws.index_notes_now();
+        ws.open(&a).unwrap();
+        show(&mut ws);
+
+        // An id that is on no block leaves the note at its top.
+        assert_eq!(ws.open_link("wiki:B#^nothing"), LinkOutcome::OpenedTab(1));
+        show(&mut ws);
+        assert_eq!(ws.scroll(), 0.0);
+        assert!(ws.activate(0));
+        show(&mut ws);
+
+        assert_eq!(ws.open_link("wiki:B#^deep-one"), LinkOutcome::OpenedTab(1));
+        show(&mut ws);
+        assert!(
+            ws.scroll() > 300.0,
+            "scrolled to the block: {}",
+            ws.scroll()
+        );
+        assert!(ws.status_line().is_none());
+    }
+
+    #[test]
+    fn a_block_reference_in_the_same_note_scrolls_to_it_and_a_missing_one_is_refused() {
+        let dir = temp_dir("blocks-same");
+        let text = long_note(
+            "See [[#^later]] and [[#^gone]] here.
+
+- an item ^later
+",
+        );
+        let a = write(&dir, "A.md", &text);
+        let mut ws = Workspace::new(None);
+        ws.open(&a).unwrap();
+        show(&mut ws);
+        // No folder is open, and a link into this page is a link all the same; the one whose
+        // block is not on the page is drawn as missing.
+        assert_eq!(
+            wiki_links(&ws),
+            [("^later".to_string(), false), ("^gone".to_string(), true)]
+        );
+        assert_eq!(ws.scroll(), 0.0);
+        ws.scroll_home();
+        show(&mut ws);
+        assert_eq!(ws.open_link("wiki:#^later"), LinkOutcome::Scrolled);
+        show(&mut ws);
+        assert!(ws.scroll() > 300.0, "{}", ws.scroll());
+        assert!(matches!(
+            ws.open_link("wiki:#^gone"),
+            LinkOutcome::Refused(_)
+        ));
+    }
+
+    #[test]
+    fn a_link_to_a_heading_of_this_page_needs_no_folder() {
+        let dir = temp_dir("heading-self");
+        let text =
+            long_note("## The Last Part\n\nSee [[#The Last Part]] and [[#No Such Heading]].\n");
+        let a = write(&dir, "A.md", &text);
+        let mut ws = Workspace::new(None);
+        ws.open(&a).unwrap();
+        show(&mut ws);
+        assert!(ws.folder().is_none());
+        assert_eq!(
+            wiki_links(&ws),
+            [
+                ("The Last Part".to_string(), false),
+                ("No Such Heading".to_string(), true)
+            ]
+        );
+        assert_eq!(ws.open_link("wiki:#The Last Part"), LinkOutcome::Scrolled);
+        assert!(matches!(
+            ws.open_link("wiki:#No Such Heading"),
+            LinkOutcome::Refused(_)
+        ));
+        // `[[nodiscard]]` and its like stay text, as before.
+        let b = write(&dir, "B.md", "C++ attr: [[nodiscard]] int f();\n");
+        ws.open(&b).unwrap();
+        show(&mut ws);
+        assert!(wiki_links(&ws).is_empty());
     }
 }

@@ -3652,3 +3652,31 @@ fn time_and_bdo_keep_their_text() {
     let d = parse("on <time datetime=\"2026-11-15\">15 Nov</time> by <bdo dir=\"rtl\">hand</bdo>.");
     assert_eq!(d.block_text(0), "on 15 Nov by hand.");
 }
+
+#[test]
+fn a_block_id_names_the_paragraph_item_or_block_before_it() {
+    let d = parse(
+        "First paragraph. ^first\n\nSecond one\nspans two lines ^two-lines\n\n- an item ^item\n- plain\n\n\
+         > a quote\n\n^quote\n\nNot an id: a^b and ^trailing-not-at-end here\n\n# Head ^head\n",
+    );
+    let text_of = |id: &str| {
+        d.resolve_block_id(id)
+            .map(|b| d.block_text(b).trim().to_string())
+    };
+    assert_eq!(text_of("first").as_deref(), Some("First paragraph. ^first"));
+    assert_eq!(
+        text_of("two-lines").as_deref(),
+        Some("Second one spans two lines ^two-lines")
+    );
+    assert_eq!(text_of("item").as_deref(), Some("an item ^item"));
+    // An id on a line of its own names the quote before it.
+    assert_eq!(text_of("quote").as_deref(), Some("a quote"));
+    assert_eq!(text_of("head").as_deref(), Some("Head ^head"));
+    assert_eq!(text_of("trailing-not-at-end"), None);
+    assert_eq!(text_of("b"), None);
+    assert_eq!(text_of("missing"), None);
+    assert_eq!(text_of(""), None);
+    // A fragment `^id` resolves the same way, after the headings.
+    assert_eq!(d.resolve_fragment("^first"), d.resolve_block_id("first"));
+    assert_eq!(d.resolve_fragment("^nope"), None);
+}
