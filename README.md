@@ -15,10 +15,13 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
 
 - **GitHub-flavoured Markdown:** tables, task lists, footnotes, alerts, strikethrough, autolinks,
   front matter, emoji shortcodes, and the HTML that GitHub allows (`<details>`, `<kbd>`, `<sub>`,
-  aligned blocks, HTML tables with spans, `<picture>` with light and dark sources).
+  aligned blocks, HTML tables with spans, `<picture>` with light and dark sources, `<abbr title>`
+  with its title in a hover card, `<br clear>`, and a table that stands beside a floated image
+  when it fits), and Obsidian-style wiki-links (`[[Note]]`, `[[Note#^block]]`, labels with emphasis,
+  `![[picture.png]]`).
 - **Math and diagrams:** TeX math (`$...$`, `$$...$$`, fenced `math`) and Mermaid, 31 diagram
   families, rendered locally.
-- **Syntax highlighting** in fenced code blocks.
+- **Syntax highlighting** in fenced code blocks, including Vue and Svelte components.
 - **Images:** PNG, JPEG, GIF, WebP and SVG. Remote images stay off until you allow them, per
   document or always.
 - **Updates:** an installed mdview (on Linux, the AppImage) looks for a newer version at every
@@ -36,6 +39,8 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
   plain text and HTML on the clipboard together, so a paste into a word processor or a mail keeps
   headings, emphasis, links, lists, tables and code, and a paste into a text field gets the plain
   text as before.
+- **Copy as Markdown** (the page's context menu and the command palette) copies the Markdown
+  source of the blocks a selection touches, exactly as written in the file.
 - **Copy button on code blocks.** Point at a code block and a small copy button appears at its top
   right; a click copies the block's code exactly (without the newline that ends its last line) and
   the button shows a check mark for a moment. "Copy code block" in the command palette copies the
@@ -49,8 +54,8 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
   highlighted as the find in the page does. It runs on a background thread, results stream in,
   and Escape or a new query cancels it. It is in the "⋯" menu and the command palette
   (`>find in folder`); it has no key yet.
-- **Export as HTML** saves the open document as one self-contained `.html` file (the page's
-  light look, your page font and width, code colours, tables, task boxes, footnotes, formulas and
+- **Export as HTML** saves the open document as one self-contained `.html` file (it follows the
+  reader's light or dark browser setting; your page font and width, code colours, tables, task boxes, footnotes, formulas and
   diagrams as pictures, local images embedded). **Print (opens in browser)** opens a printable
   copy in the default browser, which shows its own print dialog. Both are in a tab's context menu
   and the command palette (`>export`, `>print`).
@@ -60,7 +65,12 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
   formulas, diagrams and pictures. Right, Space, Page Down, Enter or a click go on; Left, Page Up
   or Backspace go back; Home and End jump; a slide taller than the screen scrolls first (wheel,
   Up and Down). A small counter shows and fades. Escape returns to the document where you left
-  it. Front matter is no slide, and an edit of the file keeps the slide you are on.
+  it. Front matter is no slide, and an edit of the file keeps the slide you are on. Links on a
+  slide can be clicked, text can be selected and copied with Ctrl+C, and **G** lists the slides by
+  number and title.
+- **Keyboard in menus.** The "..." menu and the context menus have underlined access keys: hold
+  Alt (or press it) with a menu open to see them, and a letter picks the item. The Outline pane can
+  be walked with the keys ("Focus outline" in the command palette).
 - **Command palette (Ctrl+P):** open tabs, recent files, the open folder's Markdown files,
   commands (`>`) and headings (`#`).
 - **Settings (Ctrl+,):** page width, text size, theme, a page font and a code font (any installed
@@ -70,7 +80,11 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
   and shadow; where the window is opaque (X11, KDE with a square setting) it stays square.
 - **Window backdrop** (Windows 11, off by default): Settings > Window backdrop lets the system's
   Mica or Acrylic material show through the title row and tab strip, the bar and the Files and
-  Outline panes. The page, menus and dialogs stay solid.
+  Outline panes. The page, menus and dialogs stay solid. On KDE Plasma (Wayland) the same setting
+  blurs the desktop behind them (written, compiled and tested on Windows only; never run or seen on
+  Linux).
+- **Snap layouts** (Windows 11): pointing at the maximize button shows the system's snap-layouts
+  flyout.
 - **With mdedit:** Edit in mdedit (Ctrl+E) opens the file in the editor at the line you are
   reading, and when mdedit previews a file here it shows the editor's unsaved text as you type
   (live preview, up to 2 MiB), also for a document that was never saved, and returns to the

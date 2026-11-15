@@ -334,14 +334,21 @@ Agreed after mdview 0.3.0 and mdedit 0.5.0 (Windows and Linux).
   leaves the window opaque and square: with rounding wanted, `Auto` takes the margin there too
   (the shared repository's docs/LINUX.md, "Rounded window corners").
 
-### After 0.4.0 and 0.6.0 (written 2026-11-15; item 1 asked for by the owner, the rest proposed, nothing built)
+### After 0.4.0 and 0.6.0 (written 2026-11-15; item 1 asked for by the owner, the rest proposed; items 1 to 4 built on 2026-11-15, not released, not looked at by the owner)
 
 mdview 0.4.0 and mdedit 0.6.0 are released and every item of "Next release" above is in them.
 This is what is left, in the proposed order. Rules as always: code both apps could use goes into
 `markdown-shared-rs` first; each item keeps the budgets; the owner approves the interface by
 looking at it.
 
-**1. Windows return to where they were when a side-by-side preview ends (both apps; owner
+**Status, 2026-11-15.** Items 1 to 4 and the extra gaps are built on the viewer branch `f/adopt-shared`
+(and the matching editor and shared branches) and are in `docs/release-notes/NEXT.md`; none of it is
+released, none of it was looked at by the owner, and what each worker did not verify is listed in
+`docs/HANDOFF.md`, "After 0.4.0: gaps closed". Item 5 is still open. Not built: `<bdo>` (the text
+layout has no per-range direction: parley has no bidi override per range, and a control character in
+the text would move every offset of the document text).
+
+**1. DONE. Windows return to where they were when a side-by-side preview ends (both apps; owner
 request 2026-11-15).** Today "Preview side by side" puts mdedit on the left half of its screen
 (`tile_left` in mdedit's `app/handoff.rs`) and sends mdview the right half (`--place`, or a
 `place` request to a running copy; `App::place` in `app/commands.rs`). Nothing puts either
@@ -369,27 +376,36 @@ window back.
   a viewer that the preview started be closed when the preview ends, or only moved back (the
   plan here: only moved back)?
 
-**2. Copy as Markdown (mdview).** Left out of 0.4.0 because a selection could not be mapped back
+**2. DONE. Copy as Markdown (mdview).** Left out of 0.4.0 because a selection could not be mapped back
 to the file. Since finer sync the viewer has a map from the file's lines to places on the page.
 Plan: "Copy as Markdown" copies the source lines of the blocks the selection touches (whole
 blocks, from the file's bytes, not from the parsed text), in the page's menu and the palette.
 First step is a check that the line map covers every block kind (front matter, math, tables,
 `<details>`); if it does not, report and stop.
 
-**3. Small gaps of the viewer**, each on its own, smallest first:
+**3. DONE (except `<bdo>`). Small gaps of the viewer**, each on its own, smallest first:
 
-- Outline rows (and backlink rows) get keyboard navigation.
-- Following mdedit's caret upward: the caret's line can be up to two rows above the top of the
+- DONE: outline rows (and backlink rows) get keyboard navigation ("Focus outline").
+- DONE: following mdedit's caret upward: the caret's line can be up to two rows above the top of the
   page before the page follows (the test bound was loosened for 0.4.0; fix the rule, tighten the
   test).
-- Markup inside a wiki-link label (`[[Note|a *b* c]]`); `![[embed]]`.
-- A table beside a floated image when it fits; `<br clear>`.
+- DONE: markup inside a wiki-link label (`[[Note|a *b* c]]`); `![[embed]]`.
+- DONE: a table beside a floated image when it fits; `<br clear>`.
+- Also done from the gap lists: a covered window stops animating on Windows; find in folder goes to
+  the chosen line's own match and follows changing files; presentation mode got links, selecting and
+  copying, and a slide list (G); ruby bases kept on one line; the `<figure>` margin; `<abbr title>`;
+  `[[Note#^block]]` and `[[#Heading]]` with no folder; new folders and notes wake the window; Export
+  as HTML follows the light or dark scheme and the tables' HTML attributes; menu access keys; the
+  snap-layouts flyout; Vue and Svelte highlighting.
+- NOT built: `<bdo>`, because the text layout has no per-range direction.
 
-**4. Frosted window on Linux (both apps).** Only the Windows 11 backdrop was built. KDE Wayland
+**4. DONE in code, never run on Linux. Frosted window on Linux (both apps).** Only the Windows 11 backdrop was built. KDE Wayland
 has a blur-behind protocol and the window already has an ARGB surface on the client-margin
 route; GNOME offers nothing, so flat colour stays there. A spike first (does the blur show behind
 the chrome only, what does it cost when idle), then the setting's Linux value. Needs the Linux
-machine; nothing of it can be judged on the Windows PC.
+machine; nothing of it can be judged on the Windows PC. Built (shared `f/linux-frost`, `org_kde_kwin_blur`
+on the window's own connection; the apps pass `BlurSystem` and present with alpha): it was only
+compiled, by CI. The spike was not made, so the idle cost and the look are unknown.
 
 **5. Checks and measurements that are owed**, no new code:
 

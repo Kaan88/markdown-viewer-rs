@@ -13,6 +13,11 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ## START HERE: mdview 0.4.0 is released (2026-11-15)
 
+**Later on 2026-11-15, not released: branch `f/adopt-shared` holds the gaps closed after 0.4.0 (Copy as
+Markdown, more render gaps, presentation additions, the shared Vue/Svelte, menu access keys,
+snap-layouts and KDE blur additions). The owner has not looked at any of it; read "After 0.4.0:
+gaps closed" below.**
+
 **The released state is `main`, mdview 0.4.0, tag `v0.4.0` at `09e1dc5`, published with mdedit
 0.6.0 on the owner's word; see "Release 0.4.0" below and `docs/UPDATE.md`.** The text that
 follows was written before the merge and the release: read "0.3.1" as the release before, and
@@ -512,11 +517,9 @@ of it.
   `Hit::BacklinkRow`): a hairline, "Backlinks n", then the linking file's name over the link's
   line, one entry per link; absent when there are none. A click opens the file with the link
   selected. Wiki-links and relative Markdown links (and reference definitions) count.
-- *Not done.* Outline rows have no keyboard navigation, so backlink rows have none either. A
-  note created beside a document while no folder is open (nobody watches that folder) leaves
-  its `[[name]]` as text until the document is read again or another wake comes. With no
-  folder open `[[#Heading]]` is text too, since the parser decides before headings are known. A new folder below the open one is seen
-  at the next wake, not by itself. `[[Note#^block]]` opens the note at its top. Idle CPU with
+- *Not done.* (Updated 2026-11-15; the outline keyboard, new folders and notes waking the window,
+  `[[#Heading]]` with no folder and `[[Note#^block]]` were built later: see "After 0.4.0: gaps
+  closed".) Idle CPU with
   the indexer thread was not measured, only reasoned (it blocks on a channel). Nothing was run
   in a real window: tests and `--shot` only. `fixtures/wiki/` is the test folder.
 
@@ -877,16 +880,15 @@ and the showcase's two decodes separately.
 
 **New shell:**
 
-- No snap-layouts flyout on the maximize button. The system accent colour is not used.
+- The system accent colour is not used. (The snap-layouts flyout is built on `f/adopt-shared`, not seen: see "After 0.4.0: gaps closed".)
 - Maximized memory is three full-window bitmaps.
 - On Windows, icons need Segoe Fluent Icons or Segoe MDL2 Assets; off Windows a built-in subset of the Fluent UI System Icons is used (shared `1e244ec`).
 
 **Renderer and engine:**
 
-- Ruby annotations sit over the first line of their base only, at half size.
-- `<figure>` has no side margin.
+- Ruby annotations are at half size; a base is kept on one line up to 40 characters, a longer one may wrap with its annotation over the first line. `<bdo>` keeps its text with no direction override.
 - An animated image over 10,000 frames or 4 M pixels shows its first frame only. A window covered
-  by another one goes on animating (winit reports no occlusion there); minimised, it stops. An
+  by another one stops animating within about a second on Windows (GDI, never tried with a real covered window) and where winit reports occlusion (X11, macOS), but goes on animating on Wayland; minimised, it stops. An
   animated image in a footnote does not move. After a zoom or resize an animation shown small may
   show an older frame for one frame time, and one that had given up its decoder starts from its
   first frame.
@@ -1146,6 +1148,141 @@ branch `f/window-return` in the three repositories; the pins name the shared bra
   size larger than half the screen) counts as moved and is not put back.
 
 
+## After 0.4.0: gaps closed (2026-11-15, not released)
+
+Branch `f/adopt-shared` (viewer), made of the merge `merge/next` (Copy as Markdown, the shell
+gaps, presentation mode additions, render gaps) plus the adoption of three shared additions.
+Written by workers from the notes that were in `docs/next/` (now folded into this file,
+`docs/COVERAGE.md`, `docs/PORT_CHECKLIST.md`, `docs/PLAN.md`, the README and
+`docs/release-notes/NEXT.md`). **The owner has not looked at any of it. Nothing here was released,
+and nothing was tried by hand in a real window.** Pins: all `mdshared-*` name `065cbdc` of
+`markdown-shared-rs` (branch `f/linux-frost`, which contains `681baf8`, which added Vue and Svelte
+highlighting, menu access keys and the snap hook). Third-party crates in `Cargo.lock` are
+unchanged; only the five shared `source` lines moved.
+
+### What was built and where it lives
+
+- **Copy as Markdown.** `mdview_core::rich::selection_markdown`; `Workspace::selected_markdown`;
+  command `CopyMarkdown` in `crates/core/src/commands.rs`; a row in the page's context menu
+  (`overlays::page_menu`) and the palette. Whole top-level blocks from the file's own bytes; a file
+  changed on disk since the parse, an untitled or a missing file gives a status message and copies
+  nothing. No shortcut.
+- **Outline keyboard.** Command `FocusOutline` (palette only). `Ui::outline_focus`,
+  `panes::focus_mark`; keys handled in `app/input.rs`. Shot `outline-focus`.
+- **Following mdedit's caret upward.** `Workspace::jump` now follows when the target row's top is
+  above the top edge going up.
+- **A covered window.** Windows: `platform::is_covered` (GDI `GetClipBox`) asked once a second while
+  an animation plays (`timers`). Elsewhere: `Occluded(false)` wakes a frame and a requested frame
+  waits while occluded.
+- **Find in folder.** The chosen line selects its own match (`Document::text_at_line`); the card
+  searches again when the watcher wakes (`FolderSearch::refresh`).
+- **Presentation mode.** Links on a slide, selecting and copying text on a slide, **G** for the
+  slide list (`app/slides.rs`, the shared palette widget). Shots `present-overview-dark`,
+  `present-select-light`.
+- **Render.** `[[Note|a *b* c]]` and `![[picture.png]]` (`crates/core` `find_wiki`, `Decider` in
+  `workspace/notes.rs`); `<br clear>` (`Document::clears`, `Pager::clear_side`); a table beside a
+  float (`Pager::table`); a ruby base kept on one line (`build_layout`); the 40 px `<figure>`
+  margin (`figure_margin`); `<abbr title>` with a dotted underline and a hover card
+  (`SpanKind::Abbr`, `preview::abbr`); `[[Note#^id]]` and `[[#Heading]]` without a folder
+  (`Document::resolve_block_id`, `fragment_of`); new folders and notes wake the window
+  (`Workspace::note_folders`, `watch_tree`); Export as HTML places tables by their HTML attributes
+  and follows the reader's light or dark scheme (`crates/render/src/export.rs`). Fixtures
+  `fixtures/wiki-embeds/`, `floats-clear.md`, `floats-table.md`, `render-more.md`.
+- **Snap-layouts flyout** (this branch). `chrome::max_button_rect(w, maximized)` is the maximize
+  button below the 8 px top resize band (the whole button when maximized); `App::sync_snap`, called
+  after every composed frame in `draw`, gives it to `mdshared_ui::snap::set_maximize_button_rect`
+  and withdraws it (`None`) while a dialog, the palette or Settings, a presentation or full screen
+  covers the title row. Only a change is sent (`App::snap_sent`). A menu does not cover the title
+  row (`menu_room`), so it leaves the rectangle in place.
+- **Menu access keys** (this branch). The main menu and the tab, page and find-box menus
+  (`overlays.rs`) have one marked letter per item and `.access_keys(true)`; the three labels taken
+  from the command table (Show in the file manager, Export as HTML, Print) are marked by letter
+  with `overlays::mark`. The Recent menu stays opted out: its labels are file names. In
+  `app/input.rs` a printable key without Ctrl or Alt calls `menu.access_key(ch)` and acts as Enter
+  does (a submenu item opens its submenu). Underlines: `Popup::new` hides them; they show when the
+  menu opens with Alt held (`open_popup`) or when Alt is pressed with it open (`ModifiersChanged`);
+  `Popup::access` is part of the overlay signature. Menus are opened by the pointer in this app
+  (there is no key that opens the main menu), so in practice Alt reveals them. Shot
+  `menu-main-keys` (`--menu main-keys`).
+- **Vue and Svelte highlighting.** Free with the shared rev;
+  `export::tests::vue_and_svelte_code_blocks_are_highlighted` checks that a `vue` and a `svelte`
+  block get several colours.
+- **Blur on KDE Plasma (Wayland)** (this branch, `App::sync_frost`, non-Windows paths only): off
+  Windows the backdrop system is `mdshared_ui::frost::BlurSystem(&window)`; after each sync the
+  surface is told `set_premultiplied_alpha(frost.wants_alpha() || shadow.wants_alpha())` (the
+  patched softbuffer the manifest already pins). The frame copy already applied `frost::key_out`
+  to marked pixels and writes alpha 255 elsewhere on every platform, so it needed no change.
+  **This has never been run or seen on Linux. It was only compiled, by CI** (see below).
+
+### What was run (Windows PC, release build, 2026-11-15)
+
+- `cargo build --locked --release` with each pin; `cargo fmt --all`;
+  `cargo clippy --locked --release --workspace --all-targets -- -D warnings`;
+  `cargo test --locked --release --workspace` (the `mdview` bin: 206 passed, 1 ignored; every
+  other test binary passed).
+- New tests: the maximize rectangle (`chrome::tests`); access keys (one per item and no two the
+  same in every menu and every combination of the page menu; a letter picks like Enter, in capitals
+  too; Ctrl keeps shortcuts; a disabled item is not picked; the Recent menu is untouched; a
+  submenu item opens its submenu; the underline rules); the Vue and Svelte export test.
+- A real window started from Git Bash with `--no-session` (the copy under `md-wt`, stopped
+  afterwards): the app starts and does not crash; `WM_NCHITTEST` sent to the window answers
+  `HTMAXBUTTON` (9) across the maximize button and `HTCLIENT` (1) elsewhere in the title row and in
+  the top 2 px above the button; posted `WM_NCMOUSEMOVE`, `WM_NCLBUTTONDOWN` and `WM_NCLBUTTONUP` at
+  the button maximized the window, and the same on the maximized window restored it (read with
+  `IsZoomed`). The button answers `HTMAXBUTTON` when maximized too.
+- `--shot menu-main-keys`: looked at; the underline sits just under the marked letter. The other
+  menus were not looked at with underlines.
+- CI (`ci.yml`, Linux and Windows) on `f/adopt-shared`: CI_RESULT_PLACEHOLDER
+
+### What was NOT verified
+
+- That the snap-layouts flyout appears and snaps (needs a real pointer on Windows 11), and how the
+  maximize button's hover and click feel with it; touch and pen. The 8 px band above the button
+  gives no flyout (only the button below it does). The `None` cases (dialog, palette, presentation,
+  full screen) were not tried in a real window.
+- Access keys with a real keyboard in a real window, Alt pressed while a menu is open, and the
+  look of the underlines in the dark theme and in the tab, page and find menus.
+- The blur on KDE Plasma, and the whole non-Windows frosted path: never run or seen on Linux, only
+  compiled (CI on Linux). Whether KWin accepts the request, how the chrome looks keyed out, the
+  focus rule, turning it off. GNOME and others say "not available" and keep the flat colour.
+- What the earlier workers marked not verified: a real selection with the mouse then Copy as
+  Markdown and a paste elsewhere (the clipboard was never written; live and presented tabs; BOM or
+  lone `\r` files); the outline's focus mark in the dark theme and at other scales, and a screen
+  reader; the new caret rule against the old one, and Linux row heights; X11 and macOS occlusion;
+  that `GetClipBox` is empty for a covered window with DWM and the frosted backdrop, and the one
+  second timing; a real watcher waking the find-in-folder card, and a large folder; a real click
+  on a web link from a full-screen slide, the hand cursor, a drag on a tall slide, typing with an
+  IME in the slide list; wiki-link labels with markup in a table cell, an embed with a markup
+  label, pictures found elsewhere in the folder, block ids inside a table cell, quote or footnote;
+  `<br clear>` inside a list item, quote or table cell; a table beside a float inside a list item,
+  quote or `<details>`, with `colspan` or a caption; a ruby base wider than the column; the dotted
+  underline of a wrapped `<abbr>`; a figure beside a float; the idle cost of 1,000 watched folders
+  and Linux inotify limits; export printed in a dark browser, a diagram drawn for the dark scheme,
+  Safari and Firefox; real-world `.vue` and `.svelte` components and the speed of the scanners
+  (only linear-time tests ran); `lang="sass"`, `stylus` and `pug` inside a component (read as CSS
+  or HTML).
+- `tests/shots.sh` was not run in full on this branch; the earlier workers compared the earlier
+  pictures byte for byte before and after their changes. `menu-page` has one more row than before
+  on purpose.
+- The installer (`packaging/windows/mdview.iss`) was not run; it already registers `.md`,
+  `.markdown`, `.mdown` and `.mkd`.
+- Nobody has looked at any of this: the owner approves the interface by looking at it.
+
+### Not built
+
+- `<bdo>`: the text layout has no per-range direction (parley has no bidi override per range, and
+  a control character in the text would move every offset of the document text), so a `<bdo>`
+  keeps its text as written.
+- Heights and `<col width>` in the HTML export (the parser does not keep `<col>`); transcluding an
+  embedded note; `.mkdn` and `.mdwn` in the installer (the app would not open them as Markdown).
+- A way to tell a keyboard-opened menu from a mouse-opened one other than Alt: the app has no key
+  that opens a menu. Alt held at opening or pressed afterwards shows the underlines.
+- A timer or z-order check for a covered window on Wayland (winit reports no occlusion there).
+- Decisions taken without the owner: whole top-level blocks for Copy as Markdown; no shortcut for
+  it or for "Focus outline"; G for the slide list; a link on a slide asks nothing; two `<img>` (one
+  hidden by CSS) rather than `<picture>` in the export; both Mica and Acrylic mean the same blur
+  on Linux.
+
 ## Release 0.4.0 (2026-11-15)
 
 The next-release batch, released on the owner's word ("merge everything and make a release")
@@ -1288,10 +1425,10 @@ What is open:
    moves it, then the `rev`s here (`bins/mdv-app`, `crates/core`, `crates/render`) can name
    commits on `main`.
 3. **Linux** was built for 0.3.0 (see "Release 0.3.0"). The owner has not tested it.
-4. Left open by the workers of the seven features: a table never stands beside a float even
-   when it would fit; `[[Note|a *b* c]]` (markup in a label) and `![[embed]]` stay text; a
-   window fully covered by another keeps animating; the main menu, with "Play animated
-   images" added, just fits a window 800 px high (not re-checked).
+4. Left open by the workers of the seven features: the main menu, with "Play animated
+   images" added, just fits a window 800 px high (not re-checked). (A table beside a float,
+   markup in a wiki-link label, `![[embed]]` and the covered window were closed later: see "After
+   0.4.0: gaps closed".)
 5. The no-pixel-change check is now `tests/shots.sh` (55 states, deterministic, pinned to
    scale 1.0 except the shots that ask for another). Before a change to the renderer, the
    shell or the shared pin run it into one folder, after it into another, and `cmp` every
