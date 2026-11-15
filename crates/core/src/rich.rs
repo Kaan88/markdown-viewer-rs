@@ -369,16 +369,23 @@ fn safe_href(url: &str) -> bool {
 /// Appends `s` escaped for HTML text or a double-quoted attribute. In text, a line break (a hard
 /// break in the page) becomes `<br>`.
 fn escape_into(out: &mut String, s: &str, breaks: bool) {
+    escape_html(out, s, if breaks { Some("<br>") } else { None });
+}
+
+/// Appends `s` escaped for HTML text or a quoted attribute: the one escaping every HTML this
+/// app writes goes through (the clipboard fragment here, the exported page in `mdview-render`).
+/// With `line_break`, a newline (a hard break in the page) is written as that markup.
+pub fn escape_html(out: &mut String, s: &str, line_break: Option<&str>) {
     for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            '\n' if breaks => out.push_str("<br>"),
-            '\0' => out.push('\u{FFFD}'),
-            c => out.push(c),
+        match (c, line_break) {
+            ('&', _) => out.push_str("&amp;"),
+            ('<', _) => out.push_str("&lt;"),
+            ('>', _) => out.push_str("&gt;"),
+            ('"', _) => out.push_str("&quot;"),
+            ('\'', _) => out.push_str("&#39;"),
+            ('\n', Some(markup)) => out.push_str(markup),
+            ('\0', _) => out.push('\u{FFFD}'),
+            (c, _) => out.push(c),
         }
     }
 }

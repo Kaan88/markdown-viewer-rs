@@ -2017,28 +2017,37 @@ fn find_in_folder_starts_with_the_find_boxes_text_and_is_in_the_menu_and_the_pal
 // ---- export and print -------------------------------------------------------------------------
 
 #[test]
-fn export_and_print_are_in_the_menu_and_the_palette_and_need_a_document() {
+fn export_and_print_are_in_the_tab_menu_and_the_palette_and_need_a_document() {
     use crate::palette::Target;
-    let a = app(&["showcase.md"]);
-    let items = overlays::main_menu(&a.ws, &a.ui, 0.0, 0.0).items;
+    let a = app(&["showcase.md", "tables.md"]);
+    // Not in the main menu: it has to fit the default window without scrolling.
+    let main = overlays::main_menu(&a.ws, &a.ui, 0.0, 0.0).items;
+    let items = overlays::tab_menu(&a.ws, 0, 0.0, 0.0).items;
     for (id, label) in [
         (C::ExportHtml, "Export as HTML…"),
         (C::Print, "Print (opens in browser)"),
     ] {
+        assert!(!main.iter().any(|i| i.id == Act::Cmd(id)));
         let item = items
             .iter()
-            .find(|i| i.id == Act::Cmd(id))
-            .unwrap_or_else(|| panic!("{id:?} is not in the main menu"));
+            .find(|i| i.id == Act::TabCmd(id, 0))
+            .unwrap_or_else(|| panic!("{id:?} is not in the tab menu"));
         assert_eq!(item.label, label);
         assert!(item.enabled);
         assert!(!overlays::command_icon(id).is_empty());
     }
-    let empty = app(&[]);
-    let items = overlays::main_menu(&empty.ws, &empty.ui, 0.0, 0.0).items;
-    for id in [C::ExportHtml, C::Print] {
-        let item = items.iter().find(|i| i.id == Act::Cmd(id)).unwrap();
-        assert!(!item.enabled, "{id:?} needs a document");
-    }
+    // Chosen for a tab that is not the active one, it is that tab's page: the tab comes forward.
+    let mut b = app(&["showcase.md", "tables.md"]);
+    let other = 1 - b.ws.active().unwrap();
+    b.exporting = true;
+    b.tab_command(C::Print, other);
+    assert_eq!(b.ws.active(), Some(other));
+    assert_eq!(
+        b.ws.status(Instant::now()),
+        Some("Another export is still running")
+    );
+    // Without a document there is nothing to export.
+    assert!(app(&[]).export_job().is_none());
     let mut a = a;
     a.command(C::CommandPalette);
     a.compose();
@@ -2058,6 +2067,9 @@ fn the_exported_page_is_the_active_document_in_the_readers_page_look() {
     let job = a.export_job().expect("a document is open");
     let html = job.page(false);
     assert!(html.starts_with("<!DOCTYPE html>"));
+    // A wiki-link is its words, as on the page, not its brackets.
+    assert!(html.contains("the second page"));
+    assert!(!html.contains("[[linked|"), "a wiki-link is written raw");
     assert!(
         html.contains("<h1 id="),
         "the page has the document's headings"

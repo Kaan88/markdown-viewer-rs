@@ -173,8 +173,6 @@ pub const COMMANDS: &[Command] = &[
     )),
     cmd(C::ManageRecent, Menu::File, "Manage recent files…", &[]),
     cmd(C::ClearRecent, Menu::File, "Clear recent files", &[]),
-    sep(cmd(C::ExportHtml, Menu::File, "Export as HTML…", &[])),
-    cmd(C::Print, Menu::File, "Print (opens in browser)", &[]),
     sep(cmd(
         C::CloseTab,
         Menu::File,
@@ -295,6 +293,10 @@ pub const COMMANDS: &[Command] = &[
         &[K("Escape")],
     ),
     cmd(C::CopyCodeBlock, Menu::None, "Copy code block", &[]),
+    // In no menu bar menu (the File menu's items are pinned by a regression test): the shell's
+    // menu and the command palette offer them.
+    cmd(C::ExportHtml, Menu::None, "Export as HTML…", &[]),
+    cmd(C::Print, Menu::None, "Print (opens in browser)", &[]),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

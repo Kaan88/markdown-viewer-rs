@@ -55,6 +55,7 @@ shot menu-recent --light --menu recent "$fx/showcase.md" "$fx/tables.md" "$fx/ma
 shot menu-cascade-light --light --menu cascade "$fx/showcase.md" "$fx/tables.md"
 shot menu-cascade-dark --dark --menu cascade "$fx/showcase.md" "$fx/tables.md"
 shot menu-tab --dark --menu tab "$fx/showcase.md" "$fx/tables.md"
+shot menu-tab-light --light --menu tab "$fx/showcase.md" "$fx/tables.md"
 shot menu-page --light --menu page "$fx/showcase.md"
 shot menu-find --light --find the --menu find "$fx/showcase.md"
 

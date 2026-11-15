@@ -453,7 +453,14 @@ impl<'a> Writer<'a> {
                 continue;
             }
             let (cs, ce) = (span.start.max(from), span.end.min(to));
-            if cs >= ce || cs < at {
+            // A span with no text of its own is written when it holds a picture: a link around
+            // an image alone.
+            let holds_atom = cs == ce
+                && (ss..se).any(|k| {
+                    let inner = doc.spans[k as usize];
+                    inner.parent == s && matches!(inner.kind, SpanKind::Image(_))
+                });
+            if (cs >= ce && !holds_atom) || cs < at {
                 continue;
             }
             self.text(at, cs);
@@ -780,17 +787,8 @@ fn safe_href(href: &str) -> bool {
 
 /// Appends `text` escaped for HTML; `breaks` turns a newline (a hard break) into `<br>`.
 fn escape_into(out: &mut String, text: &str, breaks: bool) {
-    for c in text.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\n' if breaks => out.push_str("<br>\n"),
-            '\0' => out.push('\u{fffd}'),
-            c => out.push(c),
-        }
-    }
+    // The clipboard writer's escaping (`mdview_core::rich`), so both agree on it.
+    mdview_core::rich::escape_html(out, text, if breaks { Some("<br>\n") } else { None });
 }
 
 /// The source with each run of one colour in a `<span>`.
@@ -1012,6 +1010,7 @@ table{border-collapse:collapse;max-width:100%}
 th,td{border:1px solid var(--border);padding:6px 13px;text-align:left;vertical-align:top}
 th{background:var(--head-bg);font-weight:600}
 summary{cursor:pointer;font-weight:600}
+summary>div,summary>p{display:inline}
 figure{margin-left:0;margin-right:0}
 figcaption{font-size:.875em;color:var(--muted)}
 .dt{font-weight:600;margin-bottom:2px}
@@ -1335,5 +1334,33 @@ mod tests {
         let html = export("");
         assert!(html.contains("<title>Document</title>"));
         assert!(body(&html).trim().is_empty());
+    }
+
+    #[test]
+    fn a_link_around_a_picture_alone_keeps_both() {
+        let dir = scratch("linked-image");
+        std::fs::write(dir.join("p.png"), PIXEL).unwrap();
+        let html = export_with(
+            "<p align=\"center\"><b>Head</b><br><a href=\"https://example.com\"><img src=\"p.png\" alt=\"badge\" width=\"18\"></a></p>\n\n[![alt](p.png)](https://example.org)\n",
+            Some(&dir),
+            false,
+        );
+        let b = body(&html);
+        assert!(
+            b.contains("<a href=\"https://example.com\"><img src=\"data:image/png;base64,"),
+            "{b}"
+        );
+        assert!(
+            b.contains("<a href=\"https://example.org\"><img src=\"data:image/png;base64,"),
+            "{b}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_summary_stays_on_the_line_of_its_marker() {
+        let html = export("<details>\n<summary>More</summary>\n\nBody.\n\n</details>\n");
+        assert!(html.contains("summary>div,summary>p{display:inline}"));
+        assert!(body(&html).contains("<summary>"));
     }
 }

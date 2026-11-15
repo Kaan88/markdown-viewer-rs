@@ -79,8 +79,6 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
             .sep()
             .enabled(has_tab),
         cmd(C::EditInMdedit, "Edit in mdedit", glyph::EDIT).enabled(can_edit),
-        cmd(C::ExportHtml, "Export as HTML…", glyph::DOWNLOAD).enabled(has_tab),
-        cmd(C::Print, "Print (opens in browser)", glyph::OPEN_WITH).enabled(has_tab),
         cmd(C::CloseTab, "Close tab", glyph::CLOSE).enabled(has_tab),
         cmd(C::CloseAllTabs, "Close all tabs", glyph::CLOSE_ALL).enabled(has_tab),
         cmd(C::ZoomIn, "Zoom in", glyph::ZOOM).sep(),
@@ -149,6 +147,8 @@ pub fn recent_menu(ws: &Workspace, x: f32, y: f32, align_right: bool) -> Menu<Ac
 
 pub fn tab_menu(ws: &Workspace, index: usize, x: f32, y: f32) -> Menu<Act> {
     let many = ws.tab_count() > 1;
+    // A file that could not be read has no page to export.
+    let exportable = ws.tab(index).is_some_and(|t| !t.is_missing());
     let items = vec![
         Item::new(Act::TabCmd(C::CloseTab, index), "Close tab").icon(glyph::CLOSE),
         Item::new(Act::TabCmd(C::CloseOtherTabs, index), "Close other tabs")
@@ -165,6 +165,21 @@ pub fn tab_menu(ws: &Workspace, index: usize, x: f32, y: f32) -> Menu<Act> {
             mdview_core::commands::command(C::ShowInFileManager).label,
         )
         .icon(glyph::FOLDER_OPEN),
+        // Here and in the command palette, not in the main menu: with two more rows that menu
+        // would no longer fit the default window without scrolling.
+        Item::new(
+            Act::TabCmd(C::ExportHtml, index),
+            mdview_core::commands::command(C::ExportHtml).label,
+        )
+        .icon(glyph::DOWNLOAD)
+        .enabled(exportable)
+        .sep(),
+        Item::new(
+            Act::TabCmd(C::Print, index),
+            mdview_core::commands::command(C::Print).label,
+        )
+        .icon(glyph::OPEN_WITH)
+        .enabled(exportable),
     ];
     Menu::new(items, x, y, false)
 }

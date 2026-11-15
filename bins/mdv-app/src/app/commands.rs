@@ -262,6 +262,13 @@ impl App {
                     self.ws.set_status(&message);
                 }
             }
+            // The page of that tab: it becomes the active one, as a click on it would make it.
+            C::ExportHtml | C::Print => {
+                self.ws.activate(index);
+                if self.ws.active() == Some(index) {
+                    self.command(id);
+                }
+            }
             other => self.command(other),
         }
     }

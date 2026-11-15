@@ -1673,3 +1673,45 @@ desktop, so no feature below has been seen live, and no budget was measured.
 - NOT verified: a real window (streaming on screen, typing while a search runs), a huge folder,
   Linux. Left out: results updating while files change; the exact match inside a long paragraph
   (the first of the paragraph is taken); the editor adopting `foldersearch`.
+
+### Export as HTML and Print (`f/export-print`; shared `f/export-print`)
+
+- Commands `ExportHtml` ("Export as HTML…") and `Print` ("Print (opens in browser)"), enabled with
+  a document open; icons DOWNLOAD and OPEN_WITH.
+- Export: the Save dialog (`pick_save_async`, helper thread) suggests `<name>.html` beside the
+  document; `.html` is added when missing. The page is made on that thread; the status says
+  "Exporting…", then "Exported to <file>" or "Could not save the HTML file". One at a time.
+- Print: writes `<temp>/mdview-print/<name>-<ms>.html` (files older than a day are removed at the
+  next print) and opens it with `platform::open_file` (shared; html/htm only, ShellExecute or
+  xdg-open). The page opens every `<details>` and calls `window.print()` after load.
+- The page (`crates/render/src/export.rs`, `export_html`, from the document model): always the
+  light theme with the reader's page font, code font and page width (Narrow 700, Wide 1000, Full
+  no limit). Local images are embedded as data URIs (png, jpeg, gif, webp, svg) up to 4 MiB each
+  and 24 MiB in all, larger ones link by `file://`; remote images are linked only when the reader
+  loaded them, else their alt text; nothing is downloaded. Formulas and diagrams are drawn by the
+  engine at 2x and embedded as PNG with the source as alt text; without the engine the source
+  stays in a labelled code box. Links keep only http, https, mailto and relative addresses;
+  wiki-links are their words. Headings and anchors keep ids; footnotes are listed at the end. A
+  print style sheet: white page, no break inside code, tables or images, addresses after links.
+- Changed after the merge (the branch was an unbuilt WIP that compiled):
+  - Two regression tests failed: the commands were in `Menu::File`, whose items are pinned. They
+    are `Menu::None` now, at the end of the table.
+  - With two more rows the "⋯" menu no longer fitted the default 800 px window (it covered the
+    toolbar and scrolled). **Export and Print are therefore in the tab's context menu** (after
+    "Show in file manager"; they act on that tab, which comes forward) **and the command palette,
+    not in the main menu.**
+  - A link around a picture alone (a badge: `<a><img></a>`, `[![alt](p.png)](url)`) was dropped
+    from the page; it is written now. A `<summary>` stood on the line under its marker; fixed in
+    the style sheet. Both seen by rendering the exported fixtures in headless Edge.
+  - The escaping is shared with the copy-as-rich-text writer (`mdview_core::rich::escape_html`).
+    The two writers themselves stay apart: one writes a fragment clipped to a selection with no
+    resources for the clipboard, the other a whole page with ids, pictures, code colours and a
+    style sheet. Unifying them is possible later and was judged not worth the risk now.
+- Decisions: light theme only; no setting; no key (Ctrl+P is the palette); print through the
+  browser, no native printing or PDF.
+- Shots: `palette-export-light`, `palette-print-dark`, `menu-tab-light`; `menu-tab` changed (two
+  more rows). No shot shows the status messages.
+- Seen: the exported `showcase`, `math` and `tables` fixtures rendered in headless Edge on this PC
+  (formulas as pictures, code colours, tables, the float, the badge link, details).
+- NOT verified: the Save dialog and its thread, ShellExecute opening a real browser, a real print
+  dialog, Linux. Left out: table widths and centring from HTML attributes, dark export, PDF.

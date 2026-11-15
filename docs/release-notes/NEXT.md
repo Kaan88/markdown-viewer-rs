@@ -18,3 +18,5 @@ NEXT
   shows a small card with its text; a setting turns it off.
 - Find in folder searches the Markdown files of the open folder and opens a result at its match
   (menu "Find in folder..." and the command palette).
+- Export as HTML saves a document as one self-contained page; Print opens a printable copy in
+  your browser (right-click a tab, or the command palette).

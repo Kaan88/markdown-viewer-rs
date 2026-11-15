@@ -48,6 +48,11 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
   highlighted as the find in the page does. It runs on a background thread, results stream in,
   and Escape or a new query cancels it. It is in the "⋯" menu and the command palette
   (`>find in folder`); it has no key yet.
+- **Export as HTML** saves the open document as one self-contained `.html` file (the page's
+  light look, your page font and width, code colours, tables, task boxes, footnotes, formulas and
+  diagrams as pictures, local images embedded). **Print (opens in browser)** opens a printable
+  copy in the default browser, which shows its own print dialog. Both are in a tab's context menu
+  and the command palette (`>export`, `>print`).
 - **Command palette (Ctrl+P):** open tabs, recent files, the open folder's Markdown files,
   commands (`>`) and headings (`#`).
 - **Settings (Ctrl+,):** page width, text size, theme, a page font and a code font (any installed
