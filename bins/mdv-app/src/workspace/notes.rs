@@ -170,6 +170,45 @@ impl Workspace {
         }
     }
 
+    /// The folders whose listing the watcher should follow for the notes' sake, so that a file or
+    /// a folder created, removed or renamed in one wakes the window: the open folder and every
+    /// folder below it that holds an indexed note, and the folder of each open file (a note made
+    /// beside the document is looked for there). Following files alone is not enough: a new
+    /// entry is not a file the watcher knows, so only a followed listing hears of it. At most
+    /// `max` folders below the open one, else none of those: the wakes then come only from
+    /// the open files and the Files tree. Memory only, in path order.
+    pub fn note_folders(&self, max: usize) -> Vec<PathBuf> {
+        let mut folders = std::collections::BTreeSet::new();
+        for path in self.watched_paths() {
+            folders.extend(path.parent().map(Path::to_path_buf));
+        }
+        if let (Some(root), Some(index)) = (self.session.folder.as_deref(), &self.notes.index)
+            && Some(root) == Some(index.root())
+        {
+            let mut below = std::collections::BTreeSet::new();
+            for note in index.notes() {
+                let mut dir = note.path.parent();
+                while let Some(d) = dir
+                    && d != root
+                    && d.starts_with(root)
+                    && below.insert(d.to_path_buf())
+                {
+                    dir = d.parent();
+                }
+                if below.len() > max {
+                    below.clear();
+                    break;
+                }
+            }
+            folders.extend(below);
+            folders.insert(root.to_path_buf());
+        } else if let Some(root) = self.session.folder.as_deref() {
+            // Before the index is ready the folder itself is already followed.
+            folders.insert(root.to_path_buf());
+        }
+        folders.into_iter().collect()
+    }
+
     /// The Markdown files of the open folder as the note index lists them (paths and the path
     /// below the folder, `/` between parts), at most `max`, in path order. The index is built on
     /// its own thread, so this reads memory only; it is empty until the index is ready, and with
@@ -1150,5 +1189,72 @@ A ref link [x] and [[x]].
         ws.open(&b).unwrap();
         show(&mut ws);
         assert!(wiki_links(&ws).is_empty());
+    }
+
+    /// The watcher as the window sets it: the open files and notes, and the note folders.
+    fn watcher_for(
+        ws: &Workspace,
+    ) -> (
+        mdview_core::watch::FileWatcher,
+        std::sync::mpsc::Receiver<()>,
+    ) {
+        let (send, woken) = std::sync::mpsc::channel();
+        let mut watcher =
+            mdview_core::watch::FileWatcher::new(move || _ = send.send(())).expect("a watcher");
+        watcher.set_files(ws.watched_paths().chain(ws.note_files(100)));
+        watcher.set_folders(ws.note_folders(100).iter().map(PathBuf::as_path));
+        (watcher, woken)
+    }
+
+    #[test]
+    fn a_new_folder_below_the_open_one_wakes_the_watcher_even_with_the_pane_closed() {
+        let dir = temp_dir("watch-folder");
+        let a = write(&dir, "A.md", "[[B]]\n");
+        write(&dir, "sub/deep/C.md", "# C\n");
+        let mut ws = Workspace::new(None);
+        ws.set_folder(Some(dir.clone()));
+        ws.index_notes_now();
+        ws.open(&a).unwrap();
+        let folders = ws.note_folders(100);
+        assert_eq!(
+            folders,
+            [dir.clone(), dir.join("sub"), dir.join("sub").join("deep")]
+        );
+        // Too many folders below the root: only the root and the open files' folders.
+        assert_eq!(ws.note_folders(1), [dir.clone()]);
+
+        let (mut watcher, woken) = watcher_for(&ws);
+        std::fs::create_dir(dir.join("fresh")).unwrap();
+        woken
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the new folder wakes");
+        watcher.woken();
+        // A note made in a folder that holds notes wakes as well, and once the index has it
+        // the new folder is followed too.
+        write(&dir, "fresh/D.md", "# D\n");
+        ws.index_notes_now();
+        assert!(ws.note_folders(100).contains(&dir.join("fresh")));
+        write(&dir, "sub/E.md", "# E\n");
+        woken
+            .recv_timeout(Duration::from_secs(10))
+            .expect("a note in a folder below the root wakes");
+    }
+
+    #[test]
+    fn a_note_made_beside_a_document_wakes_the_watcher_with_no_folder_open() {
+        let dir = temp_dir("watch-beside");
+        let a = write(&dir, "A.md", "[[Later]]\n");
+        let mut ws = Workspace::new(None);
+        ws.open(&a).unwrap();
+        assert_eq!(ws.note_folders(100), [dir.clone()]);
+        let (_watcher, woken) = watcher_for(&ws);
+        write(&dir, "Later.md", "# Later\n");
+        woken
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the new note wakes");
+        // What the window does then: it asks again, and the text becomes a link.
+        ws.notes_changed();
+        show(&mut ws);
+        assert_eq!(wiki_links(&ws), [("Later".to_string(), false)]);
     }
 }
