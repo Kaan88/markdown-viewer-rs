@@ -10,6 +10,7 @@
 use super::*;
 use crate::palette::{PaletteState, Target};
 use crate::settings as setting;
+use mdshared_ui::corners::Corners;
 use mdshared_ui::palette::Outcome as Pick;
 use mdshared_ui::settings::{Outcome as Form, Value};
 use mdview_core::session::{PageWidth, clamp_zoom};
@@ -42,7 +43,7 @@ impl App {
         self.ui.find_focused = false;
         self.ui.dialog = None;
         self.ui.palette = None;
-        self.ui.settings = Some(setting::form(&self.ws));
+        self.ui.settings = Some(setting::form(&self.ws, self.corners_offered()));
         self.modal_changed();
     }
 
@@ -226,6 +227,32 @@ impl App {
         }
     }
 
+    /// Whether the window can be rounded here, so the setting is offered: Windows (11 rounds it,
+    /// 10 ignores the call), or a Linux window with a shadow route (Wayland; X11 has none unless
+    /// forced and its window is opaque). A shot has no window and shows the row.
+    pub(super) fn corners_offered(&self) -> bool {
+        cfg!(windows) || self.shadow.is_some() || self.args.shot.is_some()
+    }
+
+    /// Takes a new corner setting and keeps it: Windows is told its preference; with the
+    /// client-drawn margin the whole window is drawn again (KDE chooses its route from the setting
+    /// at the next start).
+    pub(super) fn set_corners(&mut self, c: Corners) {
+        if Corners::from_setting(self.ws.corners()) == c {
+            return;
+        }
+        self.ws.set_corners(c.to_setting());
+        #[cfg(windows)]
+        if let Some(w) = &self.window {
+            style(w, self.pal.dark, c);
+        }
+        if self.shadow.as_mut().is_some_and(|s| s.set_corners(c)) {
+            self.full = true;
+            self.expose = true;
+            self.redraw();
+        }
+    }
+
     /// Applies one change with the setter the menus used, which also saves it.
     pub(super) fn apply_setting(&mut self, id: u32, value: Value) {
         match (id, value) {
@@ -239,6 +266,9 @@ impl App {
             }
             (setting::THEME, Value::Choice(i)) => {
                 self.ws.set_theme_choice(setting::theme_of(i));
+            }
+            (setting::WINDOW_CORNERS, Value::Choice(i)) => {
+                self.set_corners(Corners::from_index(i));
             }
             (setting::PAGE_FONT, Value::Text(family)) => _ = self.ws.set_font(false, &family),
             (setting::CODE_FONT, Value::Text(family)) => _ = self.ws.set_font(true, &family),

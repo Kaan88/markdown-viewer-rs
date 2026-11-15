@@ -1306,6 +1306,20 @@ impl Workspace {
         self.persist();
     }
 
+    /// The window's corner radius, logical px (0, 4 or 8).
+    pub fn corners(&self) -> u8 {
+        self.session.corners
+    }
+
+    pub fn set_corners(&mut self, radius: u8) {
+        let radius = mdview_core::session::clean_corners(radius);
+        if self.session.corners == radius {
+            return;
+        }
+        self.session.corners = radius;
+        self.persist();
+    }
+
     /// Records whether the system shows animations; when it does not, images stay still.
     pub fn set_system_animations(&mut self, on: bool) {
         if self.system_animations != on {

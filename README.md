@@ -30,6 +30,9 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
   commands (`>`) and headings (`#`).
 - **Settings (Ctrl+,):** page width, text size, theme, a page font and a code font (any installed
   family), remote images, ticking task boxes, animations, and updates.
+- **Window:** rounded corners (Settings > Window corners: Square, Small or Round; Round, 8 px at
+  100 %, is the default). Windows 11 draws them itself; on Wayland the window draws its own shape
+  and shadow; where the window is opaque (X11, KDE with a square setting) it stays square.
 - **With mdedit:** Edit in mdedit (Ctrl+E) opens the file in the editor at the line you are
   reading, and when mdedit previews a file here it shows the editor's unsaved text as you type
   (live preview, up to 2 MiB) and returns to the saved file when the editor closes.
