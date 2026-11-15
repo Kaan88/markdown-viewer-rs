@@ -136,6 +136,12 @@ struct App {
     ws: Workspace,
     ui: Ui,
     window: Option<Rc<Window>>,
+    /// Where the window was before the editor's "Preview side by side" placed it, while it is
+    /// still there.
+    tiling: mdshared_ui::place::Tiling,
+    /// What the window was placed for: the file, or the editor's name for a document that has
+    /// no file. When no tab shows it any more the arrangement is over.
+    placed_for: Option<(std::path::PathBuf, Option<String>)>,
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
     proxy: Option<EventLoopProxy<Wake>>,
     /// A file or folder dialog is open (off Windows, where it runs beside the window); a second
@@ -229,6 +235,8 @@ impl App {
             ws,
             ui: Ui::new(),
             window: None,
+            tiling: Default::default(),
+            placed_for: None,
             surface: None,
             proxy: None,
             #[cfg(not(windows))]
@@ -358,7 +366,9 @@ impl App {
         if event_loop.exiting() {
             return;
         }
-        self.save_size();
+        if !self.leave_side_by_side() {
+            self.save_size();
+        }
         if let Err(e) = self.ws.save_session() {
             eprintln!("mdview: could not save the session: {e}");
         }
@@ -1341,7 +1351,8 @@ impl ApplicationHandler<Wake> for App {
             self.redraw();
         }
         if let Some(rect) = self.args.place {
-            self.place(rect);
+            let file = self.args.files.first().cloned().unwrap_or_default();
+            self.place(rect, (file, None));
         }
     }
 
@@ -1516,6 +1527,14 @@ impl ApplicationHandler<Wake> for App {
             );
         }
         self.watch_tree();
+        // The tab the window was placed for is closed: the side-by-side arrangement is over.
+        if self.tiling.is_some()
+            && let Some((path, doc)) = &self.placed_for
+            && !(path.as_os_str().is_empty() && doc.is_none())
+            && !self.ws.shows(path, doc.as_deref())
+        {
+            self.end_side_by_side(true);
+        }
         let refining = self.refine_slice();
         let next = self.timers(Instant::now());
         if refining {

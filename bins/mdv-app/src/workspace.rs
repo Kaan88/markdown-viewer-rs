@@ -1569,6 +1569,17 @@ impl Workspace {
         (self.tabs.iter()).position(|t| t.untitled.as_deref() == Some(doc))
     }
 
+    /// Whether a tab shows the file `path`, or (`doc`) the editor's document of that name.
+    pub fn shows(&self, path: &Path, doc: Option<&str>) -> bool {
+        match doc {
+            Some(doc) if path.as_os_str().is_empty() => self.untitled_tab(doc).is_some(),
+            _ => {
+                let path = canonical_or_absolute(path);
+                (self.tabs.iter()).any(|t| t.untitled.is_none() && same_file(&t.path, &path))
+            }
+        }
+    }
+
     /// Whether any tab shows the editor's text.
     pub fn any_live(&self) -> bool {
         self.tabs.iter().any(|t| t.live)

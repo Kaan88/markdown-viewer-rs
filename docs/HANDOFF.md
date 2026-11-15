@@ -1104,6 +1104,48 @@ message row such as "Go to line 25"; icons for the editor's line commands; the r
 hands folders to request receivers, which the viewer's own `mdview_core::single` is not). Shots
 compared with a baseline made before the change: see the commit message.
 
+## Windows return when a side-by-side preview ends (2026-11-15, branch `f/window-return`, not merged)
+
+Owner request of 2026-11-15, item 1 of "After 0.4.0 and 0.6.0" in `docs/PLAN.md`. The owner's two
+answers: a viewer the preview started is only moved back, not closed; and the windows also go
+back when the side-by-side arrangement is given up while the preview goes on. Built on the
+branch `f/window-return` in the three repositories; the pins name the shared branch's head
+(`6249cd1`). **Not merged, not released; the owner has not looked at it.**
+
+- **Shared** (`mdshared_ui::place::Tiling`, `Request::unplace`; `docs/SISTER.md` in the shared
+  repository, "Going back"). A window remembers its outer rectangle, inner size and whether it
+  was maximised at the moment it is placed; `restore` puts it back unless it is no longer within
+  4 px of where it was put (the user moved, resized or maximised it: it is theirs). `?unplace`
+  is the request that asks the other application to go back; the receiver (`single::serve`)
+  hands it over although it names no file. A build that predates it drops it and does not raise
+  its window.
+- **mdview** (`App::tiling`, `App::placed_for`; `place`, `end_side_by_side`,
+  `leave_side_by_side` in `app/commands.rs`). The window goes back when: the editor says so
+  (`?unplace`: its preview ended, it gave the arrangement up, or it exits); the editor is found
+  gone (`Wake::Sister(false)`, now also asked while the window is placed, not only while a tab
+  is live); the tab the window was placed for is closed here, and then the editor is told. An
+  exit while placed saves the place the window had before, not the half, and tells the editor.
+- **mdedit**: its handoff, "Windows return when a side-by-side preview ends".
+- **Run on the Windows PC**: `cargo fmt`, clippy `-D warnings`, `cargo test --release
+  --workspace` (548 pass). Real windows by script, both release builds with scratch settings
+  (each application's settings file in a folder of its own: the instance port file lies beside
+  it, and two applications sharing a folder take each other's port): the editor closed while
+  side by side, viewer back at its pixels 1 ms later and both settings files with the places
+  from before; the viewer closed, editor back at its pixels; the viewer moved by hand first,
+  then the editor closed, viewer left where it was put; a viewer that was maximised before,
+  maximised again.
+- **Not run**: closing the previewed tab in the viewer, the editor's "Preview side by side"
+  chosen a second time (gives the arrangement up), stopping the preview from the editor's menu,
+  closing the previewed document in the editor. They use the code paths that were run, but were
+  not driven in a window (no script can choose a menu item). Linux: nothing; on Wayland a
+  window is not told its position, so nothing is remembered and nothing goes back (KDE's
+  placing still works one way).
+- **Known limits**: a window that was maximised goes back to maximised, but its size under the
+  maximise is now the half it was placed at. A window that crashes while placed starts next time
+  at the half. The 4 px test means a window the desktop refused to place exactly (a minimum
+  size larger than half the screen) counts as moved and is not put back.
+
+
 ## Release 0.4.0 (2026-11-15)
 
 The next-release batch, released on the owner's word ("merge everything and make a release")

@@ -2548,3 +2548,27 @@ fn the_tab_menu_of_an_unsaved_document_asks_the_editor_by_name() {
     unsafe { std::env::remove_var("MD_SISTER_MDEDIT_SETTINGS") };
     _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_editor_giving_up_side_by_side_opens_and_changes_nothing() {
+    let mut a = app(&["showcase.md"]);
+    let tabs = a.ws.tab_count();
+    // What the editor sends: a live update with no file and no line.
+    let message = super::commands::unplace_request().encode("mdview");
+    let lines = message.lines().skip(1).take_while(|l| !l.is_empty());
+    let requests = Request::parse(lines);
+    assert!(requests.len() == 1 && requests[0].unplace && requests[0].follow);
+    a.placed_for = Some((std::path::PathBuf::from("x.md"), None));
+    a.handed_over(requests);
+    assert_eq!(a.ws.tab_count(), tabs, "nothing was opened or closed");
+    assert!(a.placed_for.is_none(), "the arrangement is over");
+}
+
+#[test]
+fn a_tab_is_found_by_its_file_or_by_the_editors_name_for_it() {
+    let a = app(&["showcase.md"]);
+    let showcase = fixture("showcase.md");
+    assert!(a.ws.shows(&showcase, None));
+    assert!(!a.ws.shows(std::path::Path::new("no-such.md"), None));
+    assert!(!a.ws.shows(std::path::Path::new(""), Some("mdedit-1-2")));
+}

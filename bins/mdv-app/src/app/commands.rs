@@ -662,6 +662,12 @@ impl App {
     pub(super) fn handed_over(&mut self, requests: Vec<Request>) {
         let mut follow: Option<&Request> = None;
         for request in &requests {
+            if request.unplace {
+                // The editor gave up the side-by-side arrangement, or its preview ended: the
+                // window goes back to where it was. The editor is not told; it knows.
+                self.end_side_by_side(false);
+                continue;
+            }
             if let Some(doc) = request.doc.as_deref() {
                 // A document mdedit has not saved: by its name, not by a path. Saved, it
                 // comes with its file, and is then followed like any file.
@@ -670,6 +676,12 @@ impl App {
                     continue;
                 }
                 self.ws.document_saved(doc, &request.path);
+                // The window placed for the document stays placed for its file.
+                if let Some((path, named)) = &mut self.placed_for
+                    && named.as_deref() == Some(doc)
+                {
+                    (*path, *named) = (request.path.clone(), None);
+                }
             }
             if request.live_off {
                 self.ws.live_off(&request.path);
@@ -689,8 +701,10 @@ impl App {
         {
             self.ws.follow(&request.path, at);
         }
-        if let Some(rect) = requests.iter().rev().find_map(|r| r.place) {
-            self.place(rect);
+        if let Some(request) = requests.iter().rev().find(|r| r.place.is_some())
+            && let Some(rect) = request.place
+        {
+            self.place(rect, (request.path.clone(), request.doc.clone()));
         }
         let only_following = !requests.is_empty() && requests.iter().all(|r| r.follow);
         if !only_following && let Some(w) = &self.window {
@@ -712,13 +726,68 @@ impl App {
     }
 
     /// Moves and resizes the window to `rect` (physical screen px), or says it cannot be done.
-    pub(super) fn place(&mut self, rect: mdshared_app::sister::Rect) {
-        if let Some(w) = &self.window
-            && !mdshared_ui::place::set(w, rect)
-        {
+    /// Where it was is remembered, to go back to when the tab it was placed `for_tab` closes or
+    /// the editor says the arrangement is over.
+    pub(super) fn place(
+        &mut self,
+        rect: mdshared_app::sister::Rect,
+        for_tab: (std::path::PathBuf, Option<String>),
+    ) {
+        let Some(w) = self.window.clone() else {
+            return;
+        };
+        if self.tiling.set(&w, rect) {
+            self.placed_for = Some(for_tab);
+        } else {
             self.ws
                 .set_status("This desktop does not let a window be placed");
         }
+    }
+
+    /// The side-by-side arrangement is over: the window goes back to where it was before,
+    /// unless the user has moved it since. `tell` the editor to do the same with its own when
+    /// the ending is this window's doing; that goes off this thread, as a send waits for the
+    /// answer.
+    pub(super) fn end_side_by_side(&mut self, tell: bool) {
+        self.placed_for = None;
+        if !self.tiling.is_some() {
+            return;
+        }
+        if let Some(w) = self.window.clone() {
+            self.tiling.restore(&w);
+        } else {
+            self.tiling.forget();
+        }
+        if tell {
+            std::thread::spawn(|| {
+                mdshared_app::sister::send("mdedit", &unplace_request());
+            });
+        }
+    }
+
+    /// The exit while the windows are side by side: the place the window had before is the one
+    /// the next start gets, and the editor is told to go back to its own. True when that was
+    /// so: the size is saved then, and [`save_size`](Self::save_size) would save the half.
+    pub(super) fn leave_side_by_side(&mut self) -> bool {
+        let Some(w) = self.window.clone() else {
+            return false;
+        };
+        let Some(before) = self.tiling.before(&w) else {
+            return false;
+        };
+        self.tiling.forget();
+        let (cw, ch) = self.content_size(before.inner.0, before.inner.1);
+        let size = winit::dpi::PhysicalSize::new(cw, ch).to_logical::<f64>(w.scale_factor());
+        if !before.maximized {
+            (self.ws).set_window_position(before.outer.x, before.outer.y);
+        }
+        self.ws.set_window_size(
+            size.width.round() as u32,
+            size.height.round() as u32,
+            before.maximized,
+        );
+        mdshared_app::sister::send("mdedit", &unplace_request());
+        true
     }
 
     // ---- wakes and timers ----------------------------------------------------------------------
@@ -744,6 +813,8 @@ impl App {
                 self.sister_asking = false;
                 if !alive {
                     self.ws.live_end_all();
+                    // Nobody to tell: the editor is gone.
+                    self.end_side_by_side(false);
                 }
             }
             Wake::Preview => {
@@ -1014,8 +1085,9 @@ impl App {
                 at(due.max(now));
             }
         }
-        // The editor may die without a word: while a tab shows its text, ask now and then.
-        if self.ws.any_live() {
+        // The editor may die without a word: while a tab shows its text, or the window is where
+        // its preview put it, ask now and then.
+        if self.ws.any_live() || self.tiling.is_some() {
             let due = *self.sister_due.get_or_insert(now + SISTER_CHECK);
             if now >= due {
                 self.ask_sister();
@@ -1171,4 +1243,13 @@ fn spawn_updater(work: impl FnOnce() + Send + 'static) {
     let _ = std::thread::Builder::new()
         .name("mdview-update".into())
         .spawn(work);
+}
+
+/// The request that asks the editor to put its window back where it was.
+pub(super) fn unplace_request() -> Request {
+    Request {
+        unplace: true,
+        from: Some("mdview".into()),
+        ..Request::default()
+    }
 }
