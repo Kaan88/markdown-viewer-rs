@@ -85,6 +85,8 @@ pub enum Wake {
     Images,
     /// The note index (wiki-links, backlinks) was built or refreshed.
     Notes,
+    /// Find in folder has results waiting.
+    FolderSearch,
     /// The animation thread has a frame ready.
     Animation,
     /// A helper thread has read a file for a hover card.
@@ -1482,6 +1484,19 @@ fn shot(mut app: App, path: &Path) -> i32 {
     }
     if let Some(query) = app.args.palette.clone() {
         app.open_palette(&query);
+    }
+    if let Some(query) = app.args.folder_search.clone() {
+        app.open_folder_search();
+        if let Some(p) = app.ui.palette.as_mut() {
+            p.palette.set_query(&query);
+            p.sync(&app.ws);
+            // A shot has no event loop to hand the results over: wait for the search to end.
+            while p.folder_running() {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                p.poll_folder();
+            }
+            p.poll_folder();
+        }
     }
     if app.ui.dialog.is_some() || app.ui.popup.is_some() || app.ui.modal() {
         app.compose();

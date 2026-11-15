@@ -15,6 +15,8 @@ pub enum CommandId {
     FindNext,
     FindPrevious,
     ClearSearch,
+    /// Search the Markdown files of the open folder; the results are in the palette's card.
+    FindInFolder,
     Theme,
     ThemeSystem,
     ThemeLight,
@@ -269,6 +271,8 @@ pub const COMMANDS: &[Command] = &[
         "Make mdview the default for Markdown files",
         &[],
     ),
+    // No default key: Ctrl+Shift+F is Focus reading mode's. Reached from the menu and the palette.
+    cmd(C::FindInFolder, Menu::None, "Find in folder…", &[]),
     cmd(C::NextTab, Menu::None, "Next tab", &[K("Ctrl+Tab")]),
     cmd(
         C::PreviousTab,

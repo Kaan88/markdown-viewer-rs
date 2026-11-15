@@ -1812,3 +1812,204 @@ fn previews_can_be_turned_off_in_settings() {
     rest(&mut a, mark);
     assert!(a.ui.card.is_some());
 }
+
+// ---- find in folder ----------------------------------------------------------------------------
+
+/// A folder of its own with a few Markdown files and a note that is not one, removed when dropped.
+struct Folder(PathBuf);
+
+impl Folder {
+    fn new(name: &str) -> Folder {
+        let dir = std::env::temp_dir().join(format!("mdview-fs-{name}-{}", std::process::id()));
+        _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("a.md"), "# Alpha\n\nplain\n\nthe Needle here\n").unwrap();
+        std::fs::write(dir.join("sub/b.md"), "# Beta\n\nneedle one\n\nneedle two\n").unwrap();
+        std::fs::write(dir.join("notes.txt"), "needle in a text file\n").unwrap();
+        Folder(mdview_core::files::canonical_or_absolute(&dir))
+    }
+}
+
+impl Drop for Folder {
+    fn drop(&mut self) {
+        _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Waits for the search of the open Find in folder to end, taking what it finds as the window does.
+fn settle(a: &mut App) {
+    let p = a.ui.palette.as_mut().expect("Find in folder is open");
+    for _ in 0..4000 {
+        p.poll_folder();
+        if !p.folder_running() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("the search did not end");
+}
+
+/// The rows listed: `(id, label)`.
+fn rows(a: &App) -> Vec<(u32, String)> {
+    let p = &a.ui.palette.as_ref().unwrap().palette;
+    let ids = p.listed_ids();
+    ids.into_iter()
+        .map(|id| (id, p.label_of(id).unwrap_or_default().to_string()))
+        .collect()
+}
+
+fn folder_app(f: &Folder) -> App {
+    let mut a = app(&["linked.md"]);
+    a.set_folder(f.0.clone());
+    a.compose();
+    a
+}
+
+#[test]
+fn find_in_folder_without_a_folder_says_so_and_opens_nothing() {
+    let mut a = app(&["linked.md"]);
+    a.command(C::FindInFolder);
+    assert!(a.ui.palette.is_none());
+    assert_eq!(
+        a.ws.status(Instant::now()),
+        Some("Open a folder to search it")
+    );
+}
+
+#[test]
+fn find_in_folder_lists_lines_by_file_and_enter_opens_the_page_at_the_match() {
+    let f = Folder::new("open");
+    let mut a = folder_app(&f);
+    a.command(C::FindInFolder);
+    a.compose();
+    assert!(a.ui.modal());
+    type_text(&mut a, "needle");
+    settle(&mut a);
+    a.compose();
+    let labels: Vec<String> = rows(&a).into_iter().map(|r| r.1).collect();
+    // Folders first, as the Files pane lists them; only the Markdown files; the matching lines.
+    assert_eq!(
+        labels,
+        [
+            "sub/b.md",
+            "needle one",
+            "needle two",
+            "a.md",
+            "the Needle here"
+        ]
+    );
+    let p = a.ui.palette.as_ref().unwrap();
+    // The first row that can be chosen is selected, not a file's name.
+    assert_eq!(p.palette.selected_id(), Some(1));
+    assert_eq!(p.folder_hit(1).map(|h| h.1), Some(3));
+    // Down, Down: into the next file.
+    key(&mut a, KeyName::Down, None);
+    key(&mut a, KeyName::Down, None);
+    key(&mut a, KeyName::Enter, None);
+    assert!(a.ui.palette.is_none());
+    assert_eq!(
+        a.ws.active_tab().unwrap().path().file_name().unwrap(),
+        "a.md"
+    );
+    // The find box and the page's find hold the query, on the match that was chosen.
+    assert_eq!(a.ui.find.text(), "needle");
+    assert_eq!(a.ws.find_query(), "needle");
+    assert_eq!(
+        (a.ws.find_counts().current, a.ws.find_counts().total),
+        (1, 1)
+    );
+}
+
+#[test]
+fn find_in_folder_clicking_a_result_opens_it_and_a_second_in_the_same_file_selects_its_match() {
+    let f = Folder::new("click");
+    let mut a = folder_app(&f);
+    a.command(C::FindInFolder);
+    type_text(&mut a, "needle");
+    settle(&mut a);
+    a.compose();
+    let p = a.ui.palette.as_ref().unwrap();
+    // The second line of sub/b.md (id 2).
+    let r = p.palette.row_rect(2);
+    a.pointer_moved(r.cx(), r.cy());
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert!(a.ui.palette.is_none());
+    assert_eq!(
+        a.ws.active_tab().unwrap().path().file_name().unwrap(),
+        "b.md"
+    );
+    assert_eq!(
+        (a.ws.find_counts().current, a.ws.find_counts().total),
+        (2, 2)
+    );
+}
+
+#[test]
+fn find_in_folder_a_new_query_replaces_the_results_and_nothing_found_says_so() {
+    let f = Folder::new("query");
+    let mut a = folder_app(&f);
+    a.command(C::FindInFolder);
+    type_text(&mut a, "needle");
+    settle(&mut a);
+    assert_eq!(rows(&a).len(), 5);
+    type_text(&mut a, "x");
+    settle(&mut a);
+    a.compose();
+    assert!(rows(&a).is_empty());
+    let p = a.ui.palette.as_ref().unwrap();
+    assert_eq!(p.palette.selected_id(), None);
+    key(&mut a, KeyName::Backspace, None);
+    settle(&mut a);
+    assert_eq!(rows(&a).len(), 5, "the first query again");
+    // Enter with nothing selected and the card empty does nothing but stay.
+    for _ in 0..6 {
+        key(&mut a, KeyName::Backspace, None);
+    }
+    settle(&mut a);
+    assert!(rows(&a).is_empty());
+    key(&mut a, KeyName::Enter, None);
+    assert!(a.ui.palette.is_some());
+}
+
+#[test]
+fn find_in_folder_escape_closes_it_and_ends_the_search() {
+    let f = Folder::new("escape");
+    let mut a = folder_app(&f);
+    a.command(C::FindInFolder);
+    type_text(&mut a, "needle");
+    key(&mut a, KeyName::Escape, None);
+    assert!(a.ui.palette.is_none());
+    assert!(!a.ui.modal());
+    // The page is as it was.
+    assert_eq!(
+        a.ws.active_tab().unwrap().path().file_name().unwrap(),
+        "linked.md"
+    );
+}
+
+#[test]
+fn find_in_folder_starts_with_the_find_boxes_text_and_is_in_the_menu_and_the_palette() {
+    use crate::palette::Target;
+    let f = Folder::new("prefill");
+    let mut a = folder_app(&f);
+    a.ui.find.set_text("alpha");
+    a.command(C::FindInFolder);
+    settle(&mut a);
+    assert_eq!(a.ui.palette.as_ref().unwrap().palette.query(), "alpha");
+    assert_eq!(rows(&a).len(), 2);
+    key(&mut a, KeyName::Escape, None);
+    // The command palette lists it, enabled with a folder, with no key of its own.
+    a.command(C::CommandPalette);
+    a.compose();
+    type_text(&mut a, ">find in f");
+    assert_eq!(listed(&a).first(), Some(&Target::Cmd(C::FindInFolder)));
+    assert_eq!(crate::keys::hint(C::FindInFolder), "");
+    key(&mut a, KeyName::Enter, None);
+    assert!(
+        a.ui.palette
+            .as_ref()
+            .is_some_and(|p| p.folder_running() || p.palette.query() == "alpha")
+    );
+}

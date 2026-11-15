@@ -11,6 +11,7 @@
 //! Nothing is built until the palette opens; an entry's id is its index in `targets`, which says
 //! what choosing it does.
 
+use crate::folder_search::{self, FolderSearch, Waker};
 use crate::overlays::command_icon;
 use crate::platform;
 use crate::workspace::Workspace;
@@ -75,6 +76,9 @@ pub struct PaletteState {
     mode: Option<Mode>,
     /// Whether the folder's files are among the entries (only once the query has text).
     with_files: bool,
+    /// Find in folder: the card lists the lines of the folder's files that hold the query, not
+    /// the entries above.
+    folder: Option<FolderSearch>,
 }
 
 impl PaletteState {
@@ -99,15 +103,63 @@ impl PaletteState {
             targets: Vec::new(),
             mode: None,
             with_files: false,
+            folder: None,
         };
         state.sync(ws);
         state
+    }
+
+    /// The card as Find in folder, searching `root` for `query` at once. `wake` is called from the
+    /// search thread when results are waiting ([`poll_folder`](Self::poll_folder) takes them).
+    pub fn open_folder(root: PathBuf, query: &str, wake: Option<Waker>) -> PaletteState {
+        let mut palette = Palette::new();
+        palette.set_literal(true);
+        palette.set_placeholder(folder_search::PLACEHOLDER);
+        palette.open(query);
+        let mut folder = FolderSearch::new(root, wake);
+        let query = palette.query().to_string();
+        folder.start(&query, &mut palette);
+        PaletteState {
+            palette,
+            targets: Vec::new(),
+            mode: None,
+            with_files: false,
+            folder: Some(folder),
+        }
+    }
+
+    /// Takes the results the search thread has found. True when the card changed.
+    pub fn poll_folder(&mut self) -> bool {
+        match self.folder.as_mut() {
+            Some(f) => f.poll(&mut self.palette),
+            None => false,
+        }
+    }
+
+    /// Whether Find in folder is still reading files.
+    pub fn folder_running(&self) -> bool {
+        self.folder.as_ref().is_some_and(FolderSearch::running)
+    }
+
+    /// What choosing a result row of Find in folder opens: the file, the line and the query.
+    pub fn folder_hit(&self, id: u32) -> Option<(PathBuf, u32, String)> {
+        let f = self.folder.as_ref()?;
+        let (path, line) = f.hit(id)?;
+        Some((path.to_path_buf(), line, f.query().to_string()))
     }
 
     /// Swaps the entries when the query's prefix (or, for files, whether it has text) changed
     /// the source. Called after the query changed; typing within a mode only re-ranks, which the
     /// palette does by itself.
     pub fn sync(&mut self, ws: &Workspace) {
+        // Find in folder has one source: a new query is a new search.
+        if let Some(f) = self.folder.as_mut() {
+            if f.query() != self.palette.query() {
+                let query = self.palette.query().to_string();
+                f.start(&query, &mut self.palette);
+            }
+            return;
+        }
         let (mode, skip) = mode_of(self.palette.query());
         let with_files = mode == Mode::Files && !self.palette.needle().is_empty();
         if self.mode == Some(mode) && (mode != Mode::Files || with_files == self.with_files) {

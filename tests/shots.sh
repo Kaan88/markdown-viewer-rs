@@ -80,6 +80,11 @@ shot palette-history-light --light --palette ">back" "$fx/showcase.md"
 shot palette-headings-light --light --palette "#" "$fx/showcase.md"
 shot palette-headings-dark --dark --palette "#" "$fx/showcase.md"
 
+# Find in folder: results by file with the matches marked; nothing found.
+shot folder-search-light --light --files --folder "$fx" --folder-search "table" "$fx/showcase.md"
+shot folder-search-dark --dark --files --folder "$fx" --folder-search "table" "$fx/showcase.md"
+shot folder-search-none-light --light --files --folder "$fx" --folder-search "zzzqq" "$fx/showcase.md"
+
 # Panes, find, focus mode, tabs.
 shot files-pane --light --files --folder "$fx" "$fx/showcase.md"
 shot files-pane-dark --dark --files --folder "$fx/wiki" "$fx/linked.md"
