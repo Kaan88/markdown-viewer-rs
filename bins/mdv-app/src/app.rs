@@ -173,6 +173,8 @@ struct App {
     /// The active file, to follow it in the Files tree when it changes.
     last_active: Option<PathBuf>,
     last_heading: Option<usize>,
+    /// The tab `last_heading` was computed for: a heading index means nothing across tabs.
+    last_heading_tab: Option<usize>,
     toast_until: Option<Instant>,
     size_save_due: Option<Instant>,
     idle_due: Option<Instant>,
@@ -242,6 +244,7 @@ impl App {
             last_title: String::new(),
             last_active: None,
             last_heading: None,
+            last_heading_tab: None,
             toast_until: None,
             size_save_due: None,
             idle_due: None,
@@ -506,10 +509,21 @@ impl App {
         }
         self.ws.update_backlinks();
         let current = self.ws.current_heading();
-        if current != self.last_heading {
-            self.last_heading = current;
-            if let Some(i) = current {
-                panes::reveal_outline_row(&mut self.ui, i);
+        let tab = self.ws.active();
+        if current != self.last_heading || tab != self.last_heading_tab {
+            // The outline follows the page, except while the pointer is on it or its size is not
+            // known yet (not drawn): then the row is revealed on a later frame.
+            let shown = self.areas.outline.is_some();
+            let done = !shown
+                // Above the first heading nothing is current: the outline returns to its top.
+                || panes::follow_outline_row(&mut self.ui, current.unwrap_or(0));
+            if done {
+                self.last_heading = current;
+                self.last_heading_tab = tab;
+            } else if self.ui.panes.outline_view <= 0.0
+                && panes::outline_has_room(self.areas.outline)
+            {
+                self.wants_frame = true;
             }
         }
         self.follow_active_file();
