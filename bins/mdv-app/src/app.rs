@@ -62,6 +62,9 @@ const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
 /// While a tab shows the editor's text: how often to ask whether the editor still answers.
 const SISTER_CHECK: Duration = Duration::from_secs(5);
+/// While animated images are on the page and the window may be covered: how often to look
+/// again, and how long an answer is kept. Nothing runs without an animated image.
+const COVER_CHECK: Duration = Duration::from_secs(1);
 const IDLE_UNLOAD: Duration = Duration::from_secs(60);
 const SIZE_SAVE_DELAY: Duration = Duration::from_millis(800);
 /// How long the page's refinement may run between events: short enough that input waiting
@@ -216,6 +219,11 @@ struct App {
     page_again: bool,
     /// The system says the window is completely covered.
     occluded: bool,
+    /// An animated image was on the page at the last look: whether the window is covered is
+    /// worth asking (Windows never reports it).
+    anim_seen: bool,
+    /// The last answer to "is the window covered", and when it was asked.
+    covered: Option<(Instant, bool)>,
     /// `--scroll-steps`: steps left and the frame times taken.
     steps: Option<u32>,
     step_times: Vec<FrameTimes>,
@@ -284,6 +292,8 @@ impl App {
             anim_rows: None,
             page_again: false,
             occluded: false,
+            anim_seen: false,
+            covered: None,
             step_times: Vec::new(),
             trace,
             wheel_rest: 0.0,

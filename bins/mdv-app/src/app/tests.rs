@@ -3098,3 +3098,45 @@ fn the_overview_is_drawn_over_the_slide_and_a_click_on_a_row_goes_there() {
     assert_eq!(slide_index(&a), 3);
     assert!(!a.ui.present.as_ref().unwrap().overview_open());
 }
+
+#[test]
+fn a_window_the_system_does_not_report_covered_but_gdi_says_is_asked_about_once_a_second() {
+    let mut a = app(&["formats.md"]);
+    a.first = false;
+    a.ws.set_animation_wake(|| {});
+    let mut now = Instant::now();
+    let mut armed = None;
+    for _ in 0..200 {
+        a.compose();
+        armed = a.timers(now);
+        if armed.is_some() && a.anim_seen {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        now = Instant::now();
+    }
+    assert!(armed.is_some() && a.anim_seen, "an animated GIF is playing");
+
+    // Covered (the answer of the system call, kept for a second): no animation work, no frame,
+    // only a slow look again.
+    let now = Instant::now();
+    a.covered = Some((now, true));
+    a.anim_rows = None;
+    a.wants_frame = false;
+    assert_eq!(a.timers(now), Some(now + COVER_CHECK));
+    assert!(
+        a.anim_rows.is_none() && !a.wants_frame,
+        "no frame while covered"
+    );
+    // Once the answer is a second old it is asked again (no window here: not covered) and the
+    // animation goes on as before.
+    let later = now + COVER_CHECK + Duration::from_millis(1);
+    let _ = a.timers(later);
+    assert_eq!(a.covered, Some((later, false)));
+    // Without an animated image on the page nothing is asked at all.
+    let mut b = app(&["showcase.md"]);
+    b.first = false;
+    b.compose();
+    assert_eq!(b.timers(Instant::now()), None, "idle is idle");
+    assert_eq!(b.covered, None, "and the system is never asked");
+}

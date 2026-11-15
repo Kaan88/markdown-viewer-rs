@@ -1177,8 +1177,13 @@ impl App {
         }
         // Animated images, only while the window can be seen. A window that is minimised or
         // covered asks for nothing, so its animations stand still and cost nothing.
-        if self.shows_page() {
+        if self.shows_page() && self.anim_seen && self.covered_now(now) {
+            // Windows never says a window is covered, so it is asked: no frame is drawn while it
+            // is, and it is asked again in a second (only while an animated image is on the page).
+            at(now + COVER_CHECK);
+        } else if self.shows_page() {
             let tick = self.ws.animate(now);
+            self.anim_seen = tick.next.is_some() || tick.rows.is_some();
             if let Some((a, b)) = tick.rows {
                 self.anim_rows = Some(match self.anim_rows {
                     Some((c, d)) => (a.min(c), b.max(d)),
@@ -1248,6 +1253,24 @@ impl App {
                 .window
                 .as_ref()
                 .is_none_or(|w| w.is_minimized() != Some(true) && w.is_visible() != Some(false))
+    }
+
+    /// Whether another window hides all of this one, as far as the system tells (Windows: the
+    /// visible region is empty). The answer is kept for [`COVER_CHECK`], so asking costs one
+    /// small system call a second while animated images play, and nothing otherwise. False
+    /// without a window and on systems that report covering themselves (`occluded`).
+    pub(super) fn covered_now(&mut self, now: Instant) -> bool {
+        if let Some((at, covered)) = self.covered
+            && now.saturating_duration_since(at) < COVER_CHECK
+        {
+            return covered;
+        }
+        let covered = self
+            .window
+            .as_ref()
+            .is_some_and(|w| platform::is_covered(w));
+        self.covered = Some((now, covered));
+        covered
     }
 
     pub(super) fn window_focused(&self) -> bool {

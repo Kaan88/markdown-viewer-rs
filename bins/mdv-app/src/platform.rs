@@ -28,6 +28,45 @@ pub fn shows_animations() -> bool {
     true
 }
 
+/// Whether nothing of the window can be seen because other windows cover all of it. winit sends
+/// `Occluded` on X11 and macOS only, so on Windows GDI is asked: the clip box of the window's
+/// device context is the part of it that shows, and is empty when all of it is covered.
+#[cfg(windows)]
+pub fn is_covered(window: &winit::window::Window) -> bool {
+    use windows_sys::Win32::Foundation::{HWND, RECT};
+    use windows_sys::Win32::Graphics::Gdi::{GetClipBox, GetDC, NULLREGION, ReleaseDC};
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Some(hwnd) = window.window_handle().ok().and_then(|h| match h.as_raw() {
+        RawWindowHandle::Win32(h) => Some(h.hwnd.get() as HWND),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    // SAFETY: `hwnd` is the live window's own handle; the device context taken here is released
+    // before returning, and `rect` is a valid out parameter.
+    unsafe {
+        let hdc = GetDC(hwnd);
+        if hdc.is_null() {
+            return false;
+        }
+        let kind = GetClipBox(hdc, &mut rect);
+        ReleaseDC(hwnd, hdc);
+        kind == NULLREGION
+    }
+}
+
+/// Other systems say it themselves (`Occluded`).
+#[cfg(not(windows))]
+pub fn is_covered(_window: &winit::window::Window) -> bool {
+    false
+}
+
 /// The extensions the open dialog's Markdown filter lists.
 const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdown", "mkd"];
 
