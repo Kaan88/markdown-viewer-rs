@@ -559,6 +559,7 @@ impl App {
                 }
             }
             C::FindInFolder => self.open_folder_search(),
+            C::Present => self.present_toggle(),
             C::CommandPalette => {
                 if self.ui.palette.is_some() {
                     self.close_palette();
@@ -847,6 +848,9 @@ impl App {
         } else {
             self.ui.caret_due = None;
         }
+        if let Some(t) = self.present_tick(now) {
+            at(t);
+        }
         // The pointer resting on a submenu item: open it when the dwell is up. Nothing is
         // scheduled when no menu is open, because the dwell lives in the popup.
         let dwell = self.ui.popup.as_ref().and_then(|p| p.dwell);
@@ -1025,7 +1029,7 @@ impl App {
 
     pub(super) fn save_size(&mut self) {
         let Some(w) = &self.window else { return };
-        if w.is_minimized() == Some(true) {
+        if w.is_minimized() == Some(true) || w.fullscreen().is_some() {
             return;
         }
         // The CONTENT size (the window reports the surface, margin included, with the

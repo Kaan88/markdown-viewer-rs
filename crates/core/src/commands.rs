@@ -27,6 +27,8 @@ pub enum CommandId {
     ToggleFiles,
     ToggleOutline,
     FocusMode,
+    /// Show the document as slides, full screen.
+    Present,
     ShowShortcuts,
     About,
     /// The command palette: tabs, recent files, commands and headings behind one search box.
@@ -277,6 +279,7 @@ pub const COMMANDS: &[Command] = &[
     ),
     // No default key: Ctrl+Shift+F is Focus reading mode's. Reached from the menu and the palette.
     cmd(C::FindInFolder, Menu::None, "Find in folder…", &[]),
+    cmd(C::Present, Menu::None, "Present", &[K("Shift+F5")]),
     cmd(C::NextTab, Menu::None, "Next tab", &[K("Ctrl+Tab")]),
     cmd(
         C::PreviousTab,
@@ -372,6 +375,7 @@ pub mod strings {
     pub const ABOUT: &str = "A native, read-only Markdown reader.";
     pub const TRANSIENT_MS: u32 = 2500;
 
+    pub const NOTHING_TO_PRESENT: &str = "Nothing to present";
     pub const TOOLBAR_TITLE: &str = "Reader";
     pub const MANAGE_RECENT_TITLE: &str = "Manage recent files";
     pub const SHORTCUTS_TITLE: &str = "Keyboard shortcuts";

@@ -50,6 +50,7 @@ pub fn command_icon(id: C) -> &'static str {
         C::ToggleFiles => glyph::SIDEBAR,
         C::ToggleOutline => glyph::OUTLINE,
         C::FocusMode => glyph::FULLSCREEN,
+        C::Present => glyph::PLAY,
         C::ShowShortcuts => glyph::KEYBOARD,
         C::About => glyph::INFO,
         C::CopyFilePath | C::CopyCodeBlock => glyph::COPY,
@@ -95,6 +96,7 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
         cmd(C::ToggleOutline, "Outline pane", glyph::OUTLINE)
             .checked(ui.panes.outline && !ui.focus_mode),
         cmd(C::FocusMode, "Focus reading mode", glyph::FULLSCREEN).checked(ui.focus_mode),
+        cmd(C::Present, "Present", glyph::PLAY).enabled(can_edit),
         cmd(C::CommandPalette, "Command palette…", glyph::SEARCH).sep(),
         cmd(C::FindInFolder, "Find in folder…", glyph::SEARCH).enabled(ws.folder().is_some()),
         cmd(C::Settings, "Settings…", command_icon(C::Settings)),

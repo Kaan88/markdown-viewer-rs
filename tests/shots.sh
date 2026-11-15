@@ -168,5 +168,13 @@ shot code-copy-light --light --scroll 400 --hover 700,420 "$fx/showcase.md"
 shot code-copy-tip-light --light --scroll 400 --hover 971,339 "$fx/showcase.md"
 shot code-copy-done-dark --dark --scroll 400 --hover 971,339 --copied "$fx/showcase.md"
 shot code-copy-dark --dark --scroll 1200 --hover 640,475 "$fx/showcase.md"
+# Presentation mode: a slide, in both themes, and at a small and a large window.
+shot present-title-light --light --present 1 "$fx/slides.md"
+shot present-bullets-light --light --present 2 "$fx/slides.md"
+shot present-bullets-dark --dark --present 2 "$fx/slides.md"
+shot present-table-dark --dark --present 3 "$fx/slides.md"
+shot present-small-light --light --size 700x500 --present 2 "$fx/slides.md"
+shot present-large-dark --dark --size 1920x1080 --present 2 "$fx/slides.md"
+shot present-scale-150 --light --scale 1.5 --present 3 "$fx/slides.md"
 
 ls "$out" | wc -l
