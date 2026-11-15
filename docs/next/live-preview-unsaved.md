@@ -75,5 +75,11 @@ Decisions taken, for the owner to confirm:
 Tried in real windows on Windows 11 together with the editor: see the editor's file of the same
 name. Also seen there: with the editor gone the tab kept its text and the toast appeared.
 
+Budgets, measured on this PC on release builds of the base (`e909adc`) and of this branch, ten
+launches each in turn (`MDVIEW_TRACE=1`, `--scroll-steps`): first frame of `fixtures/showcase.md`
+75 to 82 ms before and 76 to 82 ms after; scroll frame median 0.56 to 0.57 ms before and 0.57
+to 0.61 ms after. Nothing runs for the feature until the editor hands such a document over.
+Not measured: memory.
+
 Not verified: Linux in real windows; "Edit in mdedit" from such a tab in real windows (app-level
 tests only); an older mdedit needs nothing new (it never sends a document).
