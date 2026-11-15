@@ -438,7 +438,8 @@ fn every_fixture_keeps_its_marks_in_order_and_inside_the_text() {
 #[test]
 #[ignore = "a measurement"]
 fn parse_cost() {
-    let showcase = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/showcase.md");
+    let showcase =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/showcase.md");
     let one = std::fs::read_to_string(showcase).unwrap();
     // About 8 MB of ordinary Markdown, and 8 MB of one-line paragraphs.
     let big = one.repeat(8 * 1024 * 1024 / one.len() + 1);
