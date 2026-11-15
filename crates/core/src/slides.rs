@@ -20,7 +20,8 @@ pub fn split(src: &str) -> Vec<String> {
     for (event, range) in parser.by_ref() {
         match event {
             Event::Start(tag) => {
-                if depth == 0 && matches!(tag, Tag::Heading { level, .. } if level <= HeadingLevel::H2)
+                if depth == 0
+                    && matches!(tag, Tag::Heading { level, .. } if level <= HeadingLevel::H2)
                 {
                     headings.push(range.start);
                 }

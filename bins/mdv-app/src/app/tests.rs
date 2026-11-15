@@ -2123,3 +2123,137 @@ fn a_second_export_waits_and_the_answers_clear_and_report() {
         assert_eq!(a.ws.status(Instant::now()), text);
     }
 }
+
+// ---- presentation ------------------------------------------------------------------------------
+
+fn slide_index(a: &App) -> usize {
+    a.ui.present.as_ref().expect("presenting").index()
+}
+
+#[test]
+fn present_shows_the_slides_and_escape_returns_to_the_same_place() {
+    let mut a = app(&["slides.md"]);
+    a.ws.scroll_to(120.0);
+    a.compose();
+    let place = a.ws.scroll();
+    assert!(!a.presenting());
+    a.command(CommandId::Present);
+    a.compose();
+    assert!(a.presenting());
+    let show = a.ui.present.as_ref().unwrap();
+    assert_eq!(show.len(), 4);
+    // Front matter is no slide: the first one is the title.
+    assert!(
+        show.slide(0).starts_with("# Quarterly review"),
+        "{}",
+        show.slide(0)
+    );
+    assert_eq!(slide_index(&a), 0);
+    key(&mut a, KeyName::Right, None);
+    assert_eq!(slide_index(&a), 1);
+    key(&mut a, KeyName::Space, Some(" "));
+    assert_eq!(slide_index(&a), 2);
+    key(&mut a, KeyName::Left, None);
+    assert_eq!(slide_index(&a), 1);
+    key(&mut a, KeyName::PageDown, None);
+    key(&mut a, KeyName::PageUp, None);
+    assert_eq!(slide_index(&a), 1);
+    key(&mut a, KeyName::End, None);
+    assert_eq!(slide_index(&a), 3);
+    // Past the last slide nothing moves.
+    key(&mut a, KeyName::Right, None);
+    assert_eq!(slide_index(&a), 3);
+    key(&mut a, KeyName::Home, None);
+    assert_eq!(slide_index(&a), 0);
+    // A click goes forward.
+    a.pointer_moved(600.0, 400.0);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert_eq!(slide_index(&a), 1);
+    key(&mut a, KeyName::Escape, None);
+    assert!(!a.presenting());
+    a.compose();
+    assert_eq!(a.ws.scroll(), place, "the page is where the reader left it");
+    // The chrome is drawn again.
+    assert!(a.hit_rect(Hit::Bar(BarItem::More)).is_some());
+}
+
+#[test]
+fn a_presentation_takes_every_other_input() {
+    let mut a = app(&["slides.md"]);
+    a.command(CommandId::Present);
+    a.compose();
+    // No menu, no palette, no find box, no history travel while the slides show.
+    a.pointer_moved(600.0, 400.0);
+    a.right_press();
+    assert!(a.ui.popup.is_none());
+    a.mods = Mods {
+        ctrl: true,
+        ..Mods::default()
+    };
+    key(&mut a, KeyName::Char('p'), None);
+    assert!(a.ui.palette.is_none());
+    key(&mut a, KeyName::Char('f'), None);
+    assert!(!a.ui.find_focused);
+    a.mods = Mods::default();
+    a.travel(true);
+    assert!(a.presenting());
+    assert_eq!(slide_index(&a), 0);
+    // Present again (its key or the command) leaves, as Escape does.
+    a.mods = Mods {
+        shift: true,
+        ..Mods::default()
+    };
+    key(&mut a, KeyName::F(5), None);
+    assert!(!a.presenting());
+}
+
+#[test]
+fn present_has_its_key_and_reload_keeps_f5() {
+    use crate::keys::command_for;
+    let shift = Mods {
+        shift: true,
+        ..Mods::default()
+    };
+    assert_eq!(command_for(&KeyName::F(5), shift), Some(CommandId::Present));
+    assert_eq!(
+        command_for(&KeyName::F(5), Mods::default()),
+        Some(CommandId::Refresh)
+    );
+    // Without a document there is nothing to present, and the status says so.
+    let mut a = app(&[]);
+    a.command(CommandId::Present);
+    assert!(!a.presenting());
+    assert_eq!(a.ws.status(Instant::now()), Some("Nothing to present"));
+}
+
+#[test]
+fn a_changed_text_keeps_the_slide_and_a_text_without_slides_ends_the_show() {
+    let mut a = app(&["slides.md"]);
+    let path = a.ws.active_tab().unwrap().path().to_path_buf();
+    a.command(CommandId::Present);
+    a.compose();
+    key(&mut a, KeyName::Right, None);
+    key(&mut a, KeyName::Right, None);
+    assert_eq!(slide_index(&a), 2);
+    // The editor sends new text (live preview): the slides are cut again, the number stays.
+    assert!(a.ws.live_text(
+        &path,
+        "# One\n\n---\n\n# Two\n\n---\n\n# Three, new\n\n---\n\n# Four\n\n---\n\n# Five\n".into(),
+        None
+    ));
+    a.compose();
+    let show = a.ui.present.as_ref().expect("still presenting");
+    assert_eq!((show.len(), show.index()), (5, 2));
+    assert!(show.slide(2).contains("Three, new"));
+    // Fewer slides than the number: the last one.
+    assert!(a.ws.live_text(&path, "# Only\n\ntext\n".into(), None));
+    a.compose();
+    let show = a.ui.present.as_ref().expect("still presenting");
+    assert_eq!((show.len(), show.index()), (1, 0));
+    // Nothing left to show: the presentation ends.
+    assert!(a.ws.live_text(&path, "\n".into(), None));
+    a.compose();
+    assert!(!a.presenting());
+}

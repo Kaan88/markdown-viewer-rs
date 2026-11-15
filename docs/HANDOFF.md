@@ -1715,3 +1715,52 @@ desktop, so no feature below has been seen live, and no budget was measured.
   (formulas as pictures, code colours, tables, the float, the badge link, details).
 - NOT verified: the Save dialog and its thread, ShellExecute opening a real browser, a real print
   dialog, Linux. Left out: table widths and centring from HTML attributes, dark export, PDF.
+
+### Presentation mode (`f/presentation`)
+
+- Command `Present` ("Present", icon PLAY), enabled with a document open: in the "⋯" menu, the
+  command palette, and on **Shift+F5**. It toggles: the same key or command leaves, as Escape does.
+- **Key decision: Reload keeps F5.** The spec says "F5 unless taken"; F5 is Reload since the first
+  release and a regression test pins it, so Present is Shift+F5 (PowerPoint's "from this slide").
+  A test pins both.
+- Slides (`crates/core/src/slides.rs`, `split`): cut at top-level horizontal rules when the
+  document has any, otherwise before every top-level H1 and H2 (a rule or heading inside a quote
+  or list does not cut). Front matter is skipped; the link reference definitions of the whole
+  document are appended to every slide so `[text][ref]` resolves.
+- The show (`bins/mdv-app/src/present.rs`, `Show`; `app/slides.rs`): its own `DocumentRenderer`,
+  made when Present starts and dropped when it ends, so nothing exists before. One slide is
+  parsed and laid out at a time: first at zoom 1 in an 860 px column to learn its height, then at
+  `fit_zoom` (as wide as the window allows, up to 3; less when the slide would not fit in 90 % of
+  the height, but not under 0.6 of that and never under 1), centred vertically; a slide still
+  taller than the window starts at its top and scrolls. The page's theme and fonts; formulas,
+  diagrams and local pictures draw as on the page.
+- Keys: Right, Enter, Page Down, Space next; Left, Backspace, Page Up, Shift+Space previous (Space
+  and the Page keys scroll a tall slide by a screen first); Home, End; Up, Down and the wheel
+  scroll a tall slide; a left click goes on. Every other key, the right button, menus, the
+  palette, find and history travel are ignored while presenting; Exit still works.
+- The counter ("2 / 4", bottom right) shows for 1.8 s after a slide change or a pointer movement
+  and fades over 0.4 s; the pointer is hidden when the counter has gone and returns when it
+  moves. The timer runs only while a presentation shows.
+- The window goes borderless fullscreen (winit) and returns to what it was; a window that
+  already was fullscreen stays so. The tab's scroll position is never touched, so Escape returns
+  to the same place.
+- The tab keeps its source text only while it is presented (`Workspace::present_source`,
+  `present_update`, `present_end`); a reload or live text from mdedit cuts the slides again and
+  keeps the slide number (the last slide when there are fewer; the show ends when none is left
+  or the tab closes).
+- `--present N` starts at slide N (for shots and checks).
+- Added after the merge: the branch had unit tests for the cutting and the show but no app-level
+  tests and no docs. Four app tests now cover starting, every navigation key, the click, Escape
+  returning to the same scroll position, input being swallowed, the toggle, the key table, "Nothing
+  to present", and live text keeping the slide number. No behaviour of the branch was changed.
+- Shots: `present-title-light`, `present-bullets-light`, `present-bullets-dark`,
+  `present-table-dark`, `present-small-light` (700x500), `present-large-dark` (1920x1080),
+  `present-scale-150`. Also rendered once and looked at, not kept: slides with a formula, a
+  Mermaid diagram and a picture (all drawn). Existing shots that changed: the main-menu shots
+  (one more row; the menu still fits the 800 px window), `dialog-shortcuts` (the Present row),
+  and the shots that list or search the fixtures folder (`fixtures/slides.md` is new).
+- NOT verified (needs a real window): the switch to fullscreen and back, on one and on two
+  monitors; the pointer hiding and returning; the counter's fade as an animation; the wheel on a
+  tall slide; remote pictures on a slide; Linux.
+- Left out: speaker notes, transitions, a slide overview, clicking links on a slide (a click
+  always goes on), text selection on a slide.

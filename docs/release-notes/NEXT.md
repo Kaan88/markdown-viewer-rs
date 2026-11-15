@@ -20,3 +20,6 @@ NEXT
   (menu "Find in folder..." and the command palette).
 - Export as HTML saves a document as one self-contained page; Print opens a printable copy in
   your browser (right-click a tab, or the command palette).
+- Present (Shift+F5, the "⋯" menu and the command palette) shows a document as full-screen
+  slides, cut at its horizontal rules or else at its level 1 and 2 headings; Escape returns to
+  the page where you left it.

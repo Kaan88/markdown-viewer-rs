@@ -1196,7 +1196,8 @@ impl Workspace {
         }
         tab.follow_end = tab.at_end;
         tab.set_document(document, stamp);
-        tab.source = (live || tab.presenting).then(|| mdview_core::files::decode(bytes).0.into_owned());
+        tab.source =
+            (live || tab.presenting).then(|| mdview_core::files::decode(bytes).0.into_owned());
         tab.missing = live && tab.missing;
         tab.live = live;
         tab.live_pending = None;
@@ -1232,7 +1233,9 @@ impl Workspace {
     /// from now on, until [`present_end`](Self::present_end). Nothing is held for a tab that is
     /// never presented.
     pub fn present_source(&mut self) -> Result<(usize, u64, String), String> {
-        let index = self.active.ok_or_else(|| strings::NOTHING_TO_PRESENT.to_string())?;
+        let index = self
+            .active
+            .ok_or_else(|| strings::NOTHING_TO_PRESENT.to_string())?;
         self.load(index);
         let tab = &mut self.tabs[index];
         if tab.source.is_none() {

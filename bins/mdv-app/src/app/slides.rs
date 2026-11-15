@@ -6,6 +6,9 @@ use crate::present::Show;
 use mdview_core::commands::strings;
 use winit::window::Fullscreen;
 
+/// What a composed frame gives back: the damaged rectangles and what the frame cost.
+type Frame = (Vec<(i32, i32, i32, i32)>, FrameTimes);
+
 /// One arrow-key step of a tall slide, logical px (the page's own step).
 const LINE: f32 = 48.0;
 
@@ -169,7 +172,7 @@ impl App {
     /// The frame of a presentation: the slide alone, drawn whole when something about it changed.
     /// `None` when the presentation ended on the way (its tab is gone, or its text has no slides
     /// left), and the frame is the window's.
-    pub(super) fn compose_present(&mut self) -> Option<(Vec<(i32, i32, i32, i32)>, FrameTimes)> {
+    pub(super) fn compose_present(&mut self) -> Option<Frame> {
         let started = Instant::now();
         let show = self.ui.present.as_ref()?;
         if self.ws.active() != Some(show.tab) {

@@ -53,6 +53,13 @@ It opens quickly, stays small in memory, and aims to show a document the way Git
   diagrams as pictures, local images embedded). **Print (opens in browser)** opens a printable
   copy in the default browser, which shows its own print dialog. Both are in a tab's context menu
   and the command palette (`>export`, `>print`).
+- **Present (Shift+F5)** shows the open document as slides, full screen: cut at the horizontal
+  rules (`---`) when it has any, otherwise before every level 1 and level 2 heading. Each slide
+  is drawn by the page's own renderer, enlarged to fit and centred, in the page's theme, with
+  formulas, diagrams and pictures. Right, Space, Page Down, Enter or a click go on; Left, Page Up
+  or Backspace go back; Home and End jump; a slide taller than the screen scrolls first (wheel,
+  Up and Down). A small counter shows and fades. Escape returns to the document where you left
+  it. Front matter is no slide, and an edit of the file keeps the slide you are on.
 - **Command palette (Ctrl+P):** open tabs, recent files, the open folder's Markdown files,
   commands (`>`) and headings (`#`).
 - **Settings (Ctrl+,):** page width, text size, theme, a page font and a code font (any installed
@@ -167,6 +174,7 @@ the `.md` default.
 |---|---|
 | Open files, open folder | Ctrl+O, Ctrl+Shift+O |
 | Reload | F5 |
+| Present (Escape leaves) | Shift+F5 |
 | Edit in mdedit (the file, at the place being read) | Ctrl+E |
 | Close tab, close all | Ctrl+W, Ctrl+Shift+W |
 | Find, next, previous | Ctrl+F, F3, Shift+F3 |

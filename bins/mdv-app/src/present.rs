@@ -37,12 +37,19 @@ const TICK: Duration = Duration::from_millis(30);
 pub fn fit_zoom(vw: f32, vh: f32, natural: f32, margin: f32) -> f32 {
     let wide = (vw / (SLIDE_WIDTH + 2.0 * margin)).clamp(1.0, MAX_ZOOM);
     let tall = FIT * vh / natural.max(1.0);
-    tall.min(wide).max(wide * SMALLEST).max(1.0).min(MAX_ZOOM)
+    tall.min(wide).max(wide * SMALLEST).clamp(1.0, MAX_ZOOM)
 }
 
 /// What a laid-out slide was made for, and what came of it.
 struct Laid {
-    key: (u32, u32, u32, (&'static str, &'static str, &'static str), usize, u32),
+    key: (
+        u32,
+        u32,
+        u32,
+        (&'static str, &'static str, &'static str),
+        usize,
+        u32,
+    ),
     options: Options,
     /// The slide's height, device px.
     total: f32,
@@ -251,7 +258,14 @@ impl Show {
         if w == 0 || h == 0 || !(scale.is_finite() && scale > 0.0) {
             return false;
         }
-        let key = (w, h, scale.to_bits(), theme.key(), self.index, self.generation);
+        let key = (
+            w,
+            h,
+            scale.to_bits(),
+            theme.key(),
+            self.index,
+            self.generation,
+        );
         if self.laid.as_ref().is_some_and(|l| l.key == key) {
             return true;
         }
@@ -279,7 +293,10 @@ impl Show {
             options.scale = scale * zoom;
             self.renderer.layout_exact(doc, &options);
         }
-        let total = self.renderer.page_layout().map_or(0.0, |l| l.total_height());
+        let total = self
+            .renderer
+            .page_layout()
+            .map_or(0.0, |l| l.total_height());
         self.laid = Some(Laid {
             key,
             options,
@@ -419,7 +436,10 @@ mod tests {
         let s = show("a\n");
         let t = s.active;
         assert_eq!(s.counter_alpha(t, true), 1.0);
-        assert_eq!(s.counter_alpha(t + HOLD - Duration::from_millis(1), true), 1.0);
+        assert_eq!(
+            s.counter_alpha(t + HOLD - Duration::from_millis(1), true),
+            1.0
+        );
         let mid = s.counter_alpha(t + HOLD + FADE / 2, true);
         assert!((mid - 0.5).abs() < 0.01, "{mid}");
         assert_eq!(s.counter_alpha(t + HOLD + FADE, true), 0.0);
