@@ -14,7 +14,7 @@ use mdview_core::model::{Align, BlockKind, Dir, Document, ImageAlign, Length, NO
 use parley::{
     Alignment, AlignmentOptions, Cluster, FontContext, FontFamily, FontStyle, FontWeight,
     InlineBox, InlineBoxKind, Layout, LayoutContext, LineHeight, OverflowWrap,
-    PositionedLayoutItem, StyleProperty, VerticalAlign,
+    PositionedLayoutItem, StyleProperty, TextWrapMode, VerticalAlign,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -97,6 +97,8 @@ const DASHED_UNDERLINE: f32 = 1.0;
 const RESERVED: u64 = 1 << 32;
 /// Marks a zero-width box that only makes its line taller, to leave room for a ruby annotation.
 const SPACER: u64 = 1 << 33;
+/// The longest ruby base (in characters) that is kept on one line.
+const RUBY_WHOLE_MAX: usize = 40;
 
 fn brush(c: Color) -> Brush {
     [c[0], c[1], c[2], 255]
@@ -485,6 +487,22 @@ impl<'a, 'b> Pager<'a, 'b> {
                 builder.push(
                     StyleProperty::FontSize(txt.size * style.size_factor()),
                     range.clone(),
+                );
+            }
+        }
+        // A ruby base is kept whole, as a browser keeps it: no line break falls inside it, so its
+        // annotation sits over one line. parley reads the mode of the atom before a break, so the
+        // last character is left out and a break after the base stays possible. A base too long
+        // to hold on one line stays breakable.
+        for note in &inline.notes {
+            let base = &inline.text[note.base.clone()];
+            let Some((last, _)) = base.char_indices().next_back() else {
+                continue;
+            };
+            if last > 0 && base.chars().count() <= RUBY_WHOLE_MAX {
+                builder.push(
+                    StyleProperty::TextWrapMode(TextWrapMode::NoWrap),
+                    note.base.start..note.base.start + last,
                 );
             }
         }

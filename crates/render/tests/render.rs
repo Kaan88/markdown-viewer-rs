@@ -1675,3 +1675,36 @@ fn a_point_in_a_code_box_reports_its_box_and_code() {
     let again = renderer.hit_test(&doc, &options, found[0].rect.x + 5.0, found[0].rect.y + 5.0);
     assert_eq!(again.and_then(|h| h.code), Some(found[0]));
 }
+
+#[test]
+fn a_ruby_base_is_not_broken_across_lines_and_its_note_stays_over_it() {
+    let words =
+        "A line of plain words before <ruby>wide base<rt>note</rt></ruby> and a tail of words.";
+    let plain = "A line of plain words before wide base and a tail of words.";
+    let (with, without) = (mdview_core::parse(words), mdview_core::parse(plain));
+    let mut split_without = false;
+    for width in (160..420).step_by(7) {
+        let options = narrow(width as f32);
+        let mut renderer = DocumentRenderer::new();
+        let rects = rects_of(&mut renderer, &with, &options, "wide base");
+        assert_eq!(
+            rects.len(),
+            1,
+            "the base is on one line at {width}: {rects:?}"
+        );
+        let note = rects_of(&mut renderer, &with, &options, "note")[0];
+        assert!(
+            note.y + note.h <= rects[0].y + rects[0].h,
+            "{note:?} {rects:?}"
+        );
+        let mut other = DocumentRenderer::new();
+        split_without |= rects_of(&mut other, &without, &options, "wide base").len() > 1;
+        // The break after the base is still possible: the line is never wider than the column.
+        let tail = rects_of(&mut renderer, &with, &options, "tail")[0];
+        assert!(tail.x + tail.w <= width as f32, "{tail:?} at {width}");
+    }
+    assert!(
+        split_without,
+        "the same words do break when there is no ruby"
+    );
+}
