@@ -694,7 +694,7 @@ impl App {
         };
         #[cfg(not(any(windows, target_os = "linux")))]
         let bare = event.logical_key.clone();
-        let Some(name) = keys::key_name(&bare).or_else(|| keys::key_name(&event.logical_key))
+        let Some(name) = event_key(&bare, &event.logical_key, event.text.as_deref(), self.mods)
         else {
             return;
         };
@@ -868,4 +868,26 @@ impl App {
         self.caret_reset();
         true
     }
+}
+
+/// The key name of a key event. Characters sent as `KEYEVENTF_UNICODE` (on-screen keyboards, emoji
+/// pickers, remapping tools) arrive as `Key::Unidentified` with the text only in the event, and a
+/// sequence of several code points has no key name either: such text, when it holds no control
+/// character and Ctrl and Alt are not held, becomes a character key, so it still reaches the boxes.
+pub(super) fn event_key(
+    bare: &winit::keyboard::Key,
+    logical: &winit::keyboard::Key,
+    text: Option<&str>,
+    mods: Mods,
+) -> Option<KeyName> {
+    keys::key_name(bare)
+        .or_else(|| keys::key_name(logical))
+        .or_else(|| {
+            let text = text.filter(|t| !t.is_empty() && !t.chars().any(char::is_control))?;
+            if mods.ctrl || mods.alt {
+                return None;
+            }
+            let c = text.chars().next()?;
+            Some(KeyName::Char(c.to_lowercase().next().unwrap_or(c)))
+        })
 }

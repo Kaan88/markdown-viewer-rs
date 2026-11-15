@@ -3411,3 +3411,35 @@ fn the_scrollbar_at_the_right_edge_is_not_covered_by_the_resize_band() {
     // With no scrollbar beside the point the old band stands.
     assert_eq!(a.resize_band(w - 6.0, 24.0), Some(D::East));
 }
+
+/// Text sent as `KEYEVENTF_UNICODE` arrives as `Key::Unidentified` with the characters only in the
+/// event's text: it still gets a key, so it reaches the find box and the palette.
+#[test]
+fn text_without_a_key_name_still_gets_a_key_so_that_it_is_typed() {
+    use super::input::event_key;
+    use winit::keyboard::{Key as WKey, NativeKey};
+    let none = Mods::default();
+    let packet = WKey::Unidentified(NativeKey::Unidentified);
+    assert_eq!(
+        event_key(&packet, &packet, Some("\u{e9}"), none),
+        Some(KeyName::Char('\u{e9}'))
+    );
+    assert_eq!(
+        event_key(&packet, &packet, Some("\u{11f}\u{11f}"), none),
+        Some(KeyName::Char('\u{11f}'))
+    );
+    assert_eq!(event_key(&packet, &packet, Some("\r"), none), None);
+    assert_eq!(event_key(&packet, &packet, None, none), None);
+    let ctrl = Mods {
+        ctrl: true,
+        ..none
+    };
+    assert_eq!(event_key(&packet, &packet, Some("\u{e9}"), ctrl), None);
+
+    // And the text lands in the find box and the palette.
+    let mut a = app(&["linked.md"]);
+    a.command(CommandId::Find);
+    a.compose();
+    key(&mut a, KeyName::Char('\u{e9}'), Some("\u{e9}"));
+    assert_eq!(a.ui.find.text(), "\u{e9}");
+}
