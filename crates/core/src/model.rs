@@ -313,6 +313,23 @@ pub struct BlockAttrs {
     pub marker: Option<ListMarker>,
 }
 
+/// Which floats a block starts below: what `<br clear="left|right|all">` asks of the content
+/// after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Clear {
+    Left,
+    Right,
+    Both,
+}
+
+/// A block that starts below the floated images at one side or both. Sorted by `block`; use
+/// `Document::clear_of`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClearAt {
+    pub block: u32,
+    pub side: Clear,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Heading {
     pub level: u8,
@@ -408,6 +425,8 @@ pub struct Document {
     pub anchors: Vec<Anchor>,
     pub footnotes: Vec<Footnote>,
     pub block_attrs: Vec<BlockAttrs>,
+    /// Blocks that start below floated images (`<br clear>`); almost always empty.
+    pub clears: Vec<ClearAt>,
     pub warnings: Vec<Warning>,
     /// The note names of the `[[target]]`s that were left as text (`WikiAs::Text`), so the
     /// application can tell when one of them would be a link now.
@@ -448,6 +467,12 @@ impl Document {
             .binary_search_by_key(&block, |a| a.block)
             .ok()?;
         Some(&self.block_attrs[i])
+    }
+
+    /// Which floats `block` starts below, if it was asked to.
+    pub fn clear_of(&self, block: u32) -> Option<Clear> {
+        let i = self.clears.binary_search_by_key(&block, |c| c.block).ok()?;
+        Some(self.clears[i].side)
     }
 
     /// Direct children of `parent`, or the top-level blocks for `NONE`.

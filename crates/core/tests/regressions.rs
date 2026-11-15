@@ -3553,3 +3553,74 @@ fn check_text_ranges(d: &Document) {
         last = s.start;
     }
 }
+
+/// The text of each top-level block and which clear it carries, as `text:Clear`.
+fn clears(d: &Document) -> Vec<String> {
+    d.children(mdview_core::model::NONE)
+        .map(|b| {
+            let text = d.text[d.blocks[b as usize].text.usize()].trim().to_string();
+            match d.clear_of(b) {
+                Some(c) => format!("{text}:{c:?}"),
+                None => text,
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn a_br_with_clear_starts_the_next_block_below_the_floats() {
+    for (tag, want) in [
+        (r#"<br clear="all">"#, "Both"),
+        (r#"<br clear=all>"#, "Both"),
+        (r#"<br clear='both' />"#, "Both"),
+        (r#"<BR CLEAR="Left"/>"#, "Left"),
+        (r#"<br clear="right">"#, "Right"),
+    ] {
+        // Alone, and ending a paragraph: the next paragraph carries it.
+        let d = parse(&format!("a\n\n{tag}\n\nb\n"));
+        assert_eq!(clears(&d), ["a".to_string(), format!("b:{want}")], "{tag}");
+        let d = parse(&format!("a {tag}\n\nb\n"));
+        assert_eq!(clears(&d), ["a".to_string(), format!("b:{want}")], "{tag}");
+    }
+    // In the middle of a paragraph the rest of it becomes the block that clears.
+    let d = parse("one <br clear=\"all\"> two\n\nthree\n");
+    assert_eq!(clears(&d), ["one", "two:Both", "three"]);
+    // After an image in the same paragraph, as READMEs write it.
+    let d =
+        parse("<img src=\"a.png\" align=\"left\" width=\"40\"> text\n<br clear=\"left\">\nafter\n");
+    assert_eq!(clears(&d), ["text", "after:Left"]);
+    assert_eq!(d.images.len(), 1);
+}
+
+#[test]
+fn a_br_without_a_usable_clear_is_the_break_it_was() {
+    for tag in [
+        "<br>",
+        "<br clear>",
+        "<br clear=\"\">",
+        "<br clear=\"none\">",
+        "<br clear=\"sideways\">",
+    ] {
+        let d = parse(&format!("a {tag} b\n"));
+        assert!(d.clears.is_empty(), "{tag}");
+        assert_eq!(d.text.trim_end(), "a \n b", "{tag}");
+    }
+    // Where the block cannot be ended the break stays a break, with nothing cleared.
+    let d = parse("# head <br clear=\"all\"> more\n\nnext\n");
+    assert!(d.clears.is_empty());
+    assert!(d.text.contains('\n'));
+    // A clear with nothing after it, or in code, asks for nothing.
+    assert!(parse("a\n\n<br clear=\"all\">\n").clears.is_empty());
+    assert!(parse("`<br clear=\"all\">`\n\nb\n").clears.is_empty());
+}
+
+#[test]
+fn clears_stay_in_order_and_inside_the_document() {
+    let d = parse(
+        "a <br clear=\"left\"> b\n\n- c <br clear=\"all\"> d\n\n> q\n> <br clear=\"right\">\n> r\n\n| t |\n|---|\n| <br clear=\"all\"> x |\n\n<br clear=\"all\">\n\n```\ncode\n```\n",
+    );
+    for pair in d.clears.windows(2) {
+        assert!(pair[0].block < pair[1].block);
+    }
+    assert!(d.clears.iter().all(|c| (c.block as usize) < d.blocks.len()));
+}

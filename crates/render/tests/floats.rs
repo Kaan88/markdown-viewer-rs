@@ -776,3 +776,119 @@ fn an_arrived_float_is_drawn_in_a_frame_below_its_paragraph() {
         expected.view(&doc, &options, top, 200.0).bitmap.pixels
     );
 }
+
+/// The first row with ink in it in top-level block `index`.
+fn ink_top(r: &mdview_render::Rendered, index: usize) -> usize {
+    let width = r.bitmap.width as usize;
+    rows_of(r, index)
+        .find(|&row| start(r, row) < width)
+        .expect("the block has ink")
+}
+
+/// Top-level blocks: 0 the image's paragraph (no line), 1 "Beside.", 2 "After.", 3 "Last.".
+fn clear_doc(side: &str, clear: &str) -> mdview_core::Document {
+    mdview_core::parse(&format!(
+        "<img src=\"assets/tall.png\" width=\"200\" align=\"{side}\">\n\nBeside.\n\n\
+         <br clear=\"{clear}\">\n\nAfter.\n\nLast.\n"
+    ))
+}
+
+#[test]
+fn a_br_with_clear_starts_the_next_block_below_the_float_at_that_side() {
+    let options = options(780.0, 1.0);
+    // The image is 200 wide and 280 tall.
+    for (clear, below) in [
+        ("right", true),
+        ("all", true),
+        ("both", true),
+        ("left", false),
+    ] {
+        let page = render(&clear_doc("right", clear), &options);
+        let image_bottom = page.blocks[0].y + 280.0;
+        let after = ink_top(&page, 2) as f32;
+        assert_eq!(
+            after >= image_bottom,
+            below,
+            "clear={clear}: After's ink starts at {after} (the image ends at {image_bottom})"
+        );
+        if below {
+            // And the block after it runs at the full width again.
+            let widest = rows_of(&page, 3).map(|row| reach(&page, row)).max();
+            assert!(ink_top(&page, 3) as f32 >= image_bottom, "clear={clear}");
+            assert!(widest.is_some());
+        }
+    }
+    // Without a clear, the same document stands beside the float.
+    let plain = render(
+        &mdview_core::parse(
+            "<img src=\"assets/tall.png\" width=\"200\" align=\"right\">\n\nBeside.\n\nAfter.\n\nLast.\n",
+        ),
+        &options,
+    );
+    assert!((ink_top(&plain, 2) as f32) < plain.blocks[0].y + 280.0);
+    // A float at the left, cleared at the left: the text is below it, and a right clear leaves it.
+    let page = render(&clear_doc("left", "left"), &options);
+    assert!(ink_top(&page, 2) as f32 >= page.blocks[0].y + 280.0);
+    let beside = render(&clear_doc("left", "right"), &options);
+    assert!((ink_top(&beside, 2) as f32) < beside.blocks[0].y + 280.0);
+    let first = rows_of(&beside, 2).map(|row| start(&beside, row)).min();
+    assert!(
+        first.unwrap() >= 256,
+        "a right clear leaves the left float: {first:?}"
+    );
+}
+
+#[test]
+fn a_br_with_clear_in_the_middle_of_a_paragraph_moves_the_rest_below() {
+    let options = options(780.0, 1.0);
+    let doc = mdview_core::parse(&format!(
+        "<img src=\"assets/tall.png\" width=\"200\" align=\"right\">\n\n\
+         First part. {WORDS}<br clear=\"all\"> Second part.\n\nThird.\n"
+    ));
+    let page = render(&doc, &options);
+    // 0 the image, 1 the first part, 2 the second part, 3 the third.
+    let image_bottom = page.blocks[0].y + 280.0;
+    assert!(
+        (ink_top(&page, 1) as f32) < image_bottom,
+        "the first part is beside"
+    );
+    assert!(
+        ink_top(&page, 2) as f32 >= image_bottom,
+        "{:?}",
+        page.blocks
+    );
+    assert!(ink_top(&page, 3) as f32 >= image_bottom);
+}
+
+#[test]
+fn clears_lay_out_the_same_whatever_order_the_blocks_were_measured_in() {
+    let options = options(780.0, 1.0);
+    let mut md =
+        String::from("# Top\n\n<img src=\"assets/tall.png\" width=\"200\" align=\"right\">\n\n");
+    for i in 0..6 {
+        md.push_str(&format!("Paragraph {i}. {WORDS}\n\n"));
+    }
+    md.push_str("<br clear=\"right\">\n\n");
+    for i in 6..30 {
+        md.push_str(&format!("Paragraph {i}. {WORDS}\n\n"));
+    }
+    let doc = mdview_core::parse(&md);
+    let full = eager(&doc, &options);
+    let mut renderer = DocumentRenderer::new();
+    renderer.layout(&doc, &options);
+    refine_all(&mut renderer, &doc, &options);
+    let layout = renderer.layout_exact(&doc, &options).clone();
+    same_positions(&full, &layout, "refined");
+    // Jumping into the middle first gives the same page too.
+    let mut jumped = DocumentRenderer::new();
+    jumped.layout(&doc, &options);
+    jumped
+        .jump_to(&doc, &options, Jump::Block(20), 24.0, 300.0)
+        .unwrap();
+    refine_all(&mut jumped, &doc, &options);
+    same_positions(
+        &full,
+        &jumped.layout_exact(&doc, &options).clone(),
+        "jumped",
+    );
+}

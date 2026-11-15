@@ -226,6 +226,12 @@ impl<'a, 'b> Pager<'a, 'b> {
     }
 
     pub(super) fn block(&mut self, b: u32, left: f32, width: f32, color: Color, depth: usize) {
+        if !self.floats.is_empty()
+            && !self.doc.clears.is_empty()
+            && let Some(side) = self.doc.clear_of(b)
+        {
+            self.clear_side(side);
+        }
         let kind = self.doc.blocks[b as usize].kind;
         match kind {
             BlockKind::Paragraph { align } => self.paragraph(b, left, width, color, align),

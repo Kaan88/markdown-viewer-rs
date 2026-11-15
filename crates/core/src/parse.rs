@@ -512,6 +512,8 @@ struct Builder<'a> {
     /// The span of a wiki-link whose label holds markup (`[[Note|a *b* c]]`) while its closing
     /// `]]` is still to come, or `NONE`.
     wiki_open: u32,
+    /// A `<br clear>` was read: the next block that opens starts below the floats at that side.
+    pending_clear: Option<Clear>,
     /// Set by `find_wiki` when the run ends inside such a label.
     wiki_pending: Option<WikiOpen>,
     link_depth: u32,
@@ -609,6 +611,7 @@ impl<'a> Builder<'a> {
             wiki,
             heading_wiki: false,
             wiki_open: NONE,
+            pending_clear: None,
             wiki_pending: None,
             link_depth: 0,
             strong_depth: 0,
@@ -1372,6 +1375,9 @@ impl<'a> Builder<'a> {
             origin,
         });
         self.cur_block = idx;
+        if let Some(side) = self.pending_clear.take() {
+            self.doc.clears.push(ClearAt { block: idx, side });
+        }
         idx
     }
 
@@ -1480,6 +1486,10 @@ impl<'a> Builder<'a> {
         self.doc.blocks.truncate(b as usize);
         while self.doc.block_attrs.last().is_some_and(|a| a.block >= b) {
             self.doc.block_attrs.pop();
+        }
+        // A clear the dropped block held belongs to whatever block takes its place.
+        while let Some(c) = self.doc.clears.pop_if(|c| c.block >= b) {
+            self.pending_clear = Some(c.side);
         }
         // An empty implied container can hold an empty heading or an anchor; both would point past
         // the end of the tree once it goes.
@@ -2557,9 +2567,17 @@ impl<'a> Builder<'a> {
             Tag::A => self.html_link(attrs),
             Tag::Img => self.html_image(attrs),
             Tag::Br => {
-                self.begin_inline();
-                self.flush_run();
-                self.doc.text.push('\n');
+                // `<br clear>` ends the block it is in, and the next block starts below the
+                // floats; where the block cannot be ended (a heading, a list item's own text)
+                // it is the break it always was.
+                let cleared = html::attr(attrs, "clear")
+                    .and_then(|v| parse_clear(&v))
+                    .is_some_and(|side| self.clear_break(side));
+                if !cleared {
+                    self.begin_inline();
+                    self.flush_run();
+                    self.doc.text.push('\n');
+                }
             }
             // GitHub's sanitizer removes a raw input outside a task list, so nothing is drawn.
             Tag::Input => {}
@@ -2696,6 +2714,17 @@ impl<'a> Builder<'a> {
         if matches!(tag, Tag::P | Tag::H(_)) {
             self.enter_inline();
         }
+    }
+
+    /// A `<br clear>`: ends the inline content open, if it can be ended, and has the next block
+    /// start below the floats at `side`. False when the content has to stay whole.
+    fn clear_break(&mut self, side: Clear) -> bool {
+        self.flush_run();
+        if self.inline_open && !self.make_room_for_html_block(Tag::Br) {
+            return false;
+        }
+        self.pending_clear = Some(side);
+        true
     }
 
     /// Ends whatever inline content is open so that a block can start. False when the tag has to be
@@ -3023,6 +3052,17 @@ fn html_align(attrs: &str) -> Align {
         Some(a) if a.eq_ignore_ascii_case("right") => Align::Right,
         Some(a) if a.eq_ignore_ascii_case("justify") => Align::Justify,
         _ => Align::None,
+    }
+}
+
+/// The `clear` of a `<br>`: `left`, `right`, `all` or `both`, in any case. Anything else, an empty
+/// value too, clears nothing.
+fn parse_clear(v: &str) -> Option<Clear> {
+    match v.trim().to_ascii_lowercase().as_str() {
+        "left" => Some(Clear::Left),
+        "right" => Some(Clear::Right),
+        "all" | "both" => Some(Clear::Both),
+        _ => None,
     }
 }
 

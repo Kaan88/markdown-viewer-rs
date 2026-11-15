@@ -477,6 +477,12 @@ fn check_invariants(d: &Document, src: &str) {
     for a in &d.block_attrs {
         assert!((a.block as usize) < d.blocks.len(), "{src:?}");
     }
+    for pair in d.clears.windows(2) {
+        assert!(pair[0].block < pair[1].block, "{src:?}");
+    }
+    for c in &d.clears {
+        assert!((c.block as usize) < d.blocks.len(), "{src:?}");
+    }
     let px_ok = |l: Option<Length>| !matches!(l, Some(Length::Px(n)) if n > MAX_HTML_LENGTH_PX);
     assert!(
         d.block_attrs
