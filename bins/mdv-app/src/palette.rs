@@ -289,6 +289,7 @@ fn commands(ws: &Workspace) -> (Vec<Entry>, Vec<Target>) {
     let (mut entries, mut targets) = (Vec::new(), Vec::new());
     let has_tab = ws.active().is_some();
     let many = ws.tab_count() > 1;
+    let has_selection = ws.has_selection();
     let any_recent = !ws.recents().is_empty();
     let mut table: Vec<_> = COMMANDS
         .iter()
@@ -320,6 +321,7 @@ fn commands(ws: &Workspace) -> (Vec<Entry>, Vec<Target>) {
             C::Back => ws.can_go_back(),
             C::Forward => ws.can_go_forward(),
             C::ClearRecent => any_recent,
+            C::CopyMarkdown => has_selection,
             _ => true,
         };
         let name = label(c.id, c.label);

@@ -52,6 +52,9 @@ pub enum CommandId {
     /// Copy the code of the block at the selection, or the first one in view. In no menu bar menu:
     /// the command palette and the code box's own button offer it.
     CopyCodeBlock,
+    /// Copy the source lines of the top-level blocks the selection touches. In no menu bar menu:
+    /// the page's right-click menu and the command palette offer it, and it needs a selection.
+    CopyMarkdown,
     /// Save the document as one self-contained HTML file.
     ExportHtml,
     /// Hand the document to the default browser to print.
@@ -296,6 +299,7 @@ pub const COMMANDS: &[Command] = &[
         &[K("Escape")],
     ),
     cmd(C::CopyCodeBlock, Menu::None, "Copy code block", &[]),
+    cmd(C::CopyMarkdown, Menu::None, "Copy as Markdown", &[]),
     // In no menu bar menu (the File menu's items are pinned by a regression test): the shell's
     // menu and the command palette offer them.
     cmd(C::ExportHtml, Menu::None, "Export as HTML…", &[]),

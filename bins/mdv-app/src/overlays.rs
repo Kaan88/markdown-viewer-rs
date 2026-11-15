@@ -53,7 +53,7 @@ pub fn command_icon(id: C) -> &'static str {
         C::Present => glyph::PLAY,
         C::ShowShortcuts => glyph::KEYBOARD,
         C::About => glyph::INFO,
-        C::CopyFilePath | C::CopyCodeBlock => glyph::COPY,
+        C::CopyFilePath | C::CopyCodeBlock | C::CopyMarkdown => glyph::COPY,
         C::EditInMdedit => glyph::EDIT,
         C::MakeDefault => glyph::CHECK,
         C::ExportHtml => glyph::DOWNLOAD,
@@ -217,6 +217,7 @@ pub fn page_menu(ctx: &PageContext, x: f32, y: f32) -> Menu<Act> {
         copy = copy.sep();
     }
     items.push(copy);
+    items.push(cmd(C::CopyMarkdown, "Copy as Markdown", glyph::COPY).enabled(ctx.has_selection));
     items.push(
         Item::new(Act::SelectAll, "Select all")
             .hint("Ctrl+A")

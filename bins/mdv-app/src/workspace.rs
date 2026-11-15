@@ -3091,6 +3091,36 @@ impl Workspace {
         doc.text.get(from as usize..to as usize).map(str::to_string)
     }
 
+    /// The Markdown source of the top-level blocks the selection touches, as the file has it
+    /// (`mdview_core::rich::selection_markdown`). The model keeps no source, so it is the text a
+    /// live or presented tab holds, else the file read again, and only when that file is the one
+    /// the page was made from (same stamp): a file changed on disk since gives a message to show
+    /// and the page is left to be reloaded.
+    pub fn selected_markdown(&self) -> Result<String, &'static str> {
+        let (from, to) = self
+            .selection()
+            .ok_or("Select something to copy as Markdown")?;
+        let tab = self.active_tab().ok_or("Nothing is open")?;
+        let doc = tab.doc.as_ref().ok_or("Nothing is open")?;
+        let read;
+        let source = match tab.source.as_deref() {
+            Some(source) => source,
+            None if tab.untitled.is_some() || tab.missing => {
+                return Err("The source of this page is not available");
+            }
+            None => {
+                let loaded = read_stable(&tab.path).map_err(|_| "The file could not be read")?;
+                if loaded.stamp != tab.stamp {
+                    return Err("The file changed on disk: reload, then copy again");
+                }
+                read = mdview_core::files::decode(&loaded.bytes).0.into_owned();
+                &read
+            }
+        };
+        mdview_core::rich::selection_markdown(doc, source, from, to)
+            .ok_or("No Markdown found for the selection")
+    }
+
     /// The selection as an HTML fragment, to go on the clipboard beside the text.
     pub fn selected_html(&self) -> Option<String> {
         let (from, to) = self.selection()?;
@@ -4945,6 +4975,27 @@ mod tests {
         assert!(ws.context_at(x, y).has_selection);
         assert!(ws.clear_selection());
         assert!(ws.selected_text().is_none());
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn selected_markdown_is_the_files_lines_of_the_touched_blocks() {
+        let dir = temp_dir("copymd");
+        let text = "# Head\n\nalpha *bravo*\ncharlie\n\n- x\n- y\n\nlast\n";
+        let path = write(&dir, "doc.md", text);
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        // Nothing selected: nothing to copy.
+        assert!(ws.selected_markdown().is_err());
+        let (x, y) = point_of(&mut ws, "bravo");
+        assert!(ws.pointer_press(x, y, 2));
+        assert_eq!(ws.pointer_release(), Click::Selected);
+        assert_eq!(ws.selected_markdown().unwrap(), "alpha *bravo*\ncharlie");
+        assert!(ws.select_all());
+        assert_eq!(ws.selected_markdown().unwrap(), text.trim_end());
+        // The file changed on disk and the page was not reloaded: no guess from new bytes.
+        std::fs::write(&path, format!("new first line\n\n{text}")).unwrap();
+        assert!(ws.selected_markdown().is_err());
         _ = std::fs::remove_dir_all(&dir);
     }
 

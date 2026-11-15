@@ -234,6 +234,18 @@ impl App {
         }
     }
 
+    /// "Copy as Markdown": the source of the blocks the selection touches, as plain text.
+    pub(super) fn copy_markdown(&mut self) {
+        match self.ws.selected_markdown() {
+            Ok(text) => {
+                if crate::codebtn::to_clipboard(&text) {
+                    self.ws.set_status("Copied");
+                }
+            }
+            Err(message) => self.ws.set_status(message),
+        }
+    }
+
     pub(super) fn tab_command(&mut self, id: C, index: usize) {
         let Some(path) = self.ws.tab(index).map(|t| t.path().to_path_buf()) else {
             return;
@@ -617,6 +629,7 @@ impl App {
             }
             C::Escape => self.escape(),
             C::CopyCodeBlock => self.copy_code_block(),
+            C::CopyMarkdown => self.copy_markdown(),
             C::CloseOtherTabs | C::CopyFilePath | C::ShowInFileManager | C::EditInMdedit => {
                 if let Some(i) = self.ws.active() {
                     self.tab_command(id, i);

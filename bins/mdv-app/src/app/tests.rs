@@ -2572,3 +2572,59 @@ fn a_tab_is_found_by_its_file_or_by_the_editors_name_for_it() {
     assert!(!a.ws.shows(std::path::Path::new("no-such.md"), None));
     assert!(!a.ws.shows(std::path::Path::new(""), Some("mdedit-1-2")));
 }
+
+// ---- copy as markdown ------------------------------------------------------------------------
+
+#[test]
+fn copy_as_markdown_is_a_palette_command_that_waits_for_a_selection() {
+    use crate::palette::Target;
+    let mut a = app(&["showcase.md"]);
+    a.open_palette(">copy as");
+    a.compose();
+    assert!(listed(&a).contains(&Target::Cmd(CommandId::CopyMarkdown)));
+    let cmd = mdview_core::commands::command(CommandId::CopyMarkdown);
+    assert!(cmd.shortcuts.is_empty(), "no default key");
+    // Without a selection the command only says so; nothing is copied.
+    crate::codebtn::COPIED.with(|c| c.borrow_mut().take());
+    a.command(CommandId::CopyMarkdown);
+    assert!(crate::codebtn::COPIED.with(|c| c.borrow().is_none()));
+    assert_ne!(a.ws.status(Instant::now()), Some("Copied"));
+}
+
+#[test]
+fn copy_as_markdown_copies_the_source_and_says_copied() {
+    let mut a = app(&["showcase.md"]);
+    a.compose();
+    assert!(a.ws.select_all());
+    crate::codebtn::COPIED.with(|c| c.borrow_mut().take());
+    a.command(CommandId::CopyMarkdown);
+    let copied = crate::codebtn::COPIED
+        .with(|c| c.borrow_mut().take())
+        .expect("copied");
+    let file = std::fs::read_to_string(fixture("showcase.md")).unwrap();
+    assert!(
+        file.replace("\r\n", "\n")
+            .contains(&copied.replace("\r\n", "\n"))
+    );
+    assert!(copied.len() > 500);
+    assert_eq!(a.ws.status(Instant::now()), Some("Copied"));
+}
+
+#[test]
+fn the_page_menu_offers_copy_as_markdown_after_copy_and_greyed_without_a_selection() {
+    let ctx = |has_selection| crate::workspace::PageContext {
+        has_selection,
+        ..Default::default()
+    };
+    for has in [false, true] {
+        let menu = crate::overlays::page_menu(&ctx(has), 10.0, 10.0);
+        let items = &menu.items;
+        let at = items
+            .iter()
+            .position(|i| matches!(i.id, crate::ui::Act::Cmd(CommandId::CopyMarkdown)))
+            .expect("the item");
+        assert_eq!(items[at].label, "Copy as Markdown");
+        assert_eq!(items[at].enabled, has);
+        assert!(matches!(items[at - 1].id, crate::ui::Act::Copy));
+    }
+}
