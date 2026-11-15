@@ -663,7 +663,8 @@ mod tests {
         let (mut ws, dir) = fixture();
         ws.open(&dir.join("Home.md")).unwrap();
         show(&mut ws);
-        assert_eq!(wiki_links(&ws).len(), 12);
+        // Twelve written as `[[..]]` and the `![[Recipes]]` embed, which is a link to the note.
+        assert_eq!(wiki_links(&ws).len(), 13);
         assert_eq!(missing(&ws), ["Shopping list", "the budget", "Nowhere"]);
 
         // Hovering shows the file a link leads to, or that there is none.

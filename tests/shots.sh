@@ -188,4 +188,9 @@ shot present-small-light --light --size 700x500 --present 2 "$fx/slides.md"
 shot present-large-dark --dark --size 1920x1080 --present 2 "$fx/slides.md"
 shot present-scale-150 --light --scale 1.5 --present 3 "$fx/slides.md"
 
+# The render gaps: markup in a wiki-link label and embeds, `<br clear>`, a table beside a float.
+shot wiki-embeds-light --light --size 900x700 "$fx/wiki-embeds/Embeds.md"
+shot floats-clear-light --light --size 900x700 "$fx/floats-clear.md"
+shot floats-table-light --light --size 900x700 "$fx/floats-table.md"
+
 ls "$out" | wc -l
