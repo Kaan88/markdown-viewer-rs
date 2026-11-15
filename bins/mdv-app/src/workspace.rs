@@ -2558,7 +2558,12 @@ impl Workspace {
         else {
             return false;
         };
-        if (top.round() - tab.scroll).abs() < min_move {
+        // The page stays for a move under `min_move`. A move up is under it only while the target
+        // is still in view: `top` leaves the target `margin` below the top edge, so a move up of
+        // `margin` or more puts the target's own row above the edge, and the page follows.
+        let by = top.round() - tab.scroll;
+        // (And a move down is under it only while the target is above the bottom edge.)
+        if by.abs() < min_move && -by < margin && by < height - 2.0 * margin {
             self.renderer.set_top(tab.scroll);
             return false;
         }
@@ -3091,6 +3096,36 @@ impl Workspace {
         doc.text.get(from as usize..to as usize).map(str::to_string)
     }
 
+    /// The Markdown source of the top-level blocks the selection touches, as the file has it
+    /// (`mdview_core::rich::selection_markdown`). The model keeps no source, so it is the text a
+    /// live or presented tab holds, else the file read again, and only when that file is the one
+    /// the page was made from (same stamp): a file changed on disk since gives a message to show
+    /// and the page is left to be reloaded.
+    pub fn selected_markdown(&self) -> Result<String, &'static str> {
+        let (from, to) = self
+            .selection()
+            .ok_or("Select something to copy as Markdown")?;
+        let tab = self.active_tab().ok_or("Nothing is open")?;
+        let doc = tab.doc.as_ref().ok_or("Nothing is open")?;
+        let read;
+        let source = match tab.source.as_deref() {
+            Some(source) => source,
+            None if tab.untitled.is_some() || tab.missing => {
+                return Err("The source of this page is not available");
+            }
+            None => {
+                let loaded = read_stable(&tab.path).map_err(|_| "The file could not be read")?;
+                if loaded.stamp != tab.stamp {
+                    return Err("The file changed on disk: reload, then copy again");
+                }
+                read = mdview_core::files::decode(&loaded.bytes).0.into_owned();
+                &read
+            }
+        };
+        mdview_core::rich::selection_markdown(doc, source, from, to)
+            .ok_or("No Markdown found for the selection")
+    }
+
     /// The selection as an HTML fragment, to go on the clipboard beside the text.
     pub fn selected_html(&self) -> Option<String> {
         let (from, to) = self.selection()?;
@@ -3159,10 +3194,22 @@ impl Workspace {
         let pick = self.active_document().and_then(|doc| {
             let block = doc.block_at_line(line)?;
             let text = doc.blocks[block as usize].text;
-            self.find
-                .hits
-                .iter()
-                .position(|&(start, _)| start >= text.start && start < text.end)
+            let in_block = |&(start, _): &(u32, u32)| start >= text.start && start < text.end;
+            // A paragraph, list item or code block of many source lines is one block: the match
+            // wanted is the first one written on this line, between where its text begins in the
+            // block and where the next line's does. Failing that (the line matched in markup,
+            // not in what the page shows) the block's first match, as before.
+            let from = doc.text_at_line(line, 0).unwrap_or(text.start);
+            let to = if doc.block_at_line(line + 1) == Some(block) {
+                doc.text_at_line(line + 1, 0).filter(|&t| t > from)
+            } else {
+                None
+            }
+            .unwrap_or(text.end);
+            let hits = &self.find.hits;
+            hits.iter()
+                .position(|&(start, _)| start >= from && start < to)
+                .or_else(|| hits.iter().position(in_block))
         });
         match pick {
             Some(i) => {
@@ -4574,21 +4621,32 @@ mod tests {
             assert!(shown, "line {line} is not near the top");
         }
         assert!((10..55).contains(&moves), "{moves}");
-        // Up again: the page never goes forward, and the caret's line is never a whole step
-        // above the top of the page: the page follows before that. In rows that is two, with
-        // rows of 20 or 21 px (the fonts, and so the rows, differ by system).
-        let allowed = (LINE_STEP / row).floor() as u32;
-        for line in (110..159).rev() {
+        // Up again: the page never goes forward, and the caret's line is never above the top of
+        // the page: the page follows as soon as it would be. It still does not move on every
+        // line: a move puts the line a margin below the edge, which a row or two of walking up
+        // uses. (`row` is measured above: the fonts, and so the rows, differ by system.)
+        let mut up_moves = 0;
+        let lines = 110..159;
+        let count = lines.len() as u32;
+        for line in lines.rev() {
             let before = ws.scroll();
-            ws.follow(&path, line);
+            let moved = ws.follow(&path, line);
             settle(&mut ws);
             assert!(ws.scroll() <= before, "line {line}");
+            assert_eq!(moved, ws.scroll() != before, "line {line}");
+            up_moves += moved as u32;
             let top = ws.top_source_line().unwrap();
             assert!(
-                top <= line + allowed,
+                top <= line,
                 "line {line} left the view: the top is {top}, a row is {row} px"
             );
         }
+        let rows_per_move = (JUMP_MARGIN / row).floor() as u32 + 1;
+        assert!(
+            up_moves <= count / rows_per_move + 2,
+            "{up_moves} moves for {count} lines of {row} px"
+        );
+        assert!(up_moves >= count / 6, "{up_moves}");
         _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -4810,6 +4868,35 @@ mod tests {
     }
 
     #[test]
+    fn find_at_a_line_of_a_long_block_goes_to_the_match_written_on_that_line() {
+        let dir = temp_dir("find-line-long");
+        // One paragraph of six source lines with the word on lines 3, 5 and 6 (twice on 6), a
+        // code block of three lines after it with the word on lines 10 and 11.
+        let text = "# T\n\nplain start\nmore plain\nthe needle here\nand again\nneedle needle\n\n\
+                    ```\ncode\nneedle in code\nneedle again\n```\n";
+        let path = write(&dir, "doc.md", text);
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        settle(&mut ws);
+        let total = |ws: &Workspace| ws.find_counts().total;
+        // Line 5 (first match of the paragraph), line 7 (second and third are on it): the
+        // first match written there, not the paragraph's first.
+        ws.find_set_at_line("needle", 5);
+        assert_eq!((ws.find_counts().current, total(&ws)), (1, 5));
+        ws.find_set_at_line("needle", 7);
+        assert_eq!(ws.find_counts().current, 2);
+        // A line of the paragraph without a match: the block's first.
+        ws.find_set_at_line("needle", 6);
+        assert_eq!(ws.find_counts().current, 1);
+        // Code lines are exact.
+        ws.find_set_at_line("needle", 11);
+        assert_eq!(ws.find_counts().current, 4);
+        ws.find_set_at_line("needle", 12);
+        assert_eq!(ws.find_counts().current, 5);
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_search_result_is_a_jump_back_returns_from() {
         let dir = temp_dir("find-line-back");
         let first = write(&dir, "a.md", "# A\n\nstart\n");
@@ -4945,6 +5032,27 @@ mod tests {
         assert!(ws.context_at(x, y).has_selection);
         assert!(ws.clear_selection());
         assert!(ws.selected_text().is_none());
+        _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn selected_markdown_is_the_files_lines_of_the_touched_blocks() {
+        let dir = temp_dir("copymd");
+        let text = "# Head\n\nalpha *bravo*\ncharlie\n\n- x\n- y\n\nlast\n";
+        let path = write(&dir, "doc.md", text);
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        // Nothing selected: nothing to copy.
+        assert!(ws.selected_markdown().is_err());
+        let (x, y) = point_of(&mut ws, "bravo");
+        assert!(ws.pointer_press(x, y, 2));
+        assert_eq!(ws.pointer_release(), Click::Selected);
+        assert_eq!(ws.selected_markdown().unwrap(), "alpha *bravo*\ncharlie");
+        assert!(ws.select_all());
+        assert_eq!(ws.selected_markdown().unwrap(), text.trim_end());
+        // The file changed on disk and the page was not reloaded: no guess from new bytes.
+        std::fs::write(&path, format!("new first line\n\n{text}")).unwrap();
+        assert!(ws.selected_markdown().is_err());
         _ = std::fs::remove_dir_all(&dir);
     }
 

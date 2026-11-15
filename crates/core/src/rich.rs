@@ -26,6 +26,72 @@ pub fn selection_html(doc: &Document, from: u32, to: u32) -> Option<String> {
     (!w.out.is_empty()).then_some(w.out)
 }
 
+/// The source of the top-level blocks the selection `from..to` (offsets into `Document::text`)
+/// touches, whole, as lines of `source`: the file's own bytes, not a re-serialisation. `source`
+/// must be the text `doc` was parsed from.
+///
+/// The model knows where a block starts (`Block::line`), not where it ends, so a block runs to
+/// the line before the next top-level block begins; blank lines at the end are dropped, and so
+/// is the last line's own terminator. What lies between two blocks and is no block (a link
+/// reference definition, an HTML comment) therefore goes with the block above it. Front matter,
+/// tables, lists, code, math, `<details>`, HTML blocks and footnote definitions are all
+/// top-level blocks that begin on their own line, so each is taken whole. `None` when the
+/// selection touches no block or a block begins past the end of `source` (the source is not
+/// the document's).
+pub fn selection_markdown(doc: &Document, source: &str, from: u32, to: u32) -> Option<String> {
+    if from >= to || to as usize > doc.text.len() {
+        return None;
+    }
+    let mut starts: Vec<u32> = doc
+        .children(NONE)
+        .map(|b| doc.blocks[b as usize].line)
+        .collect();
+    starts.sort_unstable();
+    starts.dedup();
+    let mut first = u32::MAX;
+    let mut last = 0;
+    for top in doc.children(NONE) {
+        let b = doc.blocks[top as usize];
+        let (start, end) = (b.text.start, b.text.end);
+        // A block with no text (a rule) is touched when the selection runs across where it stands
+        // (a rule whose place is the selection's start belongs to the text that follows it).
+        let touched = if start == end {
+            // At the very end of the text (an image alone in the last paragraph) the selection
+            // that reaches the end takes it.
+            from < start && (start < to || to as usize == doc.text.len())
+        } else {
+            start < to && end > from
+        };
+        if touched {
+            first = first.min(b.line);
+            last = last.max(b.line);
+        }
+    }
+    if first == u32::MAX || first == 0 {
+        return None;
+    }
+    let after = starts.partition_point(|&l| l <= last);
+    let end = starts.get(after).map(|&l| l - 1);
+    let mut lines = source.split_inclusive('\n');
+    let mut from_byte = 0;
+    for _ in 1..first {
+        from_byte += lines.next()?.len();
+    }
+    let mut to_byte = from_byte;
+    let mut kept = from_byte;
+    for (n, line) in (first..).zip(lines) {
+        if end.is_some_and(|end| n > end) {
+            break;
+        }
+        to_byte += line.len();
+        if !line.trim().is_empty() {
+            kept = to_byte;
+        }
+    }
+    let text = source[from_byte..kept].trim_end_matches(['\n', '\r']);
+    (!text.is_empty()).then(|| text.to_string())
+}
+
 struct Writer<'a> {
     doc: &'a Document,
     from: u32,
@@ -537,5 +603,157 @@ mod tests {
     fn html_in_the_source_cannot_inject_markup() {
         let h = all("<script>alert(1)</script>\n\n<b onclick=\"x\">bold</b>\n");
         assert!(!h.contains("<script") && !h.contains("onclick"), "{h}");
+    }
+}
+
+#[cfg(test)]
+mod markdown_tests {
+    use super::*;
+    use crate::parse::parse;
+
+    /// The Markdown copied for a selection from the first `from` to the end of the first `to`
+    /// (found in the page's text).
+    fn pick(src: &str, from: &str, to: &str) -> Option<String> {
+        let doc = parse(src);
+        let a = doc.text.find(from).unwrap_or_else(|| panic!("{from:?}")) as u32;
+        let b = (doc.text[a as usize..]
+            .find(to)
+            .unwrap_or_else(|| panic!("{to:?}"))
+            + to.len()) as u32
+            + a;
+        selection_markdown(&doc, src, a, b)
+    }
+
+    const SRC: &str = "---\ntitle: Hello\ntags: [a, b]\n---\n\n# Heading\n\nFirst *para*\nwraps here.\n\n- item one\n  continued\n- item two\n  - nested two\n\n```rust\nfn main() {}\n\n```\n\n$$\nx^2 + y^2\n$$\n\n| h1 | h2 |\n|----|----|\n| c1 | c2 |\n\n<details>\n<summary>More</summary>\n\nInside body\n\n</details>\n\n<div align=\"center\">\n  <b>html bold</b>\n</div>\n\nNote[^1]\n\n[^1]: The footnote text\n    goes on.\n\n---\n\nLast one";
+
+    #[test]
+    fn a_paragraph_is_its_own_lines_and_nothing_else() {
+        assert_eq!(
+            pick(SRC, "First", "here.").unwrap(),
+            "First *para*\nwraps here."
+        );
+        // A selection inside one word takes the whole block too.
+        assert_eq!(
+            pick(SRC, "wraps", "wra").unwrap(),
+            "First *para*\nwraps here."
+        );
+    }
+
+    #[test]
+    fn a_selection_across_blocks_takes_every_block_between_with_the_blank_lines() {
+        assert_eq!(
+            pick(SRC, "Heading", "First").unwrap(),
+            "# Heading\n\nFirst *para*\nwraps here."
+        );
+    }
+
+    #[test]
+    fn front_matter_is_taken_whole_as_written() {
+        assert_eq!(
+            pick(SRC, "title", "Hello").unwrap(),
+            "---\ntitle: Hello\ntags: [a, b]\n---"
+        );
+    }
+
+    #[test]
+    fn a_list_is_taken_whole_from_one_item() {
+        assert_eq!(
+            pick(SRC, "nested", "two").unwrap(),
+            "- item one\n  continued\n- item two\n  - nested two"
+        );
+    }
+
+    #[test]
+    fn code_keeps_its_fences_and_inner_blank_lines() {
+        assert_eq!(
+            pick(SRC, "fn main", "}").unwrap(),
+            "```rust\nfn main() {}\n\n```"
+        );
+    }
+
+    #[test]
+    fn a_math_block_keeps_its_dollar_lines() {
+        assert_eq!(pick(SRC, "x^2", "y^2").unwrap(), "$$\nx^2 + y^2\n$$");
+    }
+
+    #[test]
+    fn a_table_is_taken_whole_from_one_cell() {
+        assert_eq!(
+            pick(SRC, "c1", "c1").unwrap(),
+            "| h1 | h2 |\n|----|----|\n| c1 | c2 |"
+        );
+    }
+
+    #[test]
+    fn details_is_taken_whole_from_its_body_or_its_summary() {
+        let whole = "<details>\n<summary>More</summary>\n\nInside body\n\n</details>";
+        assert_eq!(pick(SRC, "Inside", "body").unwrap(), whole);
+        assert_eq!(pick(SRC, "More", "More").unwrap(), whole);
+    }
+
+    #[test]
+    fn an_html_block_is_taken_whole() {
+        assert_eq!(
+            pick(SRC, "html", "bold").unwrap(),
+            "<div align=\"center\">\n  <b>html bold</b>\n</div>"
+        );
+    }
+
+    #[test]
+    fn a_footnote_definition_is_taken_whole() {
+        assert_eq!(
+            pick(SRC, "The footnote", "goes on.").unwrap(),
+            "[^1]: The footnote text\n    goes on."
+        );
+    }
+
+    #[test]
+    fn the_last_block_runs_to_the_end_without_the_final_newline() {
+        assert_eq!(pick(SRC, "Last", "one").unwrap(), "Last one");
+        let src = format!("{SRC}\n\n\n");
+        assert_eq!(pick(&src, "Last", "one").unwrap(), "Last one");
+    }
+
+    #[test]
+    fn the_files_bytes_are_kept_crlf_and_all() {
+        let src = "# T\r\n\r\nA *b*\r\nc\r\n\r\nD\r\n";
+        let doc = parse(src);
+        let got = selection_markdown(&doc, src, 0, doc.text.len() as u32).unwrap();
+        assert_eq!(got, "# T\r\n\r\nA *b*\r\nc\r\n\r\nD");
+    }
+
+    #[test]
+    fn nothing_selected_or_a_source_that_is_not_the_documents_gives_none() {
+        let doc = parse(SRC);
+        assert_eq!(selection_markdown(&doc, SRC, 3, 3), None);
+        let last = doc.text.len() as u32;
+        assert_eq!(selection_markdown(&doc, "short", last - 3, last), None);
+    }
+
+    #[test]
+    fn every_fixture_page_selection_ends_where_the_file_ends() {
+        // Selecting the whole page gives the file from its first block to its end for every
+        // fixture, so no block's lines are lost or taken twice.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "md") {
+                continue;
+            }
+            let Ok(src) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let doc = parse(&src);
+            let Some(got) = selection_markdown(&doc, &src, 0, doc.text.len() as u32) else {
+                continue;
+            };
+            // Whatever precedes the first block (comments, definitions) is not a block's.
+            assert!(src.contains(&got), "{}", path.display());
+            // The last block runs to the end of the file: nothing of it is lost.
+            assert!(src.trim_end().ends_with(&got), "{}", path.display());
+            seen += 1;
+        }
+        assert!(seen > 3);
     }
 }

@@ -356,6 +356,9 @@ pub struct Ui {
     pub tree: FileTree,
     pub find: TextField,
     pub find_focused: bool,
+    /// The Outline pane's focused row while the keyboard is in that pane: the headings first,
+    /// then the backlinks, as one list.
+    pub outline_focus: Option<usize>,
     pub caret_on: bool,
     /// When the caret next blinks.
     pub caret_due: Option<Instant>,
@@ -408,6 +411,7 @@ impl Ui {
             tree: new_tree(),
             find: TextField::new(),
             find_focused: false,
+            outline_focus: None,
             caret_on: true,
             caret_due: None,
             mouse: (-1.0, -1.0),

@@ -57,6 +57,8 @@ pub struct Args {
     pub scroll: Option<f32>,
     pub menu: Option<ShotMenu>,
     pub dialog: Option<ShotDialog>,
+    /// `--outline-focus <n>`: the keyboard on row n (from 0) of the Outline pane, for a shot.
+    pub outline_focus: Option<usize>,
     /// `--palette <query>`: the command palette open with this text (an empty one is `""`).
     pub palette: Option<String>,
     /// `--folder-search <query>`: Find in folder open with this text, searched to the end.
@@ -68,6 +70,10 @@ pub struct Args {
     pub focus_mode: bool,
     /// `--present N`: start presenting at slide N (1 is the first), for shots and checks.
     pub present: Option<usize>,
+    /// `--present-overview`: with `--present`, the list of slides open (for shots).
+    pub present_overview: bool,
+    /// `--present-select`: with `--present`, the text of the slide selected (for shots).
+    pub present_select: bool,
     /// Load the first document's remote images without showing the bar (for checks).
     pub load_remote: bool,
     /// Show the update bar at this stage (`available`, `installing` or `installed`) with a
@@ -148,6 +154,8 @@ impl Args {
                 "--present" => {
                     out.present = value(&a).and_then(|v| v.parse().ok()).filter(|&n| n >= 1);
                 }
+                "--present-overview" => out.present_overview = true,
+                "--present-select" => out.present_select = true,
                 "--load-remote" => out.load_remote = true,
                 "--update-bar" => out.update_bar = value(&a),
                 "--demo-untitled" => out.demo_untitled = value(&a).map(PathBuf::from),
@@ -194,6 +202,7 @@ impl Args {
                         _ => None,
                     }
                 }
+                "--outline-focus" => out.outline_focus = value(&a).and_then(|v| v.parse().ok()),
                 "--palette" => out.palette = value(&a),
                 "--folder-search" => out.folder_search = value(&a),
                 "--dialog" => {
@@ -256,6 +265,9 @@ mod tests {
         assert_eq!(a.files_pane, Some(false));
         let a = parse("--shot x.png --palette >zoom --dialog settings");
         assert_eq!(a.palette.as_deref(), Some(">zoom"));
+        assert_eq!(parse("--outline-focus 3").outline_focus, Some(3));
+        let p = parse("--present 2 --present-overview --present-select");
+        assert!(p.present_overview && p.present_select && p.present == Some(2));
         assert_eq!(a.dialog, Some(ShotDialog::Settings));
     }
 

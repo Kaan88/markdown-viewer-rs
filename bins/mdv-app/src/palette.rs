@@ -136,6 +136,24 @@ impl PaletteState {
         }
     }
 
+    /// Files changed: Find in folder searches again for its query, and its list is replaced
+    /// when that is done ([`poll_folder`](Self::poll_folder)). False when this is no such card or
+    /// its box is empty.
+    pub fn refresh_folder(&mut self) -> bool {
+        self.folder.as_mut().is_some_and(FolderSearch::refresh)
+    }
+
+    /// Whether a search started by a change of files is still reading.
+    #[cfg(test)]
+    pub fn folder_refreshing(&self) -> bool {
+        self.folder.as_ref().is_some_and(FolderSearch::refreshing)
+    }
+
+    /// Whether this card is Find in folder, which wants to hear about files changing.
+    pub fn is_folder_search(&self) -> bool {
+        self.folder.is_some()
+    }
+
     /// Whether Find in folder is still reading files.
     pub fn folder_running(&self) -> bool {
         self.folder.as_ref().is_some_and(FolderSearch::running)
@@ -289,6 +307,7 @@ fn commands(ws: &Workspace) -> (Vec<Entry>, Vec<Target>) {
     let (mut entries, mut targets) = (Vec::new(), Vec::new());
     let has_tab = ws.active().is_some();
     let many = ws.tab_count() > 1;
+    let has_selection = ws.has_selection();
     let any_recent = !ws.recents().is_empty();
     let mut table: Vec<_> = COMMANDS
         .iter()
@@ -320,6 +339,7 @@ fn commands(ws: &Workspace) -> (Vec<Entry>, Vec<Target>) {
             C::Back => ws.can_go_back(),
             C::Forward => ws.can_go_forward(),
             C::ClearRecent => any_recent,
+            C::CopyMarkdown => has_selection,
             _ => true,
         };
         let name = label(c.id, c.label);

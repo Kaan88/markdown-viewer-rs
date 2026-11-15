@@ -1162,10 +1162,19 @@ fn live_text_replaces_the_page_keeps_the_place_and_ends_on_live_off() {
     assert!(a.ws.active_tab().unwrap().is_live());
     assert!(page_text(&a).contains("A new heading"));
     assert!(page_text(&a).contains("Tail added in the editor"));
+    // The line sent is the one whose row is at the top of the page, and its first row may be
+    // hidden above the edge (a line that wraps): the page then moves up to show it, by less
+    // than one step and never down. A line fully in view keeps the page still.
+    let moved_up = before - a.ws.scroll();
     assert!(
-        (a.ws.scroll() - before).abs() < 2.0,
+        (0.0..48.0 * a.scale).contains(&moved_up) || moved_up.abs() < 2.0,
         "the reader stays where they were: {before} -> {}",
         a.ws.scroll()
+    );
+    let now = a.ws.top_source_line().unwrap();
+    assert!(
+        now <= top && top - now < 4,
+        "the top line was {top}, is {now}"
     );
     // A follow without text does not end it, and does not change the text.
     a.handed_over(vec![Request {
@@ -2571,4 +2580,563 @@ fn a_tab_is_found_by_its_file_or_by_the_editors_name_for_it() {
     assert!(a.ws.shows(&showcase, None));
     assert!(!a.ws.shows(std::path::Path::new("no-such.md"), None));
     assert!(!a.ws.shows(std::path::Path::new(""), Some("mdedit-1-2")));
+}
+
+// ---- copy as markdown ------------------------------------------------------------------------
+
+#[test]
+fn copy_as_markdown_is_a_palette_command_that_waits_for_a_selection() {
+    use crate::palette::Target;
+    let mut a = app(&["showcase.md"]);
+    a.open_palette(">copy as");
+    a.compose();
+    assert!(listed(&a).contains(&Target::Cmd(CommandId::CopyMarkdown)));
+    let cmd = mdview_core::commands::command(CommandId::CopyMarkdown);
+    assert!(cmd.shortcuts.is_empty(), "no default key");
+    // Without a selection the command only says so; nothing is copied.
+    crate::codebtn::COPIED.with(|c| c.borrow_mut().take());
+    a.command(CommandId::CopyMarkdown);
+    assert!(crate::codebtn::COPIED.with(|c| c.borrow().is_none()));
+    assert_ne!(a.ws.status(Instant::now()), Some("Copied"));
+}
+
+#[test]
+fn copy_as_markdown_copies_the_source_and_says_copied() {
+    let mut a = app(&["showcase.md"]);
+    a.compose();
+    assert!(a.ws.select_all());
+    crate::codebtn::COPIED.with(|c| c.borrow_mut().take());
+    a.command(CommandId::CopyMarkdown);
+    let copied = crate::codebtn::COPIED
+        .with(|c| c.borrow_mut().take())
+        .expect("copied");
+    let file = std::fs::read_to_string(fixture("showcase.md")).unwrap();
+    assert!(
+        file.replace("\r\n", "\n")
+            .contains(&copied.replace("\r\n", "\n"))
+    );
+    assert!(copied.len() > 500);
+    assert_eq!(a.ws.status(Instant::now()), Some("Copied"));
+}
+
+#[test]
+fn the_page_menu_offers_copy_as_markdown_after_copy_and_greyed_without_a_selection() {
+    let ctx = |has_selection| crate::workspace::PageContext {
+        has_selection,
+        ..Default::default()
+    };
+    for has in [false, true] {
+        let menu = crate::overlays::page_menu(&ctx(has), 10.0, 10.0);
+        let items = &menu.items;
+        let at = items
+            .iter()
+            .position(|i| matches!(i.id, crate::ui::Act::Cmd(CommandId::CopyMarkdown)))
+            .expect("the item");
+        assert_eq!(items[at].label, "Copy as Markdown");
+        assert_eq!(items[at].enabled, has);
+        assert!(matches!(items[at - 1].id, crate::ui::Act::Copy));
+    }
+}
+
+#[test]
+fn the_outline_pane_is_walked_with_the_keyboard_only_once_focused() {
+    let mut a = app(&["everything.md"]);
+    // Not focused: Down is the page's.
+    key(&mut a, KeyName::Down, None);
+    assert_eq!(a.ui.outline_focus, None);
+    assert!(a.ws.scroll() > 0.0, "the page took the key");
+
+    a.command(CommandId::FocusOutline);
+    a.compose();
+    let total = a.ws.outline().len();
+    assert!(total > 20);
+    let first = a.ui.outline_focus.expect("a focused row");
+    let page = a.ws.scroll();
+
+    key(&mut a, KeyName::Down, None);
+    assert_eq!(a.ui.outline_focus, Some(first + 1));
+    assert_eq!(a.ws.scroll(), page, "the page did not move");
+    key(&mut a, KeyName::Up, None);
+    key(&mut a, KeyName::Up, None);
+    assert_eq!(a.ui.outline_focus, Some(first.saturating_sub(1)));
+    key(&mut a, KeyName::End, None);
+    assert_eq!(a.ui.outline_focus, Some(total - 1));
+    assert!(
+        outline_row_visible(&a, total - 1),
+        "End reveals the last row"
+    );
+    key(&mut a, KeyName::Down, None);
+    assert_eq!(a.ui.outline_focus, Some(total - 1), "no wrapping");
+    key(&mut a, KeyName::Home, None);
+    assert_eq!(a.ui.outline_focus, Some(0));
+    assert!(outline_row_visible(&a, 0));
+    key(&mut a, KeyName::PageDown, None);
+    let n = a.ui.outline_focus.unwrap();
+    assert!(n > 1 && n < total, "a page of rows: {n}");
+    assert!(outline_row_visible(&a, n));
+    key(&mut a, KeyName::PageUp, None);
+    assert_eq!(a.ui.outline_focus, Some(0));
+
+    // Enter goes to the heading and keeps the keyboard in the pane.
+    key(&mut a, KeyName::End, None);
+    key(&mut a, KeyName::Up, None);
+    let target = a.ui.outline_focus.unwrap();
+    key(&mut a, KeyName::Enter, None);
+    a.compose();
+    a.compose();
+    let now = a.ws.current_heading().expect("a current heading");
+    assert!(
+        now == target || a.ws.scroll() == a.ws.max_scroll(),
+        "went to {now}, wanted {target}"
+    );
+    assert_eq!(a.ui.outline_focus, Some(target));
+
+    // Escape gives the keyboard back to the page.
+    key(&mut a, KeyName::Escape, None);
+    assert_eq!(a.ui.outline_focus, None);
+    a.ws.scroll_to(0.0);
+    key(&mut a, KeyName::Down, None);
+    assert!(a.ws.scroll() > 0.0, "Down is the page's again");
+}
+
+#[test]
+fn the_outline_focus_follows_clicks_and_other_panes() {
+    let mut a = app(&["everything.md"]);
+    click(&mut a, Hit::OutlineRow(2));
+    assert_eq!(a.ui.outline_focus, Some(2));
+    // A click on the page, or the find box, takes the keyboard back.
+    a.pointer_moved(400.0, 400.0);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert_eq!(a.ui.outline_focus, None);
+    click(&mut a, Hit::OutlineRow(2));
+    a.command(CommandId::Find);
+    key(&mut a, KeyName::Down, None);
+    assert_eq!(a.ui.outline_focus, None);
+    // Shortcuts still work with the pane focused.
+    click(&mut a, Hit::OutlineRow(1));
+    a.mods.ctrl = true;
+    key(&mut a, KeyName::Down, None);
+    a.mods.ctrl = false;
+    assert_eq!(a.ui.outline_focus, Some(1));
+    // Closing the pane drops the focus; the command opens it again.
+    a.command(CommandId::ToggleOutline);
+    assert_eq!(a.ui.outline_focus, None);
+    assert!(!a.ui.panes.outline);
+    a.command(CommandId::FocusOutline);
+    assert!(a.ui.panes.outline);
+    assert!(a.ui.outline_focus.is_some());
+}
+
+#[test]
+fn the_keyboard_walks_on_from_the_headings_into_the_backlinks_and_enter_opens_one() {
+    let mut a = app(&["wiki/Home.md"]);
+    a.set_folder(fixture("wiki"));
+    a.ws.index_notes_now();
+    a.compose();
+    let headings = a.ws.outline().len();
+    let links = a.ws.backlinks().len();
+    assert!(links >= 4);
+    a.command(CommandId::FocusOutline);
+    key(&mut a, KeyName::End, None);
+    assert_eq!(a.ui.outline_focus, Some(headings + links - 1));
+    assert!(a.hit_rect(Hit::BacklinkRow(links - 1)).is_some());
+    key(&mut a, KeyName::Up, None);
+    key(&mut a, KeyName::Up, None);
+    assert_eq!(a.ui.outline_focus, Some(headings + links - 3));
+    let before = a.ws.active_tab().unwrap().path().to_path_buf();
+    key(&mut a, KeyName::Enter, None);
+    assert_ne!(a.ws.active_tab().unwrap().path(), before);
+    assert_eq!(
+        a.ui.outline_focus, None,
+        "the keyboard went back to the page"
+    );
+}
+
+#[test]
+fn a_covered_window_arms_no_animation_timer_and_wakes_when_seen_again() {
+    let mut a = app(&["formats.md"]);
+    a.first = false; // the first frame is drawn by the event loop, which a test has not got
+    a.ws.set_animation_wake(|| {});
+    let mut now = Instant::now();
+    // Images arrive from helper threads: compose until the animated one is on the page.
+    let mut armed = None;
+    for _ in 0..200 {
+        a.compose();
+        armed = a.timers(now);
+        if armed.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        now = Instant::now();
+    }
+    assert!(a.shows_page(), "no window, nothing hides it");
+    assert!(armed.is_some(), "an animated GIF in view asks for a wake");
+
+    // Covered: the same page, nothing asked for. Idle is idle.
+    a.occluded = true;
+    assert!(!a.shows_page());
+    assert_eq!(a.timers(Instant::now()), None, "no timer while covered");
+    // Seen again: the timer is armed again.
+    a.occluded = false;
+    assert!(a.timers(Instant::now()).is_some());
+}
+
+#[test]
+fn find_in_folder_searches_again_when_files_change_and_keeps_the_selected_row() {
+    let f = Folder::new("changes");
+    let mut a = folder_app(&f);
+    a.command(C::FindInFolder);
+    type_text(&mut a, "needle");
+    settle(&mut a);
+    a.compose();
+    // Select "needle two" of sub/b.md (the second row that can be chosen).
+    key(&mut a, KeyName::Down, None);
+    let p = a.ui.palette.as_ref().unwrap();
+    assert_eq!(p.folder_hit(p.palette.selected_id().unwrap()).unwrap().1, 5);
+    assert_eq!(rows(&a).len(), 5);
+
+    // A watcher wake with nothing changed leaves the list as it was.
+    a.watch_check();
+    refreshed(&mut a);
+    assert_eq!(rows(&a).len(), 5);
+
+    // Two files change: a line added to a.md, a new file (listed before a.md, so ids move). The list is
+    // replaced when the new search is done, and the selection is on the same line of b.md.
+    std::fs::write(
+        f.0.join("a.md"),
+        "# Alpha\n\nneedle top\n\nthe Needle here\n",
+    )
+    .unwrap();
+    std::fs::write(f.0.join("0.md"), "needle zero\n").unwrap();
+    a.watch_check();
+    // Not replaced yet: the old rows stay while the search reads.
+    assert_eq!(rows(&a).len(), 5);
+    assert!(a.ui.palette.as_ref().unwrap().folder_refreshing());
+    refreshed(&mut a);
+    a.compose();
+    let labels: Vec<String> = rows(&a).into_iter().map(|r| r.1).collect();
+    assert_eq!(
+        labels,
+        [
+            "sub/b.md",
+            "needle one",
+            "needle two",
+            "0.md",
+            "needle zero",
+            "a.md",
+            "needle top",
+            "the Needle here"
+        ]
+    );
+    let p = a.ui.palette.as_ref().unwrap();
+    let (path, line, query) = p.folder_hit(p.palette.selected_id().unwrap()).unwrap();
+    assert_eq!((path.ends_with("sub/b.md"), line), (true, 5));
+    assert_eq!(query, "needle");
+
+    // Without a query, or with the card closed, a wake searches nothing.
+    key(&mut a, KeyName::Escape, None);
+    a.watch_check();
+    assert!(a.ui.palette.is_none());
+}
+
+/// Waits for a search started by changed files to end, taking what it finds as the window does.
+fn refreshed(a: &mut App) {
+    let p = a.ui.palette.as_mut().expect("Find in folder is open");
+    for _ in 0..4000 {
+        p.poll_folder();
+        if !p.folder_refreshing() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("the search did not end");
+}
+
+// ---- presentation: links, selection and the slide overview --------------------------------------
+
+/// A deck and a neighbour file in a fresh temp folder; returns the deck's path.
+fn deck(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("mdview-deck-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("other.md"), "# Other file\n\nHello.\n").unwrap();
+    let path = dir.join("deck.md");
+    std::fs::write(
+        &path,
+        "# First\n\nGo to [the end](#last-slide), [the web](https://example.com/x) \
+         or [the file](other.md).\n\n---\n\n## Middle\n\nSome middle words to select here, \
+         and a few more of them.\n\n---\n\n## Last slide\n\ndone\n",
+    )
+    .unwrap();
+    path
+}
+
+fn deck_app(path: &Path) -> App {
+    app(&[path.to_str().unwrap()])
+}
+
+/// The first point (device px) of the slide where `want` is true, scanning the window.
+fn find_on_slide(
+    a: &mut App,
+    mut want: impl FnMut(&mut crate::present::Show, f32, f32) -> bool,
+) -> Option<(f32, f32)> {
+    let show = a.ui.present.as_mut()?;
+    for y in (0..800).step_by(6) {
+        for x in (0..1280).step_by(8) {
+            if want(show, x as f32, y as f32) {
+                return Some((x as f32, y as f32));
+            }
+        }
+    }
+    None
+}
+
+/// What a click at the point would follow, when it is a link.
+fn link_is(show: &mut crate::present::Show, x: f32, y: f32, dest: &str) -> bool {
+    show.link_at(x, y) && {
+        show.press_at(x, y);
+        show.release() == crate::present::Release::Link(dest.into())
+    }
+}
+
+#[test]
+fn a_click_on_a_link_on_a_slide_goes_to_the_slide_that_holds_the_target() {
+    let path = deck("fragment");
+    let mut a = deck_app(&path);
+    a.ws.scroll_to(0.0);
+    a.compose();
+    let place = a.ws.scroll();
+    a.command(CommandId::Present);
+    a.compose();
+    // The three links of slide 1 are all there to be found.
+    for dest in ["#last-slide", "https://example.com/x", "other.md"] {
+        assert!(
+            find_on_slide(&mut a, |s, x, y| link_is(s, x, y, dest)).is_some(),
+            "{dest}"
+        );
+    }
+    // An in-document link: the slide with the heading shows, and the page behind stays put.
+    let (x, y) = find_on_slide(&mut a, |s, x, y| link_is(s, x, y, "#last-slide")).unwrap();
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert_eq!(slide_index(&a), 2);
+    assert_eq!(a.ws.scroll(), place);
+    assert!(a.presenting());
+    // A name no slide has is not found; one that a slide has is.
+    key(&mut a, KeyName::Home, None);
+    let show = a.ui.present.as_mut().unwrap();
+    assert!(!show.go_to_fragment("no-such-heading"));
+    assert!(show.go_to_fragment("middle"));
+    assert_eq!(slide_index(&a), 1);
+}
+
+#[test]
+fn a_click_on_a_file_link_on_a_slide_opens_it_and_ends_the_show() {
+    let path = deck("file");
+    let mut a = deck_app(&path);
+    a.command(CommandId::Present);
+    a.compose();
+    let (x, y) = find_on_slide(&mut a, |s, x, y| link_is(s, x, y, "other.md"))
+        .expect("the link to the file");
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert_eq!(a.ws.tab_count(), 2, "the file opened in a tab");
+    assert!(!a.presenting(), "the show was of the other tab");
+}
+
+#[test]
+fn a_link_to_the_web_on_a_slide_is_handed_over_as_the_page_hands_it() {
+    // Not clicked for real (that would start the browser): the click gives the destination as
+    // written, which the shell hands to the workspace, which answers as it does for the page.
+    let path = deck("web");
+    let mut a = deck_app(&path);
+    a.command(CommandId::Present);
+    a.compose();
+    assert!(find_on_slide(&mut a, |s, x, y| link_is(s, x, y, "https://example.com/x")).is_some());
+    assert_eq!(
+        a.ws.open_link("https://example.com/x"),
+        LinkOutcome::OpenUrl("https://example.com/x".into())
+    );
+    // And a scheme the page never follows is not followed from a slide either.
+    assert_eq!(a.ws.open_link("javascript:alert(1)"), LinkOutcome::Ignored);
+}
+
+#[test]
+fn dragging_on_a_slide_selects_text_and_ctrl_c_copies_it_and_a_click_still_goes_on() {
+    let path = deck("select");
+    let mut a = deck_app(&path);
+    a.command(CommandId::Present);
+    a.compose();
+    key(&mut a, KeyName::Right, None);
+    assert_eq!(slide_index(&a), 1);
+    let without = a.screen.pixels.clone();
+    let (x, y) = find_on_slide(&mut a, |s, x, y| s.hit(x, y).is_some_and(|h| h.on_text))
+        .expect("text on the slide");
+    // A drag along the line selects, and does not go on.
+    a.pointer_moved(x + 2.0, y);
+    a.left_press();
+    a.pointer_moved(x + 300.0, y);
+    a.left_release();
+    a.compose();
+    assert_eq!(slide_index(&a), 1);
+    let (from, to) =
+        a.ui.present
+            .as_ref()
+            .unwrap()
+            .selection()
+            .expect("selected");
+    assert!(to > from);
+    assert_ne!(without, a.screen.pixels, "the selection tints the slide");
+    // Ctrl+C puts the text on the clipboard (the tests' stand-in) and says Copied.
+    crate::codebtn::COPIED.with(|c| c.borrow_mut().take());
+    a.mods = Mods {
+        ctrl: true,
+        ..Mods::default()
+    };
+    key(&mut a, KeyName::Char('c'), None);
+    a.mods = Mods::default();
+    let copied = crate::codebtn::COPIED
+        .with(|c| c.borrow_mut().take())
+        .expect("copied");
+    assert!(!copied.is_empty());
+    let slide = a.ui.present.as_ref().unwrap().slide(1).to_string();
+    assert!(slide.contains(copied.trim()), "{copied:?}");
+    assert_eq!(a.ws.status(Instant::now()), Some("Copied"));
+    // A plain click drops the selection and goes on.
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert_eq!(slide_index(&a), 2);
+    assert_eq!(a.ui.present.as_ref().unwrap().selection(), None);
+    // Ctrl+A takes the whole text of the slide.
+    a.mods = Mods {
+        ctrl: true,
+        ..Mods::default()
+    };
+    key(&mut a, KeyName::Char('a'), None);
+    a.mods = Mods::default();
+    assert!(a.ui.present.as_ref().unwrap().selection().is_some());
+}
+
+#[test]
+fn the_overview_lists_the_slides_and_enter_goes_to_one() {
+    let mut a = app(&["slides.md"]);
+    a.command(CommandId::Present);
+    a.compose();
+    key(&mut a, KeyName::Right, None);
+    key(&mut a, KeyName::Right, None);
+    assert_eq!(slide_index(&a), 2);
+    // G opens the list, on the slide showing, with a row per slide: number and title.
+    key(&mut a, KeyName::Char('g'), Some("g"));
+    let show = a.ui.present.as_ref().unwrap();
+    assert!(show.overview_open());
+    assert_eq!(show.overview_selected(), Some(2));
+    assert_eq!(
+        show.titles(),
+        ["Quarterly review", "What changed", "Numbers", "Thank you"]
+    );
+    // Keys go to the list, not to the slides.
+    key(&mut a, KeyName::Down, None);
+    assert_eq!(a.ui.present.as_ref().unwrap().overview_selected(), Some(3));
+    assert_eq!(slide_index(&a), 2);
+    // Enter goes there and closes the list.
+    key(&mut a, KeyName::Enter, None);
+    assert_eq!(slide_index(&a), 3);
+    assert!(!a.ui.present.as_ref().unwrap().overview_open());
+    // Escape closes only the list; the show stays.
+    key(&mut a, KeyName::Char('g'), Some("g"));
+    key(&mut a, KeyName::Escape, None);
+    assert!(a.presenting());
+    assert!(!a.ui.present.as_ref().unwrap().overview_open());
+    assert_eq!(slide_index(&a), 3);
+    // Typing narrows the list: a word of the title finds its slide.
+    key(&mut a, KeyName::Char('g'), Some("g"));
+    type_text(&mut a, "numb");
+    key(&mut a, KeyName::Enter, None);
+    assert_eq!(slide_index(&a), 2);
+    // Present still leaves from inside the list.
+    key(&mut a, KeyName::Char('g'), Some("g"));
+    a.mods = Mods {
+        shift: true,
+        ..Mods::default()
+    };
+    key(&mut a, KeyName::F(5), None);
+    a.mods = Mods::default();
+    assert!(!a.presenting());
+}
+
+#[test]
+fn the_overview_is_drawn_over_the_slide_and_a_click_on_a_row_goes_there() {
+    let mut a = app(&["slides.md"]);
+    a.command(CommandId::Present);
+    a.compose();
+    let plain = a.screen.pixels.clone();
+    key(&mut a, KeyName::Char('g'), Some("g"));
+    assert_ne!(plain, a.screen.pixels, "the list is on screen");
+    // The pointer over the fourth row selects it, a click chooses it.
+    let row = {
+        let show = a.ui.present.as_mut().unwrap();
+        (100..700)
+            .step_by(4)
+            .find_map(|y| {
+                show.overview_move(640.0, y as f32);
+                (show.overview_selected() == Some(3)).then_some(y as f32)
+            })
+            .expect("a row for slide 4")
+    };
+    a.pointer_moved(640.0, row);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert_eq!(slide_index(&a), 3);
+    assert!(!a.ui.present.as_ref().unwrap().overview_open());
+}
+
+#[test]
+fn a_window_the_system_does_not_report_covered_but_gdi_says_is_asked_about_once_a_second() {
+    let mut a = app(&["formats.md"]);
+    a.first = false;
+    a.ws.set_animation_wake(|| {});
+    let mut now = Instant::now();
+    let mut armed = None;
+    for _ in 0..200 {
+        a.compose();
+        armed = a.timers(now);
+        if armed.is_some() && a.anim_seen {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        now = Instant::now();
+    }
+    assert!(armed.is_some() && a.anim_seen, "an animated GIF is playing");
+
+    // Covered (the answer of the system call, kept for a second): no animation work, no frame,
+    // only a slow look again.
+    let now = Instant::now();
+    a.covered = Some((now, true));
+    a.anim_rows = None;
+    a.wants_frame = false;
+    assert_eq!(a.timers(now), Some(now + COVER_CHECK));
+    assert!(
+        a.anim_rows.is_none() && !a.wants_frame,
+        "no frame while covered"
+    );
+    // Once the answer is a second old it is asked again (no window here: not covered) and the
+    // animation goes on as before.
+    let later = now + COVER_CHECK + Duration::from_millis(1);
+    let _ = a.timers(later);
+    assert_eq!(a.covered, Some((later, false)));
+    // Without an animated image on the page nothing is asked at all.
+    let mut b = app(&["showcase.md"]);
+    b.first = false;
+    b.compose();
+    assert_eq!(b.timers(Instant::now()), None, "idle is idle");
+    assert_eq!(b.covered, None, "and the system is never asked");
 }

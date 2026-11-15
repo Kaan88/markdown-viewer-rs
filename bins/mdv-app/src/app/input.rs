@@ -359,6 +359,15 @@ impl App {
         ) {
             self.ui.find_focused = false;
         }
+        // Likewise the Outline pane's rows: a click anywhere but on them gives the keyboard back.
+        if !matches!(
+            hit,
+            Hit::OutlineRow(_)
+                | Hit::BacklinkRow(_)
+                | Hit::ScrollBar(Scroller::Pane(Side::Outline))
+        ) {
+            self.ui.outline_focus = None;
+        }
         let clicks = self.click_count(x, y);
         self.redraw();
         match hit {
@@ -433,6 +442,10 @@ impl App {
     pub(super) fn left_release(&mut self) {
         let (x, y) = self.ui.mouse;
         self.ui.autoscroll_due = None;
+        if self.presenting() {
+            self.present_release();
+            return;
+        }
         if self.ui.modal() {
             self.modal_release();
             return;
@@ -698,7 +711,7 @@ impl App {
 
         // A presentation takes the keyboard before anything else.
         if self.presenting() {
-            self.present_key(name, mods);
+            self.present_key(name, mods, typed);
             return;
         }
         // The palette and the settings dialog take the keyboard before anything else.
@@ -755,6 +768,12 @@ impl App {
         }
         if mods.alt && !mods.ctrl && matches!(name, KeyName::Left | KeyName::Right) {
             self.travel(name == KeyName::Left);
+            return;
+        }
+        if self.ui.find_focused {
+            self.ui.outline_focus = None;
+        }
+        if self.outline_key(&name, mods) {
             return;
         }
         if self.ui.find_focused && self.find_key(&name, mods, typed) {

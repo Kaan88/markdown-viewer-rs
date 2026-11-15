@@ -62,6 +62,9 @@ const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
 /// While a tab shows the editor's text: how often to ask whether the editor still answers.
 const SISTER_CHECK: Duration = Duration::from_secs(5);
+/// While animated images are on the page and the window may be covered: how often to look
+/// again, and how long an answer is kept. Nothing runs without an animated image.
+const COVER_CHECK: Duration = Duration::from_secs(1);
 const IDLE_UNLOAD: Duration = Duration::from_secs(60);
 const SIZE_SAVE_DELAY: Duration = Duration::from_millis(800);
 /// How long the page's refinement may run between events: short enough that input waiting
@@ -216,6 +219,11 @@ struct App {
     page_again: bool,
     /// The system says the window is completely covered.
     occluded: bool,
+    /// An animated image was on the page at the last look: whether the window is covered is
+    /// worth asking (Windows never reports it).
+    anim_seen: bool,
+    /// The last answer to "is the window covered", and when it was asked.
+    covered: Option<(Instant, bool)>,
     /// `--scroll-steps`: steps left and the frame times taken.
     steps: Option<u32>,
     step_times: Vec<FrameTimes>,
@@ -284,6 +292,8 @@ impl App {
             anim_rows: None,
             page_again: false,
             occluded: false,
+            anim_seen: false,
+            covered: None,
             step_times: Vec::new(),
             trace,
             wheel_rest: 0.0,
@@ -345,6 +355,12 @@ impl App {
             self.present_begin();
             if let Some(show) = self.ui.present.as_mut() {
                 show.go(n - 1);
+                if a.present_select {
+                    show.select_all();
+                }
+                if a.present_overview {
+                    show.open_overview();
+                }
             }
         }
         if let Some(stage) = &a.update_bar {
@@ -934,7 +950,14 @@ impl App {
         let Some(w) = self.watcher.as_mut() else {
             return;
         };
-        let dirs = if self.ui.panes.files {
+        // The folders the Files pane lists, while it is open or Find in folder is: a file made
+        // or removed there changes what a search finds.
+        let searching = self
+            .ui
+            .palette
+            .as_ref()
+            .is_some_and(|p| p.is_folder_search());
+        let dirs = if self.ui.panes.files || searching {
             self.ui.tree.watched_dirs()
         } else {
             Vec::new()
@@ -1429,6 +1452,9 @@ impl ApplicationHandler<Wake> for App {
             }
             WindowEvent::Occluded(occluded) => {
                 self.occluded = occluded;
+                // Seen again: whatever changed while covered is drawn, and the animations start
+                // again (`about_to_wait` follows this event and arms their timer).
+                self.wants_frame |= !occluded;
             }
             WindowEvent::Focused(focused) => {
                 self.update_shadow(Some(focused));
@@ -1546,7 +1572,9 @@ impl ApplicationHandler<Wake> for App {
             }
             return;
         }
-        if self.wants_frame {
+        // A window that is fully covered is not drawn: the frame waits until it is seen again.
+        // (The first frame is drawn whatever is reported: it is what shows the window.)
+        if self.wants_frame && (!self.occluded || self.first) {
             self.wants_frame = false;
             if let Some(w) = &self.window {
                 self.requested = true;
@@ -1619,6 +1647,11 @@ fn shot(mut app: App, path: &Path) -> i32 {
         Some(ShotDialog::Edit) => app.open_dialog(DialogKind::AllowEdit),
         Some(ShotDialog::Settings) => app.open_settings(),
         None => {}
+    }
+    if let Some(n) = app.args.outline_focus {
+        app.compose();
+        app.ui.outline_focus = Some(n);
+        app.reveal_focused_outline();
     }
     if let Some(query) = app.args.palette.clone() {
         app.open_palette(&query);

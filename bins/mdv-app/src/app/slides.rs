@@ -2,7 +2,7 @@
 //! frame, and the timer of the slide counter. The slides themselves are `crate::present`.
 
 use super::*;
-use crate::present::Show;
+use crate::present::{Overview, Release, Show};
 use mdview_core::commands::strings;
 use winit::window::Fullscreen;
 
@@ -95,12 +95,40 @@ impl App {
 
     /// A key while presenting. Escape leaves; the slide keys move; Present and Exit still work as
     /// everywhere; nothing else does.
-    pub(super) fn present_key(&mut self, name: KeyName, mods: Mods) {
+    pub(super) fn present_key(&mut self, name: KeyName, mods: Mods, typed: Option<&str>) {
         let now = Instant::now();
         let Some(show) = self.ui.present.as_mut() else {
             return;
         };
+        // The list of slides takes every key (Present and Exit still work).
+        if show.overview_open() {
+            if let Some(id @ (C::Present | C::Exit)) = keys::command_for(&name, mods) {
+                self.command(id);
+                return;
+            }
+            let out = show.overview_key(&name, mods, typed);
+            self.overview_done(out, now);
+            return;
+        }
         let _ = match name {
+            KeyName::Char('g') if !mods.ctrl && !mods.alt => {
+                show.open_overview();
+                self.redraw();
+                return;
+            }
+            KeyName::Char('a') if mods.ctrl && !mods.alt => {
+                show.select_all();
+                self.redraw();
+                return;
+            }
+            KeyName::Char('c') if mods.ctrl => {
+                self.present_copy();
+                return;
+            }
+            KeyName::Char('\u{3}') => {
+                self.present_copy();
+                return;
+            }
             KeyName::Escape => {
                 self.present_end();
                 return;
@@ -128,42 +156,164 @@ impl App {
         self.redraw();
     }
 
-    /// A left click goes forward as Space does.
+    /// What the list of slides did: a chosen slide shows the counter, a closed list is gone.
+    fn overview_done(&mut self, out: Overview, now: Instant) {
+        if out == Overview::Went
+            && let Some(show) = self.ui.present.as_mut()
+        {
+            show.touch(now);
+        }
+        self.redraw();
+    }
+
+    /// The left button went down: in the list of slides it acts there; on the slide it starts a
+    /// selection, a click on a link, or a click that goes on (decided when the button comes up).
     pub(super) fn present_press(&mut self) {
-        if let Some(show) = self.ui.present.as_mut() {
-            show.page(true);
-            show.touch(Instant::now());
+        let ((x, y), mods, scale) = (self.ui.mouse, self.mods, self.scale);
+        let Some(show) = self.ui.present.as_mut() else {
+            return;
+        };
+        if show.overview_open() {
+            let out = show.overview_press(x, y, mods);
+            self.overview_done(out, Instant::now());
+        } else {
+            show.press_at(x * scale, y * scale);
+        }
+    }
+
+    /// The left button came up: a plain click goes forward as Space does, a click on a link
+    /// follows it, after a drag the selected text stays.
+    pub(super) fn present_release(&mut self) {
+        let ((x, y), now) = (self.ui.mouse, Instant::now());
+        let Some(show) = self.ui.present.as_mut() else {
+            return;
+        };
+        if show.overview_open() {
+            let out = show.overview_release(x, y);
+            self.overview_done(out, now);
+            return;
+        }
+        match show.release() {
+            Release::Advance => {
+                show.page(true);
+                show.touch(now);
+            }
+            Release::Link(destination) => self.present_link(&destination),
+            Release::Selected | Release::Nothing => {}
         }
         self.redraw();
     }
 
-    /// The wheel scrolls a slide taller than the window.
+    /// A link on a slide, followed as on the page. A link to a place in this document goes to
+    /// the slide that holds it (the page behind is not moved); any other goes through the
+    /// workspace as on the page: a web address opens in the browser, a Markdown file in a tab
+    /// (which ends the presentation, its tab no longer being the one shown), and what the page
+    /// refuses is refused.
+    fn present_link(&mut self, destination: &str) {
+        let doc_dir = self
+            .ws
+            .active_tab()
+            .and_then(|t| t.path().parent().map(Path::to_path_buf))
+            .unwrap_or_default();
+        let is_wiki = destination.starts_with(crate::workspace::WIKI_SCHEME);
+        if !is_wiki
+            && let mdview_core::links::LinkAction::Fragment(fragment) =
+                mdview_core::links::classify_link(destination, &doc_dir)
+        {
+            let found = self
+                .ui
+                .present
+                .as_mut()
+                .is_some_and(|show| show.go_to_fragment(&fragment));
+            if found {
+                if let Some(show) = self.ui.present.as_mut() {
+                    show.touch(Instant::now());
+                }
+            } else {
+                self.ws.set_status(&format!("no anchor named {fragment}"));
+            }
+            return;
+        }
+        let outcome = self.ws.open_link(destination);
+        self.link_outcome(outcome);
+    }
+
+    /// Ctrl+C: the selected text of the slide goes on the clipboard, as the page's does.
+    fn present_copy(&mut self) {
+        let Some(show) = self.ui.present.as_ref() else {
+            return;
+        };
+        if let Some(text) = show.selected_text()
+            && (if cfg!(test) {
+                // A test run must not replace what the person at this machine has copied.
+                crate::codebtn::to_clipboard(&text)
+            } else {
+                show.selected_html()
+                    .is_some_and(|html| platform::set_clipboard_html(&html, &text))
+                    || platform::set_clipboard_text(&text)
+            })
+        {
+            self.ws.set_status("Copied");
+        }
+    }
+
+    /// The wheel scrolls a slide taller than the window, or the list of slides.
     pub(super) fn present_wheel(&mut self, notches: f32, pixels: Option<f32>) {
+        let ((x, y), scale) = (self.ui.mouse, self.scale);
         if let Some(show) = self.ui.present.as_mut() {
-            let dy = match pixels {
-                Some(py) => -py,
-                None => -notches * WHEEL_LINES * LINE * self.scale,
-            };
-            show.scroll_by(dy);
+            if show.overview_open() {
+                let dy = match pixels {
+                    Some(py) => -py / scale,
+                    None => -notches * PANE_WHEEL,
+                };
+                show.overview_wheel(x, y, dy);
+            } else {
+                let dy = match pixels {
+                    Some(py) => -py,
+                    None => -notches * WHEEL_LINES * LINE * scale,
+                };
+                show.scroll_by(dy);
+            }
         }
         self.redraw();
     }
 
-    /// The pointer moved: it shows again, and the counter with it.
+    /// The pointer moved: it shows again, and the counter with it. With the button down on the
+    /// slide it selects; over a link it is a hand.
     pub(super) fn present_pointer(&mut self, x: f32, y: f32) {
         let (px, py) = self.ui.mouse;
         self.ui.mouse = (x, y);
+        let scale = self.scale;
+        let Some(show) = self.ui.present.as_mut() else {
+            return;
+        };
+        if show.overview_open() {
+            show.overview_move(x, y);
+            self.set_cursor(CursorIcon::Default);
+            self.redraw();
+            return;
+        }
+        if show.pressing() {
+            if show.drag_to(x * scale, y * scale) {
+                self.redraw();
+            }
+            return;
+        }
         if (px - x).abs() < MOVE_SLOP && (py - y).abs() < MOVE_SLOP {
             return;
         }
-        if let Some(show) = self.ui.present.as_mut() {
-            if show.cursor_hidden
-                && let Some(w) = &self.window
-            {
-                w.set_cursor_visible(true);
-            }
-            show.touch(Instant::now());
+        if show.cursor_hidden
+            && let Some(w) = &self.window
+        {
+            w.set_cursor_visible(true);
         }
+        show.touch(Instant::now());
+        let hand = show.link_at(x * scale, y * scale);
+        self.set_cursor(if hand {
+            CursorIcon::Pointer
+        } else {
+            CursorIcon::Default
+        });
         self.redraw();
     }
 
