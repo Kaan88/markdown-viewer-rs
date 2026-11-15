@@ -49,6 +49,8 @@ use winit::window::{CursorIcon, ResizeDirection, Theme as WinTheme, Window, Wind
 mod cards;
 mod commands;
 mod export;
+#[cfg(test)]
+mod frost_tests;
 mod input;
 mod modal;
 mod slides;
@@ -161,6 +163,10 @@ struct App {
     /// (the surface minus the margin on every side) and `present` puts the content inside it.
     /// Dropping it would remove the KWin shadow, so it lives as long as the window.
     shadow: Option<mdshared_ui::shadow::Shadow>,
+    /// The "Window backdrop" setting at work (Windows 11): idle unless the setting is on.
+    frost: crate::frost::Frost,
+    /// Whether the window has the keyboard; a window that never heard otherwise has it.
+    focused: bool,
     areas: Areas,
     hits: [Vec<(Hit, Rect)>; 5],
     overlay_hits: Vec<(Hit, Rect)>,
@@ -178,6 +184,8 @@ struct App {
     expose: bool,
     first: bool,
     exit: bool,
+    /// The file to start once the window is closed: set by a Restart that was carried out.
+    restart: Option<PathBuf>,
     mods: Mods,
     cursor: CursorIcon,
     last_title: String,
@@ -239,6 +247,8 @@ impl App {
             size: (1, 1),
             maximized: false,
             shadow: None,
+            frost: crate::frost::Frost::default(),
+            focused: true,
             areas: Areas::default(),
             hits: Default::default(),
             overlay_hits: Vec::new(),
@@ -251,6 +261,7 @@ impl App {
             expose: false,
             first: true,
             exit: false,
+            restart: None,
             mods: Mods::default(),
             cursor: CursorIcon::Default,
             last_title: String::new(),
@@ -331,6 +342,9 @@ impl App {
         if let Some(stage) = &a.update_bar {
             self.ws.preview_update(stage);
         }
+        if let Some(backdrop) = a.backdrop {
+            self.ws.set_backdrop(backdrop);
+        }
         if a.load_remote {
             self.ws.allow_remote(false);
         }
@@ -359,6 +373,33 @@ impl App {
             if let Some(w) = &self.window {
                 style(w, dark, Corners::from_setting(self.ws.corners()));
             }
+        }
+    }
+
+    /// The "Window backdrop" setting: asks the system when the setting or the focus changed and
+    /// repaints everything when the chrome turns frosted or flat. One comparison when it is off.
+    fn sync_frost(&mut self) {
+        let want = self.ws.backdrop();
+        if !self.frost.concerns(want) {
+            return;
+        }
+        // Without a window (`--shot`) there is nothing to show a backdrop behind.
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        #[cfg(windows)]
+        let handle = hwnd(&window);
+        #[cfg(not(windows))]
+        let handle = None;
+        let _ = &window;
+        let mut sys = mdshared_ui::frost::WindowSystem(handle);
+        if self.frost.sync(want, self.focused, &self.pal, &mut sys) {
+            // Every mark goes: the regions put theirs back when they are drawn frosted.
+            for px in self.screen.pixels.as_chunks_mut::<4>().0 {
+                px[3] = 255;
+            }
+            self.full = true;
+            self.expose = true;
         }
     }
 
@@ -477,7 +518,13 @@ impl App {
                 } else {
                     0
                 };
-                let update = self.ws.update_bar().map(|stage| format!("{stage:?}"));
+                let update = self.ws.update_bar().map(|stage| {
+                    // The Restart button comes and goes with the file there is to start.
+                    (
+                        format!("{stage:?}"),
+                        self.ws.update_relaunch_target().is_some(),
+                    )
+                });
                 // The code box whose copy button shows, and its check mark.
                 let vr = page::viewport(&self.ws, self.areas.page);
                 let code = crate::codebtn::spot(&mut self.ws, &self.ui, vr, self.scale)
@@ -524,6 +571,7 @@ impl App {
             self.full = true;
         }
         self.sync_theme();
+        self.sync_frost();
         // Text the editor sent since the last frame: one parse, of the newest.
         self.ws.apply_live();
         // A presentation is the whole frame.
@@ -768,6 +816,20 @@ impl App {
                     }
                 }
                 p.restore(old);
+                // The chrome lets the backdrop through: its pixels are marked for the present.
+                if self.frost.key().is_some() && crate::frost::frosted(r) {
+                    mdshared_ui::frost::mark(p.bmp, p.dev_rect(clip));
+                }
+            }
+            if self.frost.key().is_some() {
+                self.frost.areas.clear();
+                for r in REGIONS {
+                    if let Some(rect) = self.areas.region(r).filter(|_| crate::frost::frosted(r)) {
+                        let d = p.dev_rect(rect);
+                        let u = |v: i32| v.max(0) as usize;
+                        self.frost.areas.push((u(d.0), u(d.1), u(d.2), u(d.3)));
+                    }
+                }
             }
             if draw_overlays {
                 let mut c = Ctx {
@@ -981,12 +1043,23 @@ impl App {
         let (surface_stride, m) = (sw as usize, m as usize);
         // Both are BGRX in memory (the content's alpha byte is always 255: the blit ignores it,
         // the client-drawn margin needs it). A content row lands `m` rows down and `m` columns in.
+        let frost = &self.frost;
         let copy = |buffer: &mut [u32], (x0, y0, x1, y1): (usize, usize, usize, usize)| {
             let bytes: &mut [u8] = bytemuck::cast_slice_mut(buffer);
             for y in y0..y1 {
                 let (a, b) = ((y * stride + x0) * 4, (y * stride + x1) * 4);
                 let to = (((y + m) * surface_stride) + x0 + m) * 4;
                 bytes[to..to + (b - a)].copy_from_slice(&self.screen.pixels[a..b]);
+            }
+            // A frosted chrome: the flat colour is taken out of its marked pixels, in the
+            // window's copy only (the bitmap keeps what was drawn).
+            if let Some(key) = frost.key() {
+                for area in &frost.areas {
+                    if let Some(r) = mdshared_ui::frost::overlap((x0, y0, x1, y1), *area) {
+                        let r = (r.0 + m, r.1 + m, r.2 + m, r.3 + m);
+                        mdshared_ui::frost::key_out(key, buffer, surface_stride, r);
+                    }
+                }
             }
         };
         whole |= margin_painted;
@@ -1265,7 +1338,14 @@ impl ApplicationHandler<Wake> for App {
 
     fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => self.exit = true,
+            WindowEvent::CloseRequested => {
+                self.exit = true;
+                // A close that comes from the system alone (the taskbar's "Close window") is
+                // followed by no other event, and the window would stay until one came.
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::RedrawRequested => {
                 self.wants_frame = false;
                 if !std::mem::take(&mut self.requested) {
@@ -1329,6 +1409,11 @@ impl ApplicationHandler<Wake> for App {
             }
             WindowEvent::Focused(focused) => {
                 self.update_shadow(Some(focused));
+                self.focused = focused;
+                // The backdrop shows only behind the window that has the keyboard.
+                if self.ws.backdrop() != mdshared_app::backdrop::Backdrop::Off {
+                    self.redraw();
+                }
                 if focused {
                     // The one place the system's "animation effects" setting is read again.
                     self.ws.set_system_animations(platform::shows_animations());
@@ -1456,6 +1541,12 @@ fn shot(mut app: App, path: &Path) -> i32 {
         (lw as f32 * app.scale).round() as u32,
         (lh as f32 * app.scale).round() as u32,
     );
+    // A document mdedit has not saved, as its "Preview in mdview" would hand it over.
+    if let Some(text) =
+        (app.args.demo_untitled.as_deref()).and_then(|file| std::fs::read_to_string(file).ok())
+    {
+        (app.ws).document_text("mdedit-0-1", Some("Untitled 1"), Some(text), None, true);
+    }
     app.compose();
     if let Some(px) = app.args.scroll {
         app.ws.scroll_to(px * app.scale);
@@ -1632,6 +1723,9 @@ pub fn run() -> i32 {
         (false, false) => explicit.or_else(mdview_core::session::default_settings_path),
     };
     if let Some(settings) = session.as_ref().filter(|_| args.shot.is_none()) {
+        // Started by a restart: the window that started it is still closing; wait it out, or the
+        // hand-over below would go to it and leave no window.
+        mdshared_app::relaunch::wait_for_predecessor(std::env::args().skip(1), settings);
         // A window is already open: hand it the files and quit, before any window work. A launch
         // that asks for a line, a place or a follow hands each file over with that.
         let requests = args.requests();
@@ -1712,5 +1806,14 @@ pub fn run() -> i32 {
     app.updates_at_launch();
     stage(started, "ready to run");
     let _ = event_loop.run_app(&mut app);
+    // A restart starts the new version last, with the window and the engine gone and the session
+    // written. The new process waits for this one to end before it looks for a running instance.
+    let restart = app.restart.take();
+    drop(app);
+    if let Some(target) = restart
+        && let Err(e) = mdshared_app::relaunch::spawn(&target)
+    {
+        eprintln!("mdview: could not start {}: {e}", target.display());
+    }
     0
 }

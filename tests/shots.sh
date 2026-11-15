@@ -71,6 +71,9 @@ shot dialog-settings-dark --dark --dialog settings "$fx/showcase.md"
 shot dialog-settings-scale-150 --light --scale 1.5 --dialog settings "$fx/showcase.md"
 shot dialog-settings-min-dark --dark --size 520x360 --dialog settings "$fx/showcase.md"
 shot dialog-settings-640 --light --size 640x800 --dialog settings "$fx/showcase.md"
+# The Window backdrop row (offered on Windows) with a choice made. A shot has no window, so
+# there is no backdrop to show: the chrome is the flat colours.
+shot dialog-settings-backdrop --dark --backdrop mica --dialog settings "$fx/showcase.md"
 
 # The command palette: tabs and recent files, commands by prefix, headings by prefix.
 shot palette-empty-light --light --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
@@ -136,6 +139,14 @@ shot preview-remote --light --size 1000x600 --hover 240,242 "$fx/previews.md"
 shot update-available --light --update-bar available "$fx/showcase.md"
 shot update-installing --dark --update-bar installing "$fx/showcase.md"
 shot update-installed --dark --update-bar installed
+shot update-installed-plain --light --update-bar installed-plain
+
+# A document mdedit previews before it has a file: a tab under the editor's name, live, with
+# its images and links shown as missing; its tab menu (no path to copy or show) and its tooltip.
+shot untitled-live --light --demo-untitled "$fx/images.md" "$fx/tables.md"
+shot untitled-live-dark --dark --demo-untitled "$fx/showcase.md"
+shot untitled-tab-menu --light --menu tab --demo-untitled "$fx/images.md" "$fx/tables.md"
+shot untitled-tip --dark --hover 70,18 --demo-untitled "$fx/images.md"
 
 # A menu taller than its window: kept below the title row, scrolling, and scrolled to its end.
 shot menu-tall-main --light --size 1000x520 --menu main

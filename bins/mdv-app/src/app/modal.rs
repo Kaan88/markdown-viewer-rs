@@ -323,6 +323,9 @@ impl App {
                 self.ws.set_previews(on);
                 self.ui.card = None;
             }
+            (setting::BACKDROP, Value::Choice(i)) => {
+                (self.ws).set_backdrop(mdshared_app::backdrop::Backdrop::from_index(i))
+            }
             (setting::CHECK_AT_LAUNCH, Value::Bool(on)) => self.ws.set_checks_updates(on),
             _ => {}
         }

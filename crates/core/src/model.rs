@@ -412,6 +412,21 @@ pub struct Document {
     /// The note names of the `[[target]]`s that were left as text (`WikiAs::Text`), so the
     /// application can tell when one of them would be a link now.
     pub wiki_text: Vec<StrRef>,
+    /// Where lines of the file are in `text`, in the order of `text`: one for each line a
+    /// run of text or code begins on, and more along a long line. Blocks alone say where a
+    /// block starts; these say where a line inside one is ([`Document::text_at_line`]).
+    pub marks: Vec<LineMark>,
+}
+
+/// A place of the file and where its text is in [`Document::text`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineMark {
+    /// The line of the file, counting from 1.
+    pub line: u32,
+    /// The byte offset in that line.
+    pub col: u32,
+    /// The offset into `Document::text` of what is written there.
+    pub text: u32,
 }
 
 impl Document {
@@ -618,6 +633,64 @@ impl Document {
         }
         best.map(|(_, i)| i as u32)
             .or_else(|| (!self.blocks.is_empty()).then_some(0))
+    }
+
+    /// The marks whose text is in `range`.
+    fn marks_in(&self, range: TextRange) -> &[LineMark] {
+        let from = self.marks.partition_point(|m| m.text < range.start);
+        let to = self.marks.partition_point(|m| m.text < range.end);
+        &self.marks[from..to]
+    }
+
+    /// Where the text written at source line `line` (from 1), byte `col` of it (from 0), is
+    /// in `text`: a place inside the block [`block_at_line`](Self::block_at_line) gives, so
+    /// that a long paragraph, list item or code block can be shown at the line meant and not
+    /// at its start. A line of a code block is found exactly, a line of a paragraph where
+    /// its text begins, and a place along a long line as far along its text (markup that
+    /// shows nothing makes that a little late). A place before the line's first text (an
+    /// indent, a list marker) is that first text; a line the block has no text on gives the
+    /// nearest line before it, or the block's start. `None` for a block with no text.
+    pub fn text_at_line(&self, line: u32, col: u32) -> Option<u32> {
+        let range = self.blocks[self.block_at_line(line)? as usize].text;
+        if range.is_empty() {
+            return None;
+        }
+        let marks = self.marks_in(range);
+        // The marks of a block are in the order of the file: the last one at or before the
+        // place, or the line's first when the place is before its text.
+        let after = marks.partition_point(|m| (m.line, m.col) <= (line, col));
+        let i = match after.checked_sub(1) {
+            Some(i) if marks[i].line == line => i,
+            _ if marks.get(after).is_some_and(|m| m.line == line) => after,
+            Some(i) => i,
+            None => return Some(range.start),
+        };
+        let mark = marks[i];
+        // Along the line, no further than the text that was written from there.
+        let end = marks.get(i + 1).map_or(range.end, |next| next.text);
+        let along = match mark.line == line {
+            true => col.saturating_sub(mark.col),
+            false => 0,
+        };
+        let last = end.max(mark.text + 1).min(range.end) - 1;
+        let mut at = mark.text.saturating_add(along).min(last);
+        while !self.text.is_char_boundary(at as usize) {
+            at -= 1;
+        }
+        Some(at.max(range.start))
+    }
+
+    /// The other way: the source line (from 1) and the byte in it (from 0) of what is at
+    /// `pos` in `text`. The line is the one whose text holds `pos`; where nothing is known
+    /// inside the block, the line the block starts on, at its beginning.
+    pub fn line_at_text(&self, pos: u32) -> Option<(u32, u32)> {
+        let block = &self.blocks[self.block_at(pos)? as usize];
+        let marks = self.marks_in(block.text);
+        let before = marks.partition_point(|m| m.text <= pos);
+        Some(match before.checked_sub(1).map(|i| marks[i]) {
+            Some(mark) => (mark.line, mark.col + (pos - mark.text)),
+            None => (block.line, 0),
+        })
     }
 
     /// The innermost block whose text contains `pos`.

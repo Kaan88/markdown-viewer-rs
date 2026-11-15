@@ -391,6 +391,14 @@ pub mod strings {
     pub const REFRESHED: &str = "Document refreshed from disk";
     pub const LIVE_STARTED: &str = "Live preview: showing the editor's unsaved text";
     pub const LIVE_EDITOR_GONE: &str = "mdedit closed: showing the saved file";
+    pub const LIVE_EDITOR_GONE_UNSAVED: &str = "mdedit closed: this document was not saved";
+    /// A document the editor previews before it has a file: its name when the editor gave
+    /// none, what its tab says when pointed at, and what is said when a file is asked of it.
+    pub const UNTITLED: &str = "Untitled";
+    pub const UNTITLED_HINT: &str = "not saved yet: shown as mdedit has it";
+    pub const UNTITLED_NO_FILE: &str =
+        "This document has no file yet: it is shown as mdedit has it.";
+    pub const EDITOR_NOT_RUNNING: &str = "mdedit is not running";
     pub const RENDER_TIMEOUT: &str = "Rendering exceeded 15 seconds. Try a smaller document.";
     pub const REMOTE_ONE: &str = "This document has 1 remote image that was not loaded.";
     pub const REMOTE_MANY: &str = "This document has {} remote images that were not loaded.";

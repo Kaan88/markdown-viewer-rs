@@ -35,15 +35,21 @@ fn below_update_bar(ws: &Workspace, r: Rect) -> Rect {
 }
 
 /// The bar that offers a newer version, shows its download, and says when it is in place.
-fn draw_update_bar(c: &mut Ctx, bar: Rect, stage: &Stage) {
+fn draw_update_bar(c: &mut Ctx, bar: Rect, stage: &Stage, can_restart: bool) {
     let state = UpdateBarState {
         go_hovered: c.hover == Some(Hit::UpdateGo),
         go_pressed: c.pressed == Some(Hit::UpdateGo),
         close_hovered: c.hover == Some(Hit::UpdateClose),
+        restart: can_restart,
+        restart_hovered: c.hover == Some(Hit::UpdateRestart),
+        restart_pressed: c.pressed == Some(Hit::UpdateRestart),
     };
     let hits = notice::draw_update_bar(c.p, c.pal, bar, &updater::APP, stage, state);
     if let Some(r) = hits.go {
         c.hit(Hit::UpdateGo, r);
+    }
+    if let Some(r) = hits.restart {
+        c.hit(Hit::UpdateRestart, r);
     }
     if let Some(r) = hits.close {
         c.hit(Hit::UpdateClose, r);
@@ -107,7 +113,13 @@ pub fn draw_page(c: &mut Ctx, ws: &mut Workspace, ui: &Ui, r: Rect) -> Duration 
     let whole = r;
     let r = below_update_bar(ws, whole);
     if let Some(stage) = ws.update_bar() {
-        draw_update_bar(c, Rect::new(whole.x, whole.y, whole.w, BANNER_H), stage);
+        let can_restart = ws.update_relaunch_target().is_some();
+        draw_update_bar(
+            c,
+            Rect::new(whole.x, whole.y, whole.w, BANNER_H),
+            stage,
+            can_restart,
+        );
     }
     if ws.active().is_none() {
         c.p.fill(r, pal.page);

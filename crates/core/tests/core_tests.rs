@@ -279,3 +279,188 @@ fn every_fixture_has_sane_block_lines() {
     }
     assert!(seen > 5);
 }
+
+/// What the document's text has from the place source line `line`, byte `col`, is shown at.
+fn shown_at(doc: &Document, line: u32, col: u32) -> &str {
+    &doc.text[doc.text_at_line(line, col).unwrap() as usize..]
+}
+
+const INSIDE: &str = "\
+# Title
+
+First line of a paragraph
+second line with *emphasis* in it
+third line.
+
+- item one
+  goes on here
+- item two
+
+```rust
+fn main() {
+
+    let x = 1;
+}
+```
+
+| a | b |
+|---|---|
+| c | d |
+| e | f |
+
+    indented one
+    indented two
+
+end
+";
+
+#[test]
+fn a_line_inside_a_paragraph_or_a_list_item_is_found_where_its_text_begins() {
+    let doc = parse(INSIDE);
+    assert!(shown_at(&doc, 3, 0).starts_with("First line"));
+    assert!(shown_at(&doc, 4, 0).starts_with("second line with emphasis"));
+    assert!(shown_at(&doc, 5, 0).starts_with("third line."));
+    // A place along a line, as far along its text: markup that shows nothing (two stars
+    // here) makes it that much late.
+    assert!(shown_at(&doc, 4, 7).starts_with("line with emphasis"));
+    assert!(shown_at(&doc, 4, 29).starts_with("it"));
+    // Past the end of the line: still that line's text.
+    assert!(shown_at(&doc, 4, 500).starts_with(" third"));
+    // Before the line's first text (a list marker, an indent): that text.
+    assert!(shown_at(&doc, 8, 1).starts_with("goes on here"));
+    assert!(shown_at(&doc, 7, 0).starts_with("item one"));
+    assert!(shown_at(&doc, 8, 0).starts_with("goes on here"));
+    assert!(shown_at(&doc, 9, 0).starts_with("item two"));
+    // A line with no text of its own (the blank one after the paragraph): the line before it.
+    assert!(shown_at(&doc, 6, 0).starts_with("third line."));
+    // The other way round.
+    let at = doc.text.find("second line").unwrap() as u32;
+    assert_eq!(doc.line_at_text(at), Some((4, 0)));
+    assert_eq!(doc.line_at_text(at + 7), Some((4, 7)));
+    let at = doc.text.find("goes on").unwrap() as u32;
+    assert_eq!(doc.line_at_text(at + 2).map(|(line, _)| line), Some(8));
+}
+
+#[test]
+fn a_line_of_a_code_block_is_found_exactly() {
+    let doc = parse(INSIDE);
+    // The fence is the block's start; the lines after it are the code's.
+    assert!(shown_at(&doc, 11, 0).starts_with("fn main() {"));
+    assert!(shown_at(&doc, 12, 0).starts_with("fn main() {"));
+    assert!(shown_at(&doc, 14, 0).starts_with("    let x = 1;"));
+    assert!(shown_at(&doc, 14, 4).starts_with("let x = 1;"));
+    assert!(shown_at(&doc, 15, 0).starts_with("}"));
+    // The closing fence: the last line of the code.
+    assert!(shown_at(&doc, 16, 0).starts_with("}"));
+    assert!(shown_at(&doc, 23, 0).starts_with("indented one"));
+    assert!(shown_at(&doc, 24, 0).starts_with("indented two"));
+    for (needle, line) in [("let x", 14), ("fn main", 12), ("indented two", 24)] {
+        let at = doc.text.find(needle).unwrap() as u32;
+        assert_eq!(doc.line_at_text(at).map(|(l, _)| l), Some(line), "{needle}");
+    }
+}
+
+#[test]
+fn a_line_of_a_table_is_its_row() {
+    let doc = parse(INSIDE);
+    let row = |line: u32| {
+        let at = doc.text_at_line(line, 0).unwrap();
+        let cell = doc.block_at(at).unwrap();
+        doc.blocks[doc.blocks[cell as usize].parent as usize].line
+    };
+    assert_eq!((row(18), row(20), row(21)), (18, 20, 21));
+    let at = doc
+        .text
+        .find('f')
+        .map(|_| doc.text.rfind('f').unwrap())
+        .unwrap() as u32;
+    assert_eq!(doc.line_at_text(at).map(|(l, _)| l), Some(21));
+}
+
+#[test]
+fn a_paragraph_written_as_one_long_line_is_marked_along_it() {
+    let words: Vec<String> = (0..120).map(|n| format!("word{n:03}")).collect();
+    let src = format!("# T\n\n{}\n\nend\n", words.join(" "));
+    let doc = parse(&src);
+    // Byte 8 * n of the line is where word n starts, in the file and in the text.
+    for n in [0u32, 1, 17, 60, 119] {
+        assert!(
+            shown_at(&doc, 3, 8 * n).starts_with(&words[n as usize]),
+            "{n}"
+        );
+        let at = doc.text.find(&words[n as usize]).unwrap() as u32;
+        assert_eq!(doc.line_at_text(at), Some((3, 8 * n)));
+    }
+    // With markup the place is late by what the markup hides since the last mark, and a mark
+    // follows a long hidden stretch.
+    let src = "One **two** [three](https://example.com/a/very/long/address/that/shows/nothing) four five six seven eight nine ten eleven twelve thirteen\n";
+    let doc = parse(src);
+    let col = src.find("thirteen").unwrap() as u32;
+    assert!(shown_at(&doc, 1, col).starts_with("thirteen"));
+    let col = src.find("four").unwrap() as u32;
+    assert!(shown_at(&doc, 1, col).starts_with("four"));
+    // One mark a line for short lines, a few along a long one: not one per piece of text.
+    let short = parse("a *b* c `d` e\nf *g* h\n");
+    assert_eq!(short.marks.len(), 2);
+}
+
+#[test]
+fn every_fixture_keeps_its_marks_in_order_and_inside_the_text() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+    let mut seen = 0;
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "md") {
+            continue;
+        }
+        let src = std::fs::read_to_string(&path).unwrap();
+        let doc = parse(&src);
+        let lines = src.lines().count() as u32 + 1;
+        assert!(doc.marks.windows(2).all(|w| w[0].text <= w[1].text));
+        assert!(doc.marks.iter().all(|m| m.text as usize <= doc.text.len()));
+        assert!(doc.marks.iter().all(|m| m.line >= 1 && m.line <= lines));
+        // Every line and every place answers with a place inside the text, on a character.
+        for line in 0..lines + 2 {
+            for col in [0, 3, 70, 4000] {
+                if let Some(at) = doc.text_at_line(line, col) {
+                    assert!(doc.text.is_char_boundary(at as usize), "{}", path.display());
+                    assert!((at as usize) < doc.text.len());
+                }
+            }
+        }
+        seen += 1;
+    }
+    assert!(seen > 5);
+}
+
+/// Prints what a parse costs, for comparing before and after a change to the parser (run it
+/// with `--release -- --ignored --nocapture parse_cost`).
+#[test]
+#[ignore = "a measurement"]
+fn parse_cost() {
+    let showcase =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/showcase.md");
+    let one = std::fs::read_to_string(showcase).unwrap();
+    // About 8 MB of ordinary Markdown, and 8 MB of one-line paragraphs.
+    let big = one.repeat(8 * 1024 * 1024 / one.len() + 1);
+    let line = "Lorem ipsum dolor sit amet, *consectetur* adipiscing elit, sed do `eiusmod` tempor incididunt ut labore et dolore magna aliqua. ".repeat(12);
+    let long = format!("{line}\n\n").repeat(8 * 1024 * 1024 / (line.len() + 2));
+    for (name, src) in [("showcase x n", &big), ("long lines", &long)] {
+        let mut times: Vec<f64> = (0..9)
+            .map(|_| {
+                let t = std::time::Instant::now();
+                let doc = parse(src);
+                let ms = t.elapsed().as_secs_f64() * 1e3;
+                assert!(!doc.blocks.is_empty());
+                ms
+            })
+            .collect();
+        times.sort_by(f64::total_cmp);
+        eprintln!(
+            "{name}: {:.1} MB, min {:.1} ms, median {:.1} ms",
+            src.len() as f64 / 1048576.0,
+            times[0],
+            times[4]
+        );
+    }
+}

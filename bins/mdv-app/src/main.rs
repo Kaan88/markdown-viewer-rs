@@ -6,6 +6,7 @@ mod args;
 mod chrome;
 mod codebtn;
 mod folder_search;
+mod frost;
 mod keys;
 mod overlays;
 mod page;

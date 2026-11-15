@@ -217,7 +217,10 @@ fn files(ws: &Workspace, with_files: bool) -> (Vec<Entry>, Vec<Target>) {
     let mut listed: HashSet<PathBuf> = HashSet::new();
     for (i, tab) in ws.tabs().iter().enumerate() {
         let label = ws.labels().get(i).cloned().unwrap_or_default();
-        let hint = folder_name(tab.path());
+        let hint = match tab.is_untitled() {
+            true => "mdedit".to_string(),
+            false => folder_name(tab.path()),
+        };
         let icon = if tab.is_missing() {
             glyph::WARN
         } else {

@@ -23,6 +23,7 @@ pub const DEFAULT_APP: u32 = 9;
 pub const PAGE_FONT: u32 = 10;
 pub const CODE_FONT: u32 = 11;
 pub const WINDOW_CORNERS: u32 = 12;
+pub const BACKDROP: u32 = 13;
 pub const PREVIEWS: u32 = 30;
 
 pub const WIDTHS: [&str; 3] = ["Narrow", "Wide", "Full"];
@@ -104,6 +105,21 @@ pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
         ),
         Row::action(CHECK_NOW, "Look for a newer version", check_now_label(ws)),
     ];
+    // The backdrop is Windows 11's: the row is offered, under the theme, where it can do something.
+    #[cfg(windows)]
+    if let Some(at) = rows.iter().position(|r| r.id() == Some(THEME)) {
+        use mdshared_app::backdrop::Backdrop;
+        rows.insert(
+            at + 1,
+            Row::choice(
+                BACKDROP,
+                Backdrop::TITLE,
+                &Backdrop::LABELS,
+                ws.backdrop().index(),
+            )
+            .help(Backdrop::HELP),
+        );
+    }
     if corners {
         // After Theme, in the Page group.
         let at = rows

@@ -11,7 +11,7 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn app(files: &[&str]) -> App {
+pub(super) fn app(files: &[&str]) -> App {
     let args = Args {
         files: files.iter().map(|f| fixture(f)).collect(),
         dark: Some(true),
@@ -304,6 +304,40 @@ fn the_update_bar_pushes_the_page_down_and_closes() {
     a.compose();
     assert!(a.hit_rect(Hit::UpdateClose).is_none());
     assert_eq!(page::viewport(&a.ws, a.areas.page), before);
+}
+
+#[test]
+fn the_bar_shows_restart_only_when_installed_with_a_file_to_start() {
+    let mut a = app(&["linked.md"]);
+    for (stage, restart) in [
+        ("available", false),
+        ("installing", false),
+        ("installed-plain", false),
+        ("installed", true),
+    ] {
+        a.ws.preview_update(stage);
+        a.compose();
+        assert_eq!(a.hit_rect(Hit::UpdateRestart).is_some(), restart, "{stage}");
+        assert_eq!(
+            a.hit_rect(Hit::UpdateGo).is_some(),
+            stage == "available",
+            "{stage}"
+        );
+    }
+    // Pressing it closes the window the way Exit does, and remembers what to start.
+    assert!(!a.exit);
+    click(&mut a, Hit::UpdateRestart);
+    assert!(a.exit);
+    assert_eq!(a.restart, Some(std::path::PathBuf::from("/preview/app")));
+}
+
+#[test]
+fn a_bar_without_a_file_to_start_restarts_nothing() {
+    let mut a = app(&["linked.md"]);
+    a.ws.preview_update("installed-plain");
+    a.restart_into_update();
+    assert!(!a.exit);
+    assert_eq!(a.restart, None);
 }
 
 #[test]
@@ -974,7 +1008,12 @@ fn edit_in_mdedit_starts_the_editor_at_the_top_line() {
     }
     let args = std::fs::read_to_string(&record).unwrap_or_default();
     let path = a.ws.active_tab().unwrap().path().display().to_string();
-    assert_eq!(args, format!("--goto\n{top}\n--from\nmdview\n{path}\n"));
+    // The column goes with the line only when the top row begins inside a line that wraps.
+    let goto = match a.ws.top_source_place().unwrap().column {
+        Some(column) => format!("{top}:{column}"),
+        None => top.to_string(),
+    };
+    assert_eq!(args, format!("--goto\n{goto}\n--from\nmdview\n{path}\n"));
     // SAFETY: as above.
     unsafe { std::env::remove_var("MD_SISTER_MDEDIT") };
     _ = std::fs::remove_dir_all(&dir);
@@ -1059,6 +1098,43 @@ fn page_text(a: &App) -> String {
         .unwrap()
         .text
         .to_string()
+}
+
+#[test]
+fn a_hand_over_with_a_column_shows_the_row_of_a_wrapped_line() {
+    let (mut a, dir, file) = live_app("column");
+    // One paragraph written as a single line of 3000 words, as the editor has it.
+    let words: Vec<String> = (0..3000).map(|n| format!("word{n:04}")).collect();
+    let text = format!("# Title\n\n{}\n\nThe end.\n", words.join(" "));
+    let place = |line, column| Request {
+        follow: true,
+        line: Some(line),
+        column,
+        ..Request::new(&file)
+    };
+    a.handed_over(vec![Request {
+        text: Some(text),
+        ..place(3, None)
+    }]);
+    a.compose();
+    let start = a.ws.scroll();
+    // The caret far along the line: the page follows into the paragraph, to the row that
+    // holds that place, and a caret further along is further down.
+    a.handed_over(vec![place(3, Some(9 * 1000 + 1))]);
+    a.compose();
+    let middle = a.ws.scroll();
+    assert!(middle > start + 200.0, "{start} {middle}");
+    let at = a.ws.top_source_place().unwrap();
+    assert_eq!(at.line, 3);
+    assert!(at.column.is_some_and(|c| c < 9001 && c > 8000), "{at:?}");
+    a.handed_over(vec![place(3, Some(9 * 2500 + 1))]);
+    a.compose();
+    assert!(a.ws.scroll() > middle + 200.0);
+    // Without a column (an older mdedit) the line is its beginning, as before.
+    a.handed_over(vec![place(3, None)]);
+    a.compose();
+    assert_eq!(a.ws.scroll(), start);
+    _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -2256,4 +2332,219 @@ fn a_changed_text_keeps_the_slide_and_a_text_without_slides_ends_the_show() {
     assert!(a.ws.live_text(&path, "\n".into(), None));
     a.compose();
     assert!(!a.presenting());
+}
+
+// ---- a document mdedit has not saved yet ---------------------------------------------------
+
+const DOC: &str = "mdedit-77-3";
+
+/// "Preview in mdview" on a document that has no file: its text, its name, and `open`.
+fn shown(doc: &str, text: &str, line: Option<u32>) -> Request {
+    Request {
+        open: true,
+        text: Some(text.to_string()),
+        line,
+        from: Some("mdedit".into()),
+        ..Request::document(doc, "Untitled 1")
+    }
+}
+
+/// A later update of it: the text, or the caret's line alone.
+fn sent(doc: &str, text: Option<&str>, line: Option<u32>) -> Request {
+    Request {
+        follow: true,
+        text: text.map(str::to_string),
+        line,
+        ..Request::document(doc, "Untitled 1")
+    }
+}
+
+#[test]
+fn a_document_without_a_file_gets_a_tab_from_its_text_and_follows_the_editor() {
+    let (mut a, dir, _file) = live_app("untitled");
+    // A text that does not ask to be shown opens nothing.
+    a.handed_over(vec![sent(DOC, Some("# Stray\n"), None)]);
+    a.compose();
+    assert_eq!(a.ws.tab_count(), 1);
+    // Shown: a tab named like the editor's, active, live, with the text.
+    a.handed_over(vec![shown(DOC, "# Never saved\n\nBody.\n", Some(1))]);
+    a.compose();
+    assert_eq!((a.ws.tab_count(), a.ws.active()), (2, Some(1)));
+    assert_eq!(a.ws.labels()[1], "Untitled 1");
+    let tab = a.ws.active_tab().unwrap();
+    assert!(tab.is_untitled() && tab.is_live() && !tab.is_missing() && tab.is_loaded());
+    assert!(tab.describe().starts_with("Untitled 1 ("));
+    assert!(a.ws.title().contains("Untitled 1"));
+    assert!(page_text(&a).contains("Never saved"));
+    // The next texts replace it; the tab is not opened twice, and nothing else is raised.
+    let mut long = String::from("# Never saved\n\n");
+    for i in 0..200 {
+        long.push_str(&format!(
+            "Paragraph {i} that exists only in the editor.\n\n"
+        ));
+    }
+    a.handed_over(vec![sent(DOC, Some(&long), Some(300))]);
+    a.compose();
+    assert_eq!(a.ws.tab_count(), 2);
+    assert!(page_text(&a).contains("Paragraph 199"));
+    let top = a.ws.top_source_line().unwrap();
+    assert!((280..=300).contains(&top), "followed to the caret: {top}");
+    // The caret alone moves the page.
+    a.handed_over(vec![sent(DOC, None, Some(3))]);
+    a.compose();
+    assert!(a.ws.top_source_line().unwrap() < 20);
+    // An image and a link given relative to the document have no folder to be found in: the
+    // page is drawn, the link is refused, and nothing is opened.
+    let text = "# Links\n\n![pic](pic.png)\n\n[other](other.md) [abs](https://example.com)\n";
+    a.handed_over(vec![sent(DOC, Some(text), Some(1))]);
+    a.compose();
+    assert!(page_text(&a).contains("other"));
+    let refused = a.ws.open_link("other.md");
+    assert!(matches!(refused, crate::workspace::LinkOutcome::Refused(_)));
+    assert_eq!(
+        a.ws.status(std::time::Instant::now()),
+        Some("not a file: other.md")
+    );
+    assert_eq!(a.ws.tab_count(), 2);
+    // There is no file: F5 says so and changes nothing, and the watcher has nothing to see.
+    assert!(!a.ws.reload());
+    a.ws.check_changed();
+    a.compose();
+    assert!(a.ws.active_tab().unwrap().is_live() && page_text(&a).contains("Links"));
+    assert!(a.ws.watched_paths().all(|p| p.is_file()));
+    // Left alone, the tab keeps its text (there is nothing to read it from again).
+    a.ws.activate(0);
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    a.ws.drop_idle(later, std::time::Duration::from_secs(60));
+    assert!(a.ws.tabs()[1].is_loaded());
+    a.ws.activate(1);
+    a.compose();
+    // The editor ends the preview: the text stays, the mark goes.
+    a.handed_over(vec![Request {
+        live_off: true,
+        ..Request::document(DOC, "Untitled 1")
+    }]);
+    a.compose();
+    let tab = a.ws.active_tab().unwrap();
+    assert!(!tab.is_live() && tab.is_untitled());
+    assert!(page_text(&a).contains("Links"));
+    // Closed here, it does not come back with the editor's next keystroke.
+    a.ws.close(1);
+    a.handed_over(vec![sent(DOC, Some("# Typed on\n"), Some(1))]);
+    a.compose();
+    assert_eq!(a.ws.tab_count(), 1);
+    // Until the editor shows it again.
+    a.handed_over(vec![shown(DOC, "# Typed on\n", Some(1))]);
+    a.compose();
+    assert_eq!(a.ws.tab_count(), 2);
+    assert!(page_text(&a).contains("Typed on"));
+    _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_saved_document_becomes_its_files_tab_without_a_duplicate() {
+    let (mut a, dir, file) = live_app("untitled-saved");
+    a.handed_over(vec![shown(DOC, "# Draft\n\nBody.\n", Some(1))]);
+    a.compose();
+    // The editor saved it: the same tab is the file's now, read from disk, no longer live.
+    let saved = dir.join("notes.md");
+    std::fs::write(&saved, "# Draft\n\nBody, saved.\n").unwrap();
+    let became = |path: &Path| Request {
+        follow: true,
+        doc: Some(DOC.into()),
+        line: Some(1),
+        ..Request::new(path)
+    };
+    a.handed_over(vec![became(&saved)]);
+    a.compose();
+    assert_eq!((a.ws.tab_count(), a.ws.active()), (2, Some(1)));
+    let tab = a.ws.active_tab().unwrap();
+    assert!(!tab.is_untitled() && !tab.is_live() && !tab.is_missing());
+    assert!(crate::workspace::same_file(
+        tab.path(),
+        &mdshared_app::paths::canonical_or_absolute(&saved)
+    ));
+    assert_eq!(a.ws.labels()[1], "notes.md");
+    assert!(page_text(&a).contains("Body, saved."));
+    // It is an ordinary file tab from here: the editor's text for the file is taken as live.
+    a.handed_over(vec![live(&saved, "# Draft\n\nEdited again.\n", None)]);
+    a.compose();
+    assert!(a.ws.active_tab().unwrap().is_live() && page_text(&a).contains("Edited again"));
+    // The old name means nothing any more.
+    a.handed_over(vec![sent(DOC, Some("# Late\n"), None)]);
+    a.compose();
+    assert!(!page_text(&a).contains("Late"));
+    // A second document saved over a file that already has a tab: that tab is shown, and the
+    // document's own tab goes. The file is never open twice.
+    let other = "mdedit-77-4";
+    a.handed_over(vec![shown(other, "# Second\n", Some(1))]);
+    a.compose();
+    assert_eq!((a.ws.tab_count(), a.ws.active()), (3, Some(2)));
+    a.handed_over(vec![Request {
+        doc: Some(other.into()),
+        ..became(&file)
+    }]);
+    a.compose();
+    assert_eq!((a.ws.tab_count(), a.ws.active()), (2, Some(0)));
+    assert!(page_text(&a).contains("of the file on disk"));
+    assert!(a.ws.tabs().iter().all(|t| !t.is_untitled()));
+    _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_editor_that_is_gone_leaves_the_unsaved_document_as_it_was_last_sent() {
+    let (mut a, dir, _file) = live_app("untitled-gone");
+    a.handed_over(vec![shown(DOC, "# Draft\n", Some(1))]);
+    a.compose();
+    // Live, so the editor is asked after like for any live tab.
+    assert!(a.timers(std::time::Instant::now()).is_some());
+    a.woken(Wake::Sister(false));
+    a.compose();
+    let tab = a.ws.active_tab().unwrap();
+    assert!(!tab.is_live() && tab.is_untitled());
+    assert!(page_text(&a).contains("Draft"));
+    assert_eq!(
+        a.ws.status(std::time::Instant::now()),
+        Some("mdedit closed: this document was not saved")
+    );
+    _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_tab_menu_of_an_unsaved_document_asks_the_editor_by_name() {
+    let (mut a, dir, _file) = live_app("untitled-menu");
+    a.handed_over(vec![shown(DOC, "# Draft\n\nBody.\n", Some(3))]);
+    a.compose();
+    // No path to copy and nowhere to show; Edit in mdedit stays.
+    let menu = overlays::tab_menu(&a.ws, 1, 0.0, 0.0);
+    let enabled = |id: CommandId| {
+        let item = menu.items.iter().find(|it| it.id == Act::TabCmd(id, 1));
+        item.is_some_and(|it| it.enabled)
+    };
+    assert!(enabled(CommandId::EditInMdedit));
+    assert!(!enabled(CommandId::CopyFilePath) && !enabled(CommandId::ShowInFileManager));
+    // The editor is asked for the document by the name it gave, at the line being read.
+    let settings = dir.join("editor").join("settings.ini");
+    let rx = mdshared_app::single::listen_requests_waking("mdedit", &settings, || {}).unwrap();
+    // SAFETY: no other test reads or writes this variable.
+    unsafe { std::env::set_var("MD_SISTER_MDEDIT_SETTINGS", &settings) };
+    a.tab_command(CommandId::EditInMdedit, 1);
+    let r = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert_eq!(r.doc.as_deref(), Some(DOC));
+    assert!(r.path.as_os_str().is_empty() && !r.follow && r.line.is_some());
+    assert_eq!(r.from.as_deref(), Some("mdview"));
+    // With no editor running it says so; a path that is not one is never copied.
+    unsafe { std::env::set_var("MD_SISTER_MDEDIT_SETTINGS", dir.join("none.ini")) };
+    a.tab_command(CommandId::EditInMdedit, 1);
+    assert_eq!(
+        a.ws.status(std::time::Instant::now()),
+        Some("mdedit is not running")
+    );
+    a.tab_command(CommandId::CopyFilePath, 1);
+    assert_eq!(
+        a.ws.status(std::time::Instant::now()),
+        Some("This document has no file yet: it is shown as mdedit has it.")
+    );
+    unsafe { std::env::remove_var("MD_SISTER_MDEDIT_SETTINGS") };
+    _ = std::fs::remove_dir_all(&dir);
 }

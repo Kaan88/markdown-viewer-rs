@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::ui::EditAct;
+use crate::workspace::SourcePlace;
 
 use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
@@ -77,6 +78,7 @@ impl App {
             Hit::RemoteAlways => self.ws.allow_remote(true),
             Hit::RemoteClose => self.ws.dismiss_remote(),
             Hit::UpdateGo => self.install_update(),
+            Hit::UpdateRestart => self.restart_into_update(),
             Hit::UpdateClose => self.ws.dismiss_update(),
             Hit::EmptyRecent(i) => {
                 if let Some(p) = self.ws.recents().get(i).cloned() {
@@ -97,6 +99,8 @@ impl App {
                     self.close_dialog();
                     if matches!(self.ws.update_stage(), updater::Stage::Available(_)) {
                         self.install_update();
+                    } else if self.ws.update_relaunch_target().is_some() {
+                        self.restart_into_update();
                     } else {
                         self.check_for_updates(true);
                     }
@@ -234,7 +238,33 @@ impl App {
         let Some(path) = self.ws.tab(index).map(|t| t.path().to_path_buf()) else {
             return;
         };
+        // A document mdedit has not saved yet: there is no file to name or show, and the
+        // editor is asked for it by the name it gave.
+        let untitled = (self.ws.tab(index)).and_then(|t| {
+            Some((
+                t.untitled_doc()?.to_string(),
+                self.ws.labels().get(index)?.clone(),
+            ))
+        });
         match id {
+            C::CopyFilePath | C::ShowInFileManager if untitled.is_some() => {
+                self.ws
+                    .set_status(mdview_core::commands::strings::UNTITLED_NO_FILE);
+            }
+            C::EditInMdedit if untitled.is_some() => {
+                let (doc, title) = untitled.unwrap_or_default();
+                let at = self.ws.source_place(index);
+                let request = Request {
+                    line: at.map(|at| at.line),
+                    column: at.and_then(|at| at.column),
+                    from: Some("mdview".into()),
+                    ..Request::document(doc, title)
+                };
+                if !mdshared_app::sister::send("mdedit", &request) {
+                    self.ws
+                        .set_status(mdview_core::commands::strings::EDITOR_NOT_RUNNING);
+                }
+            }
             C::CloseTab => {
                 self.ws.close(index);
             }
@@ -253,8 +283,10 @@ impl App {
                 platform::reveal_in_file_manager(&path);
             }
             C::EditInMdedit => {
+                let at = self.ws.source_place(index);
                 let request = Request {
-                    line: self.ws.source_line(index),
+                    line: at.map(|at| at.line),
+                    column: at.and_then(|at| at.column),
                     from: Some("mdview".into()),
                     ..Request::new(path)
                 };
@@ -391,6 +423,7 @@ impl App {
     pub(super) fn start_dir(&self) -> Option<PathBuf> {
         self.ws
             .active_tab()
+            .filter(|t| !t.is_untitled())
             .and_then(|t| t.path().parent().map(Path::to_path_buf))
             .or_else(|| self.ws.folder().map(Path::to_path_buf))
     }
@@ -629,23 +662,32 @@ impl App {
     pub(super) fn handed_over(&mut self, requests: Vec<Request>) {
         let mut follow: Option<&Request> = None;
         for request in &requests {
+            if let Some(doc) = request.doc.as_deref() {
+                // A document mdedit has not saved: by its name, not by a path. Saved, it
+                // comes with its file, and is then followed like any file.
+                if request.path.as_os_str().is_empty() {
+                    self.handed_document(doc, request);
+                    continue;
+                }
+                self.ws.document_saved(doc, &request.path);
+            }
             if request.live_off {
                 self.ws.live_off(&request.path);
             } else if let Some(text) = &request.text {
                 // Of several texts that arrive together the last is the one shown.
-                self.ws.live_text(&request.path, text.clone(), request.line);
+                (self.ws).live_text(&request.path, text.clone(), SourcePlace::of(request));
             } else if request.follow {
                 follow = Some(request);
             } else if self.ws.open(&request.path).is_ok()
-                && let Some(line) = request.line
+                && let Some(at) = SourcePlace::of(request)
             {
-                self.ws.scroll_to_line(line);
+                self.ws.scroll_to_line(at);
             }
         }
         if let Some(request) = follow
-            && let Some(line) = request.line
+            && let Some(at) = SourcePlace::of(request)
         {
-            self.ws.follow(&request.path, line);
+            self.ws.follow(&request.path, at);
         }
         if let Some(rect) = requests.iter().rev().find_map(|r| r.place) {
             self.place(rect);
@@ -655,6 +697,18 @@ impl App {
             w.set_minimized(false);
             w.focus_window();
         }
+    }
+
+    /// What the editor asked for the document `doc`, which has no file: to show it (`open`),
+    /// its text as it is now, the caret's line, or that its text is over.
+    fn handed_document(&mut self, doc: &str, request: &Request) {
+        if request.live_off {
+            self.ws.document_off(doc);
+            return;
+        }
+        let title = request.title.as_deref();
+        let text = request.text.clone();
+        (self.ws).document_text(doc, title, text, SourcePlace::of(request), request.open);
     }
 
     /// Moves and resizes the window to `rect` (physical screen px), or says it cannot be done.
@@ -796,6 +850,16 @@ impl App {
         });
     }
 
+    /// Closes the window as Exit does (the session is saved on the way out), then starts the
+    /// version the update installed: the file is taken now and started by `run()` after the
+    /// window and the engine are gone. The viewer has no unsaved text to ask about.
+    pub(super) fn restart_into_update(&mut self) {
+        if let Some(target) = self.ws.update_relaunch_target() {
+            self.restart = Some(target);
+            self.exit = true;
+        }
+    }
+
     /// Downloads and swaps in the version that was offered, on its own thread.
     pub(super) fn install_update(&mut self) {
         let (Some(files), Some(proxy)) = (updater::installed_files(), self.proxy.clone()) else {
@@ -805,6 +869,8 @@ impl App {
         let Some(offer) = self.ws.update_begin() else {
             return;
         };
+        self.ws
+            .update_set_relaunch(mdshared_app::relaunch::target(Some(&files)));
         spawn_updater(move || {
             let result = updater::install(&offer, &files, &updater::fetch);
             if result.is_ok() {

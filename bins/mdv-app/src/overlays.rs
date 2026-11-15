@@ -151,6 +151,8 @@ pub fn tab_menu(ws: &Workspace, index: usize, x: f32, y: f32) -> Menu<Act> {
     let many = ws.tab_count() > 1;
     // A file that could not be read has no page to export.
     let exportable = ws.tab(index).is_some_and(|t| !t.is_missing());
+    // A document mdedit has not saved yet has no path to copy and no place to show.
+    let has_file = ws.tab(index).is_some_and(|t| !t.is_untitled());
     let items = vec![
         Item::new(Act::TabCmd(C::CloseTab, index), "Close tab").icon(glyph::CLOSE),
         Item::new(Act::TabCmd(C::CloseOtherTabs, index), "Close other tabs")
@@ -161,12 +163,15 @@ pub fn tab_menu(ws: &Workspace, index: usize, x: f32, y: f32) -> Menu<Act> {
             .icon(glyph::EDIT)
             .enabled(ws.tab(index).is_some_and(|t| !t.is_missing()))
             .sep(),
-        Item::new(Act::TabCmd(C::CopyFilePath, index), "Copy file path").icon(glyph::COPY),
+        Item::new(Act::TabCmd(C::CopyFilePath, index), "Copy file path")
+            .icon(glyph::COPY)
+            .enabled(has_file),
         Item::new(
             Act::TabCmd(C::ShowInFileManager, index),
             mdview_core::commands::command(C::ShowInFileManager).label,
         )
-        .icon(glyph::FOLDER_OPEN),
+        .icon(glyph::FOLDER_OPEN)
+        .enabled(has_file),
         // Here and in the command palette, not in the main menu: with two more rows that menu
         // would no longer fit the default window without scrolling.
         Item::new(
