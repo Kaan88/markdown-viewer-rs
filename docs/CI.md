@@ -35,7 +35,9 @@ of `Cargo.toml`, before anything is built.
 | --- | --- | --- |
 | `windows` | windows-latest | Installs Inno Setup (`choco install innosetup`), runs `packaging\windows\build-installer.ps1` (native build of `mdview.exe` and `mdview-engine.exe` with the static C runtime, the Inno Setup installer), then `packaging\windows\build-zip.ps1` (the portable zip). |
 | `linux` | ubuntu-latest | `packaging/linux/build-packages.sh`: builds the binary in the Ubuntu 20.04 image of `packaging/linux/Dockerfile` (glibc 2.31, the script refuses a binary that needs a newer one), then the AppImage, tar.gz, deb, rpm and the PKGBUILD from that one binary. Smoke test: the tar.gz is unpacked, installed into a temporary prefix, run headless, uninstalled. |
-| `publish` | ubuntu-latest | Needs both. Writes `mdview-update.txt` with both platforms (`packaging/write-manifest.sh`: the Windows entry names the native exes the `windows` job built and carries the engine keys, the Linux entry the AppImage), checks every hash against its file, runs the repo's manifest test (`cargo test --release -p mdview the_release_scripts_write_a_manifest_this_build_reads`) against the assembled `target/release-files-all/`, and, only for a tag or `publish: true`, runs `gh release create v<version>` at the tagged commit with all assets, marked latest. This is the only job with `contents: write`. |
+| `macos` | macos-15, macos-15-intel | Builds `mdview.app` with `packaging/macos/make-bundle.sh` (ad-hoc signature, checked with `codesign --verify`) and zips it as `mdview-<version>-macos-aarch64.zip` and `-x86_64.zip`. |
+| `attach` | ubuntu-latest | Only for a manual run with `attach_macos_to: v<version>` (then `windows`, `linux` and `publish` are skipped): adds the two macOS zips and `mdview-update-macos.txt` to that existing release, and the macOS paragraph to its text. |
+| `publish` | ubuntu-latest | Needs `windows`, `linux` and `macos`. Also writes `mdview-update-macos.txt` (`packaging/macos/write-manifest.sh`) and adds the macOS paragraph (`packaging/macos/release-notes.md`) to the release text. Writes `mdview-update.txt` with both platforms (`packaging/write-manifest.sh`: the Windows entry names the native exes the `windows` job built and carries the engine keys, the Linux entry the AppImage), checks every hash against its file, runs the repo's manifest test (`cargo test --release -p mdview the_release_scripts_write_a_manifest_this_build_reads`) against the assembled `target/release-files-all/`, and, only for a tag or `publish: true`, runs `gh release create v<version>` at the tagged commit with all assets, marked latest. This is the only job with `contents: write`. |
 
 The release text is `docs/release-notes/<version>.md` when that file exists (its first non-empty
 line is also the manifest's one-line note, which the update bar shows), else a default line.
@@ -51,6 +53,10 @@ Dry run: Actions, `release`, Run workflow, leave `publish` unchecked (or
 `gh workflow run release.yml --ref <branch>`). Everything is built and checked, and uploaded as
 one artifact `release-files-all`; no release is created.
 
+macOS files for a release made before them: Actions, `release`, Run workflow, `attach_macos_to`
+`v<version>` (or `gh workflow run release.yml -f attach_macos_to=v<version>`), from a commit whose
+version is that release's.
+
 ### Assets
 
 | File | For |
@@ -64,6 +70,8 @@ one artifact `release-files-all`; no release is created.
 | `mdview-<version>-1.x86_64.rpm` | Fedora, openSUSE, RHEL and derivatives. |
 | `PKGBUILD` | Arch: `makepkg -si` in a folder holding it; installs the tar.gz. |
 | `mdview-update.txt` | The update manifest (Windows and Linux entries). |
+| `mdview-<version>-macos-aarch64.zip`, `mdview-<version>-macos-x86_64.zip` | `mdview.app` for Apple Silicon and Intel Macs, macOS 12 or later; ad-hoc signed only, so opened with right-click, Open the first time. |
+| `mdview-update-macos.txt` | The manifest the macOS builds read: they only tell of a new version and open the download page. |
 
 ## Who should use which
 
