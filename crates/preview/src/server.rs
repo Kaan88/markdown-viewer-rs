@@ -539,8 +539,16 @@ mod tests {
             end: Some((10.0, 15.0)),
         };
         assert_eq!(sync.row(1.0), 0.0);
-        assert_eq!(sync.row(10.0), 1000.0, "before the last screen: the same line");
-        assert_eq!(sync.row(15.0), 2700.0, "the editor at its end: the page at its own");
+        assert_eq!(
+            sync.row(10.0),
+            1000.0,
+            "before the last screen: the same line"
+        );
+        assert_eq!(
+            sync.row(15.0),
+            2700.0,
+            "the editor at its end: the page at its own"
+        );
         assert_eq!(sync.row(19.0), 2700.0);
         let mut last = -1.0;
         for i in 0..=140 {
