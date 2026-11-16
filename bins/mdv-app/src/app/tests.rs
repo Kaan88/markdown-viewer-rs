@@ -3440,3 +3440,23 @@ fn text_without_a_key_name_still_gets_a_key_so_that_it_is_typed() {
     key(&mut a, KeyName::Char('\u{e9}'), Some("\u{e9}"));
     assert_eq!(a.ui.find.text(), "\u{e9}");
 }
+
+#[test]
+fn a_composition_shows_in_the_find_box_and_is_not_typed() {
+    let mut a = app(&["showcase.md"]);
+    click(&mut a, Hit::Find);
+    a.caret_reset();
+    a.compose();
+    let before = a.screen.pixels.clone();
+    a.ime_preedit("かな".to_string(), Some((6, 6)));
+    a.caret_reset();
+    a.compose();
+    assert!(a.screen.pixels != before, "the composition is drawn");
+    assert_eq!(a.ui.find.text(), "", "a composition is not text yet");
+    a.ime_preedit(String::new(), None);
+    a.ime_commit("家");
+    a.caret_reset();
+    a.compose();
+    assert_eq!(a.ui.find.text(), "家");
+    assert_eq!(a.ui.find.preedit(), None);
+}

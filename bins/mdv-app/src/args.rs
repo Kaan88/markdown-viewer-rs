@@ -90,6 +90,8 @@ pub struct Args {
     pub backdrop: Option<mdshared_app::backdrop::Backdrop>,
     /// Look for a newer version, print the answer, and exit. No window.
     pub check_update: bool,
+    /// Install a newer version as the update bar would, start it, and exit. No window.
+    pub install_update: bool,
     /// Scroll this many wheel steps after the first frame, log timings, and exit.
     pub scroll_steps: Option<u32>,
     /// Start maximized (for checking the frameless maximized geometry).
@@ -167,6 +169,7 @@ impl Args {
                         .and_then(mdshared_app::backdrop::Backdrop::parse)
                 }
                 "--check-update" => out.check_update = true,
+                "--install-update" => out.install_update = true,
                 "--maximize" => out.maximize = true,
                 "--follow" => out.follow = true,
                 "--line" => out.line = value(&a).and_then(|v| v.parse().ok()).filter(|&n| n >= 1),

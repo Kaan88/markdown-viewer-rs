@@ -513,7 +513,10 @@ impl App {
                 ui.find.text(),
                 ui.find.caret(),
                 ui.find_focused,
-                ui.find_focused && ui.caret_on,
+                (
+                    ui.find_focused && ui.caret_on,
+                    ui.find.preedit().map(|p| (&p.text, p.cursor)),
+                ),
                 self.ws.find_label(),
                 ui.panes.files,
                 ui.panes.outline,
@@ -1641,6 +1644,12 @@ impl ApplicationHandler<Wake> for App {
             // Text an input method made: an accent typed with a dead key or chosen by holding a
             // key, or Chinese, Japanese or Korean input. Input methods are on only on macOS.
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => self.ime_commit(&text),
+            WindowEvent::Ime(winit::event::Ime::Preedit(text, cursor)) => {
+                self.ime_preedit(text, cursor)
+            }
+            WindowEvent::Ime(winit::event::Ime::Enabled | winit::event::Ime::Disabled) => {
+                self.ime_preedit(String::new(), None)
+            }
             WindowEvent::DroppedFile(path) => self.dropped(path),
             _ => {}
         }
@@ -1901,6 +1910,9 @@ pub fn run() -> i32 {
     let args = Args::parse(std::env::args().skip(1));
     if args.check_update {
         return check_update();
+    }
+    if args.install_update {
+        return mdshared_app::updater::install_and_restart(&updater::APP, &updater::fetch);
     }
     let explicit = std::env::var_os("MDVIEW_SETTINGS").map(PathBuf::from);
     // A shot never touches the user's session; it may use a scratch one named by MDVIEW_SETTINGS.

@@ -710,6 +710,36 @@ impl App {
     /// Text an input method committed, typed as a key without modifiers would type it. winit
     /// sends a commit only for text the input method composed (a dead key, a held key's accent
     /// menu, CJK), and then no key event for it, so nothing is typed twice.
+    /// What an input method is composing, drawn in place by the box that has the keyboard (the
+    /// palette's query, the settings' text box, the find box); its candidate window goes under
+    /// that box.
+    pub(super) fn ime_preedit(&mut self, text: String, cursor: Option<(usize, usize)>) {
+        use mdshared_ui::textfield::Preedit;
+        let pre = Preedit::new(text, cursor);
+        // The palette and the settings say nothing of what changed inside: the tick does.
+        let (shown, area) = if let Some(p) = self.ui.palette.as_mut() {
+            self.ui.overlay_tick += 1;
+            (p.palette.set_preedit(pre), Some(p.palette.field_rect()))
+        } else if let Some(f) = self.ui.settings.as_mut() {
+            self.ui.overlay_tick += 1;
+            (f.set_preedit(pre), None)
+        } else if self.ui.find_focused {
+            (self.ui.find.set_preedit(pre), self.hit_rect(Hit::Find))
+        } else {
+            (false, None)
+        };
+        if shown {
+            self.caret_reset();
+            self.redraw();
+        }
+        if let (Some(r), Some(w)) = (area, &self.window) {
+            w.set_ime_cursor_area(
+                winit::dpi::LogicalPosition::new(r.x, r.y),
+                winit::dpi::LogicalSize::new(r.w, r.h),
+            );
+        }
+    }
+
     pub(super) fn ime_commit(&mut self, text: &str) {
         let Some(c) = text.chars().next() else {
             return;

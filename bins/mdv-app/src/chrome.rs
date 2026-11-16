@@ -378,6 +378,7 @@ pub fn draw_title(c: &mut Ctx, ws: &Workspace, ui: &Ui, r: Rect, maximized: bool
             next_quiet: i + 1 < labels.len() && active != Some(i + 1) && !is_hot(c.hover, i + 1),
             close_hovered: c.hover == Some(Hit::TabClose(i)),
             close_pressed: c.pressed == Some(Hit::TabClose(i)),
+            pinned: false,
         };
         let drawn = draw_tab(c.p, &pal, x, w, r.w, label, &state);
         c.hit(Hit::Tab(i), drawn.tab);

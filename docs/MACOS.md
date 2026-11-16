@@ -91,10 +91,10 @@ the 40 px tab row, the icon, dark mode, the fonts).
 
 - Known gaps: text inserted without a key press (Edit, Emoji & Symbols; dictation) did not
   arrive, because winit only passed inserted text on when it ended a composition; our fork now
-  sends it as `Ime::Commit` (`view.rs`, `insert_text`, `62fa727`), to try on the Mac. No
-  preedit (the underlined text while composing) is drawn. The update bar does not yet open the
-  download page on a Mac. Input methods are on for macOS only; Windows and Linux would gain from
-  them too.
+  sends it as `Ime::Commit` (`view.rs`, `insert_text`, `62fa727`), to try on the Mac. The
+  text being composed is drawn underlined where it will go (the editor's text, and every text
+  box: `TextField::set_preedit`), and updates install themselves (decision 5); both to try on
+  the Mac. Input methods are on for macOS only; Windows and Linux would gain from them too.
 - The bundles: the `macos` zips of the latest release (or the artifacts of the latest CI run on
   `main`); right-click, Open, the first time.
 
@@ -109,6 +109,12 @@ the 40 px tab row, the icon, dark mode, the fonts).
    left and our tab row drawn beneath them.
 4. **Two builds**, Apple Silicon and Intel, not one universal binary. macOS 12 or later.
 5. **Updates**: the bar says a new version exists and opens the download page. No self-update.
+   *Changed by the owner on 2026-11-16*: macOS builds update themselves in place as on Windows and
+   Linux. The release zip is fetched, checked against the manifest's SHA-256, unpacked with
+   `ditto` beside the bundle, and swapped in whole (the old bundle kept as `<name>.app.old` until
+   the next launch); Restart starts the new bundle with `open -n`. A copy the system runs from a
+   read-only place (opened where it was downloaded) cannot, and says to move it to Applications.
+   `tests/mac-update.sh` tries the whole of it on the runner against a local HTTPS server.
 
 ## What the runners can do, and how the work leans on them
 

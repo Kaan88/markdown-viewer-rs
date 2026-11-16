@@ -11,6 +11,13 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## After 0.5.1, on `main`, not released (2026-11-16)
+
+Shared crates at `d775493`. Input-method compositions are drawn in the find box, the palette and
+the settings (`ime_preedit` in `app/input.rs`; test in `app/tests.rs`), not yet tried with a real
+input method. macOS builds update themselves in place (see `docs/MACOS.md`, decision 5), checked
+in the Mac CI job by `tests/mac-update.sh`; `--install-update` does the same from a terminal.
+
 ## START HERE: mdview 0.5.1 is released (2026-11-15)
 
 **The released state is `main`, mdview 0.5.1, tag `v0.5.1` at `a73da37`, published with mdedit

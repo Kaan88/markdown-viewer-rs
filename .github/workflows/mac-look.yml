@@ -6,7 +6,7 @@ name: mac-look
 
 on:
   push:
-    branches: [f/macos]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -44,12 +44,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Kaan88/markdown-editor-rs
-          ref: f/macos
+          ref: main
           path: editor
       - name: The editor's bundle, beside the viewer's
         run: |
           cargo build --release -p mdedit --manifest-path editor/Cargo.toml
           bash editor/packaging/macos/make-bundle.sh editor/target/release target/dist
+      - name: Updating itself (a newer bundle from a local HTTPS server)
+        if: ${{ !cancelled() }}
+        run: bash tests/mac-update.sh target/update target/dist/mdview.app
       - name: Opening files from the system, Command+Q
         run: bash tests/mac-open.sh target/open target/dist/mdview.app
       - name: Edit in mdedit, the two bundles side by side
