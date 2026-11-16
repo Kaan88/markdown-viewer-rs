@@ -11,6 +11,19 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Preview server for mdedit, branch `f/preview-pane` (2026-11-16, not merged)
+
+For mdedit's preview pane (its handoff has the whole story and the timings):
+- `crates/preview` (`mdview-preview`): the wire format (`wire.rs`: requests Text, View, Follow,
+  Scroll, Quit; updates carry the rows that changed plus a shift) and, with feature `server`,
+  the drawing loop (`server.rs`, `serve`, `serve_stdio`). mdedit's embedded build runs `serve`
+  on a thread; its default build starts `mdview --preview-server`, which runs `serve_stdio`
+  with no window (checked first in `main`). The server greets with `MDVPREVIEW1\n`.
+- `mdview_render::set_engine_path`: where the math and diagram engine is, ahead of
+  `MDV_ENGINE` and the exe's folder (for the embedded build, whose exe is mdedit).
+- The page follows the caret's source line only when that line is out of view.
+Tests: 5 in the crate. Not run on Windows by hand.
+
 ## After 0.5.1, on `main`, not released (2026-11-16)
 
 Shared crates at `d775493`. Input-method compositions are drawn in the find box, the palette and
