@@ -4549,11 +4549,12 @@ mod tests {
         assert!((10.0..40.0).contains(&step), "{step}");
         // A paragraph written over many lines: the page's line that holds the file's line.
         // Its lines are joined and wrapped anew, so the line asked for begins somewhere in
-        // the row below the edge, or was the row above's last word.
+        // the row below the edge, or was the row above's last word. A row holds about two of
+        // the file's lines, more with the Mac's narrower fonts.
         assert!(ws.scroll_to_line(306 + 150));
         settle(&mut ws);
         let (line, _) = line_below_the_edge(&mut ws).unwrap();
-        assert!((455..=456).contains(&line), "{line}");
+        assert!((453..=456).contains(&line), "{line}");
         assert!(ws.scroll() > in_code + 1000.0);
         // And back: what is at the top of the page is a line near it, not the paragraph's
         // first.
