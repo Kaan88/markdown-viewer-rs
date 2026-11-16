@@ -63,9 +63,9 @@ impl Server {
                     self.renderer.layout(&doc, &self.options);
                 }
                 self.doc = Some(doc);
-                // The page shows the caret again in the new text.
+                // The page shows the caret in the new text; it stays still while it does.
                 if let Some((line, column)) = self.follow {
-                    self.go_to(line, column, true);
+                    self.go_to(line, column);
                 }
             }
             Request::View {
@@ -95,13 +95,13 @@ impl Server {
                     }
                     self.whole = true;
                     if let Some((line, column)) = self.follow {
-                        self.go_to(line, column, true);
+                        self.go_to(line, column);
                     }
                 }
             }
             Request::Follow { line, column } => {
                 self.follow = Some((line, column));
-                self.go_to(line, column, false);
+                self.go_to(line, column);
             }
             Request::Scroll { by } => {
                 if by.is_finite() {
@@ -114,9 +114,9 @@ impl Server {
         true
     }
 
-    /// Moves the page so that source line `line` shows; unless `always`, only when that line
-    /// is not in view already, so a caret moving within the pane leaves the page still.
-    fn go_to(&mut self, line: u32, column: u32, always: bool) {
+    /// Moves the page so that source line `line` shows, only when that line is not in view
+    /// already, so a caret moving within the pane leaves the page still.
+    fn go_to(&mut self, line: u32, column: u32) {
         let (Some(doc), Some((_, height))) = (&self.doc, self.size) else {
             return;
         };
@@ -139,7 +139,7 @@ impl Server {
         };
         // The line's row is `top + margin`: in view, with a margin, the page stays.
         let row = top + margin;
-        if !always && row >= self.top + margin && row <= self.top + height - 2.0 * margin {
+        if row >= self.top + margin && row <= self.top + height - 2.0 * margin {
             self.renderer.set_top(self.top);
             return;
         }
