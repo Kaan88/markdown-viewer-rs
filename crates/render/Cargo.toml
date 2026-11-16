@@ -7,8 +7,8 @@ publish.workspace = true
 [dependencies]
 mdview-core = { path = "../core" }
 mdview-engine-proto = { path = "../engine-proto" }
-mdshared-text = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "6b0086bc9c60573e2e81c5c6685cbb5e73ec9c3f" }
-mdshared-highlight = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "6b0086bc9c60573e2e81c5c6685cbb5e73ec9c3f" }
+mdshared-text = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "e97fc1fbbeae029e3a6d96be6863d48aa790745c" }
+mdshared-highlight = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "e97fc1fbbeae029e3a6d96be6863d48aa790745c" }
 parley = "=0.12.0"
 png = "0.18"
 zune-jpeg = "=0.5.15"

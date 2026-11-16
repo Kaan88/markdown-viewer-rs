@@ -91,6 +91,10 @@ const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
 pub enum Wake {
     /// The single-instance listener queued paths.
     Instance,
+    /// macOS asked the application to open files (Finder, Open With, the Dock icon).
+    Open(Vec<PathBuf>),
+    /// An item of the macOS menu bar the application answers.
+    Menu(mdshared_ui::menu_bar::AppCommand),
     /// The file watcher saw a change.
     Files,
     /// A remote image finished downloading.
@@ -1401,6 +1405,12 @@ impl ApplicationHandler<Wake> for App {
         );
         let window = Rc::new(event_loop.create_window(attributes).expect("window"));
         mdshared_ui::window::created(&window);
+        // macOS: the menu bar, with Quit as the Exit command (winit's ends the process at once).
+        if let Some(p) = self.proxy.clone() {
+            mdshared_ui::menu_bar::install("mdview", move |c| {
+                let _ = p.send_event(Wake::Menu(c));
+            });
+        }
         stage(self.started, "window created");
         self.scale = window.scale_factor() as f32;
         self.maximized = window.is_maximized();
@@ -1919,6 +1929,11 @@ pub fn run() -> i32 {
     };
     stage(started, "event loop");
     let proxy = event_loop.create_proxy();
+    // macOS hands a running bundle its files as an event, also the files it was launched with.
+    let p = proxy.clone();
+    mdshared_ui::open_documents::on_open(move |paths| {
+        let _ = p.send_event(Wake::Open(paths));
+    });
     if let Some(settings) = &app.session {
         let p = proxy.clone();
         app.incoming = mdview_core::single::listen_requests_waking(settings, move || {

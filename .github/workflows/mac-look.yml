@@ -38,7 +38,10 @@ jobs:
         run: bash tests/shots.sh target/shots
       - name: The bundle
         run: bash packaging/macos/make-bundle.sh target/release target/dist
+      - name: Opening files from the system, Command+Q
+        run: bash tests/mac-open.sh target/open target/dist/mdview.app
       - name: The app in a real window
+        if: ${{ !cancelled() }}
         run: |
           bash tests/mac-window.sh target/window/showcase target/dist/mdview.app --no-session "$PWD/fixtures/showcase.md"
           bash tests/mac-window.sh target/window/empty-dark target/dist/mdview.app --no-session --dark
@@ -47,7 +50,7 @@ jobs:
         run: |
           bash tests/print-pngs.sh \
             target/window/showcase/screen.png target/window/showcase/window.png \
-            target/window/empty-dark/window.png \
+            target/window/empty-dark/window.png target/open/opened.png \
             target/shots/showcase-light.png target/shots/everything-dark.png \
             target/shots/emoji-light.png target/shots/menu-main-light.png \
             target/shots/dialog-settings-light.png target/shots/scale-200.png
