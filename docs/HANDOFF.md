@@ -24,7 +24,7 @@ For mdedit's preview pane (its handoff has the whole story and the timings):
 - The page follows the caret's source line only when that line is out of view.
 Tests: 5 in the crate. Not run on Windows by hand.
 
-Crash reports (same branch, shared crates `f/crash-report` at `5323efa`, the owner's request):
+Crash reports (same branch, shared crates `f/crash-report` at `21fd49b`, the owner's request):
 - `main.rs` installs `mdshared_app::crash` after the `--preview-server` branch, into
   `data_dir("mdview")/crashes`, and calls `crash::closed_normally()` after `app::run()`: mdview
   builds with `panic = "unwind"` and catches panics in image decoding and export, so a run that
