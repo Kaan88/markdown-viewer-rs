@@ -1,11 +1,11 @@
-# A macOS version: plan (2026-11-15; stage 1 under way on the runners)
+# A macOS version: plan and progress (stages 1 to 4 done on runners, 2026-11-16)
 
-A plan for porting mdview and mdedit to macOS. Nothing here is built, and nothing has been
-compiled for macOS. It rests on a read of all three repositories on 2026-11-15 (shared crates at
+A plan for porting mdview and mdedit to macOS, and below it where the work stands
+(**Progress**). The plan rests on a read of all three repositories on 2026-11-15 (shared crates at
 `d955a48`, mdview 0.5.0, mdedit 0.7.0). The usual rule holds: nothing counts as working on macOS
 until it has run on a Mac, and the owner approves the interface by looking at it.
 
-## Where the code stands
+## Where the code stood (before the port, 2026-11-15)
 
 - `target_os = "macos"` appears nowhere. Code is split into "Windows" and "not Windows", and most
   of the "not Windows" side assumes Linux (Wayland and X11, D-Bus, XDG folders, AppImage).
@@ -24,38 +24,72 @@ touches: check whether they have been merged, and if not, build the port on top 
 
 ## Progress
 
-**Stage 1, 2026-11-15: on the runners**, on the branch `f/macos` in all three repositories,
-built on `main` (mdview 0.5.1, mdedit 0.7.1; the control fixes are merged there). The shared
-crates' branch is pinned by both apps. Nothing has been run on the owner's Mac, and no window
-has been opened on a Mac yet.
+**Stages 1 to 4 done on GitHub's macOS runners (2026-11-16)**, on the branch `f/macos` in all
+three repositories, built on `main` (mdview 0.5.1, mdedit 0.7.1). Both apps pin the shared
+crates' `f/macos`. Nothing has run on the owner's Mac yet; the next step is the owner's first Mac
+session (below).
 
-- CI has a `macos` job on `macos-15` (Apple Silicon) and `macos-15-intel` (`macos-13`, named
-  above, is retired). Build, clippy and tests in all three; the screenshot suite of both apps
-  runs there and its pictures are artifacts of the run. They cannot be downloaded into a cloud
-  session (the artifact host is refused by its network), so they are looked at from the run's
-  page in a browser.
-- What changed: see the commit messages on `f/macos`. In short: zbus and the portal only on
-  Linux; `open`/`open -R`; dark mode from `AppleInterfaceStyle`; `/usr/lib/libcurl.4.dylib`;
-  `~/Library/Application Support`; FSEvents; names without case (`paths::NAMES_IGNORE_CASE`);
-  greyscale text; update platforms `macos-aarch64` and `macos-x86_64` read from
-  `<name>-update-macos.txt`, the parser skips keys of unknown platforms, no self-update on a Mac;
-  the other app found as `<name>.app` beside this bundle or in `/Applications` and
-  `~/Applications` (from stage 4, as it was small); macOS font fallbacks; the editor pastes a
-  picture (PNG, or TIFF made PNG) and copied files through `NSPasteboard`; the key without
-  modifiers is read on macOS too.
-- State of the runs: all three build and pass clippy on both Macs, and both apps' screenshot
-  suites run there. The last test failures found there are fixed in the latest commits, whose
-  runs were not finished when this was written: see the Actions page of each repository.
-- Found on the runners: FSEvents keeps a file's "created" flag on later events for it, so a
-  write into a new file woke a listed folder; on macOS a listing event now wakes only when the
-  folder's own modification time moved. Two viewer tests held on one font's pixels and failed
-  in Helvetica's metrics; they no longer do.
-- Found in the code, for stage 2: rfd already runs its panels on the main thread when called
-  from a helper thread while the app is running (`dispatch2::run_on_main`), so the dialogs may
-  need no change. To be seen in a real window.
-- Not done in stage 1: the page and interface font stacks still name no Mac family (they reach
-  the system's sans-serif and monospace); the editor's memory and CPU read-outs; the update bar
-  opening the download page; everything of stages 2 to 6.
+### How it is checked without a Mac
+
+- CI (`ci.yml`): a `macos` job on `macos-15` (Apple Silicon) and `macos-15-intel` (`macos-13`
+  is retired) in all three repositories: fmt, clippy, tests, both apps' screenshot suites, and
+  the bundle zipped as an artifact (`mdview-macos-aarch64.zip`, `mdedit-macos-x86_64.zip`, ...).
+- `mac-look.yml` (both apps, Apple Silicon): builds the bundles and runs them in a real window
+  on the runner, started through LaunchServices as Finder starts them, driven through System
+  Events (`tests/mac-*.sh`). The pictures are printed into the log as base64 as well as uploaded,
+  because a cloud session cannot download artifacts: `gh run view <id> --log |
+  tools/mac-look-decode.sh <dir>` writes them back.
+- What those runs have shown working (pass lines in the logs, pictures looked at):
+  typing; a dead key (Option+E, then E) arriving as "é" through the input method; Command+S,
+  Command+Z, Command+A/X/V (the menu bar's Edit items leave them to the window); Command+Left
+  and Option+Right; Command+O opening the system's open panel from the helper thread and Escape
+  closing it; Command+Q with unsaved changes asking first; Command+E in the viewer starting
+  `mdedit.app` from beside its own bundle on the file; `open -a` reaching the running copy; the
+  native title bar with the tabs under the system's buttons; SF and Menlo; Mac shortcut labels
+  in the menus.
+
+### What was built
+
+- Stage 1: see the commits of 2026-11-15 (Linux-only crates gated, `open`, dark mode from
+  `AppleInterfaceStyle`, the system libcurl, `~/Library/Application Support`, FSEvents, names
+  without case, update platforms read from `<name>-update-macos.txt`, the pasteboard).
+- Stage 2: the window keeps the system's frame with a transparent full-size title bar
+  (`window::identify`, `chrome::NATIVE_FRAME`); greyscale text; `system-ui` (SF) and Helvetica
+  Neue for the interface and the page, SF Mono or Menlo for code; input methods on, with
+  `Ime::Commit` typed and the candidate window at the editor's caret. The dialogs needed no
+  change: rfd runs them on the main thread itself.
+- Stage 3: Command is the primary modifier (`Mods::ctrl`; the Control key is `Mods::control`);
+  `keys::for_platform` moves what the Mac keeps (Control+Tab for tabs, Option+Command+F for
+  Replace, Option+Escape for completion, Command+[ and ] for Back and Forward);
+  `keys::text_key` gives the Mac's text keys; Option types; labels in the Mac's symbols; no
+  access-key underlines; a column selection is Command+Option+Shift+arrows; Control and a click
+  is a right click.
+- Stage 4: `packaging/macos/make-bundle.sh` (Info.plist with the document types, macOS 12, the
+  icon from `assets/<name>-macos.png`, the ad-hoc signature); files from Finder through the
+  open-documents event (`open_documents`); a menu bar whose Quit is the app's Exit
+  (`menu_bar`; winit's ended the process at once); the other app as a bundle beside this one or
+  in the Applications folders; side by side within the screen's visible frame; "Show in
+  Finder"; the editor's memory and CPU figures.
+- Mac extras the owner asked for: trackpad pinch zooms, the smart-zoom tap is actual size; the
+  title row's double click follows the system setting; opened files go into the system's recent
+  documents; the unsaved-changes dot in the editor's close button; Window, Enter Full Screen
+  (Control+Command+F); the double-click interval, caret blink and Reduce Motion from the system.
+
+### Left for the owner's Mac (the first Mac session)
+
+- Everything the runners cannot show: trackpad scrolling and pinch, Retina sharpness and speed
+  at scale 2, the first-open warning of an unsigned download, the owner's own setup, and the
+  look of all of it (the owner approves the interface).
+- To look at in particular: where the system's three buttons sit in the 40 px title row (the
+  system centres them in its own, shorter bar); the icon (the tile's top sheen shows its rounded
+  lower edge at 1024 px).
+- Known gaps: text inserted without a key press (Edit, Emoji & Symbols; dictation) does not
+  arrive, because winit only passes inserted text on when it ends a composition; the fix is
+  two lines in our winit fork (`view.rs`, `insert_text`), not made here. No preedit (the
+  underlined text while composing) is drawn. The update bar does not yet open the download page
+  on a Mac. Input methods are on for macOS only; Windows and Linux would gain from them too.
+- The bundles to try: the `mdview-macos-*.zip` and `mdedit-macos-*.zip` artifacts of the latest
+  CI run on `f/macos` (open from the Actions page; right-click, Open, the first time).
 
 ## Decisions (the owner, 2026-11-15)
 
