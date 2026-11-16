@@ -25,6 +25,9 @@ pub struct Server {
     follow: Option<(u32, u32)>,
     /// The source's line count, for the page's end in [`row_of_line`] and [`line_of_row`].
     lines: u32,
+    /// The editor's last screen of scrolling, `(tail, end)` in [`Request::Align`]'s units:
+    /// over it the page goes on to its own bottom.
+    end: Option<(f32, f32)>,
     /// Something changed since the last frame (or there has been none).
     dirty: bool,
     /// The editor's copy of the frame is gone: the next frame is sent whole.
@@ -47,6 +50,7 @@ impl Server {
             top: 0.0,
             follow: None,
             lines: 1,
+            end: None,
             dirty: true,
             whole: true,
         }
@@ -112,7 +116,10 @@ impl Server {
                     self.top = (self.top + by).max(0.0);
                 }
             }
-            Request::Align { line } => self.align(line),
+            Request::Align { line, tail, end } => {
+                self.end = (tail.is_finite() && end.is_finite()).then_some((tail, end));
+                self.align(line);
+            }
             Request::Quit => return false,
         }
         self.dirty = true;
@@ -151,25 +158,33 @@ impl Server {
         self.top = top.round();
     }
 
-    /// Puts source line `line` (fractional) at the pane's top, as the editor's top is.
+    /// Puts source line `line` (fractional) at the pane's top, as the editor's top is; over the
+    /// editor's last screen the page goes on to its bottom ([`Sync::row`]).
     fn align(&mut self, line: f32) {
-        let (Some(doc), Some(page)) = (&self.doc, self.renderer.page_layout()) else {
-            return;
-        };
         if !line.is_finite() {
             return;
         }
-        let top = row_of_line(&knots(doc, page.blocks(), self.lines), line).max(0.0);
-        self.top = top.round();
+        let Some(sync) = self.sync() else {
+            return;
+        };
+        self.top = sync.row(line).round();
         self.renderer.set_top(self.top);
     }
 
-    /// The source line at page row `top`.
+    /// The source line at page row `top`: the inverse of [`align`](Self::align), so that the
+    /// lead going from one side to the other moves neither.
     fn line_at(&self, top: f32) -> f32 {
-        match (&self.doc, self.renderer.page_layout()) {
-            (Some(doc), Some(page)) => line_of_row(&knots(doc, page.blocks(), self.lines), top),
-            _ => 1.0,
-        }
+        self.sync().map_or(1.0, |s| s.line(top))
+    }
+
+    fn sync(&self) -> Option<Sync> {
+        let (doc, page) = (self.doc.as_ref()?, self.renderer.page_layout()?);
+        let height = self.size.map_or(0.0, |(_, h)| h as f32);
+        Some(Sync {
+            knots: knots(doc, page.blocks(), self.lines),
+            bottom: (page.total_height() - height).max(0.0),
+            end: self.end,
+        })
     }
 
     /// Draws what changed since the last frame. `None` when nothing did, or before the pane's
@@ -245,6 +260,57 @@ fn knots(doc: &Document, blocks: &[BlockBox], lines: u32) -> Vec<(f32, f32)> {
         }
     }
     k
+}
+
+/// How the editor's top and the page's top go together.
+struct Sync {
+    knots: Vec<(f32, f32)>,
+    /// The page's largest top.
+    bottom: f32,
+    /// The editor's last screen of scrolling, `(tail, end)`.
+    end: Option<(f32, f32)>,
+}
+
+impl Sync {
+    /// The page's top for the editor's top `line`: the same source line at both tops, except
+    /// over the editor's last screen, where the page goes on straight to its bottom. The page
+    /// is mostly the longer, so its top line alone would leave its end unreachable; when it is
+    /// the shorter, it stops at its bottom as before.
+    fn row(&self, line: f32) -> f32 {
+        let same = row_of_line(&self.knots, line).clamp(0.0, self.bottom);
+        match self.end {
+            Some((tail, end)) if end > tail && self.bottom > 0.0 => {
+                let t = ((line - tail) / (end - tail)).clamp(0.0, 1.0);
+                same + (self.bottom - same) * t
+            }
+            _ => same,
+        }
+    }
+
+    /// The editor's top for page row `row`: [`row`](Self::row)'s inverse. The page at its
+    /// bottom is the editor at its end.
+    fn line(&self, row: f32) -> f32 {
+        let Some((_, end)) = self.end.filter(|&(t, e)| e > t && self.bottom > 0.0) else {
+            return line_of_row(&self.knots, row);
+        };
+        if row >= self.bottom - 0.5 {
+            return end;
+        }
+        // `row` never goes down as the line goes on: halve the interval to the line.
+        let (mut lo, mut hi) = (1.0f32, end.max(1.0));
+        for _ in 0..40 {
+            let mid = (lo + hi) / 2.0;
+            if self.row(mid) < row {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+            if hi - lo < 1e-4 {
+                break;
+            }
+        }
+        (lo + hi) / 2.0
+    }
 }
 
 /// Straight between the two knots around `x` (in `.0` when `by_line`, else in `.1`).
@@ -436,12 +502,20 @@ mod tests {
         let first = s.frame().expect("a frame");
         assert!(first.line < 2.0, "{}", first.line);
         // Paragraph 100 is on line 201: aligned, its block is at the top.
-        s.apply(Request::Align { line: 201.0 });
+        s.apply(Request::Align {
+            line: 201.0,
+            tail: 0.0,
+            end: 0.0,
+        });
         let at = s.frame().expect("moved");
         assert!(at.top > 1000.0, "{}", at.top);
         assert!((at.line - 201.0).abs() < 0.5, "{}", at.line);
         // Half a line further: the page moves down a little, not a block.
-        s.apply(Request::Align { line: 201.5 });
+        s.apply(Request::Align {
+            line: 201.5,
+            tail: 0.0,
+            end: 0.0,
+        });
         let half = s.frame().expect("moved");
         assert!(
             half.top > at.top && half.top - at.top < 40.0,
@@ -453,6 +527,81 @@ mod tests {
         s.apply(Request::Scroll { by: 400.0 });
         let wheel = s.frame().expect("moved");
         assert!(wheel.line > 205.0, "{}", wheel.line);
+    }
+
+    #[test]
+    fn over_the_editors_last_screen_the_page_goes_on_to_its_bottom_and_back() {
+        // 20 lines, the page 3000 rows, its bottom at 2700; the editor ends at line 15, a
+        // screen being 5 lines.
+        let sync = Sync {
+            knots: vec![(1.0, 0.0), (10.0, 1000.0), (21.0, 3000.0)],
+            bottom: 2700.0,
+            end: Some((10.0, 15.0)),
+        };
+        assert_eq!(sync.row(1.0), 0.0);
+        assert_eq!(sync.row(10.0), 1000.0, "before the last screen: the same line");
+        assert_eq!(sync.row(15.0), 2700.0, "the editor at its end: the page at its own");
+        assert_eq!(sync.row(19.0), 2700.0);
+        let mut last = -1.0;
+        for i in 0..=140 {
+            let line = 1.0 + i as f32 * 0.1;
+            let row = sync.row(line);
+            assert!(row >= last, "the page goes back up at line {line}");
+            last = row;
+            let back = sync.line(row);
+            assert!((back - line).abs() < 0.01, "{line} came back as {back}");
+        }
+        // The page shorter than the editor's end: it stops at its bottom, and the page at its
+        // bottom is the editor at its end.
+        let short = Sync {
+            bottom: 900.0,
+            ..sync
+        };
+        assert_eq!(short.row(12.0), 900.0);
+        assert_eq!(short.line(900.0), 15.0);
+        assert!((short.line(short.row(5.0)) - 5.0).abs() < 0.01);
+        // No last screen (the editor does not scroll): the same line, the page at its top.
+        let still = Sync {
+            end: Some((1.0, 1.0)),
+            ..short
+        };
+        assert_eq!(still.row(1.0), 0.0);
+    }
+
+    #[test]
+    fn the_editor_at_its_end_puts_the_page_at_its_end() {
+        let mut s = Server::new();
+        s.apply(Request::View {
+            width: 400,
+            height: 300,
+            scale: 1.0,
+            dark: false,
+        });
+        s.apply(Request::Text {
+            text: text(200),
+            base_dir: None,
+        });
+        s.frame().expect("a frame");
+        // The editor shows 30 lines of the 400: its end is line 371, its last screen from 341.
+        let at = |s: &mut Server, line: f32| {
+            s.apply(Request::Align {
+                line,
+                tail: 341.0,
+                end: 371.0,
+            });
+            s.frame().expect("moved")
+        };
+        let end = at(&mut s, 371.0);
+        assert_eq!(end.top, end.total - 300.0, "the page at its bottom");
+        assert_eq!(end.line, 371.0);
+        let before = at(&mut s, 341.0);
+        assert!(before.top < end.top && (before.line - 341.0).abs() < 0.05);
+        // The wheel over the page from there: the editor's line goes down with it, to its end.
+        s.apply(Request::Scroll { by: 100.0 });
+        let wheel = s.frame().expect("moved");
+        assert!(wheel.line > 341.0 && wheel.line < 371.0, "{}", wheel.line);
+        s.apply(Request::Scroll { by: 1e6 });
+        assert_eq!(s.frame().expect("moved").line, 371.0);
     }
 
     #[test]

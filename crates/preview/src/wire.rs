@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 /// The server's first line: the protocol's name and version.
-pub const MAGIC: &[u8; 12] = b"MDVPREVIEW2\n";
+pub const MAGIC: &[u8; 12] = b"MDVPREVIEW3\n";
 
 /// The largest message either side accepts: a frame of 8K by 8K pixels.
 pub const MAX_MESSAGE: usize = 8192 * 8192 * 4 + 64;
@@ -35,7 +35,10 @@ pub enum Request {
     Scroll { by: f32 },
     /// The editor scrolled: source line `line` (from 1; the fraction is how far down that line
     /// the editor's top is) goes to the pane's top. Synced scrolling, the editor leading.
-    Align { line: f32 },
+    /// `tail` to `end` are the editor's last screen of scrolling, as tops in the same units
+    /// (`end` is its top when scrolled to the bottom): over it the page moves on to its own
+    /// bottom, so the two reach their ends together.
+    Align { line: f32, tail: f32, end: f32 },
     /// Stop: the server ends.
     Quit,
 }
@@ -231,8 +234,10 @@ pub fn write_request(w: &mut impl Write, req: &Request) -> io::Result<()> {
             put_u32(&mut b, by.to_bits());
             SCROLL
         }
-        Request::Align { line } => {
+        Request::Align { line, tail, end } => {
             put_u32(&mut b, line.to_bits());
+            put_u32(&mut b, tail.to_bits());
+            put_u32(&mut b, end.to_bits());
             ALIGN
         }
         Request::Quit => QUIT,
@@ -268,7 +273,11 @@ pub fn read_request(r: &mut impl Read) -> io::Result<Option<Request>> {
                 column: f.u32()?,
             },
             SCROLL => Request::Scroll { by: f.f32()? },
-            ALIGN => Request::Align { line: f.f32()? },
+            ALIGN => Request::Align {
+                line: f.f32()?,
+                tail: f.f32()?,
+                end: f.f32()?,
+            },
             QUIT => Request::Quit,
             _ => continue,
         };
@@ -362,7 +371,11 @@ mod tests {
                 column: 3,
             },
             Request::Scroll { by: -48.0 },
-            Request::Align { line: 41.25 },
+            Request::Align {
+                line: 41.25,
+                tail: 300.0,
+                end: 340.5,
+            },
             Request::Quit,
         ];
         let mut buf = Vec::new();
