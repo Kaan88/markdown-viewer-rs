@@ -11,7 +11,11 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## Selecting text on mdedit's preview pane, branch `f/pane-select` (2026-11-16, not merged)
+## START HERE: mdview 1.0.1, selecting text on mdedit's preview pane (2026-11-16, released)
+
+Released as 1.0.1 with mdedit 1.0.1 on the owner's word ("I trust you"), without a hands-on
+test on Windows. Record in `docs/UPDATE.md`.
+
 
 Protocol `MDVPREVIEW4`: requests `Press { x, y, clicks }`, `Drag { x, y }` (device pixels from the
 pane's top left), `Release`, `SelectAll`, `Unselect`, `Copy`. Every answer carries
@@ -22,7 +26,7 @@ the selection as mdview's workspace does (anchor first; a click that does not mo
 two clicks a word, three the block): `word_range` and `block_range` moved to
 `mdview_core::select` and both use them. A new text clears it. Tests: 3 in `server.rs`.
 
-## START HERE: mdview 1.0.0 is released (2026-11-16)
+## mdview 1.0.0 is released (2026-11-16)
 
 **The released state is `main`, mdview 1.0.0, tag `v1.0.0` at `94280e0`, published with mdedit
 1.0.0 on the owner's word. Shared crates: `main` of markdown-shared-rs at `51e7604` (the
