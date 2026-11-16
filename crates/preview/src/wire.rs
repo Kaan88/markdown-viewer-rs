@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 /// The server's first line: the protocol's name and version.
-pub const MAGIC: &[u8; 12] = b"MDVPREVIEW1\n";
+pub const MAGIC: &[u8; 12] = b"MDVPREVIEW2\n";
 
 /// The largest message either side accepts: a frame of 8K by 8K pixels.
 pub const MAX_MESSAGE: usize = 8192 * 8192 * 4 + 64;
@@ -33,6 +33,9 @@ pub enum Request {
     Follow { line: u32, column: u32 },
     /// The pointer's wheel: move the page `by` device pixels (down when positive).
     Scroll { by: f32 },
+    /// The editor scrolled: source line `line` (from 1; the fraction is how far down that line
+    /// the editor's top is) goes to the pane's top. Synced scrolling, the editor leading.
+    Align { line: f32 },
     /// Stop: the server ends.
     Quit,
 }
@@ -56,6 +59,9 @@ pub struct Update {
     pub micros: u32,
     /// How many requests this answers: everything that was waiting when it was drawn.
     pub answers: u32,
+    /// The source line (from 1, with a fraction) at the pane's top: where the editor goes when
+    /// the page leads synced scrolling. The inverse of [`Request::Align`].
+    pub line: f32,
 }
 
 impl Update {
@@ -119,6 +125,7 @@ const VIEW: u32 = 2;
 const FOLLOW: u32 = 3;
 const SCROLL: u32 = 4;
 const QUIT: u32 = 5;
+const ALIGN: u32 = 6;
 const UPDATE: u32 = 16;
 
 fn put_u32(out: &mut Vec<u8>, v: u32) {
@@ -224,6 +231,10 @@ pub fn write_request(w: &mut impl Write, req: &Request) -> io::Result<()> {
             put_u32(&mut b, by.to_bits());
             SCROLL
         }
+        Request::Align { line } => {
+            put_u32(&mut b, line.to_bits());
+            ALIGN
+        }
         Request::Quit => QUIT,
     };
     frame(kind, &b, w)
@@ -257,6 +268,7 @@ pub fn read_request(r: &mut impl Read) -> io::Result<Option<Request>> {
                 column: f.u32()?,
             },
             SCROLL => Request::Scroll { by: f.f32()? },
+            ALIGN => Request::Align { line: f.f32()? },
             QUIT => Request::Quit,
             _ => continue,
         };
@@ -277,6 +289,7 @@ pub fn write_update(w: &mut impl Write, u: &Update) -> io::Result<()> {
     put_u32(&mut b, count);
     put_u32(&mut b, u.micros);
     put_u32(&mut b, u.answers);
+    put_u32(&mut b, u.line.to_bits());
     put_bytes(&mut b, &u.pixels);
     frame(UPDATE, &b, w)
 }
@@ -300,6 +313,7 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
         let (first, count) = (f.u32()?, f.u32()?);
         let micros = f.u32()?;
         let answers = f.u32()?;
+        let line = f.f32()?;
         let pixels = f.bytes()?.to_vec();
         return Ok(Some(Update {
             width,
@@ -311,6 +325,7 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
             pixels,
             micros,
             answers,
+            line,
         }));
     }
 }
@@ -347,6 +362,7 @@ mod tests {
                 column: 3,
             },
             Request::Scroll { by: -48.0 },
+            Request::Align { line: 41.25 },
             Request::Quit,
         ];
         let mut buf = Vec::new();
@@ -369,6 +385,7 @@ mod tests {
             pixels: vec![7; 8],
             micros: 1234,
             answers: 3,
+            line: 17.5,
         };
         let mut buf = Vec::new();
         write_update(&mut buf, &u).unwrap();

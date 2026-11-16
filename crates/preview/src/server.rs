@@ -3,7 +3,7 @@
 
 use crate::wire::{self, Request, Update};
 use mdview_core::model::Document;
-use mdview_render::{DARK, DocumentRenderer, Jump, LIGHT, Options};
+use mdview_render::{BlockBox, DARK, DocumentRenderer, Jump, LIGHT, Options};
 use std::io::{self, BufReader, BufWriter, Write};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Instant;
@@ -23,6 +23,8 @@ pub struct Server {
     top: f32,
     /// The caret's place, to show again after the text changes.
     follow: Option<(u32, u32)>,
+    /// The source's line count, for the page's end in [`row_of_line`] and [`line_of_row`].
+    lines: u32,
     /// Something changed since the last frame (or there has been none).
     dirty: bool,
     /// The editor's copy of the frame is gone: the next frame is sent whole.
@@ -44,6 +46,7 @@ impl Server {
             size: None,
             top: 0.0,
             follow: None,
+            lines: 1,
             dirty: true,
             whole: true,
         }
@@ -55,6 +58,7 @@ impl Server {
         match req {
             Request::Text { text, base_dir } => {
                 let doc = mdview_core::parse(&text);
+                self.lines = text.bytes().filter(|&b| b == b'\n').count() as u32 + 1;
                 if self.options.base_dir != base_dir {
                     self.options.base_dir = base_dir;
                 }
@@ -108,6 +112,7 @@ impl Server {
                     self.top = (self.top + by).max(0.0);
                 }
             }
+            Request::Align { line } => self.align(line),
             Request::Quit => return false,
         }
         self.dirty = true;
@@ -146,6 +151,27 @@ impl Server {
         self.top = top.round();
     }
 
+    /// Puts source line `line` (fractional) at the pane's top, as the editor's top is.
+    fn align(&mut self, line: f32) {
+        let (Some(doc), Some(page)) = (&self.doc, self.renderer.page_layout()) else {
+            return;
+        };
+        if !line.is_finite() {
+            return;
+        }
+        let top = row_of_line(&knots(doc, page.blocks(), self.lines), line).max(0.0);
+        self.top = top.round();
+        self.renderer.set_top(self.top);
+    }
+
+    /// The source line at page row `top`.
+    fn line_at(&self, top: f32) -> f32 {
+        match (&self.doc, self.renderer.page_layout()) {
+            (Some(doc), Some(page)) => line_of_row(&knots(doc, page.blocks(), self.lines), top),
+            _ => 1.0,
+        }
+    }
+
     /// Draws what changed since the last frame. `None` when nothing did, or before the pane's
     /// size and a text are known.
     pub fn frame(&mut self) -> Option<Update> {
@@ -180,6 +206,7 @@ impl Server {
             .renderer
             .page_layout()
             .map_or(0.0, |page| page.total_height());
+        let line = self.line_at(top);
         Some(Update {
             width,
             height: rows,
@@ -190,8 +217,58 @@ impl Server {
             pixels,
             micros: started.elapsed().as_micros().min(u32::MAX as u128) as u32,
             answers: 0,
+            line,
         })
     }
+}
+
+/// The places where the source and the page are known to line up, `(line, row)`, both
+/// increasing: the page's top at line 1, each top-level block's first line at its row, and the
+/// end of the source at the last block's end. Synced scrolling goes straight between them, so a
+/// block's lines share its height evenly, and the two directions are each other's inverse.
+fn knots(doc: &Document, blocks: &[BlockBox], lines: u32) -> Vec<(f32, f32)> {
+    let mut k = Vec::with_capacity(blocks.len() + 2);
+    k.push((1.0f32, 0.0f32));
+    for b in blocks {
+        let line = doc.blocks.get(b.block as usize).map_or(0, |d| d.line) as f32;
+        let &(l, r) = k.last().unwrap();
+        // Out of order (a block drawn away from its source) or not below: skipped.
+        if line > l && b.y >= r {
+            k.push((line, b.y));
+        }
+    }
+    if let Some(last) = blocks.last() {
+        let end = (lines as f32 + 1.0, last.y + last.height);
+        let &(l, r) = k.last().unwrap();
+        if end.0 > l && end.1 >= r {
+            k.push(end);
+        }
+    }
+    k
+}
+
+/// Straight between the two knots around `x` (in `.0` when `by_line`, else in `.1`).
+fn between(k: &[(f32, f32)], x: f32, by_line: bool) -> f32 {
+    let key = |p: &(f32, f32)| if by_line { p.0 } else { p.1 };
+    let val = |p: &(f32, f32)| if by_line { p.1 } else { p.0 };
+    let i = k.partition_point(|p| key(p) <= x);
+    match (i.checked_sub(1).map(|i| k[i]), k.get(i)) {
+        (Some(a), Some(b)) if key(&b) > key(&a) => {
+            let t = (x - key(&a)) / (key(&b) - key(&a));
+            val(&a) + t * (val(&b) - val(&a))
+        }
+        (Some(a), _) => val(&a),
+        (None, Some(b)) => val(&b),
+        (None, None) => 0.0,
+    }
+}
+
+fn row_of_line(k: &[(f32, f32)], line: f32) -> f32 {
+    between(k, line, true)
+}
+
+fn line_of_row(k: &[(f32, f32)], row: f32) -> f32 {
+    between(k, row, false)
 }
 
 fn same(a: &Options, b: &Options) -> bool {
@@ -327,6 +404,55 @@ mod tests {
         });
         let after = s.frame().expect("a frame").top;
         assert!((after - far).abs() < 200.0, "{far} {after}");
+    }
+
+    #[test]
+    fn lines_and_rows_map_straight_between_the_blocks_and_back() {
+        // Blocks on lines 3 and 10, at rows 24 and 200 (the second 100 high), 20 lines.
+        let k = vec![(1.0, 0.0), (3.0, 24.0), (10.0, 200.0), (21.0, 300.0)];
+        assert_eq!(row_of_line(&k, 3.0), 24.0);
+        assert_eq!(row_of_line(&k, 6.5), 112.0);
+        assert_eq!(row_of_line(&k, 1.0), 0.0);
+        assert_eq!(row_of_line(&k, 99.0), 300.0, "past the end: the end");
+        for line in [1.0, 2.0, 3.0, 4.25, 9.9, 15.0, 21.0] {
+            let back = line_of_row(&k, row_of_line(&k, line));
+            assert!((back - line).abs() < 1e-3, "{line} came back as {back}");
+        }
+    }
+
+    #[test]
+    fn the_editors_top_line_goes_to_the_panes_top_and_the_update_says_where_it_is() {
+        let mut s = Server::new();
+        s.apply(Request::View {
+            width: 400,
+            height: 300,
+            scale: 1.0,
+            dark: false,
+        });
+        s.apply(Request::Text {
+            text: text(200),
+            base_dir: None,
+        });
+        let first = s.frame().expect("a frame");
+        assert!(first.line < 2.0, "{}", first.line);
+        // Paragraph 100 is on line 201: aligned, its block is at the top.
+        s.apply(Request::Align { line: 201.0 });
+        let at = s.frame().expect("moved");
+        assert!(at.top > 1000.0, "{}", at.top);
+        assert!((at.line - 201.0).abs() < 0.5, "{}", at.line);
+        // Half a line further: the page moves down a little, not a block.
+        s.apply(Request::Align { line: 201.5 });
+        let half = s.frame().expect("moved");
+        assert!(
+            half.top > at.top && half.top - at.top < 40.0,
+            "{} {}",
+            at.top,
+            half.top
+        );
+        // The wheel moves the page; the update gives the line now at the top.
+        s.apply(Request::Scroll { by: 400.0 });
+        let wheel = s.frame().expect("moved");
+        assert!(wheel.line > 205.0, "{}", wheel.line);
     }
 
     #[test]

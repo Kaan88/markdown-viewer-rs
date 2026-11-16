@@ -22,6 +22,10 @@ For mdedit's preview pane (its handoff has the whole story and the timings):
 - `mdview_render::set_engine_path`: where the math and diagram engine is, ahead of
   `MDV_ENGINE` and the exe's folder (for the embedded build, whose exe is mdedit).
 - The page follows the caret's source line only when that line is out of view.
+- Synced scrolling (protocol `MDVPREVIEW2`): `Request::Align { line }` puts a source line
+  (fractional) at the pane's top, and every `Update` carries `line`, the source line at the
+  pane's top. Both go straight between knots at each top-level block's first line and page row
+  (`server.rs`, `knots`), so they are each other's inverse. The editor decides who leads.
 Tests: 5 in the crate. Not run on Windows by hand.
 
 Crash reports (same branch, shared crates `f/crash-report` at `21fd49b`, the owner's request):
