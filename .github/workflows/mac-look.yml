@@ -36,10 +36,12 @@ jobs:
       - run: cargo build --release -p mdview -p mdview-engine
       - name: Screenshot suite
         run: bash tests/shots.sh target/shots
+      - name: The bundle
+        run: bash packaging/macos/make-bundle.sh target/release target/dist
       - name: The app in a real window
         run: |
-          bash tests/mac-window.sh target/window/showcase target/release/mdview --no-session fixtures/showcase.md
-          bash tests/mac-window.sh target/window/empty-dark target/release/mdview --no-session --dark
+          bash tests/mac-window.sh target/window/showcase target/dist/mdview.app --no-session "$PWD/fixtures/showcase.md"
+          bash tests/mac-window.sh target/window/empty-dark target/dist/mdview.app --no-session --dark
       - name: Print the pictures
         if: ${{ !cancelled() }}
         run: |
@@ -56,4 +58,5 @@ jobs:
           path: |
             target/shots/*.png
             target/window/**
+            target/dist/**
           retention-days: 14
