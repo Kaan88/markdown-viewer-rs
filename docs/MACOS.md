@@ -24,10 +24,13 @@ touches: check whether they have been merged, and if not, build the port on top 
 
 ## Progress
 
-**Stages 1 to 4 done on GitHub's macOS runners (2026-11-16)**, on the branch `f/macos` in all
-three repositories, built on `main` (mdview 0.5.1, mdedit 0.7.1). Both apps pin the shared
-crates' `f/macos`. Nothing has run on the owner's Mac yet; the next step is the owner's first Mac
-session (below).
+**Stages 1 to 4 done on GitHub's macOS runners (2026-11-16)**, built on the branch `f/macos` from
+`main` (mdview 0.5.1, mdedit 0.7.1) and merged into `main` in all three repositories (shared
+`b3e04ee`). **The owner's first Mac session (2026-11-16) passed**: the CI bundles of both apps
+launch; trackpad scrolling, Retina sharpness, opening from Finder, the shortcuts, Turkish typing
+and the look (title bar buttons, icon, dark mode, fonts) are all approved. Afterwards our winit
+fork (`md-0.30.13`, `62fa727`) passes on text inserted without a key press (Emoji & Symbols,
+dictation), which winit dropped; that is not yet tried on the Mac.
 
 ### How it is checked without a Mac
 
@@ -75,21 +78,21 @@ session (below).
   documents; the unsaved-changes dot in the editor's close button; Window, Enter Full Screen
   (Control+Command+F); the double-click interval, caret blink and Reduce Motion from the system.
 
-### Left for the owner's Mac (the first Mac session)
+### The owner's first Mac session (done, 2026-11-16)
 
-- Everything the runners cannot show: trackpad scrolling and pinch, Retina sharpness and speed
-  at scale 2, the first-open warning of an unsigned download, the owner's own setup, and the
-  look of all of it (the owner approves the interface).
-- To look at in particular: where the system's three buttons sit in the 40 px title row (the
-  system centres them in its own, shorter bar); the icon (the tile's top sheen shows its rounded
-  lower edge at 1024 px).
-- Known gaps: text inserted without a key press (Edit, Emoji & Symbols; dictation) does not
-  arrive, because winit only passes inserted text on when it ends a composition; the fix is
-  two lines in our winit fork (`view.rs`, `insert_text`), not made here. No preedit (the
-  underlined text while composing) is drawn. The update bar does not yet open the download page
-  on a Mac. Input methods are on for macOS only; Windows and Linux would gain from them too.
+Checked and approved by the owner on their Mac, with the CI bundles: both apps launch (the
+first-open step for an unsigned download included); trackpad scrolling; sharp text on Retina;
+opening from Finder; the shortcuts; Turkish typing; the look (the system's three buttons beside
+the 40 px tab row, the icon, dark mode, the fonts).
+
+- Known gaps: text inserted without a key press (Edit, Emoji & Symbols; dictation) did not
+  arrive, because winit only passed inserted text on when it ended a composition; our fork now
+  sends it as `Ime::Commit` (`view.rs`, `insert_text`, `62fa727`), to try on the Mac. No
+  preedit (the underlined text while composing) is drawn. The update bar does not yet open the
+  download page on a Mac. Input methods are on for macOS only; Windows and Linux would gain from
+  them too.
 - The bundles to try: the `mdview-macos-*.zip` and `mdedit-macos-*.zip` artifacts of the latest
-  CI run on `f/macos` (open from the Actions page; right-click, Open, the first time).
+  CI run on `main` (open from the Actions page; right-click, Open, the first time).
 
 ## Decisions (the owner, 2026-11-15)
 
