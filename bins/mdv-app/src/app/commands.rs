@@ -81,6 +81,7 @@ impl App {
             Hit::UpdateGo => self.install_update(),
             Hit::UpdateRestart => self.restart_into_update(),
             Hit::UpdateClose => self.ws.dismiss_update(),
+            Hit::CrashOpen | Hit::CrashCopy | Hit::CrashClose => self.crash_bar(hit),
             Hit::EmptyRecent(i) => {
                 if let Some(p) = self.ws.recents().get(i).cloned() {
                     let _ = self.ws.open_recent(&p);

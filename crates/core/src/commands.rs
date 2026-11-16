@@ -421,6 +421,9 @@ pub mod strings {
     pub const DEFAULT_APP_DONE: &str = "mdview is now the default for Markdown files";
     pub const DEFAULT_APP_FAILED: &str = "Could not make mdview the default";
     pub const ONLY_MARKDOWN_LINKS: &str = "Only Markdown file links open inside the viewer.";
+    pub const CRASH_REPORT_COPIED: &str = "The report is on the clipboard.";
+    pub const CRASH_REPORT_NOT_OPENED: &str =
+        "The report could not be opened; it is in mdview's crashes folder.";
 
     pub const RECENT_EMPTY: &str = "No recent files";
     pub const RECENT_CLEARED: &str = "Recent files cleared";

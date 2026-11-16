@@ -24,6 +24,20 @@ For mdedit's preview pane (its handoff has the whole story and the timings):
 - The page follows the caret's source line only when that line is out of view.
 Tests: 5 in the crate. Not run on Windows by hand.
 
+Crash reports (same branch, shared crates `f/crash-report` at `5323efa`, the owner's request):
+- `main.rs` installs `mdshared_app::crash` after the `--preview-server` branch, into
+  `data_dir("mdview")/crashes`, and calls `crash::closed_normally()` after `app::run()`: mdview
+  builds with `panic = "unwind"` and catches panics in image decoding and export, so a run that
+  ends normally deletes the reports it wrote (it lived through them).
+- `app/crash.rs`: the context line (document size by 16 KB, tab count, a folder open,
+  presenting; never text or names), set from `compose`; `look_for_crash` at launch (one read of
+  a small folder); the bar's buttons. The bar sits under the update bar (`page.rs`), with Open
+  report (the system's text editor: `platform::open_file(.., ["txt"])`), Copy, close; each marks
+  the report seen (`.seen.txt`, kept). Strings `CRASH_REPORT_COPIED`, `CRASH_REPORT_NOT_OPENED`.
+- Tests: `app/crash.rs` (context), `last_times_crash_report_gets_a_bar_…` in `app/tests.rs`.
+  The shared module's panic and access-violation reports were checked on a Windows runner
+  (mdedit's preview-test workflow); mdview's bar has not been seen on Windows.
+
 ## After 0.5.1, on `main`, not released (2026-11-16)
 
 Shared crates at `d775493`. Input-method compositions are drawn in the find box, the palette and

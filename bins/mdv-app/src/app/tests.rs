@@ -307,6 +307,36 @@ fn the_update_bar_pushes_the_page_down_and_closes() {
 }
 
 #[test]
+fn last_times_crash_report_gets_a_bar_under_the_update_bar_and_closing_puts_it_away() {
+    let mut a = app(&["linked.md"]);
+    let before = page::viewport(&a.ws, a.areas.page);
+    let dir = std::env::temp_dir().join(format!("mdview-crash-bar-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let report = dir.join("crash-00000000001.txt");
+    std::fs::write(&report, "mdview closed because of an error.\n").unwrap();
+    a.ws.preview_update("available");
+    a.ws.set_crash_report(mdshared_app::crash::pending(&dir));
+    a.compose();
+    let with_bars = page::viewport(&a.ws, a.areas.page);
+    assert_eq!(with_bars.y, before.y + 2.0 * crate::ui::BANNER_H);
+    let (update, open) = (rect(&a, Hit::UpdateGo), rect(&a, Hit::CrashOpen));
+    assert!(update.y < open.y && open.y < with_bars.y);
+    assert!(a.hit_rect(Hit::CrashCopy).is_some());
+    click(&mut a, Hit::CrashClose);
+    a.compose();
+    assert!(a.hit_rect(Hit::CrashOpen).is_none());
+    assert_eq!(
+        page::viewport(&a.ws, a.areas.page).y,
+        before.y + crate::ui::BANNER_H
+    );
+    // Seen: kept in the folder, not offered again.
+    assert_eq!(mdshared_app::crash::pending(&dir), None);
+    assert!(dir.join("crash-00000000001.seen.txt").is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn the_bar_shows_restart_only_when_installed_with_a_file_to_start() {
     let mut a = app(&["linked.md"]);
     for (stage, restart) in [

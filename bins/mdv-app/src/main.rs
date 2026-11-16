@@ -32,5 +32,12 @@ fn main() {
     {
         std::process::exit(mdview_preview::serve_stdio());
     }
-    std::process::exit(app::run());
+    // A crash from here on leaves a report for the next start.
+    if let Some(dir) = app::crash_dir() {
+        mdshared_app::crash::install("mdview", env!("CARGO_PKG_VERSION"), dir);
+    }
+    let code = app::run();
+    // Ended normally: a panic caught on the way (a bad image) is not a crash to report.
+    mdshared_app::crash::closed_normally();
+    std::process::exit(code);
 }

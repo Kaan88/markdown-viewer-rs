@@ -112,6 +112,10 @@ pub enum Hit {
     /// The update bar's Restart button, once the new version is installed.
     UpdateRestart,
     UpdateClose,
+    /// The bar that offers last time's crash report.
+    CrashOpen,
+    CrashCopy,
+    CrashClose,
     DlgButton(usize),
     DlgOpen(usize),
     DlgRemove(usize),
@@ -146,7 +150,10 @@ impl Hit {
             | Hit::RemoteClose
             | Hit::UpdateGo
             | Hit::UpdateRestart
-            | Hit::UpdateClose => Region::Page,
+            | Hit::UpdateClose
+            | Hit::CrashOpen
+            | Hit::CrashCopy
+            | Hit::CrashClose => Region::Page,
             _ => return None,
         })
     }

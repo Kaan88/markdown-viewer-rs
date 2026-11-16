@@ -7,7 +7,7 @@ use crate::panes::{draw_scrollbar, scrollbar};
 use crate::ui::{BANNER_H, Drag, Hit, Scroller, Ui};
 use crate::updater::{self, Stage};
 use crate::workspace::Workspace;
-use mdshared_ui::notice::{self, UpdateBarState};
+use mdshared_ui::notice::{self, CrashBarState, UpdateBarState};
 use mdview_core::commands::strings;
 use std::time::{Duration, Instant};
 
@@ -25,12 +25,32 @@ pub fn viewport(ws: &Workspace, r: Rect) -> Rect {
     Rect::new(r.x, r.y + top, r.w, (r.h - top).max(0.0))
 }
 
-/// The region without the update bar, which sits at its top over a document or the empty state.
+/// The region without the update bar and the crash bar, which sit at its top, in that order,
+/// over a document or the empty state.
 fn below_update_bar(ws: &Workspace, r: Rect) -> Rect {
-    if ws.update_bar().is_some() {
-        Rect::new(r.x, r.y + BANNER_H, r.w, (r.h - BANNER_H).max(0.0))
-    } else {
-        r
+    let bars = ws.update_bar().is_some() as u8 + ws.crash_report().is_some() as u8;
+    let top = BANNER_H * f32::from(bars);
+    Rect::new(r.x, r.y + top, r.w, (r.h - top).max(0.0))
+}
+
+/// The bar that offers last time's crash report: open it, copy it, or close the bar.
+fn draw_crash_bar(c: &mut Ctx, bar: Rect) {
+    let state = CrashBarState {
+        open_hovered: c.hover == Some(Hit::CrashOpen),
+        open_pressed: c.pressed == Some(Hit::CrashOpen),
+        copy_hovered: c.hover == Some(Hit::CrashCopy),
+        copy_pressed: c.pressed == Some(Hit::CrashCopy),
+        close_hovered: c.hover == Some(Hit::CrashClose),
+    };
+    let hits = notice::draw_crash_bar(c.p, c.pal, bar, "mdview", state);
+    for (hit, r) in [
+        (Hit::CrashOpen, hits.open),
+        (Hit::CrashCopy, hits.copy),
+        (Hit::CrashClose, hits.close),
+    ] {
+        if let Some(r) = r {
+            c.hit(hit, r);
+        }
     }
 }
 
@@ -120,6 +140,9 @@ pub fn draw_page(c: &mut Ctx, ws: &mut Workspace, ui: &Ui, r: Rect) -> Duration 
             stage,
             can_restart,
         );
+    }
+    if ws.crash_report().is_some() {
+        draw_crash_bar(c, Rect::new(whole.x, r.y - BANNER_H, whole.w, BANNER_H));
     }
     if ws.active().is_none() {
         c.p.fill(r, pal.page);
