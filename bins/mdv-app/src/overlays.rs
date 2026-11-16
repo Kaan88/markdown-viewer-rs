@@ -4,6 +4,7 @@
 use crate::chrome::{Ctx, glyph, logo};
 use crate::gfx::{Face, Rect, mix};
 use crate::keys;
+use crate::keys::shortcut_help;
 use crate::menu::{Item, Menu};
 use crate::panes::{draw_scrollbar, scrollbar};
 use crate::ui::{Act, Dialog, DialogKind, EditAct, Hit, Scroller, Ui};
@@ -14,7 +15,7 @@ use mdshared_ui::overlay::{
     DIALOG_FOOTER, DIALOG_PAD, dialog_button_w, dialog_card, draw_backdrop, draw_dialog_button,
     draw_dialog_card, draw_keycaps,
 };
-use mdview_core::commands::{CommandId as C, shortcut_help, strings};
+use mdview_core::commands::{CommandId as C, strings};
 use mdview_render::SourceKind;
 
 // ---- menus -----------------------------------------------------------------------------------

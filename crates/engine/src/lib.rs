@@ -138,7 +138,13 @@ fn mermaid_page_svg(source: &str, dark: bool) -> Result<String, String> {
     let svg = family_svg_fix(svg, diagram_keyword(&source), dark);
     // Families that name no font (tree view) would get usvg's serif default. A root attribute
     // loses to any font the diagram's own CSS names, so styled families are untouched.
-    Ok(svg.replacen("<svg ", "<svg font-family=\"Segoe UI, sans-serif\" ", 1))
+    // Helvetica Neue for a Mac, where Segoe UI is not installed (a family that is missing is
+    // skipped, so the others draw as before).
+    Ok(svg.replacen(
+        "<svg ",
+        "<svg font-family=\"Segoe UI, Helvetica Neue, sans-serif\" ",
+        1,
+    ))
 }
 
 /// The first word of the diagram, after blank lines and `%%` directives or comments.

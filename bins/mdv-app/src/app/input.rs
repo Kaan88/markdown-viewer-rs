@@ -701,6 +701,21 @@ impl App {
         self.key_named(name, event.text.as_deref());
     }
 
+    /// Text an input method committed, typed as a key without modifiers would type it. winit
+    /// sends a commit only for text the input method composed (a dead key, a held key's accent
+    /// menu, CJK), and then no key event for it, so nothing is typed twice.
+    pub(super) fn ime_commit(&mut self, text: &str) {
+        let Some(c) = text.chars().next() else {
+            return;
+        };
+        let held = std::mem::take(&mut self.mods);
+        self.key_named(
+            KeyName::Char(c.to_lowercase().next().unwrap_or(c)),
+            Some(text),
+        );
+        self.mods = held;
+    }
+
     /// A pressed key by name, with the text it typed; split from [`key`](Self::key) so tests can
     /// drive it without a winit event.
     pub(super) fn key_named(&mut self, name: KeyName, typed: Option<&str>) {
@@ -809,6 +824,9 @@ impl App {
 
     /// Keys for the focused find box. True when the key was used.
     pub(super) fn find_key(&mut self, name: &KeyName, mods: Mods, typed: Option<&str>) -> bool {
+        // The Mac's text keys (Command+arrows to the ends, Option+arrows by word).
+        let (name, mods) = mdshared_ui::keys::text_key(name.clone(), mods);
+        let name = &name;
         let f = &mut self.ui.find;
         let (word, extend) = (mods.ctrl, mods.shift);
         let changed = match (name, mods.ctrl) {
@@ -854,10 +872,11 @@ impl App {
                 return false;
             }
             _ => {
-                // Typed text; Ctrl alone is a shortcut, Ctrl+Alt is AltGr on Windows.
+                // Typed text, or a shortcut (`keys::types_text`: AltGr on Windows, Option on a
+                // Mac types).
                 let typed = typed.filter(|t| !t.chars().any(char::is_control));
                 match typed {
-                    Some(t) if !(mods.ctrl && !mods.alt) => f.insert(t),
+                    Some(t) if mdshared_ui::keys::types_text(mods) => f.insert(t),
                     _ => return false,
                 }
             }

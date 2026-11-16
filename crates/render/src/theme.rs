@@ -70,13 +70,20 @@ impl Theme {
 /// The page's sans-serif and monospace family lists. Off Windows the colour emoji family comes
 /// before the generic: an emoji cluster takes the first listed font that has the character, and
 /// the generic can resolve to a font with a monochrome (or tall, boxed) glyph for it.
+///
+/// On macOS the system's own: SF (the generic `system-ui` in fontique) and Helvetica Neue for the
+/// text, SF Mono or Menlo for code (fontique's `monospace` there is Courier).
 const SANS: &str = if cfg!(windows) {
     "Segoe UI, Noto Sans, Cantarell, DejaVu Sans, sans-serif"
+} else if cfg!(target_os = "macos") {
+    "system-ui, Helvetica Neue, Apple Color Emoji, sans-serif"
 } else {
     "Segoe UI, Noto Sans, Cantarell, DejaVu Sans, Noto Color Emoji, sans-serif"
 };
 const MONO: &str = if cfg!(windows) {
     "Consolas, Cascadia Mono, Noto Sans Mono, DejaVu Sans Mono, monospace"
+} else if cfg!(target_os = "macos") {
+    "SF Mono, Menlo, Monaco, Apple Color Emoji, monospace"
 } else {
     "Consolas, Cascadia Mono, Noto Sans Mono, DejaVu Sans Mono, Noto Color Emoji, monospace"
 };
@@ -173,11 +180,11 @@ mod tests {
     #[test]
     fn a_chosen_family_goes_first_and_the_default_stays_behind() {
         let t = LIGHT.with_fonts("Noto Serif", "Fira Code");
-        assert!(t.sans.starts_with("Noto Serif, Segoe UI"));
+        assert_eq!(t.sans, format!("Noto Serif, {SANS}"));
         assert!(t.sans.ends_with("sans-serif"));
-        assert!(t.mono.starts_with("Fira Code, Consolas"));
+        assert_eq!(t.mono, format!("Fira Code, {MONO}"));
         if !cfg!(windows) {
-            assert!(t.sans.contains("Noto Color Emoji"), "emoji still fall back");
+            assert!(t.sans.contains("Color Emoji"), "emoji still fall back");
         }
         assert_ne!(t.key(), LIGHT.key());
         assert_eq!(t.key(), LIGHT.with_fonts("Noto Serif", "Fira Code").key());
@@ -192,6 +199,6 @@ mod tests {
         let t = DARK.with_fonts("", "  ");
         assert_eq!(t.key(), DARK.key());
         let t = LIGHT.with_fonts("Evil\", monospace; x", "");
-        assert!(t.sans.starts_with("Evil monospace x, Segoe UI"));
+        assert_eq!(t.sans, format!("Evil monospace x, {SANS}"));
     }
 }

@@ -586,6 +586,7 @@ const CTRL: Mods = Mods {
     ctrl: true,
     shift: false,
     alt: false,
+    control: false,
 };
 
 /// The targets of the palette's listed entries, in order.
@@ -3319,6 +3320,7 @@ fn a_letter_picks_the_marked_item_of_the_open_menu_like_enter() {
         ctrl: true,
         shift: false,
         alt: false,
+        control: false,
     };
     key(&mut a, KeyName::Char('a'), Some("a"));
     a.mods = Mods::default();
@@ -3357,6 +3359,7 @@ fn underlines_follow_how_the_menu_was_opened_and_alt_shows_them() {
         ctrl: false,
         shift: false,
         alt: true,
+        control: false,
     };
     a.open_popup(PopupKind::Main);
     assert!(a.ui.popup.as_ref().unwrap().access);

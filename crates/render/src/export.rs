@@ -1457,8 +1457,14 @@ mod tests {
         let mut theme = LIGHT.with_fonts("Noto Serif", "");
         theme.reading_width = 1000.0;
         let css = stylesheet(&theme);
+        // The default list follows the chosen family: Segoe UI first, or on a Mac the system's.
+        let next = if cfg!(target_os = "macos") {
+            "system-ui"
+        } else {
+            "\"Segoe UI\""
+        };
         assert!(
-            css.contains("--sans:\"Noto Serif\", \"Segoe UI\""),
+            css.contains(&format!("--sans:\"Noto Serif\", {next}")),
             "{}",
             &css[..300]
         );
