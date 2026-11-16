@@ -18,15 +18,18 @@ For mdedit's preview pane (its handoff has the whole story and the timings):
   Scroll, Quit; updates carry the rows that changed plus a shift) and, with feature `server`,
   the drawing loop (`server.rs`, `serve`, `serve_stdio`). mdedit's embedded build runs `serve`
   on a thread; its default build starts `mdview --preview-server`, which runs `serve_stdio`
-  with no window (checked first in `main`). The server greets with `MDVPREVIEW1\n`.
+  with no window (checked first in `main`). The server greets with `MDVPREVIEW3\n`.
 - `mdview_render::set_engine_path`: where the math and diagram engine is, ahead of
   `MDV_ENGINE` and the exe's folder (for the embedded build, whose exe is mdedit).
 - The page follows the caret's source line only when that line is out of view.
-- Synced scrolling (protocol `MDVPREVIEW2`): `Request::Align { line }` puts a source line
-  (fractional) at the pane's top, and every `Update` carries `line`, the source line at the
-  pane's top. Both go straight between knots at each top-level block's first line and page row
-  (`server.rs`, `knots`), so they are each other's inverse. The editor decides who leads.
-Tests: 5 in the crate. Not run on Windows by hand.
+- Synced scrolling (protocol `MDVPREVIEW3`): `Request::Align { line, tail, end }` puts a
+  source line (fractional) at the pane's top, and every `Update` carries `line`, the source
+  line at the pane's top. Both go straight between knots at each top-level block's first line
+  and page row (`server.rs`, `knots`, `Sync`), so they are each other's inverse. `tail..end` is
+  the editor's last screen of scrolling: over it the page's top goes on to its bottom, so both
+  reach their ends together (the line coming back is found by halving, the exact inverse).
+  The editor decides who leads.
+Tests: 9 in the crate (with `--features server`). Not run on Windows by hand.
 
 Crash reports (same branch, shared crates `f/crash-report` at `21fd49b`, the owner's request):
 - `main.rs` installs `mdshared_app::crash` after the `--preview-server` branch, into
