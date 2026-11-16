@@ -296,6 +296,15 @@ test build end to end on KDE Plasma 6.
 Not verified: the Windows files run by hand on a Windows desktop; an installed 0.2.2 updating
 itself to 0.3.0 through the bar; the deb, rpm, tar.gz and PKGBUILD of this exact build installed.
 
+## v1.0.1 (published 2026-11-16 by the release workflow, run by hand with `publish`, at commit 8faf059)
+
+Run 43967594694 (the tag made by `gh release create`, as for 1.0.0). Selecting text on mdedit's
+preview pane (protocol `MDVPREVIEW4`); released with mdedit 1.0.1 on the owner's word, the
+Windows test build of the branch cancelled at their request. 13 assets, as for 1.0.0.
+Verified against the live release: both manifests name 1.0.1, and every file they name
+downloaded with the manifest's SHA-256. Not verified: any published file run on a desktop; a
+1.0.0 install updating itself.
+
 ## v1.0.0 (published 2026-11-16 by the release workflow, run by hand with `publish`, at commit 94280e0)
 
 The tag could not be pushed from the cloud session that cut it (its proxy refuses tag pushes and
