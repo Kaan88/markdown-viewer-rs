@@ -862,6 +862,7 @@ impl Workspace {
     pub fn open(&mut self, path: &Path) -> Result<usize, String> {
         let path = untitled_key(path).unwrap_or_else(|| canonical_or_absolute(path));
         if let Some(index) = self.tabs.iter().position(|t| same_file(&t.path, &path)) {
+            mdshared_ui::platform::note_recent_document(&path);
             self.recents.add(path);
             self.activate(index);
             self.persist();
@@ -880,6 +881,8 @@ impl Workspace {
                 tab.keep = self.remembered(&path, &document);
                 tab.set_document(document, loaded.stamp);
                 self.tabs.push(tab);
+                // macOS: the Dock icon's menu and Recent Items list it too.
+                mdshared_ui::platform::note_recent_document(&path);
                 self.recents.add(path);
                 self.relabel();
                 let index = self.tabs.len() - 1;

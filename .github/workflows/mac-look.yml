@@ -65,7 +65,7 @@ jobs:
         run: |
           bash tests/print-pngs.sh \
             target/window/showcase/screen.png target/window/showcase/window.png \
-            target/window/empty-dark/window.png target/open/opened.png target/open/app-menu.png target/sister/screen.png \
+            target/window/empty-dark/window.png target/open/opened.png target/open/app-menu.png target/open/launched.png target/open/launched-screen.png target/sister/screen.png \
             target/shots/showcase-light.png target/shots/everything-dark.png \
             target/shots/emoji-light.png target/shots/menu-main-light.png \
             target/shots/dialog-settings-light.png target/shots/scale-200.png

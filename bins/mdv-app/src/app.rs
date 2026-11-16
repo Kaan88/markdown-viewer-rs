@@ -41,7 +41,9 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
-use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{
+    ElementState, KeyEvent, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{CursorIcon, ResizeDirection, Theme as WinTheme, Window, WindowId};
@@ -211,6 +213,8 @@ struct App {
     /// macOS: the left press held now was made with the Control key, which a Mac takes for a
     /// right click; its release is not a left release.
     control_click: bool,
+    /// A trackpad pinch on its way to the next zoom step.
+    pinch: mdshared_ui::window::PinchZoom,
     cursor: CursorIcon,
     last_title: String,
     /// The active file, to follow it in the Files tree when it changes.
@@ -296,6 +300,7 @@ impl App {
             restart: None,
             mods: Mods::default(),
             control_click: false,
+            pinch: Default::default(),
             cursor: CursorIcon::Default,
             last_title: String::new(),
             last_active: None,
@@ -1610,6 +1615,19 @@ impl ApplicationHandler<Wake> for App {
                 _ => {}
             },
             WindowEvent::MouseWheel { delta, .. } => self.wheel(delta),
+            // A trackpad: a pinch zooms in steps; the smart-zoom tap (two fingers, twice) is the
+            // actual size. winit reports both on macOS only.
+            WindowEvent::PinchGesture { delta, phase, .. } => {
+                let steps = self.pinch.add(delta);
+                for _ in 0..steps.unsigned_abs() {
+                    self.command(if steps > 0 { C::ZoomIn } else { C::ZoomOut });
+                }
+                if matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                    self.pinch.end();
+                }
+            }
+            WindowEvent::DoubleTapGesture { .. } => self.command(C::ZoomReset),
+
             WindowEvent::KeyboardInput {
                 event,
                 is_synthetic: false,

@@ -374,7 +374,13 @@ impl App {
             Hit::Backdrop => self.close_dialog(),
             Hit::TitleDrag => {
                 if clicks == 2 {
-                    self.toggle_maximized();
+                    // On a Mac what its setting says (zoom, minimise or nothing).
+                    match &self.window {
+                        Some(w) if mdshared_ui::chrome::NATIVE_FRAME => {
+                            mdshared_ui::window::title_double_click(w)
+                        }
+                        _ => self.toggle_maximized(),
+                    }
                 } else if let Some(w) = &self.window {
                     let _ = w.drag_window();
                 }

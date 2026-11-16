@@ -31,4 +31,18 @@ osascript -e 'tell application "System Events" to keystroke "q" using command do
 for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
 if kill -0 "$pid" 2>/dev/null; then echo "FAIL Command+Q left the process running"; fail=1; else echo "PASS Command+Q quits"; fi
 stop
+# Launched for a file, as a double-click in Finder launches it: the file comes with the launch's
+# open-documents event.
+open -a "$(cd "$app" && pwd)" "$PWD/fixtures/math.md"
+pid=""
+for _ in $(seq 1 40); do
+    pid="$(pgrep -n -f "^$(cd "$app" && pwd)/Contents/MacOS/mdview( |\$)" || true)"
+    [ -n "$pid" ] && break
+    sleep 0.25
+done
+wid="$(window_id)"
+sleep 3
+[ -n "${wid:-}" ] && screencapture -x -o -l "$wid" "$out/launched.png" && echo "launched captured"
+screencapture -x "$out/launched-screen.png"
+stop
 exit $fail

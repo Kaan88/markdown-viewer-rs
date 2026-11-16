@@ -23,9 +23,10 @@ pub fn shows_animations() -> bool {
     ok == 0 || on != 0
 }
 
+/// macOS: unless Accessibility, Display, "Reduce motion" is on. Elsewhere always.
 #[cfg(not(windows))]
 pub fn shows_animations() -> bool {
-    true
+    !mdshared_ui::platform::reduces_motion()
 }
 
 /// Whether nothing of the window can be seen because other windows cover all of it. winit sends
