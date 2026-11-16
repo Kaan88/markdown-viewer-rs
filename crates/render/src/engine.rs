@@ -233,9 +233,21 @@ fn decode(reply: Reply) -> Option<DecodedImage> {
     })
 }
 
-/// The engine binary: `MDV_ENGINE`, a sibling of this executable, or the workspace target beside
+/// Where another program that draws pages with this crate finds the engine (the one installed
+/// beside mdview): set once, before the first formula or diagram, it wins over the search.
+static ENGINE_AT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Sets the engine binary for this process, as [`ENGINE_AT`] says. Later calls do nothing.
+pub fn set_engine_path(path: PathBuf) {
+    let _ = ENGINE_AT.set(path);
+}
+
+/// The engine binary: the path set with [`set_engine_path`], `MDV_ENGINE`, a sibling of this executable, or the workspace target beside
 /// an ancestor (a test binary runs from `target/release/deps`).
 fn engine_path() -> Option<PathBuf> {
+    if let Some(path) = ENGINE_AT.get() {
+        return path.is_file().then(|| path.clone());
+    }
     if let Some(path) = std::env::var_os("MDV_ENGINE") {
         let path = PathBuf::from(path);
         return path.is_file().then_some(path);

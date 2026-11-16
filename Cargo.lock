@@ -1712,6 +1712,7 @@ dependencies = [
  "mdshared-fetch",
  "mdshared-ui",
  "mdview-core",
+ "mdview-preview",
  "mdview-render",
  "parley",
  "png",
@@ -1748,6 +1749,14 @@ dependencies = [
 [[package]]
 name = "mdview-engine-proto"
 version = "0.5.1"
+
+[[package]]
+name = "mdview-preview"
+version = "0.5.1"
+dependencies = [
+ "mdview-core",
+ "mdview-render",
+]
 
 [[package]]
 name = "mdview-render"

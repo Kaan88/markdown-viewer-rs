@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 mdview-core = { path = "../../crates/core" }
 mdview-render = { path = "../../crates/render" }
+mdview-preview = { path = "../../crates/preview", features = ["server"] }
 mdshared-fetch = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "d7754930273e8356555a417f017d05bbf436a59c" }
 mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "d7754930273e8356555a417f017d05bbf436a59c" }
 mdshared-ui = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "d7754930273e8356555a417f017d05bbf436a59c", features = ["client-margin"] }
