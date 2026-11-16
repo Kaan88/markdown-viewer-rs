@@ -32,6 +32,10 @@ and the look (title bar buttons, icon, dark mode, fonts) are all approved. After
 fork (`md-0.30.13`, `62fa727`) passes on text inserted without a key press (Emoji & Symbols,
 dictation), which winit dropped; that is not yet tried on the Mac.
 
+**Released (2026-11-16)**: the macOS zips (Apple Silicon and Intel) and the macOS manifest are
+attached to mdview 0.5.1 and mdedit 0.7.1, built from `main` with the release workflow's
+`attach_macos_to`; every release from now on carries them (`docs/CI.md`).
+
 ### How it is checked without a Mac
 
 - CI (`ci.yml`): a `macos` job on `macos-15` (Apple Silicon) and `macos-15-intel` (`macos-13`
@@ -91,8 +95,8 @@ the 40 px tab row, the icon, dark mode, the fonts).
   preedit (the underlined text while composing) is drawn. The update bar does not yet open the
   download page on a Mac. Input methods are on for macOS only; Windows and Linux would gain from
   them too.
-- The bundles to try: the `mdview-macos-*.zip` and `mdedit-macos-*.zip` artifacts of the latest
-  CI run on `main` (open from the Actions page; right-click, Open, the first time).
+- The bundles: the `macos` zips of the latest release (or the artifacts of the latest CI run on
+  `main`); right-click, Open, the first time.
 
 ## Decisions (the owner, 2026-11-15)
 
