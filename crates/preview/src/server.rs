@@ -1,7 +1,7 @@
 //! The loop that draws the page for an editor: in mdview's process (`mdview --preview-server`,
 //! [`serve_stdio`]) or on a thread of the editor's own ([`serve`]).
 
-use crate::wire::{self, Request, Update};
+use crate::wire::{self, Copied, Request, Update};
 use mdview_core::model::Document;
 use mdview_render::{BlockBox, DARK, DocumentRenderer, Jump, LIGHT, Options};
 use std::io::{self, BufReader, BufWriter, Write};
@@ -28,6 +28,16 @@ pub struct Server {
     /// The editor's last screen of scrolling, `(tail, end)` in [`Request::Align`]'s units:
     /// over it the page goes on to its own bottom.
     end: Option<(f32, f32)>,
+    /// The selection, two offsets into `Document::text`, anchor first, as mdview keeps it.
+    selection: Option<(u32, u32)>,
+    /// A press in progress: the range a drag extends from, and whether the pointer moved.
+    press: Option<((u32, u32), bool)>,
+    /// The selection's rectangles as the editor last got them.
+    shown: Vec<[f32; 4]>,
+    /// The selection (or the layout under it) changed since the editor last got it.
+    selection_dirty: bool,
+    /// The editor asked for the selection's text.
+    copy: bool,
     /// Something changed since the last frame (or there has been none).
     dirty: bool,
     /// The editor's copy of the frame is gone: the next frame is sent whole.
@@ -51,6 +61,11 @@ impl Server {
             follow: None,
             lines: 1,
             end: None,
+            selection: None,
+            press: None,
+            shown: Vec::new(),
+            selection_dirty: false,
+            copy: false,
             dirty: true,
             whole: true,
         }
@@ -71,6 +86,10 @@ impl Server {
                     self.renderer.layout(&doc, &self.options);
                 }
                 self.doc = Some(doc);
+                // The offsets were into the old text.
+                self.selection = None;
+                self.press = None;
+                self.selection_dirty = true;
                 // The page shows the caret in the new text; it stays still while it does.
                 if let Some((line, column)) = self.follow {
                     self.go_to(line, column);
@@ -102,6 +121,7 @@ impl Server {
                         self.renderer.layout(doc, &self.options);
                     }
                     self.whole = true;
+                    self.selection_dirty = true;
                     if let Some((line, column)) = self.follow {
                         self.go_to(line, column);
                     }
@@ -120,6 +140,60 @@ impl Server {
                 self.end = (tail.is_finite() && end.is_finite()).then_some((tail, end));
                 self.align(line);
             }
+            Request::Press { x, y, clicks } => {
+                self.press = None;
+                if let Some((doc, offset)) = self.offset_at(x, y) {
+                    let anchor = match clicks {
+                        0 | 1 => (offset, offset),
+                        2 => mdview_core::select::word_range(doc, offset),
+                        _ => mdview_core::select::block_range(doc, offset),
+                    };
+                    self.selection = Some(anchor);
+                    self.press = Some((anchor, clicks > 1));
+                    self.selection_dirty = true;
+                }
+            }
+            Request::Drag { x, y } => {
+                if let Some(((a, b), _)) = self.press
+                    && let Some((_, offset)) = self.offset_at(x, y)
+                {
+                    let selection = if offset < a {
+                        (b, offset)
+                    } else if offset > b {
+                        (a, offset)
+                    } else {
+                        (a, b)
+                    };
+                    if let Some((_, moved)) = self.press.as_mut() {
+                        *moved |= offset != a;
+                    }
+                    if self.selection != Some(selection) {
+                        self.selection = Some(selection);
+                        self.selection_dirty = true;
+                    }
+                }
+            }
+            Request::Release => {
+                // A click that did not move clears the selection; a drag leaves it.
+                if let Some((_, false)) = self.press.take()
+                    && self.selection.take().is_some()
+                {
+                    self.selection_dirty = true;
+                }
+            }
+            Request::SelectAll => {
+                if let Some(doc) = &self.doc {
+                    self.selection = Some((0, doc.text.len() as u32));
+                    self.selection_dirty = true;
+                }
+            }
+            Request::Unselect => {
+                self.press = None;
+                if self.selection.take().is_some() {
+                    self.selection_dirty = true;
+                }
+            }
+            Request::Copy => self.copy = true,
             Request::Quit => return false,
         }
         self.dirty = true;
@@ -187,6 +261,61 @@ impl Server {
         })
     }
 
+    /// The text offset under pane point `x, y` (device pixels), with the document. Finding it
+    /// may lay out the block there, which the next frame shows.
+    fn offset_at(&mut self, x: f32, y: f32) -> Option<(&Document, u32)> {
+        if !(x.is_finite() && y.is_finite()) {
+            return None;
+        }
+        let doc = self.doc.as_ref()?;
+        let hit = self
+            .renderer
+            .hit_test(doc, &self.options, x, y + self.top)?;
+        Some((doc, hit.offset))
+    }
+
+    /// The selected range, ordered, when it is not empty.
+    fn selected(&self) -> Option<(u32, u32)> {
+        let (a, b) = self.selection?;
+        (a != b).then(|| (a.min(b), a.max(b)))
+    }
+
+    /// What an answer carries besides the frame: the selection's rectangles when they changed
+    /// (`drew`: a frame was drawn, which can move the blocks under them), and the selected text
+    /// when the editor asked for it.
+    pub fn selection_answer(&mut self, drew: bool) -> (Option<Vec<[f32; 4]>>, Option<Copied>) {
+        let copied = std::mem::take(&mut self.copy).then(|| match (self.selected(), &self.doc) {
+            (Some((from, to)), Some(doc)) => Copied {
+                text: doc
+                    .text
+                    .get(from as usize..to as usize)
+                    .unwrap_or_default()
+                    .to_string(),
+                html: mdview_core::rich::selection_html(doc, from, to).unwrap_or_default(),
+            },
+            _ => Copied::default(),
+        });
+        let look = self.selection_dirty || (drew && self.selected().is_some());
+        self.selection_dirty = false;
+        if !look {
+            return (None, copied);
+        }
+        let rects: Vec<[f32; 4]> = match (self.selected(), &self.doc) {
+            (Some((from, to)), Some(doc)) if self.size.is_some() => self
+                .renderer
+                .selection_rects(doc, &self.options, from, to)
+                .into_iter()
+                .map(|r| [r.x, r.y, r.w, r.h])
+                .collect(),
+            _ => Vec::new(),
+        };
+        if rects == self.shown {
+            return (None, copied);
+        }
+        self.shown = rects.clone();
+        (Some(rects), copied)
+    }
+
     /// Draws what changed since the last frame. `None` when nothing did, or before the pane's
     /// size and a text are known.
     pub fn frame(&mut self) -> Option<Update> {
@@ -233,6 +362,8 @@ impl Server {
             micros: started.elapsed().as_micros().min(u32::MAX as u128) as u32,
             answers: 0,
             line,
+            selection: None,
+            copied: None,
         })
     }
 }
@@ -360,9 +491,15 @@ pub fn serve(requests: Receiver<Request>, mut send: impl FnMut(Update) -> bool) 
             answers += 1;
         }
         // Every batch is answered, a frame or an ack, so the editor knows nothing is pending.
-        let update = match server.frame() {
-            Some(update) => Update { answers, ..update },
-            None => Update::ack(answers),
+        let drawn = server.frame();
+        let (selection, copied) = server.selection_answer(drawn.is_some());
+        let update = Update {
+            selection,
+            copied,
+            ..match drawn {
+                Some(update) => Update { answers, ..update },
+                None => Update::ack(answers),
+            }
         };
         if !send(update) {
             return;
@@ -610,6 +747,134 @@ mod tests {
         assert!(wheel.line > 341.0 && wheel.line < 371.0, "{}", wheel.line);
         s.apply(Request::Scroll { by: 1e6 });
         assert_eq!(s.frame().expect("moved").line, 371.0);
+    }
+
+    /// A server with `text` on a 400 by 300 pane, its first frame taken.
+    fn shown(text: &str) -> Server {
+        let mut s = Server::new();
+        s.apply(Request::View {
+            width: 400,
+            height: 300,
+            scale: 1.0,
+            dark: false,
+        });
+        s.apply(Request::Text {
+            text: text.into(),
+            base_dir: None,
+        });
+        s.frame().expect("a frame");
+        s.selection_answer(true);
+        s
+    }
+
+    /// Applies `reqs` as one batch and returns what the answer carries.
+    fn answer(s: &mut Server, reqs: Vec<Request>) -> (Option<Vec<[f32; 4]>>, Option<Copied>) {
+        for r in reqs {
+            s.apply(r);
+        }
+        let drew = s.frame().is_some();
+        s.selection_answer(drew)
+    }
+
+    fn copy(s: &mut Server) -> String {
+        answer(s, vec![Request::Copy]).1.expect("an answer").text
+    }
+
+    #[test]
+    fn a_drag_selects_the_text_under_it_and_copy_gives_it() {
+        let mut s = shown("First paragraph here.\n\nSecond one, a little longer.\n");
+        // A click that does not move selects nothing and copies nothing.
+        let (rects, _) = answer(
+            &mut s,
+            vec![Request::Press {
+                x: 30.0,
+                y: 30.0,
+                clicks: 1,
+            }],
+        );
+        assert!(rects.is_none(), "a caret is not a selection");
+        answer(&mut s, vec![Request::Release]);
+        assert_eq!(copy(&mut s), "");
+        // From the start of the first line down past the second paragraph: both, as text.
+        let (rects, _) = answer(
+            &mut s,
+            vec![
+                Request::Press {
+                    x: 0.0,
+                    y: 20.0,
+                    clicks: 1,
+                },
+                Request::Drag { x: 399.0, y: 250.0 },
+                Request::Release,
+            ],
+        );
+        let rects = rects.expect("the selection is shown");
+        assert!(rects.len() >= 2, "a rectangle a line: {rects:?}");
+        let text = copy(&mut s);
+        assert!(
+            text.contains("First paragraph here.") && text.contains("a little longer."),
+            "{text:?}"
+        );
+        // The same again changes nothing to show.
+        assert!(answer(&mut s, vec![]).0.is_none());
+        // A click elsewhere clears it.
+        let (rects, _) = answer(
+            &mut s,
+            vec![
+                Request::Press {
+                    x: 30.0,
+                    y: 30.0,
+                    clicks: 1,
+                },
+                Request::Release,
+            ],
+        );
+        assert_eq!(rects, Some(vec![]));
+        assert_eq!(copy(&mut s), "");
+    }
+
+    #[test]
+    fn two_clicks_take_a_word_three_the_paragraph_and_all_takes_everything() {
+        let mut s = shown("Alpha beta gamma.\n\nNext paragraph.\n");
+        let press = |clicks| Request::Press {
+            x: 2.0,
+            y: 30.0,
+            clicks,
+        };
+        answer(&mut s, vec![press(2), Request::Release]);
+        assert_eq!(copy(&mut s), "Alpha", "a double click keeps its word");
+        answer(&mut s, vec![press(3), Request::Release]);
+        assert_eq!(copy(&mut s), "Alpha beta gamma.");
+        answer(&mut s, vec![Request::SelectAll]);
+        let all = copy(&mut s);
+        assert!(
+            all.starts_with("Alpha") && all.contains("Next paragraph."),
+            "{all:?}"
+        );
+        let html = answer(&mut s, vec![Request::Copy]).1.unwrap().html;
+        assert!(html.contains("<p>"), "{html}");
+        answer(&mut s, vec![Request::Unselect]);
+        assert_eq!(copy(&mut s), "");
+    }
+
+    #[test]
+    fn a_new_text_clears_the_selection_and_the_rectangles_follow_the_page() {
+        let mut s = shown(&text(100));
+        let (rects, _) = answer(&mut s, vec![Request::SelectAll]);
+        let first = rects.expect("shown")[0];
+        // The page scrolled: the rectangles are page positions, so they stay as they were.
+        let (rects, _) = answer(&mut s, vec![Request::Scroll { by: 500.0 }]);
+        assert!(rects.is_none_or(|r| r[0] == first));
+        // A new text: the offsets were into the old one.
+        let (rects, _) = answer(
+            &mut s,
+            vec![Request::Text {
+                text: text(99),
+                base_dir: None,
+            }],
+        );
+        assert_eq!(rects, Some(vec![]));
+        assert_eq!(copy(&mut s), "");
     }
 
     #[test]

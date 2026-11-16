@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 /// The server's first line: the protocol's name and version.
-pub const MAGIC: &[u8; 12] = b"MDVPREVIEW3\n";
+pub const MAGIC: &[u8; 12] = b"MDVPREVIEW4\n";
 
 /// The largest message either side accepts: a frame of 8K by 8K pixels.
 pub const MAX_MESSAGE: usize = 8192 * 8192 * 4 + 64;
@@ -39,6 +39,19 @@ pub enum Request {
     /// (`end` is its top when scrolled to the bottom): over it the page moves on to its own
     /// bottom, so the two reach their ends together.
     Align { line: f32, tail: f32, end: f32 },
+    /// The main button went down over the page at `x, y` (device pixels from the pane's top
+    /// left): a selection starts there. `clicks` is 1, 2 for a word, 3 or more for the block.
+    Press { x: f32, y: f32, clicks: u32 },
+    /// The pointer moved with the button down: the selection goes to `x, y`.
+    Drag { x: f32, y: f32 },
+    /// The button came up: a click that did not move clears the selection, a drag keeps it.
+    Release,
+    /// Selects the whole page.
+    SelectAll,
+    /// Clears the selection.
+    Unselect,
+    /// Asks for the selection's text: the next update carries it in [`Update::copied`].
+    Copy,
     /// Stop: the server ends.
     Quit,
 }
@@ -65,6 +78,20 @@ pub struct Update {
     /// The source line (from 1, with a fraction) at the pane's top: where the editor goes when
     /// the page leads synced scrolling. The inverse of [`Request::Align`].
     pub line: f32,
+    /// The selection, when it changed: its rectangles `[x, y, w, h]` in page pixels (`y` from
+    /// the page's top, so the editor places them with `top`); empty when nothing is selected.
+    /// `None`: as the last update left it.
+    pub selection: Option<Vec<[f32; 4]>>,
+    /// The answer to [`Request::Copy`]: the selected text, as mdview copies it.
+    pub copied: Option<Copied>,
+}
+
+/// The selection for the clipboard: its text, and the same as an HTML fragment (empty when
+/// there is none), as mdview puts both there.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Copied {
+    pub text: String,
+    pub html: String,
 }
 
 impl Update {
@@ -129,6 +156,12 @@ const FOLLOW: u32 = 3;
 const SCROLL: u32 = 4;
 const QUIT: u32 = 5;
 const ALIGN: u32 = 6;
+const PRESS: u32 = 7;
+const DRAG: u32 = 8;
+const RELEASE: u32 = 9;
+const SELECT_ALL: u32 = 10;
+const UNSELECT: u32 = 11;
+const COPY: u32 = 12;
 const UPDATE: u32 = 16;
 
 fn put_u32(out: &mut Vec<u8>, v: u32) {
@@ -240,6 +273,21 @@ pub fn write_request(w: &mut impl Write, req: &Request) -> io::Result<()> {
             put_u32(&mut b, end.to_bits());
             ALIGN
         }
+        Request::Press { x, y, clicks } => {
+            put_u32(&mut b, x.to_bits());
+            put_u32(&mut b, y.to_bits());
+            put_u32(&mut b, *clicks);
+            PRESS
+        }
+        Request::Drag { x, y } => {
+            put_u32(&mut b, x.to_bits());
+            put_u32(&mut b, y.to_bits());
+            DRAG
+        }
+        Request::Release => RELEASE,
+        Request::SelectAll => SELECT_ALL,
+        Request::Unselect => UNSELECT,
+        Request::Copy => COPY,
         Request::Quit => QUIT,
     };
     frame(kind, &b, w)
@@ -278,6 +326,19 @@ pub fn read_request(r: &mut impl Read) -> io::Result<Option<Request>> {
                 tail: f.f32()?,
                 end: f.f32()?,
             },
+            PRESS => Request::Press {
+                x: f.f32()?,
+                y: f.f32()?,
+                clicks: f.u32()?,
+            },
+            DRAG => Request::Drag {
+                x: f.f32()?,
+                y: f.f32()?,
+            },
+            RELEASE => Request::Release,
+            SELECT_ALL => Request::SelectAll,
+            UNSELECT => Request::Unselect,
+            COPY => Request::Copy,
             QUIT => Request::Quit,
             _ => continue,
         };
@@ -300,6 +361,26 @@ pub fn write_update(w: &mut impl Write, u: &Update) -> io::Result<()> {
     put_u32(&mut b, u.answers);
     put_u32(&mut b, u.line.to_bits());
     put_bytes(&mut b, &u.pixels);
+    match &u.selection {
+        None => put_u32(&mut b, 0),
+        Some(rects) => {
+            put_u32(&mut b, 1);
+            put_u32(&mut b, rects.len() as u32);
+            for r in rects {
+                for v in r {
+                    put_u32(&mut b, v.to_bits());
+                }
+            }
+        }
+    }
+    match &u.copied {
+        None => put_u32(&mut b, 0),
+        Some(c) => {
+            put_u32(&mut b, 1);
+            put_bytes(&mut b, c.text.as_bytes());
+            put_bytes(&mut b, c.html.as_bytes());
+        }
+    }
     frame(UPDATE, &b, w)
 }
 
@@ -324,6 +405,27 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
         let answers = f.u32()?;
         let line = f.f32()?;
         let pixels = f.bytes()?.to_vec();
+        let selection = if f.u32()? != 0 {
+            let n = f.u32()? as usize;
+            if n > MAX_MESSAGE / 16 {
+                return Err(short());
+            }
+            let mut rects = Vec::with_capacity(n);
+            for _ in 0..n {
+                rects.push([f.f32()?, f.f32()?, f.f32()?, f.f32()?]);
+            }
+            Some(rects)
+        } else {
+            None
+        };
+        let copied = if f.u32()? != 0 {
+            Some(Copied {
+                text: f.string()?,
+                html: f.string()?,
+            })
+        } else {
+            None
+        };
         return Ok(Some(Update {
             width,
             height,
@@ -335,6 +437,8 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
             micros,
             answers,
             line,
+            selection,
+            copied,
         }));
     }
 }
@@ -376,6 +480,16 @@ mod tests {
                 tail: 300.0,
                 end: 340.5,
             },
+            Request::Press {
+                x: 12.5,
+                y: 300.0,
+                clicks: 2,
+            },
+            Request::Drag { x: 40.0, y: -3.0 },
+            Request::Release,
+            Request::SelectAll,
+            Request::Unselect,
+            Request::Copy,
             Request::Quit,
         ];
         let mut buf = Vec::new();
@@ -399,10 +513,25 @@ mod tests {
             micros: 1234,
             answers: 3,
             line: 17.5,
+            selection: Some(vec![[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.5]]),
+            copied: Some(Copied {
+                text: "Başlık".into(),
+                html: "<b>Başlık</b>".into(),
+            }),
         };
         let mut buf = Vec::new();
         write_update(&mut buf, &u).unwrap();
         assert_eq!(read_update(&mut &buf[..]).unwrap(), Some(u));
+        // Nothing selected is not the same as the selection unchanged.
+        for selection in [Some(vec![]), None] {
+            let u = Update {
+                selection,
+                ..Update::ack(1)
+            };
+            let mut buf = Vec::new();
+            write_update(&mut buf, &u).unwrap();
+            assert_eq!(read_update(&mut &buf[..]).unwrap(), Some(u));
+        }
     }
 
     #[test]
