@@ -11,6 +11,17 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Selecting text on mdedit's preview pane, branch `f/pane-select` (2026-11-16, not merged)
+
+Protocol `MDVPREVIEW4`: requests `Press { x, y, clicks }`, `Drag { x, y }` (device pixels from the
+pane's top left), `Release`, `SelectAll`, `Unselect`, `Copy`. Every answer carries
+`Update::selection` when the selection's rectangles changed (page positions, `None` when not)
+and `Update::copied` (text and HTML, as `Workspace::selected_text` and `selected_html` give them)
+after `Copy` (`Server::selection_answer`, called by `serve` after each frame). The server keeps
+the selection as mdview's workspace does (anchor first; a click that does not move clears it;
+two clicks a word, three the block): `word_range` and `block_range` moved to
+`mdview_core::select` and both use them. A new text clears it. Tests: 3 in `server.rs`.
+
 ## START HERE: mdview 1.0.0 is released (2026-11-16)
 
 **The released state is `main`, mdview 1.0.0, tag `v1.0.0` at `94280e0`, published with mdedit
