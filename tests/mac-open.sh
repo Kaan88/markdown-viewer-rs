@@ -17,9 +17,16 @@ fail=0
 # The event goes to the running copy: no second process starts.
 open -a "$(cd "$app" && pwd)" "$PWD/fixtures/tables.md"
 sleep 3
-n=$(pgrep -f "$(cd "$app" && pwd)/Contents/MacOS/mdview\$" | wc -l | tr -d ' ')
+n=$(pgrep -f "^$(cd "$app" && pwd)/Contents/MacOS/mdview( |\$)" | wc -l | tr -d ' ')
+pgrep -lf "Contents/MacOS/mdview" || true
 if [ "$n" = "1" ]; then echo "PASS one process after open -a"; else echo "FAIL $n processes after open -a"; fail=1; fi
 [ -n "${wid:-}" ] && screencapture -x -o -l "$wid" "$out/opened.png" && echo "opened captured"
+# The application menu, opened from the menu bar.
+osascript -e 'tell application "System Events" to tell process "mdview" to click menu bar item "mdview" of menu bar 1' || echo "no application menu"
+sleep 1
+screencapture -x "$out/app-menu.png" && echo "app menu captured"
+osascript -e 'tell application "System Events" to key code 53'
+sleep 0.5
 osascript -e 'tell application "System Events" to keystroke "q" using command down'
 for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
 if kill -0 "$pid" 2>/dev/null; then echo "FAIL Command+Q left the process running"; fail=1; else echo "PASS Command+Q quits"; fi

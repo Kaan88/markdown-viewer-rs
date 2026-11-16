@@ -2,6 +2,7 @@
 
     python assets/make_icon.py            # the viewer: mdview.svg, mdview.ico
     python assets/make_icon.py mdedit     # the editor's mark, into the current folder
+    python assets/make_icon.py mdview --macos   # only <name>-macos.png, the Mac icon's source
 
 Needs Pillow. The mark is drawn on a 256 x 256 canvas: a rounded tile from 8 to 248, and white
 shapes centred on it. The viewer's is the Markdown "M" and a down arrow; the editor's is the same
@@ -79,11 +80,26 @@ def raster(mark, shapes, size):
     return tile.resize((size, size), Image.LANCZOS)
 
 
+def macos(mark, shapes):
+    """The Mac icon's 1024 px source: transparent, the tile 824 px wide in the middle, as the
+    macOS icon grid has it (packaging/macos/make-icns.sh makes the .icns from it)."""
+    size = round(1024 * 824 / 1024 * 256 / 240)
+    canvas = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    at = (1024 - size) // 2
+    canvas.alpha_composite(raster(mark, shapes, size), (at, at))
+    return canvas
+
+
 def main():
-    name = sys.argv[1] if len(sys.argv) > 1 else "mdview"
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    name = args[0] if args else "mdview"
     mark = MARKS[name]
     out = Path(__file__).parent if name == "mdview" else Path.cwd()
     shapes = placed(mark["shapes"])
+    if "--macos" in sys.argv:
+        macos(mark, shapes).save(out / f"{name}-macos.png")
+        print(f"wrote {name}-macos.png to {out}")
+        return
     (out / f"{name}.svg").write_text(svg(name, mark, shapes), encoding="utf-8", newline="\n")
     images = [raster(mark, shapes, size) for size in SIZES]
     images[-1].save(out / f"{name}.ico", format="ICO", append_images=images[:-1],

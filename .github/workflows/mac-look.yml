@@ -33,13 +33,28 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: mac-look
+          workspaces: |
+            . -> target
+            editor -> target
       - run: cargo build --release -p mdview -p mdview-engine
       - name: Screenshot suite
         run: bash tests/shots.sh target/shots
       - name: The bundle
         run: bash packaging/macos/make-bundle.sh target/release target/dist
+      - uses: actions/checkout@v4
+        with:
+          repository: Kaan88/markdown-editor-rs
+          ref: f/macos
+          path: editor
+      - name: The editor's bundle, beside the viewer's
+        run: |
+          cargo build --release -p mdedit --manifest-path editor/Cargo.toml
+          bash editor/packaging/macos/make-bundle.sh editor/target/release target/dist
       - name: Opening files from the system, Command+Q
         run: bash tests/mac-open.sh target/open target/dist/mdview.app
+      - name: Edit in mdedit, the two bundles side by side
+        if: ${{ !cancelled() }}
+        run: bash tests/mac-sister.sh target/sister target/dist/mdview.app
       - name: The app in a real window
         if: ${{ !cancelled() }}
         run: |
@@ -50,7 +65,7 @@ jobs:
         run: |
           bash tests/print-pngs.sh \
             target/window/showcase/screen.png target/window/showcase/window.png \
-            target/window/empty-dark/window.png target/open/opened.png \
+            target/window/empty-dark/window.png target/open/opened.png target/open/app-menu.png target/sister/screen.png \
             target/shots/showcase-light.png target/shots/everything-dark.png \
             target/shots/emoji-light.png target/shots/menu-main-light.png \
             target/shots/dialog-settings-light.png target/shots/scale-200.png

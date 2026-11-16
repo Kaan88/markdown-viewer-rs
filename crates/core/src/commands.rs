@@ -155,6 +155,8 @@ use Shortcut::{Keys as K, Standard as S};
 
 const SHOW_IN_FILE_MANAGER: &str = if cfg!(windows) {
     "Show in File Explorer"
+} else if cfg!(target_os = "macos") {
+    "Show in Finder"
 } else {
     "Show in file manager"
 };

@@ -2576,6 +2576,8 @@ fn command_table_matches_the_old_toolbar_and_view_menu() {
         show,
         if cfg!(windows) {
             "Show in File Explorer"
+        } else if cfg!(target_os = "macos") {
+            "Show in Finder"
         } else {
             "Show in file manager"
         }
