@@ -1,0 +1,59 @@
+# Pictures of mdview on a real Mac, for looking at the macOS port without one: the headless
+# screenshot suite and the app in a real window (tests/mac-window.sh). The pictures are printed
+# into the log as base64 (tests/print-pngs.sh) as well as uploaded, since a cloud session cannot
+# download artifacts; tools/mac-look-decode.sh turns the log back into files.
+name: mac-look
+
+on:
+  push:
+    branches: [f/macos]
+  workflow_dispatch:
+
+concurrency:
+  group: mac-look-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_TOOLCHAIN: 1.99.1
+
+jobs:
+  look:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mac-look
+      - run: cargo build --release -p mdview -p mdview-engine
+      - name: Screenshot suite
+        run: bash tests/shots.sh target/shots
+      - name: The app in a real window
+        run: |
+          bash tests/mac-window.sh target/window/showcase target/release/mdview --no-session fixtures/showcase.md
+          bash tests/mac-window.sh target/window/empty-dark target/release/mdview --no-session --dark
+      - name: Print the pictures
+        if: ${{ !cancelled() }}
+        run: |
+          bash tests/print-pngs.sh \
+            target/window/showcase/screen.png target/window/showcase/window.png \
+            target/window/empty-dark/window.png \
+            target/shots/showcase-light.png target/shots/everything-dark.png \
+            target/shots/emoji-light.png target/shots/menu-main-light.png \
+            target/shots/dialog-settings-light.png target/shots/scale-200.png
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: mac-look
+          path: |
+            target/shots/*.png
+            target/window/**
+          retention-days: 14
