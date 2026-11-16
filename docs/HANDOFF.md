@@ -11,7 +11,16 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## Preview server for mdedit, branch `f/preview-pane` (2026-11-16, not merged)
+## START HERE: mdview 1.0.0 is released (2026-11-16)
+
+**The released state is `main`, mdview 1.0.0, tag `v1.0.0` at `94280e0`, published with mdedit
+1.0.0 on the owner's word. Shared crates: `main` of markdown-shared-rs at `51e7604` (the
+crash-report branch merged). 1.0.0 holds what the two sections below describe (the preview
+server, crash reports, input-method compositions, Mac self-update); notes in
+`docs/release-notes/1.0.0.md`, the release record in `docs/UPDATE.md`. The `f/preview-pane`
+branch is merged.**
+
+## Preview server for mdedit (2026-11-16, merged, in 1.0.0)
 
 For mdedit's preview pane (its handoff has the whole story and the timings):
 - `crates/preview` (`mdview-preview`): the wire format (`wire.rs`: requests Text, View, Follow,
@@ -45,7 +54,7 @@ Crash reports (same branch, shared crates `f/crash-report` at `21fd49b`, the own
   The shared module's panic and access-violation reports were checked on a Windows runner
   (mdedit's preview-test workflow); mdview's bar has not been seen on Windows.
 
-## After 0.5.1, on `main`, not released (2026-11-16)
+## After 0.5.1 (2026-11-16, in 1.0.0)
 
 Shared crates at `d775493`. Input-method compositions are drawn in the find box, the palette and
 the settings (`ime_preedit` in `app/input.rs`; test in `app/tests.rs`), not yet tried with a real

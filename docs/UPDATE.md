@@ -296,6 +296,26 @@ test build end to end on KDE Plasma 6.
 Not verified: the Windows files run by hand on a Windows desktop; an installed 0.2.2 updating
 itself to 0.3.0 through the bar; the deb, rpm, tar.gz and PKGBUILD of this exact build installed.
 
+## v1.0.0 (published 2026-11-16 by the release workflow, run by hand with `publish`, at commit 94280e0)
+
+The tag could not be pushed from the cloud session that cut it (its proxy refuses tag pushes and
+ref writes), so the release workflow was dispatched on `main` with `publish: true`; its
+`gh release create --target` made the tag. Run 43937535398; the `ci` run on the same commit
+(43929166155) had passed on Windows, Linux and both Macs. Released with mdedit 1.0.0, whose
+preview pane uses this version's `--preview-server` (protocol `MDVPREVIEW3`).
+Assets: `mdview.exe` (9,329,152 bytes), `mdview-engine.exe`, `mdview-setup-1.0.0.exe`,
+`mdview-1.0.0-windows-x86_64.zip`, `mdview-1.0.0-linux-x86_64.AppImage` (15,616,504 bytes),
+`mdview-1.0.0-linux-x86_64.tar.gz`, `mdview_1.0.0_amd64.deb`, `mdview-1.0.0-1.x86_64.rpm`,
+`PKGBUILD`, `mdview-1.0.0-macos-aarch64.zip`, `mdview-1.0.0-macos-x86_64.zip`, `mdview-update.txt`
+and `mdview-update-macos.txt`.
+
+Verified against the live release: both manifests at the latest-download address name 1.0.0;
+every file they name (exe, engine, AppImage, both Mac zips) downloaded and has the manifest's
+SHA-256.
+
+Not verified: any published file run on any desktop; an installed 0.5.1 updating itself to 1.0.0;
+the installer and the Linux packages installed.
+
 ## v0.5.1 (published 2026-11-15 by the release workflow, from the tag at commit a73da37)
 
 Run 43762304418; the `ci` run on the same commit (43761002308) had passed on Linux and Windows.
