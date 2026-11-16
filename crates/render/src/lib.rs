@@ -12,6 +12,7 @@ use mdshared_highlight as highlight;
 use mdshared_text::{bitmap, text};
 
 pub use bitmap::Bitmap;
+pub use engine::set_engine_path;
 pub use export::{ExportOptions, export_html};
 pub use image::{DecodedImage, decode_image};
 pub use layout::{

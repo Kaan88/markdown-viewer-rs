@@ -11,6 +11,40 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Preview server for mdedit, branch `f/preview-pane` (2026-11-16, not merged)
+
+For mdedit's preview pane (its handoff has the whole story and the timings):
+- `crates/preview` (`mdview-preview`): the wire format (`wire.rs`: requests Text, View, Follow,
+  Scroll, Quit; updates carry the rows that changed plus a shift) and, with feature `server`,
+  the drawing loop (`server.rs`, `serve`, `serve_stdio`). mdedit's embedded build runs `serve`
+  on a thread; its default build starts `mdview --preview-server`, which runs `serve_stdio`
+  with no window (checked first in `main`). The server greets with `MDVPREVIEW3\n`.
+- `mdview_render::set_engine_path`: where the math and diagram engine is, ahead of
+  `MDV_ENGINE` and the exe's folder (for the embedded build, whose exe is mdedit).
+- The page follows the caret's source line only when that line is out of view.
+- Synced scrolling (protocol `MDVPREVIEW3`): `Request::Align { line, tail, end }` puts a
+  source line (fractional) at the pane's top, and every `Update` carries `line`, the source
+  line at the pane's top. Both go straight between knots at each top-level block's first line
+  and page row (`server.rs`, `knots`, `Sync`), so they are each other's inverse. `tail..end` is
+  the editor's last screen of scrolling: over it the page's top goes on to its bottom, so both
+  reach their ends together (the line coming back is found by halving, the exact inverse).
+  The editor decides who leads.
+Tests: 9 in the crate (with `--features server`). Not run on Windows by hand.
+
+Crash reports (same branch, shared crates `f/crash-report` at `21fd49b`, the owner's request):
+- `main.rs` installs `mdshared_app::crash` after the `--preview-server` branch, into
+  `data_dir("mdview")/crashes`, and calls `crash::closed_normally()` after `app::run()`: mdview
+  builds with `panic = "unwind"` and catches panics in image decoding and export, so a run that
+  ends normally deletes the reports it wrote (it lived through them).
+- `app/crash.rs`: the context line (document size by 16 KB, tab count, a folder open,
+  presenting; never text or names), set from `compose`; `look_for_crash` at launch (one read of
+  a small folder); the bar's buttons. The bar sits under the update bar (`page.rs`), with Open
+  report (the system's text editor: `platform::open_file(.., ["txt"])`), Copy, close; each marks
+  the report seen (`.seen.txt`, kept). Strings `CRASH_REPORT_COPIED`, `CRASH_REPORT_NOT_OPENED`.
+- Tests: `app/crash.rs` (context), `last_times_crash_report_gets_a_bar_…` in `app/tests.rs`.
+  The shared module's panic and access-violation reports were checked on a Windows runner
+  (mdedit's preview-test workflow); mdview's bar has not been seen on Windows.
+
 ## After 0.5.1, on `main`, not released (2026-11-16)
 
 Shared crates at `d775493`. Input-method compositions are drawn in the find box, the palette and

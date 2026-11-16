@@ -549,6 +549,8 @@ pub struct Workspace {
     pending_task: Option<u32>,
     /// A newer version found, being installed, or installed, and whether its bar is closed.
     updates: Updates,
+    /// Last time's crash report, offered on a bar until the reader answers it.
+    crash: Option<PathBuf>,
     /// The note index and the active document's backlinks (`workspace/notes.rs`).
     notes: notes::Notes,
     /// Animated images may play: there is a window to wake (never in a `--shot` render or a
@@ -593,6 +595,7 @@ impl Workspace {
             held: Vec::new(),
             pending_task: None,
             updates: Updates::default(),
+            crash: None,
             notes: notes::Notes::new(),
             animation_wake: false,
             system_animations: true,
@@ -3476,6 +3479,26 @@ impl Workspace {
     pub fn preview_update(&mut self, stage: &str) {
         self.updates.preview(stage);
         self.dirty = true;
+    }
+
+    /// The active document's size in bytes, for a crash report's context; never its text.
+    pub fn active_size(&self) -> Option<usize> {
+        self.active_tab()
+            .and_then(|t| t.doc.as_ref())
+            .map(|d| d.text.len())
+    }
+
+    /// Last time's crash report, while its bar shows.
+    pub fn crash_report(&self) -> Option<&Path> {
+        self.crash.as_deref()
+    }
+
+    /// Shows the crash bar for a report, or takes it away (`None`).
+    pub fn set_crash_report(&mut self, report: Option<PathBuf>) {
+        if self.crash != report {
+            self.crash = report;
+            self.dirty = true;
+        }
     }
 
     /// What the update bar shows, if it shows.

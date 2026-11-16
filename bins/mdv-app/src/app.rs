@@ -50,6 +50,8 @@ use winit::window::{CursorIcon, ResizeDirection, Theme as WinTheme, Window, Wind
 
 mod cards;
 mod commands;
+mod crash;
+pub use crash::crash_dir;
 mod export;
 #[cfg(test)]
 mod frost_tests;
@@ -170,6 +172,8 @@ struct App {
     /// while the pane is open.
     tree_dirs: Vec<PathBuf>,
     session: Option<PathBuf>,
+    /// What a crash report would say mdview was doing, as last set.
+    crash_key: crash::CrashKey,
     screen: Bitmap,
     gfx: Gfx,
     pal: Palette,
@@ -274,6 +278,7 @@ impl App {
             watch_due: None,
             tree_dirs: Vec::new(),
             session,
+            crash_key: crash::CrashKey::default(),
             screen: Bitmap::new(1, 1),
             gfx: Gfx::new(),
             pal: theme::DARK,
@@ -600,6 +605,7 @@ impl App {
                         self.ws.update_relaunch_target().is_some(),
                     )
                 });
+                let crash = self.ws.crash_report().is_some();
                 // The code box whose copy button shows, and its check mark.
                 let vr = page::viewport(&self.ws, self.areas.page);
                 let code = crate::codebtn::spot(&mut self.ws, &self.ui, vr, self.scale)
@@ -610,7 +616,7 @@ impl App {
                     missing,
                     drag,
                     recents,
-                    update,
+                    (update, crash),
                     code,
                 ))
             }
@@ -638,6 +644,7 @@ impl App {
 
     /// Composes one frame into `screen` and returns the device-px rows changed.
     fn compose(&mut self) -> (Vec<(i32, i32, i32, i32)>, FrameTimes) {
+        self.crash_context();
         let mut times = FrameTimes::default();
         let t0 = Instant::now();
         let (pw, ph) = (self.size.0.max(1), self.size.1.max(1));
@@ -1950,6 +1957,7 @@ pub fn run() -> i32 {
     app.started = started;
     app.setup();
     stage(started, "app setup");
+    app.look_for_crash();
     if let Some(path) = app.args.shot.clone() {
         return shot(app, &path);
     }
