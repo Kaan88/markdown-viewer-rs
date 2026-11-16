@@ -252,13 +252,13 @@ fn between(k: &[(f32, f32)], x: f32, by_line: bool) -> f32 {
     let key = |p: &(f32, f32)| if by_line { p.0 } else { p.1 };
     let val = |p: &(f32, f32)| if by_line { p.1 } else { p.0 };
     let i = k.partition_point(|p| key(p) <= x);
-    match (i.checked_sub(1).map(|i| k[i]), k.get(i)) {
-        (Some(a), Some(b)) if key(&b) > key(&a) => {
-            let t = (x - key(&a)) / (key(&b) - key(&a));
-            val(&a) + t * (val(&b) - val(&a))
+    match (i.checked_sub(1).map(|i| &k[i]), k.get(i)) {
+        (Some(a), Some(b)) if key(b) > key(a) => {
+            let t = (x - key(a)) / (key(b) - key(a));
+            val(a) + t * (val(b) - val(a))
         }
-        (Some(a), _) => val(&a),
-        (None, Some(b)) => val(&b),
+        (Some(a), _) => val(a),
+        (None, Some(b)) => val(b),
         (None, None) => 0.0,
     }
 }
