@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 /// The server's first line: the protocol's name and version.
-pub const MAGIC: &[u8; 12] = b"MDVPREVIEW5\n";
+pub const MAGIC: &[u8; 12] = b"MDVPREVIEW6\n";
 
 /// The largest message either side accepts: a frame of 8K by 8K pixels.
 pub const MAX_MESSAGE: usize = 8192 * 8192 * 4 + 64;
@@ -52,6 +52,9 @@ pub enum Request {
     Unselect,
     /// Asks for the selection's text: the next update carries it in [`Update::copied`].
     Copy,
+    /// The pointer rests at `x, y` (device pixels from the pane's top left), no button down:
+    /// the next update carries the cursor for that place in [`Update::pointer`].
+    Hover { x: f32, y: f32 },
     /// Stop: the server ends.
     Quit,
 }
@@ -88,6 +91,17 @@ pub struct Update {
     /// brackets) in the last [`Request::Text`], and whether the click checks it. The page does not
     /// change: the editor changes its text, which comes back as a new text.
     pub task: Option<(u32, bool)>,
+    /// The answer to [`Request::Hover`]: the cursor for the place the pointer rests on.
+    pub pointer: Option<Pointer>,
+}
+
+/// The cursor over a place of the page, as mdview shows it there: a hand over a task box (the
+/// one thing on the pane a click does), the text cursor over text, the arrow elsewhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pointer {
+    Arrow,
+    Text,
+    Hand,
 }
 
 /// The selection for the clipboard: its text, and the same as an HTML fragment (empty when
@@ -166,6 +180,7 @@ const RELEASE: u32 = 9;
 const SELECT_ALL: u32 = 10;
 const UNSELECT: u32 = 11;
 const COPY: u32 = 12;
+const HOVER: u32 = 13;
 const UPDATE: u32 = 16;
 
 fn put_u32(out: &mut Vec<u8>, v: u32) {
@@ -292,6 +307,11 @@ pub fn write_request(w: &mut impl Write, req: &Request) -> io::Result<()> {
         Request::SelectAll => SELECT_ALL,
         Request::Unselect => UNSELECT,
         Request::Copy => COPY,
+        Request::Hover { x, y } => {
+            put_u32(&mut b, x.to_bits());
+            put_u32(&mut b, y.to_bits());
+            HOVER
+        }
         Request::Quit => QUIT,
     };
     frame(kind, &b, w)
@@ -343,6 +363,10 @@ pub fn read_request(r: &mut impl Read) -> io::Result<Option<Request>> {
             SELECT_ALL => Request::SelectAll,
             UNSELECT => Request::Unselect,
             COPY => Request::Copy,
+            HOVER => Request::Hover {
+                x: f.f32()?,
+                y: f.f32()?,
+            },
             QUIT => Request::Quit,
             _ => continue,
         };
@@ -393,6 +417,15 @@ pub fn write_update(w: &mut impl Write, u: &Update) -> io::Result<()> {
             put_u32(&mut b, checked as u32);
         }
     }
+    put_u32(
+        &mut b,
+        match u.pointer {
+            None => 0,
+            Some(Pointer::Arrow) => 1,
+            Some(Pointer::Text) => 2,
+            Some(Pointer::Hand) => 3,
+        },
+    );
     frame(UPDATE, &b, w)
 }
 
@@ -443,6 +476,12 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
         } else {
             None
         };
+        let pointer = match f.u32()? {
+            1 => Some(Pointer::Arrow),
+            2 => Some(Pointer::Text),
+            3 => Some(Pointer::Hand),
+            _ => None,
+        };
         return Ok(Some(Update {
             width,
             height,
@@ -457,6 +496,7 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
             selection,
             copied,
             task,
+            pointer,
         }));
     }
 }
@@ -508,6 +548,7 @@ mod tests {
             Request::SelectAll,
             Request::Unselect,
             Request::Copy,
+            Request::Hover { x: 3.5, y: 70.0 },
             Request::Quit,
         ];
         let mut buf = Vec::new();
@@ -537,6 +578,7 @@ mod tests {
                 html: "<b>Başlık</b>".into(),
             }),
             task: Some((40, true)),
+            pointer: Some(Pointer::Hand),
         };
         let mut buf = Vec::new();
         write_update(&mut buf, &u).unwrap();

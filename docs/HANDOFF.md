@@ -19,6 +19,19 @@ The owner agreed that mdview is feature complete: see the status at the top of `
 selection requests used by mdedit 1.0.1 and 1.0.2 (which pin `8faf059`) and says version 1.0.1,
 so the next mdview release is 1.0.2 or later.
 
+## Preview protocol 6: the cursor over mdedit's pane, the page still after a tick (2026-11-17)
+
+The owner tried mdedit 1.0.3: the cursor was the text cursor over the whole pane, and a tick
+scrolled the page to the top. `MDVPREVIEW6`:
+- `Request::Hover { x, y }` is answered in `Update::pointer` (`Pointer::Hand` over a task box,
+  `Text` over text, `Arrow` elsewhere), as mdview picks its own cursor (links are not followed on
+  the pane, so they get no hand).
+- After a tick, the next text does not scroll the page to the caret (`Server::keep_top`): the
+  scroll came from `go_to(follow)` in the `Text` request with the caret off screen, often at
+  line 1. A moved caret still comes as its own `Follow`.
+- Tests: `the_text_a_tick_brings_leaves_the_page_where_it_is`, and the hover checks in
+  `a_click_on_a_task_box_gives_its_mark_and_selects_nothing`. Not an mdview release.
+
 ## Preview protocol 5: task boxes on mdedit's pane (2026-11-17, not an mdview release)
 
 For mdedit 1.0.3 (the owner: tick boxes on the pane as in mdview, without saving). `MAGIC` is

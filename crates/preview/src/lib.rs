@@ -17,4 +17,4 @@ mod server;
 #[cfg(feature = "server")]
 pub use server::{Server, serve, serve_stdio};
 
-pub use wire::{Copied, Request, Update};
+pub use wire::{Copied, Pointer, Request, Update};

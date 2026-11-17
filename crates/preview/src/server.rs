@@ -1,7 +1,7 @@
 //! The loop that draws the page for an editor: in mdview's process (`mdview --preview-server`,
 //! [`serve_stdio`]) or on a thread of the editor's own ([`serve`]).
 
-use crate::wire::{self, Copied, Request, Update};
+use crate::wire::{self, Copied, Pointer, Request, Update};
 use mdview_core::model::Document;
 use mdview_render::{BlockBox, DARK, DocumentRenderer, Jump, LIGHT, Options};
 use std::io::{self, BufReader, BufWriter, Write};
@@ -42,6 +42,11 @@ pub struct Server {
     source: String,
     /// A task box was clicked: its mark's byte offset in `source` and its new state.
     task: Option<(u32, bool)>,
+    /// The next text is the editor's answer to a tick: the page stays where it is, since the
+    /// caret did not move to the box (a moved caret still comes as its own `Follow`).
+    keep_top: bool,
+    /// The answer to the last `Hover`, until it is sent.
+    pointer: Option<Pointer>,
     /// Something changed since the last frame (or there has been none).
     dirty: bool,
     /// The editor's copy of the frame is gone: the next frame is sent whole.
@@ -72,6 +77,8 @@ impl Server {
             copy: false,
             source: String::new(),
             task: None,
+            keep_top: false,
+            pointer: None,
             dirty: true,
             whole: true,
         }
@@ -97,8 +104,11 @@ impl Server {
                 self.selection = None;
                 self.press = None;
                 self.selection_dirty = true;
-                // The page shows the caret in the new text; it stays still while it does.
-                if let Some((line, column)) = self.follow {
+                // The page shows the caret in the new text; it stays still while it does. After a
+                // tick the reader is looking at the box, not the caret: the page stays.
+                if std::mem::take(&mut self.keep_top) {
+                    self.renderer.set_top(self.top);
+                } else if let Some((line, column)) = self.follow {
                     self.go_to(line, column);
                 }
             }
@@ -152,6 +162,7 @@ impl Server {
                 if let Some(flip) = (clicks <= 1).then(|| self.task_at(x, y)).flatten() {
                     // A click on a task box ticks it in the editor's text, not a selection.
                     self.task = Some(flip);
+                    self.keep_top = true;
                     if self.selection.take().is_some() {
                         self.selection_dirty = true;
                     }
@@ -185,6 +196,9 @@ impl Server {
                         self.selection_dirty = true;
                     }
                 }
+            }
+            Request::Hover { x, y } => {
+                self.pointer = Some(self.pointer_at(x, y));
             }
             Request::Release => {
                 // A click that did not move clears the selection; a drag leaves it.
@@ -305,6 +319,26 @@ impl Server {
         Some((at as u32, byte == b'x'))
     }
 
+    /// The cursor for `x, y` (pane pixels): a hand over a task box, the text cursor over text.
+    fn pointer_at(&mut self, x: f32, y: f32) -> Pointer {
+        if !(x.is_finite() && y.is_finite()) {
+            return Pointer::Arrow;
+        }
+        let Some(doc) = self.doc.as_ref() else {
+            return Pointer::Arrow;
+        };
+        match self.renderer.hit_test(doc, &self.options, x, y + self.top) {
+            Some(hit) if hit.task.is_some() => Pointer::Hand,
+            Some(hit) if hit.on_text => Pointer::Text,
+            _ => Pointer::Arrow,
+        }
+    }
+
+    /// The answer to the last [`Request::Hover`], for [`Update::pointer`].
+    pub fn take_pointer(&mut self) -> Option<Pointer> {
+        self.pointer.take()
+    }
+
     /// The task box clicked since the last answer, for [`Update::task`].
     pub fn take_task(&mut self) -> Option<(u32, bool)> {
         self.task.take()
@@ -401,6 +435,7 @@ impl Server {
             selection: None,
             copied: None,
             task: None,
+            pointer: None,
         })
     }
 }
@@ -534,6 +569,7 @@ pub fn serve(requests: Receiver<Request>, mut send: impl FnMut(Update) -> bool) 
             selection,
             copied,
             task: server.take_task(),
+            pointer: server.take_pointer(),
             ..match drawn {
                 Some(update) => Update { answers, ..update },
                 None => Update::ack(answers),
@@ -870,6 +906,16 @@ mod tests {
             }],
         );
         assert!(s.take_task().is_none());
+        // Over the box the cursor is a hand; over the words, the text cursor.
+        s.apply(Request::Hover { x: bx, y: by });
+        assert_eq!(s.take_pointer(), Some(Pointer::Hand));
+        assert_eq!(s.take_pointer(), None, "once per hover");
+        let on_text = (0..300)
+            .step_by(2)
+            .flat_map(|y| (0..200).step_by(2).map(move |x| (x as f32, y as f32)))
+            .any(|(x, y)| s.pointer_at(x, y) == Pointer::Text);
+        assert!(on_text);
+        assert_eq!(s.pointer_at(399.0, 299.0), Pointer::Arrow);
         // A text that no longer agrees with the page about its boxes ticks nothing.
         s.source = "- [ ] one\n".into();
         s.apply(Request::Press {
@@ -878,6 +924,47 @@ mod tests {
             clicks: 1,
         });
         assert!(s.take_task().is_none());
+    }
+
+    #[test]
+    fn the_text_a_tick_brings_leaves_the_page_where_it_is() {
+        // A long page with a box far down, the caret (Follow) at the first line.
+        let mut text: String = (0..120).map(|i| format!("Line {i}.\n\n")).collect();
+        text.push_str("- [ ] far down\n");
+        let mut s = shown(&text);
+        s.apply(Request::Follow { line: 1, column: 0 });
+        s.apply(Request::Scroll { by: 1e6 });
+        let bottom = s.frame().expect("scrolled").top;
+        assert!(bottom > 0.0);
+        let (bx, by) = (0..300)
+            .step_by(2)
+            .flat_map(|y| (0..200).step_by(2).map(move |x| (x as f32, y as f32)))
+            .find(|&(x, y)| s.task_at(x, y).is_some())
+            .expect("the box in view");
+        s.apply(Request::Press {
+            x: bx,
+            y: by,
+            clicks: 1,
+        });
+        s.apply(Request::Release);
+        let (at, checked) = s.take_task().expect("ticked");
+        assert!(checked);
+        // The editor's answer: the same text with the mark changed, and no Follow (the caret
+        // did not move). The page stays at the box.
+        let mut ticked = text.clone();
+        ticked.replace_range(at as usize..at as usize + 1, "x");
+        s.apply(Request::Text {
+            text: ticked,
+            base_dir: None,
+        });
+        let after = s.frame().map_or(s.top, |u| u.top);
+        assert_eq!(after, bottom);
+        // A text typed after that follows the caret again.
+        s.apply(Request::Text {
+            text: format!("x{text}"),
+            base_dir: None,
+        });
+        assert!(s.frame().map_or(s.top, |u| u.top) < bottom);
     }
 
     #[test]
