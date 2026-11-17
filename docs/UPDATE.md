@@ -296,7 +296,14 @@ test build end to end on KDE Plasma 6.
 Not verified: the Windows files run by hand on a Windows desktop; an installed 0.2.2 updating
 itself to 0.3.0 through the bar; the deb, rpm, tar.gz and PKGBUILD of this exact build installed.
 
-## v1.0.1 (published 2026-11-16 by the release workflow, run by hand with `publish`, at commit 8faf059)
+## v1.0.1 (withdrawn)
+
+Deleted with its tag by the owner on 2026-11-16, soon after it went out: it carried no change of
+mdview's own (only the preview server that mdedit 1.0.1 ships in `mdview-engine`), so it should
+not have been released. The latest mdview release is 1.0.0 again, and `main` says 1.0.1: the
+next mdview release must be 1.0.2 or later. The record below is kept as written.
+
+### v1.0.1 (published 2026-11-16 by the release workflow, run by hand with `publish`, at commit 8faf059)
 
 Run 43967594694 (the tag made by `gh release create`, as for 1.0.0). Selecting text on mdedit's
 preview pane (protocol `MDVPREVIEW4`); released with mdedit 1.0.1 on the owner's word, the

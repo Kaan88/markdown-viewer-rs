@@ -1,5 +1,20 @@
 # Plan: mdview, a performance-first Rust Markdown viewer
 
+## Status: feature complete, in maintenance (2026-11-17)
+
+The owner agreed on 2026-11-17 that mdview is feature complete. Every roadmap below is built; the
+sections that follow are history, not open work. From here on:
+
+- Fix bugs found in daily use, and keep dependencies current: Dependabot opens pull requests
+  every Monday (`.github/dependabot.yml`); `ci` runs on each; merge by hand once it passes.
+  The sister crates (`mdshared-*`, `mdview-*`) and the winit and softbuffer forks are moved by hand.
+- A new feature goes in only when the owner asks for it, under the same rules as before.
+- Release only the app a change affects (mdview 1.0.1 carried no change of its own and was
+  withdrawn).
+- Known small gaps, not planned unless they get in the way: `<bdo>` (the text layout has no per-range direction); no key opens a menu, so access keys need a menu opened by mouse; the Recent menu has no access keys.
+- Set aside by the owner (can be reopened): screen-reader accessibility; presentation speaker notes and slide transitions; the system accent colour; Mica Alt.
+- Never checked by hand: the KDE blur on Linux; the Linux AppImage and packages; an installed copy updating itself and restarting.
+
 > Copy of the working plan, kept in the repo for the move to Windows. Phase 0 and most of Phase 1 are done, so "Nothing has been built yet" below is out of date. Current state is in [HANDOFF.md](HANDOFF.md).
 
 ## Context

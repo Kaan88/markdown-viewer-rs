@@ -11,10 +11,19 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## START HERE: mdview 1.0.1, selecting text on mdedit's preview pane (2026-11-16, released)
+## START HERE: feature complete, in maintenance (2026-11-17)
+
+The owner agreed that mdview is feature complete: see the status at the top of `docs/PLAN.md`
+(what maintenance means, the small known gaps, what was set aside). The latest release is
+**1.0.0**: 1.0.1 was withdrawn (below, and `docs/UPDATE.md`). `main` holds the preview server's
+selection requests used by mdedit 1.0.1 and 1.0.2 (which pin `8faf059`) and says version 1.0.1,
+so the next mdview release is 1.0.2 or later.
+
+## mdview 1.0.1, selecting text on mdedit's preview pane (2026-11-16, released, then withdrawn)
 
 Released as 1.0.1 with mdedit 1.0.1 on the owner's word ("I trust you"), without a hands-on
-test on Windows. Record in `docs/UPDATE.md`.
+test on Windows; the owner deleted the release the same day, since mdview itself had not
+changed. Record in `docs/UPDATE.md`.
 
 
 Protocol `MDVPREVIEW4`: requests `Press { x, y, clicks }`, `Drag { x, y }` (device pixels from the
