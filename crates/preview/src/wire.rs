@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 /// The server's first line: the protocol's name and version.
-pub const MAGIC: &[u8; 12] = b"MDVPREVIEW4\n";
+pub const MAGIC: &[u8; 12] = b"MDVPREVIEW5\n";
 
 /// The largest message either side accepts: a frame of 8K by 8K pixels.
 pub const MAX_MESSAGE: usize = 8192 * 8192 * 4 + 64;
@@ -84,6 +84,10 @@ pub struct Update {
     pub selection: Option<Vec<[f32; 4]>>,
     /// The answer to [`Request::Copy`]: the selected text, as mdview copies it.
     pub copied: Option<Copied>,
+    /// A click on a task box: the byte offset of its mark (the space or `x` between the
+    /// brackets) in the last [`Request::Text`], and whether the click checks it. The page does not
+    /// change: the editor changes its text, which comes back as a new text.
+    pub task: Option<(u32, bool)>,
 }
 
 /// The selection for the clipboard: its text, and the same as an HTML fragment (empty when
@@ -381,6 +385,14 @@ pub fn write_update(w: &mut impl Write, u: &Update) -> io::Result<()> {
             put_bytes(&mut b, c.html.as_bytes());
         }
     }
+    match u.task {
+        None => put_u32(&mut b, 0),
+        Some((at, checked)) => {
+            put_u32(&mut b, 1);
+            put_u32(&mut b, at);
+            put_u32(&mut b, checked as u32);
+        }
+    }
     frame(UPDATE, &b, w)
 }
 
@@ -426,6 +438,11 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
         } else {
             None
         };
+        let task = if f.u32()? != 0 {
+            Some((f.u32()?, f.u32()? != 0))
+        } else {
+            None
+        };
         return Ok(Some(Update {
             width,
             height,
@@ -439,6 +456,7 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
             line,
             selection,
             copied,
+            task,
         }));
     }
 }
@@ -518,6 +536,7 @@ mod tests {
                 text: "Başlık".into(),
                 html: "<b>Başlık</b>".into(),
             }),
+            task: Some((40, true)),
         };
         let mut buf = Vec::new();
         write_update(&mut buf, &u).unwrap();

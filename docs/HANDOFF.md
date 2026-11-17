@@ -19,6 +19,17 @@ The owner agreed that mdview is feature complete: see the status at the top of `
 selection requests used by mdedit 1.0.1 and 1.0.2 (which pin `8faf059`) and says version 1.0.1,
 so the next mdview release is 1.0.2 or later.
 
+## Preview protocol 5: task boxes on mdedit's pane (2026-11-17, not an mdview release)
+
+For mdedit 1.0.3 (the owner: tick boxes on the pane as in mdview, without saving). `MAGIC` is
+`MDVPREVIEW5`: `Update::task` is `Some((at, checked))` after a single click on a task box, where
+`at` is the byte offset of the mark in the last `Request::Text` and `checked` the state the click
+gives it. `Server` keeps that text (`source`) and finds the byte with `tasks::toggle`, the check
+mdview uses on files: nothing when the text and the page disagree about the boxes. The page does
+not change; the editor edits its text. A double or triple click on a box selects as before. Test:
+`a_click_on_a_task_box_gives_its_mark_and_selects_nothing`. mdview itself gains nothing from this
+and is not released for it; mdedit ships the engine built from this commit.
+
 ## mdview 1.0.1, selecting text on mdedit's preview pane (2026-11-16, released, then withdrawn)
 
 Released as 1.0.1 with mdedit 1.0.1 on the owner's word ("I trust you"), without a hands-on

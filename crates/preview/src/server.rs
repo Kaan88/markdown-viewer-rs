@@ -38,6 +38,10 @@ pub struct Server {
     selection_dirty: bool,
     /// The editor asked for the selection's text.
     copy: bool,
+    /// The text the page was parsed from, as the editor sent it: where a task box's mark is.
+    source: String,
+    /// A task box was clicked: its mark's byte offset in `source` and its new state.
+    task: Option<(u32, bool)>,
     /// Something changed since the last frame (or there has been none).
     dirty: bool,
     /// The editor's copy of the frame is gone: the next frame is sent whole.
@@ -66,6 +70,8 @@ impl Server {
             shown: Vec::new(),
             selection_dirty: false,
             copy: false,
+            source: String::new(),
+            task: None,
             dirty: true,
             whole: true,
         }
@@ -86,6 +92,7 @@ impl Server {
                     self.renderer.layout(&doc, &self.options);
                 }
                 self.doc = Some(doc);
+                self.source = text;
                 // The offsets were into the old text.
                 self.selection = None;
                 self.press = None;
@@ -142,7 +149,13 @@ impl Server {
             }
             Request::Press { x, y, clicks } => {
                 self.press = None;
-                if let Some((doc, offset)) = self.offset_at(x, y) {
+                if let Some(flip) = (clicks <= 1).then(|| self.task_at(x, y)).flatten() {
+                    // A click on a task box ticks it in the editor's text, not a selection.
+                    self.task = Some(flip);
+                    if self.selection.take().is_some() {
+                        self.selection_dirty = true;
+                    }
+                } else if let Some((doc, offset)) = self.offset_at(x, y) {
                     let anchor = match clicks {
                         0 | 1 => (offset, offset),
                         2 => mdview_core::select::word_range(doc, offset),
@@ -274,6 +287,29 @@ impl Server {
         Some((doc, hit.offset))
     }
 
+    /// The task box at `x, y` (pane pixels), when there is one and the text agrees with the page
+    /// about every box: the byte offset of its mark in the text and the state a click gives it.
+    fn task_at(&mut self, x: f32, y: f32) -> Option<(u32, bool)> {
+        if !(x.is_finite() && y.is_finite()) {
+            return None;
+        }
+        let doc = self.doc.as_ref()?;
+        let block = self
+            .renderer
+            .hit_test(doc, &self.options, x, y + self.top)?
+            .task?;
+        let boxes = mdview_core::tasks::document_boxes(doc);
+        let index = boxes.iter().position(|&(b, _)| b == block)?;
+        let states: Vec<bool> = boxes.iter().map(|&(_, checked)| checked).collect();
+        let (at, byte) = mdview_core::tasks::toggle(self.source.as_bytes(), index, &states).ok()?;
+        Some((at as u32, byte == b'x'))
+    }
+
+    /// The task box clicked since the last answer, for [`Update::task`].
+    pub fn take_task(&mut self) -> Option<(u32, bool)> {
+        self.task.take()
+    }
+
     /// The selected range, ordered, when it is not empty.
     fn selected(&self) -> Option<(u32, u32)> {
         let (a, b) = self.selection?;
@@ -364,6 +400,7 @@ impl Server {
             line,
             selection: None,
             copied: None,
+            task: None,
         })
     }
 }
@@ -496,6 +533,7 @@ pub fn serve(requests: Receiver<Request>, mut send: impl FnMut(Update) -> bool) 
         let update = Update {
             selection,
             copied,
+            task: server.take_task(),
             ..match drawn {
                 Some(update) => Update { answers, ..update },
                 None => Update::ack(answers),
@@ -778,6 +816,68 @@ mod tests {
 
     fn copy(s: &mut Server) -> String {
         answer(s, vec![Request::Copy]).1.expect("an answer").text
+    }
+
+    #[test]
+    fn a_click_on_a_task_box_gives_its_mark_and_selects_nothing() {
+        let text = "Tasks:\n\n- [ ] one\n- [x] two\n\n```\n- [ ] code\n```\n";
+        let mut s = shown(text);
+        // Every point of the pane a click would tick, and what it gives.
+        let mut found = Vec::new();
+        for y in (0..300).step_by(2) {
+            for x in (0..200).step_by(2) {
+                s.apply(Request::Press {
+                    x: x as f32,
+                    y: y as f32,
+                    clicks: 1,
+                });
+                s.apply(Request::Release);
+                if let Some(t) = s.take_task()
+                    && !found.contains(&t)
+                {
+                    found.push(t);
+                }
+            }
+        }
+        // The two boxes, by the bytes between their brackets; the fenced one is not a box.
+        assert_eq!(found, [(11, true), (21, false)]);
+        assert_eq!(&text[11..12], " ");
+        assert_eq!(&text[21..22], "x");
+        // A click on a box selects nothing; a double click there selects a word as before.
+        let (bx, by) = (0..300)
+            .step_by(2)
+            .flat_map(|y| (0..200).step_by(2).map(move |x| (x as f32, y as f32)))
+            .find(|&(x, y)| s.task_at(x, y).is_some())
+            .expect("a box");
+        let (rects, _) = answer(&mut s, vec![Request::SelectAll]);
+        assert!(rects.is_some_and(|r| !r.is_empty()));
+        let (rects, _) = answer(
+            &mut s,
+            vec![Request::Press {
+                x: bx,
+                y: by,
+                clicks: 1,
+            }],
+        );
+        assert_eq!(rects, Some(vec![]), "the click cleared the selection");
+        assert!(s.take_task().is_some());
+        answer(
+            &mut s,
+            vec![Request::Press {
+                x: bx,
+                y: by,
+                clicks: 2,
+            }],
+        );
+        assert!(s.take_task().is_none());
+        // A text that no longer agrees with the page about its boxes ticks nothing.
+        s.source = "- [ ] one\n".into();
+        s.apply(Request::Press {
+            x: bx,
+            y: by,
+            clicks: 1,
+        });
+        assert!(s.take_task().is_none());
     }
 
     #[test]
