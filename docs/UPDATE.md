@@ -296,6 +296,22 @@ test build end to end on KDE Plasma 6.
 Not verified: the Windows files run by hand on a Windows desktop; an installed 0.2.2 updating
 itself to 0.3.0 through the bar; the deb, rpm, tar.gz and PKGBUILD of this exact build installed.
 
+## v1.0.2 (published 2026-11-18 by the release workflow, run by hand with `publish`, at commit 1ba74a4)
+
+Run 44261632989. Pinned tabs (rules shared with mdedit in `mdshared_ui::pins`, shared `main` at
+`6dcaf7f`), the tab left showing kept by its file, and the setting "Start on the last pinned
+tab"; released with mdedit 1.0.5 on the owner's word after they tried the Windows test build of
+`9d3398a` (the same code, before the version bump): "all work". 13 assets (mdview.exe 9,356,288
+bytes, AppImage 15,624,696). Verified against the live release: both manifests name 1.0.2, and
+every file they name downloaded with the manifest's SHA-256.
+
+The `ci` run on the commit (44261372175) failed on Windows only:
+`the_settings_dialog_is_one_page_at_the_default_and_the_minimum_window_size`. With the Windows
+backdrop row and the new "Start on the last pinned tab" row, the Settings dialog at the test's
+default window (1280 x 800) is 21 px taller than its card and scrolls; Linux and Mac have no
+backdrop row and pass. To be settled with the owner. Not verified: a 1.0.0 install updating
+itself; the Mac and Linux files run on a desktop.
+
 ## v1.0.1 (withdrawn)
 
 Deleted with its tag by the owner on 2026-11-16, soon after it went out: it carried no change of
