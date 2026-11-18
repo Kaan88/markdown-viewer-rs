@@ -320,6 +320,7 @@ impl App {
             (setting::TICK_BOXES, Value::Bool(on)) => self.ws.set_edit_always(on),
             (setting::ANIMATIONS, Value::Bool(on)) => self.ws.set_animations(on),
             (setting::START_ON_PINNED, Value::Bool(on)) => self.ws.set_start_on_pinned(on),
+            (setting::OFFER_STALE, Value::Bool(on)) => self.ws.set_offer_stale(on),
             (setting::PREVIEWS, Value::Bool(on)) => {
                 self.ws.set_previews(on);
                 self.ui.card = None;

@@ -605,7 +605,7 @@ impl App {
                         self.ws.update_relaunch_target().is_some(),
                     )
                 });
-                let crash = self.ws.crash_report().is_some();
+                let crash = (self.ws.crash_report().is_some(), self.ws.stale_offer());
                 // The code box whose copy button shows, and its check mark.
                 let vr = page::viewport(&self.ws, self.areas.page);
                 let code = crate::codebtn::spot(&mut self.ws, &self.ui, vr, self.scale)

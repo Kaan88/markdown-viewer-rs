@@ -26,6 +26,7 @@ pub const WINDOW_CORNERS: u32 = 12;
 pub const BACKDROP: u32 = 13;
 pub const PREVIEWS: u32 = 30;
 pub const START_ON_PINNED: u32 = 31;
+pub const OFFER_STALE: u32 = 32;
 
 pub const WIDTHS: [&str; 3] = ["Narrow", "Wide", "Full"];
 pub const THEMES: [&str; 3] = ["System", "Light", "Dark"];
@@ -76,25 +77,29 @@ pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
             .help("Any installed family. Unknown ones are ignored."),
         Row::text(CODE_FONT, "Code font", ws.code_font()).placeholder("Default"),
         Row::header("Content"),
+        // No help lines from here on: the form is one page at the default window size only
+        // without them (Windows has the backdrop row too).
         Row::toggle(
             REMOTE_IMAGES,
             "Always load remote images",
             ws.remote_always(),
-        )
-        .help("Otherwise each document asks first."),
+        ),
         Row::toggle(
             TICK_BOXES,
             "Tick task boxes without asking",
             ws.edit_always(),
-        )
-        .help("Otherwise the first tick in a file asks."),
-        Row::toggle(ANIMATIONS, "Play animated images", ws.animations())
-            .help("Off shows their first frame."),
-        // No help line: with one the form is 2 px taller than its card and would scroll.
+        ),
+        Row::toggle(ANIMATIONS, "Play animated images", ws.animations()),
         Row::toggle(
             PREVIEWS,
             "Preview footnotes and links on hover",
             ws.previews(),
+        ),
+        Row::header("Tabs"),
+        Row::toggle(
+            OFFER_STALE,
+            "Offer to close tabs not opened in a week",
+            ws.offers_stale(),
         ),
         Row::toggle(
             START_ON_PINNED,

@@ -116,6 +116,10 @@ pub enum Hit {
     CrashOpen,
     CrashCopy,
     CrashClose,
+    /// The bar that offers to close the tabs not opened for a week of use.
+    StaleClose,
+    StaleKeep,
+    StaleDismiss,
     DlgButton(usize),
     DlgOpen(usize),
     DlgRemove(usize),
@@ -153,7 +157,10 @@ impl Hit {
             | Hit::UpdateClose
             | Hit::CrashOpen
             | Hit::CrashCopy
-            | Hit::CrashClose => Region::Page,
+            | Hit::CrashClose
+            | Hit::StaleClose
+            | Hit::StaleKeep
+            | Hit::StaleDismiss => Region::Page,
             _ => return None,
         })
     }

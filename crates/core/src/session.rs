@@ -136,6 +136,13 @@ pub struct Session {
     pub last_pinned: Option<PathBuf>,
     /// Start on `last_pinned`, not on the tab left showing. Off by default.
     pub start_on_pinned: bool,
+    /// The days mdview was used: how many, and the date (days since 1970) of the last. See
+    /// `mdshared_ui::stale`.
+    pub use_days: (u32, u64),
+    /// The day of use each tab with a file was last shown on: one `seen` line each.
+    pub seen: Vec<(PathBuf, u32)>,
+    /// Offer to close the tabs not opened in a week of use. On by default.
+    pub offer_stale: bool,
 }
 
 /// The default window corner radius, logical px.
@@ -187,6 +194,9 @@ impl Default for Session {
             active_tab: None,
             last_pinned: None,
             start_on_pinned: false,
+            use_days: (0, 0),
+            seen: Vec::new(),
+            offer_stale: true,
         }
     }
 }
@@ -230,6 +240,22 @@ impl Session {
                 "active_tab" if !value.is_empty() => s.active_tab = Some(decode_path(value)),
                 "last_pinned" if !value.is_empty() => s.last_pinned = Some(decode_path(value)),
                 "start_on_pinned" => s.start_on_pinned = value.trim() == "1",
+                "offer_stale" => s.offer_stale = value.trim() != "0",
+                "use_days" => {
+                    let mut parts = value.split_whitespace();
+                    let n = parts.next().and_then(|n| n.parse().ok());
+                    let d = parts.next().and_then(|d| d.parse().ok());
+                    if let (Some(n), Some(d)) = (n, d) {
+                        s.use_days = (n, d);
+                    }
+                }
+                "seen" => {
+                    if let Some((day, path)) = value.split_once(' ')
+                        && let Ok(day) = day.parse()
+                    {
+                        s.seen.push((decode_path(path), day));
+                    }
+                }
                 _ => {}
             }
         }
@@ -292,6 +318,18 @@ impl Session {
         }
         if self.start_on_pinned {
             out.line("start_on_pinned", "1");
+        }
+        if !self.offer_stale {
+            out.line("offer_stale", "0");
+        }
+        if self.use_days != (0, 0) {
+            out.line(
+                "use_days",
+                &format!("{} {}", self.use_days.0, self.use_days.1),
+            );
+        }
+        for (p, day) in &self.seen {
+            out.line("seen", &format!("{day} {}", encode_path(p)));
         }
         self.places.write(&mut out, "place");
         out.finish()
@@ -438,6 +476,9 @@ mod window_state_tests {
             active_tab: Some("a.md".into()),
             last_pinned: Some("p.md".into()),
             start_on_pinned: true,
+            use_days: (3, 20400),
+            seen: vec![("a.md".into(), 2)],
+            offer_stale: false,
             ..Default::default()
         };
         assert_eq!(Session::parse(&s.serialize()), s);

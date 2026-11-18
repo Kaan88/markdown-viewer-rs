@@ -25,7 +25,7 @@
 use crate::updater::{self, Offer, Stage, Updates};
 use mdshared_app::backdrop::Backdrop;
 use mdshared_fetch::{Fetcher, State as Fetched};
-use mdshared_ui::pins;
+use mdshared_ui::{pins, stale};
 use mdview_core::commands::strings;
 use mdview_core::files::{FileStamp, canonical_or_absolute, read_stable, stamp, tab_labels};
 use mdview_core::links::{LinkAction, classify_link};
@@ -299,6 +299,8 @@ pub struct Tab {
     untitled: Option<String>,
     /// Pinned tabs come first and are passed by when closing ([`mdshared_ui::pins`]).
     pinned: bool,
+    /// The day of use the tab was last shown on ([`mdshared_ui::stale`]).
+    seen: u32,
 }
 
 impl pins::Pinnable for Tab {
@@ -403,6 +405,7 @@ impl Tab {
             revision: 0,
             untitled: None,
             pinned: false,
+            seen: 0,
         }
     }
 
@@ -572,6 +575,10 @@ pub struct Workspace {
     system_animations: bool,
     /// The file of the pinned tab shown last, for the setting to start on it.
     last_pinned: Option<PathBuf>,
+    /// Today's number among the days mdview was used ([`mdshared_ui::stale`]).
+    day: u32,
+    /// The tabs offered for closing at start, while the bar offering them shows.
+    stale: Vec<PathBuf>,
 }
 
 impl Workspace {
@@ -615,12 +622,25 @@ impl Workspace {
             animation_wake: false,
             system_animations: true,
             last_pinned: None,
+            day: 0,
+            stale: Vec::new(),
         };
         for path in ws.session.tabs.clone() {
             let path = canonical_or_absolute(&path);
             if !ws.tabs.iter().any(|t| same_file(&t.path, &path)) {
                 ws.tabs.push(Tab::unloaded(path));
             }
+        }
+        // A day of use more when today is a new date; each tab keeps the day it was last shown,
+        // and one the session has none for counts as shown today.
+        let (count, date) = ws.session.use_days;
+        let used = stale::UseDays { count, date }.start(stale::today());
+        ws.session.use_days = (used.count, used.date);
+        ws.day = used.count;
+        for tab in &mut ws.tabs {
+            tab.seen = (ws.session.seen.iter())
+                .find(|(p, _)| same_file(p, &tab.path))
+                .map_or(used.count, |&(_, day)| day);
         }
         // Pinned tabs first, in the session's order; the start tab is found after.
         let pinned = ws.session.pins.clone();
@@ -645,6 +665,9 @@ impl Workspace {
             let start = pins::start_tab(ws.session.start_on_pinned, last, was).unwrap_or(0);
             ws.last_pinned = last.map(|i| ws.tabs[i].path.clone());
             ws.activate(start);
+        }
+        if ws.session.offer_stale {
+            ws.stale = ws.stale_tabs();
         }
         ws
     }
@@ -677,6 +700,9 @@ impl Workspace {
             .filter_map(file)
             .collect();
         self.session.active_tab = self.active_tab().and_then(file);
+        self.session.seen = (self.tabs.iter())
+            .filter_map(|t| Some((file(t)?, t.seen)))
+            .collect();
         self.session.last_pinned = self.last_pinned.clone().filter(|p| {
             (self.tabs.iter()).any(|t| t.pinned && t.untitled.is_none() && &t.path == p)
         });
@@ -981,6 +1007,7 @@ impl Workspace {
         self.load(index);
         let tab = &mut self.tabs[index];
         tab.left_at = None;
+        tab.seen = self.day;
         if tab.pinned {
             self.last_pinned = Some(tab.path.clone());
         }
@@ -3582,6 +3609,74 @@ impl Workspace {
             .map(|d| d.text.len())
     }
 
+    // ---- tabs not opened for a while ----------------------------------------------------------
+
+    /// The tabs to offer for closing: not opened in a week of use, and neither pinned, showing,
+    /// nor a document mdedit has not saved.
+    fn stale_tabs(&self) -> Vec<PathBuf> {
+        (self.tabs.iter().enumerate())
+            .filter(|&(i, t)| {
+                !t.pinned
+                    && t.untitled.is_none()
+                    && self.active != Some(i)
+                    && stale::is_stale(t.seen, self.day)
+            })
+            .map(|(_, t)| t.path.clone())
+            .collect()
+    }
+
+    /// How many tabs the bar offers to close; 0 when it does not show.
+    pub fn stale_offer(&self) -> usize {
+        self.stale.len()
+    }
+
+    /// The bar's answers: close the tabs it offers (those still open and not pinned or showing
+    /// since), keep them for another week of use, or put the question off to the next start.
+    pub fn close_stale(&mut self) {
+        let offered = std::mem::take(&mut self.stale);
+        for path in offered.iter().rev() {
+            if let Some(i) = self.tabs.iter().position(|t| &t.path == path)
+                && !self.tabs[i].pinned
+                && self.active != Some(i)
+            {
+                self.remove_tab(i);
+            }
+        }
+        self.dirty = true;
+        self.persist();
+    }
+
+    pub fn keep_stale(&mut self) {
+        let offered = std::mem::take(&mut self.stale);
+        for tab in &mut self.tabs {
+            if offered.contains(&tab.path) {
+                tab.seen = self.day;
+            }
+        }
+        self.dirty = true;
+        self.persist();
+    }
+
+    pub fn dismiss_stale(&mut self) {
+        self.stale.clear();
+        self.dirty = true;
+    }
+
+    /// Whether tabs not opened in a week of use are offered for closing at start.
+    pub fn offers_stale(&self) -> bool {
+        self.session.offer_stale
+    }
+
+    pub fn set_offer_stale(&mut self, on: bool) {
+        if self.session.offer_stale != on {
+            self.session.offer_stale = on;
+            if !on {
+                self.dismiss_stale();
+            }
+            self.persist();
+        }
+    }
+
     /// Last time's crash report, while its bar shows.
     pub fn crash_report(&self) -> Option<&Path> {
         self.crash.as_deref()
@@ -4054,6 +4149,66 @@ mod tests {
         let (x, y) = point_of(ws, needle);
         assert!(ws.pointer_press(x, y, 1));
         ws.pointer_release()
+    }
+
+    #[test]
+    fn tabs_not_opened_for_a_week_of_use_are_offered_and_closed_or_kept() {
+        let dir = temp_dir("stale");
+        let [a, b, c, d] = ["a.md", "b.md", "c.md", "d.md"].map(|n| write(&dir, n, "# x\n"));
+        let settings = dir.join("settings.ini");
+        // Day 10 of use was some other date, so this start is day 11. a and b were last shown
+        // on day 3, c on day 9, d (pinned) on day 1; b was showing.
+        let saved = Session {
+            tabs: vec![d.clone(), a.clone(), b.clone(), c.clone()],
+            pins: vec![d.clone()],
+            active_tab: Some(b.clone()),
+            use_days: (10, 0),
+            seen: vec![
+                (a.clone(), 3),
+                (b.clone(), 3),
+                (c.clone(), 9),
+                (d.clone(), 1),
+            ],
+            ..Default::default()
+        };
+        saved.save(&settings).unwrap();
+        let ws = Workspace::new(Some(settings.clone()));
+        assert_eq!(ws.labels(), ["d.md", "a.md", "b.md", "c.md"]);
+        assert_eq!(
+            ws.stale_offer(),
+            1,
+            "only a: b shows, c is recent, d is pinned"
+        );
+        drop(ws);
+
+        let mut ws = Workspace::new(Some(settings.clone()));
+        assert_eq!(
+            ws.stale_offer(),
+            1,
+            "the same day: asked again (the close button)"
+        );
+        ws.keep_stale();
+        assert_eq!(ws.stale_offer(), 0);
+        ws.save_session().unwrap();
+        drop(ws);
+        let ws = Workspace::new(Some(settings.clone()));
+        assert_eq!(ws.stale_offer(), 0, "kept: a counts from today");
+        drop(ws);
+
+        // Off: nothing offered.
+        let mut s = Session::load(&settings);
+        s.seen = vec![(a.clone(), 1), (b.clone(), 1), (c.clone(), 1)];
+        s.use_days = (20, 0);
+        s.offer_stale = false;
+        s.save(&settings).unwrap();
+        assert_eq!(Workspace::new(Some(settings.clone())).stale_offer(), 0);
+        s.offer_stale = true;
+        s.save(&settings).unwrap();
+        let mut ws = Workspace::new(Some(settings));
+        assert_eq!(ws.stale_offer(), 2, "a and c; b shows");
+        ws.close_stale();
+        assert_eq!(ws.labels(), ["d.md", "b.md"]);
+        assert_eq!(ws.stale_offer(), 0);
     }
 
     #[test]

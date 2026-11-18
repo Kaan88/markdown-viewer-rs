@@ -19,6 +19,25 @@ The owner agreed that mdview is feature complete: see the status at the top of `
 selection requests used by mdedit 1.0.1 and 1.0.2 (which pin `8faf059`) and says version 1.0.1,
 so the next mdview release is 1.0.2 or later.
 
+## Tabs not opened for a week (2026-11-18, branch `f/stale-tabs`)
+
+The owner asked for an offer to close tabs left unopened, on by default, in both applications.
+The rules are `mdshared_ui::stale` (shared `f/stale-tabs` at `49de4ec`): time counts in days of
+use (a start on a new date is one more; `Session::use_days`), each tab keeps the day it was last
+shown (`Tab::seen`, `seen` lines; none in the session counts as today, so the first start after
+an update offers nothing). At start, tabs not shown in the last 7 days of use are offered on a
+bar under the other bars (`notice::draw_offer_bar`): Close them, Keep (their count starts
+again), and the close button (asked again next start). Never offered: pinned tabs, the tab
+showing, a document mdedit has not saved. Setting "Offer to close tabs not opened in a week"
+(`offer_stale`, on), in a new Settings group "Tabs" with "Start on the last pinned tab".
+
+The Settings dialog did not fit at 1280 x 800 on Windows (its backdrop row; the `ci` run of
+1.0.2 failed on it). Now: no help lines under the Content toggles, and the shared single-page
+card may be as tall as the window less its margin (`SINGLE_MAX_CARD_H` 760; only mdview uses
+that form). Checked here by turning the backdrop row on for Linux for one run of
+`the_settings_dialog_is_one_page_at_the_default_and_the_minimum_window_size`; not yet run on
+Windows. Test: `tabs_not_opened_for_a_week_of_use_are_offered_and_closed_or_kept`.
+
 ## Pinned tabs (2026-11-18, branch `f/pins`, for 1.0.2)
 
 The owner asked for mdedit's pinned tabs here too, the rules shared. They are

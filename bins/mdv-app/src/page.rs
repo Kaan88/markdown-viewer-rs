@@ -7,7 +7,8 @@ use crate::panes::{draw_scrollbar, scrollbar};
 use crate::ui::{BANNER_H, Drag, Hit, Scroller, Ui};
 use crate::updater::{self, Stage};
 use crate::workspace::Workspace;
-use mdshared_ui::notice::{self, CrashBarState, UpdateBarState};
+use mdshared_ui::notice::{self, CrashBarState, OfferBarState, UpdateBarState};
+use mdshared_ui::stale;
 use mdview_core::commands::strings;
 use std::time::{Duration, Instant};
 
@@ -25,10 +26,12 @@ pub fn viewport(ws: &Workspace, r: Rect) -> Rect {
     Rect::new(r.x, r.y + top, r.w, (r.h - top).max(0.0))
 }
 
-/// The region without the update bar and the crash bar, which sit at its top, in that order,
+/// The region without the update bar, the crash bar and the stale-tab bar, which sit at its top, in that order,
 /// over a document or the empty state.
 fn below_update_bar(ws: &Workspace, r: Rect) -> Rect {
-    let bars = ws.update_bar().is_some() as u8 + ws.crash_report().is_some() as u8;
+    let bars = ws.update_bar().is_some() as u8
+        + ws.crash_report().is_some() as u8
+        + (ws.stale_offer() > 0) as u8;
     let top = BANNER_H * f32::from(bars);
     Rect::new(r.x, r.y + top, r.w, (r.h - top).max(0.0))
 }
@@ -47,6 +50,38 @@ fn draw_crash_bar(c: &mut Ctx, bar: Rect) {
         (Hit::CrashOpen, hits.open),
         (Hit::CrashCopy, hits.copy),
         (Hit::CrashClose, hits.close),
+    ] {
+        if let Some(r) = r {
+            c.hit(hit, r);
+        }
+    }
+}
+
+/// The bar that offers to close the tabs not opened for a week of use: close them, keep them,
+/// or put it off (the close button).
+fn draw_stale_bar(c: &mut Ctx, bar: Rect, count: usize) {
+    let state = OfferBarState {
+        yes_hovered: c.hover == Some(Hit::StaleClose),
+        yes_pressed: c.pressed == Some(Hit::StaleClose),
+        no_hovered: c.hover == Some(Hit::StaleKeep),
+        no_pressed: c.pressed == Some(Hit::StaleKeep),
+        close_hovered: c.hover == Some(Hit::StaleDismiss),
+    };
+    let text = stale::label(count, "mdview");
+    let hits = notice::draw_offer_bar(
+        c.p,
+        c.pal,
+        bar,
+        glyph::RECENT,
+        &text,
+        stale::CLOSE_THEM,
+        stale::KEEP,
+        state,
+    );
+    for (hit, r) in [
+        (Hit::StaleClose, hits.yes),
+        (Hit::StaleKeep, hits.no),
+        (Hit::StaleDismiss, hits.close),
     ] {
         if let Some(r) = r {
             c.hit(hit, r);
@@ -141,8 +176,17 @@ pub fn draw_page(c: &mut Ctx, ws: &mut Workspace, ui: &Ui, r: Rect) -> Duration 
             can_restart,
         );
     }
+    let stale = ws.stale_offer();
     if ws.crash_report().is_some() {
-        draw_crash_bar(c, Rect::new(whole.x, r.y - BANNER_H, whole.w, BANNER_H));
+        let y = r.y - BANNER_H * if stale > 0 { 2.0 } else { 1.0 };
+        draw_crash_bar(c, Rect::new(whole.x, y, whole.w, BANNER_H));
+    }
+    if stale > 0 {
+        draw_stale_bar(
+            c,
+            Rect::new(whole.x, r.y - BANNER_H, whole.w, BANNER_H),
+            stale,
+        );
     }
     if ws.active().is_none() {
         c.p.fill(r, pal.page);
