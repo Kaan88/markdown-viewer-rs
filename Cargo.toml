@@ -4,7 +4,7 @@ members = ["crates/core", "crates/render", "crates/preview", "crates/engine", "c
 exclude = ["spikes"]
 
 [workspace.package]
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 publish = false
 
