@@ -70,6 +70,7 @@ pub fn command_icon(id: C) -> &'static str {
         C::About => glyph::INFO,
         C::CopyFilePath | C::CopyCodeBlock | C::CopyMarkdown => glyph::COPY,
         C::EditInMdedit => glyph::EDIT,
+        C::PinTab => glyph::PIN,
         C::MakeDefault => glyph::CHECK,
         C::ExportHtml => glyph::DOWNLOAD,
         C::Print => glyph::OPEN_WITH,
@@ -168,8 +169,17 @@ pub fn tab_menu(ws: &Workspace, index: usize, x: f32, y: f32) -> Menu<Act> {
     let exportable = ws.tab(index).is_some_and(|t| !t.is_missing());
     // A document mdedit has not saved yet has no path to copy and no place to show.
     let has_file = ws.tab(index).is_some_and(|t| !t.is_untitled());
+    let pinned = ws.is_pinned(index);
     let items = vec![
-        Item::new(Act::TabCmd(C::CloseTab, index), "&Close tab").icon(glyph::CLOSE),
+        Item::new(
+            Act::TabCmd(C::PinTab, index),
+            if pinned { "U&npin tab" } else { "Pi&n tab" },
+        )
+        .icon(glyph::PIN),
+        Item::new(Act::TabCmd(C::CloseTab, index), "&Close tab")
+            .icon(glyph::CLOSE)
+            .enabled(!pinned)
+            .sep(),
         Item::new(Act::TabCmd(C::CloseOtherTabs, index), "Close &other tabs")
             .icon(glyph::CLOSE_OTHERS)
             .enabled(many),

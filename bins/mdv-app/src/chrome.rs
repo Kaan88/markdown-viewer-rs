@@ -250,6 +250,7 @@ pub fn tooltip(hit: Hit, ws: &Workspace, maximized: bool) -> Option<String> {
     };
     Some(match hit {
         Hit::Tab(i) => ws.tab(i)?.describe(),
+        Hit::TabClose(i) if ws.is_pinned(i) => "Unpin tab".into(),
         Hit::TabClose(_) => with("Close tab", CommandId::CloseTab),
         Hit::NewTab => with("Open files", CommandId::OpenFiles),
         Hit::LeaveFocus => "Leave focus mode (Escape)".into(),
@@ -378,7 +379,7 @@ pub fn draw_title(c: &mut Ctx, ws: &Workspace, ui: &Ui, r: Rect, maximized: bool
             next_quiet: i + 1 < labels.len() && active != Some(i + 1) && !is_hot(c.hover, i + 1),
             close_hovered: c.hover == Some(Hit::TabClose(i)),
             close_pressed: c.pressed == Some(Hit::TabClose(i)),
-            pinned: false,
+            pinned: ws.is_pinned(i),
         };
         let drawn = draw_tab(c.p, &pal, x, w, r.w, label, &state);
         c.hit(Hit::Tab(i), drawn.tab);

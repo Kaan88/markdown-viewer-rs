@@ -23,6 +23,10 @@ impl App {
             Hit::NewTab => self.command(C::OpenFiles),
             Hit::CopyCode => self.copy_code_under_pointer(),
             Hit::LeaveFocus => self.command(C::FocusMode),
+            // A pinned tab shows a pin there: it unpins.
+            Hit::TabClose(i) if self.ws.is_pinned(i) => {
+                self.ws.set_pinned(i, false);
+            }
             Hit::TabClose(i) => {
                 self.ws.close(i);
             }
@@ -281,6 +285,10 @@ impl App {
             }
             C::CloseTab => {
                 self.ws.close(index);
+            }
+            C::PinTab => {
+                let on = !self.ws.is_pinned(index);
+                self.ws.set_pinned(index, on);
             }
             C::CloseOtherTabs => {
                 self.ws.close_others(index);
@@ -640,7 +648,11 @@ impl App {
             C::Escape => self.escape(),
             C::CopyCodeBlock => self.copy_code_block(),
             C::CopyMarkdown => self.copy_markdown(),
-            C::CloseOtherTabs | C::CopyFilePath | C::ShowInFileManager | C::EditInMdedit => {
+            C::CloseOtherTabs
+            | C::CopyFilePath
+            | C::ShowInFileManager
+            | C::EditInMdedit
+            | C::PinTab => {
                 if let Some(i) = self.ws.active() {
                     self.tab_command(id, i);
                 }

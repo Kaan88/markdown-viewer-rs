@@ -127,6 +127,15 @@ pub struct Session {
     /// line per file, most recent first. The position is the shell's text
     /// (`place::ReadingPlace::to_setting`); the session stores it and never reads it.
     pub places: Places,
+    /// The pinned tabs' files, in tab order: one `pin` line each. They come first among `tabs`.
+    pub pins: Vec<PathBuf>,
+    /// The file of the tab showing when the window closed, when it has one. Read before
+    /// `active`, which counts only the tabs that have a file.
+    pub active_tab: Option<PathBuf>,
+    /// The file of the pinned tab used last.
+    pub last_pinned: Option<PathBuf>,
+    /// Start on `last_pinned`, not on the tab left showing. Off by default.
+    pub start_on_pinned: bool,
 }
 
 /// The default window corner radius, logical px.
@@ -174,6 +183,10 @@ impl Default for Session {
             page_font: String::new(),
             code_font: String::new(),
             places: Places::default(),
+            pins: Vec::new(),
+            active_tab: None,
+            last_pinned: None,
+            start_on_pinned: false,
         }
     }
 }
@@ -213,6 +226,10 @@ impl Session {
                 "page_font" => s.page_font = clean_family(value),
                 "code_font" => s.code_font = clean_family(value),
                 "place" => _ = s.places.read(value),
+                "pin" => s.pins.push(decode_path(value)),
+                "active_tab" if !value.is_empty() => s.active_tab = Some(decode_path(value)),
+                "last_pinned" if !value.is_empty() => s.last_pinned = Some(decode_path(value)),
+                "start_on_pinned" => s.start_on_pinned = value.trim() == "1",
                 _ => {}
             }
         }
@@ -262,6 +279,19 @@ impl Session {
         }
         if !self.code_font.is_empty() {
             line("code_font", &self.code_font);
+        }
+        // Only when used, so a session that never pinned a tab is the file it always was.
+        for p in &self.pins {
+            out.line("pin", &encode_path(p));
+        }
+        if let Some(p) = &self.active_tab {
+            out.line("active_tab", &encode_path(p));
+        }
+        if let Some(p) = &self.last_pinned {
+            out.line("last_pinned", &encode_path(p));
+        }
+        if self.start_on_pinned {
+            out.line("start_on_pinned", "1");
         }
         self.places.write(&mut out, "place");
         out.finish()
@@ -398,6 +428,24 @@ mod window_state_tests {
             };
             assert_eq!(Session::parse(&s.serialize()).page_width, width);
         }
+    }
+
+    #[test]
+    fn pins_the_tab_left_showing_and_the_start_setting_round_trip() {
+        let s = Session {
+            tabs: vec!["p.md".into(), "a.md".into()],
+            pins: vec!["p.md".into()],
+            active_tab: Some("a.md".into()),
+            last_pinned: Some("p.md".into()),
+            start_on_pinned: true,
+            ..Default::default()
+        };
+        assert_eq!(Session::parse(&s.serialize()), s);
+        let none = Session::default().serialize();
+        assert!(
+            !none.contains("pin") && !none.contains("active_tab"),
+            "{none}"
+        );
     }
 
     #[test]

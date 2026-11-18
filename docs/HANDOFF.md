@@ -19,6 +19,27 @@ The owner agreed that mdview is feature complete: see the status at the top of `
 selection requests used by mdedit 1.0.1 and 1.0.2 (which pin `8faf059`) and says version 1.0.1,
 so the next mdview release is 1.0.2 or later.
 
+## Pinned tabs (2026-11-18, branch `f/pins`, for 1.0.2)
+
+The owner asked for mdedit's pinned tabs here too, the rules shared. They are
+`mdshared_ui::pins` (shared `main` at `6dcaf7f`): pinned tabs come first, a drag keeps them
+there, closing several passes them by, the session brings them back first.
+- `Tab::pinned`; `Workspace::set_pinned`, `is_pinned`. "Pin tab" / "Unpin tab" heads the tab's
+  right-click menu (`CommandId::PinTab`, also in the palette). The tab draws a pin where its close
+  button was; clicking it unpins (tooltip "Unpin tab").
+- `close` refuses a pinned tab with `strings::STATUS_PINNED`; middle-click and Ctrl+W too.
+  `close_others` and `close_all` keep the pinned tabs (`close_many`); the internal
+  `remove_tab` closes a pinned one (an untitled document saved as a file already open: the pin
+  moves to that tab).
+- Session: `pin` lines (the pinned files in order), `active_tab` (the file showing at close; the
+  old `active` index counts files only and stays as the fallback for older sessions),
+  `last_pinned` (the pinned tab shown last) and `start_on_pinned`, the setting "Start on the
+  last pinned tab" (Settings, Content). `pins::start_tab` picks the start tab. A document mdedit
+  has not saved is never in the session, pinned or not.
+- Tests: `pinned_tabs_come_first_and_closing_passes_them_by`,
+  `a_restart_shows_the_tab_left_showing_or_with_the_setting_the_last_pin` (workspace), the
+  session round trip, the tab menu count in `regressions.rs` (5).
+
 ## Preview protocol 6: the cursor over mdedit's pane, the page still after a tick (2026-11-17)
 
 The owner tried mdedit 1.0.3: the cursor was the text cursor over the whole pane, and a tick

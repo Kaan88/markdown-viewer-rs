@@ -334,6 +334,7 @@ fn commands(ws: &Workspace) -> (Vec<Entry>, Vec<Target>) {
             | C::EditInMdedit
             | C::ExportHtml
             | C::Print
+            | C::PinTab
             | C::Present => has_tab,
             C::CloseOtherTabs | C::NextTab | C::PreviousTab => many,
             C::Back => ws.can_go_back(),

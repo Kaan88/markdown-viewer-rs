@@ -25,6 +25,7 @@ pub const CODE_FONT: u32 = 11;
 pub const WINDOW_CORNERS: u32 = 12;
 pub const BACKDROP: u32 = 13;
 pub const PREVIEWS: u32 = 30;
+pub const START_ON_PINNED: u32 = 31;
 
 pub const WIDTHS: [&str; 3] = ["Narrow", "Wide", "Full"];
 pub const THEMES: [&str; 3] = ["System", "Light", "Dark"];
@@ -94,6 +95,11 @@ pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
             PREVIEWS,
             "Preview footnotes and links on hover",
             ws.previews(),
+        ),
+        Row::toggle(
+            START_ON_PINNED,
+            "Start on the last pinned tab",
+            ws.start_on_pinned(),
         ),
         // The About dialog offers both unconditionally (a copy that cannot update itself says so
         // when asked), so this does too.

@@ -1103,7 +1103,7 @@ fn command_table_matches_the_inventory() {
     assert_eq!(commands::menu_items(Menu::View).count(), 8);
     assert_eq!(commands::menu_items(Menu::Theme).count(), 3);
     assert_eq!(commands::menu_items(Menu::Help).count(), 2);
-    assert_eq!(commands::menu_items(Menu::TabContext).count(), 4);
+    assert_eq!(commands::menu_items(Menu::TabContext).count(), 5);
     assert!(commands::menu_items(Menu::File).any(|c| c.label == "Clear recent files"));
     let toolbar: Vec<_> = commands::TOOLBAR
         .iter()

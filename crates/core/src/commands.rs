@@ -62,6 +62,8 @@ pub enum CommandId {
     ExportHtml,
     /// Hand the document to the default browser to print.
     Print,
+    /// Pin the tab, or unpin it: pinned tabs come first and stay open until unpinned.
+    PinTab,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,6 +274,7 @@ pub const COMMANDS: &[Command] = &[
     cmd(C::About, Menu::Help, "About Markdown Viewer", &[]),
     cmd(C::CloseTab, Menu::TabContext, "Close tab", &[]),
     cmd(C::CloseOtherTabs, Menu::TabContext, "Close other tabs", &[]),
+    cmd(C::PinTab, Menu::TabContext, "Pin or unpin tab", &[]),
     cmd(C::CopyFilePath, Menu::TabContext, "Copy file path", &[]),
     cmd(
         C::ShowInFileManager,
@@ -395,6 +398,7 @@ pub mod strings {
     pub const EMPTY_HINT: &str = "Open a Markdown file or drag one into this window.";
     pub const EMPTY_BUTTON: &str = "Open Markdown file…";
     pub const STATUS_STARTUP: &str = "Open a README or drop a Markdown file here.";
+    pub const STATUS_PINNED: &str = "This tab is pinned. Unpin it to close it.";
     pub const STATUS_ALL_CLOSED: &str = "Open a Markdown file or drag one into this window.";
 
     pub const REFRESHING: &str = "Refreshing document…";

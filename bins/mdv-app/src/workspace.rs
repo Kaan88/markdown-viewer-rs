@@ -25,6 +25,7 @@
 use crate::updater::{self, Offer, Stage, Updates};
 use mdshared_app::backdrop::Backdrop;
 use mdshared_fetch::{Fetcher, State as Fetched};
+use mdshared_ui::pins;
 use mdview_core::commands::strings;
 use mdview_core::files::{FileStamp, canonical_or_absolute, read_stable, stamp, tab_labels};
 use mdview_core::links::{LinkAction, classify_link};
@@ -296,6 +297,17 @@ pub struct Tab {
     /// ([`untitled_path`]), and `missing` is set, which keeps the text when the tab is idle and
     /// keeps its place out of the session. See [`Workspace::document_text`].
     untitled: Option<String>,
+    /// Pinned tabs come first and are passed by when closing ([`mdshared_ui::pins`]).
+    pinned: bool,
+}
+
+impl pins::Pinnable for Tab {
+    fn pinned(&self) -> bool {
+        self.pinned
+    }
+    fn set_pinned(&mut self, on: bool) {
+        self.pinned = on;
+    }
 }
 
 /// The first component of the key of a tab that has no file. No file name can hold a NUL, on
@@ -390,6 +402,7 @@ impl Tab {
             presenting: false,
             revision: 0,
             untitled: None,
+            pinned: false,
         }
     }
 
@@ -557,6 +570,8 @@ pub struct Workspace {
     /// test), and the system shows animations.
     animation_wake: bool,
     system_animations: bool,
+    /// The file of the pinned tab shown last, for the setting to start on it.
+    last_pinned: Option<PathBuf>,
 }
 
 impl Workspace {
@@ -599,6 +614,7 @@ impl Workspace {
             notes: notes::Notes::new(),
             animation_wake: false,
             system_animations: true,
+            last_pinned: None,
         };
         for path in ws.session.tabs.clone() {
             let path = canonical_or_absolute(&path);
@@ -606,10 +622,29 @@ impl Workspace {
                 ws.tabs.push(Tab::unloaded(path));
             }
         }
+        // Pinned tabs first, in the session's order; the start tab is found after.
+        let pinned = ws.session.pins.clone();
+        let place = |t: &Tab| pinned.iter().position(|p| same_file(p, &t.path));
+        pins::restore(&mut ws.tabs, place, &mut None);
         ws.relabel();
         if !ws.tabs.is_empty() {
-            let active = ws.session.active.min(ws.tabs.len() - 1);
-            ws.activate(active);
+            let find = |p: &Option<PathBuf>| {
+                let p = canonical_or_absolute(p.as_deref()?);
+                ws.tabs.iter().position(|t| same_file(&t.path, &p))
+            };
+            let last = find(&ws.session.last_pinned).filter(|&i| ws.tabs[i].pinned);
+            let was = find(&ws.session.active_tab);
+            // Sessions from before `active_tab` count among the files, in the order before
+            // the pins were put first.
+            let fallback = || {
+                let path = ws.session.tabs.get(ws.session.active)?;
+                let path = canonical_or_absolute(path);
+                ws.tabs.iter().position(|t| same_file(&t.path, &path))
+            };
+            let was = was.or_else(fallback);
+            let start = pins::start_tab(ws.session.start_on_pinned, last, was).unwrap_or(0);
+            ws.last_pinned = last.map(|i| ws.tabs[i].path.clone());
+            ws.activate(start);
         }
         ws
     }
@@ -636,6 +671,15 @@ impl Workspace {
             .map(|t| t.path.clone())
             .collect();
         self.session.active = self.active.map_or(0, |i| files(&self.tabs[..i]));
+        let file = |t: &Tab| (t.untitled.is_none()).then(|| t.path.clone());
+        self.session.pins = (self.tabs.iter())
+            .filter(|t| t.pinned)
+            .filter_map(file)
+            .collect();
+        self.session.active_tab = self.active_tab().and_then(file);
+        self.session.last_pinned = self.last_pinned.clone().filter(|p| {
+            (self.tabs.iter()).any(|t| t.pinned && t.untitled.is_none() && &t.path == p)
+        });
         self.session.recent = self.recents.clone();
         self.session.theme = self.choice;
         self.session.zoom = self.zoom;
@@ -937,6 +981,9 @@ impl Workspace {
         self.load(index);
         let tab = &mut self.tabs[index];
         tab.left_at = None;
+        if tab.pinned {
+            self.last_pinned = Some(tab.path.clone());
+        }
         self.renderer.clear_details();
         if let Some(doc) = tab.doc.as_ref() {
             for (&block, &open) in &tab.details {
@@ -950,8 +997,18 @@ impl Workspace {
     }
 
     /// Closes tab `index`. Closing the showing tab shows the one that slides into its place (or the
-    /// new last one); closing the last tab leaves the empty state.
+    /// new last one); closing the last tab leaves the empty state. A pinned tab stays, with a
+    /// word in the status bar: it is unpinned first.
     pub fn close(&mut self, index: usize) -> bool {
+        if self.tabs.get(index).is_some_and(|t| t.pinned) {
+            self.message(strings::STATUS_PINNED);
+            return false;
+        }
+        self.remove_tab(index)
+    }
+
+    /// [`close`](Self::close) for a pinned tab too.
+    fn remove_tab(&mut self, index: usize) -> bool {
         if index >= self.tabs.len() {
             return false;
         }
@@ -978,40 +1035,81 @@ impl Workspace {
         self.active.is_some_and(|i| self.close(i))
     }
 
-    /// Closes every tab but `keep`.
+    /// Closes every tab but `keep` and the pinned ones.
     pub fn close_others(&mut self, keep: usize) -> bool {
-        if keep >= self.tabs.len() || self.tabs.len() == 1 {
+        if keep >= self.tabs.len() {
+            return false;
+        }
+        self.close_many(Some(keep))
+    }
+
+    /// Closes every tab but the pinned ones.
+    pub fn close_all(&mut self) -> bool {
+        self.close_many(None)
+    }
+
+    fn close_many(&mut self, keep: Option<usize>) -> bool {
+        if pins::next_to_close(&self.tabs, keep).is_none() {
             return false;
         }
         self.note_active_place();
-        let was_active = self.active == Some(keep);
-        let tab = self.tabs.swap_remove(keep);
-        self.tabs.clear();
-        self.tabs.push(tab);
+        let shown = self.active;
+        let mut kept = None;
+        let mut stays = Vec::with_capacity(self.tabs.len());
+        for (index, tab) in std::mem::take(&mut self.tabs).into_iter().enumerate() {
+            if tab.pinned || Some(index) == keep {
+                if Some(index) == shown {
+                    self.active = Some(stays.len());
+                }
+                if Some(index) == keep {
+                    kept = Some(stays.len());
+                }
+                stays.push(tab);
+            } else if Some(index) == shown {
+                self.active = None;
+            }
+        }
+        self.tabs = stays;
         self.relabel();
-        if was_active {
-            self.active = Some(0);
-        } else {
-            self.active = None;
-            self.activate(0);
+        if self.tabs.is_empty() {
+            self.all_closed();
+        } else if self.active.is_none() {
+            // The tab kept, else the last pinned one.
+            self.activate(kept.unwrap_or(self.tabs.len() - 1));
         }
         self.dirty = true;
         self.persist();
         true
     }
 
-    pub fn close_all(&mut self) -> bool {
-        if self.tabs.is_empty() {
+    /// Pins or unpins tab `index`.
+    pub fn set_pinned(&mut self, index: usize, on: bool) -> bool {
+        if !pins::set(&mut self.tabs, index, on, &mut self.active) {
             return false;
         }
-        self.note_active_place();
-        self.tabs.clear();
-        self.active = None;
+        if on {
+            self.last_pinned = Some(self.tabs[pins::count(&self.tabs) - 1].path.clone());
+        }
         self.relabel();
-        self.all_closed();
         self.dirty = true;
         self.persist();
         true
+    }
+
+    /// Whether the window starts on the pinned tab used last, not the tab left showing.
+    pub fn start_on_pinned(&self) -> bool {
+        self.session.start_on_pinned
+    }
+
+    pub fn set_start_on_pinned(&mut self, on: bool) {
+        if self.session.start_on_pinned != on {
+            self.session.start_on_pinned = on;
+            self.persist();
+        }
+    }
+
+    pub fn is_pinned(&self, index: usize) -> bool {
+        self.tabs.get(index).is_some_and(|t| t.pinned)
     }
 
     fn all_closed(&mut self) {
@@ -1043,22 +1141,10 @@ impl Workspace {
     }
 
     /// Moves the tab at `from` to index `to`; the active tab stays active wherever it ends up.
+    /// Pinned tabs stay first ([`pins::clamp_move`]).
     pub fn move_tab(&mut self, from: usize, to: usize) -> bool {
-        if from >= self.tabs.len() || to >= self.tabs.len() || from == to {
+        if !pins::move_tab(&mut self.tabs, from, to, &mut self.active) {
             return false;
-        }
-        let tab = self.tabs.remove(from);
-        self.tabs.insert(to, tab);
-        if let Some(current) = self.active {
-            self.active = Some(if current == from {
-                to
-            } else if from < current && current <= to {
-                current - 1
-            } else if to <= current && current < from {
-                current + 1
-            } else {
-                current
-            });
         }
         self.relabel();
         self.dirty = true;
@@ -1550,9 +1636,17 @@ impl Workspace {
             (self.tabs.iter()).position(|t| t.untitled.is_none() && same_file(&t.path, &path));
         if let Some(twin) = twin {
             let shown = self.active == Some(index);
-            self.close(index);
+            let pinned = self.tabs[index].pinned;
+            self.remove_tab(index);
+            let twin = twin - usize::from(twin > index);
+            if pinned {
+                self.set_pinned(twin, true);
+            }
             if shown {
-                self.activate(twin - usize::from(twin > index));
+                // Where the pin put it.
+                let at = (self.tabs.iter())
+                    .position(|t| t.untitled.is_none() && same_file(&t.path, &path));
+                self.activate(at.unwrap_or(twin));
             }
             return true;
         }
@@ -3960,6 +4054,70 @@ mod tests {
         let (x, y) = point_of(ws, needle);
         assert!(ws.pointer_press(x, y, 1));
         ws.pointer_release()
+    }
+
+    #[test]
+    fn pinned_tabs_come_first_and_closing_passes_them_by() {
+        let dir = temp_dir("pins");
+        let [a, b, c, d] = ["a.md", "b.md", "c.md", "d.md"].map(|n| write(&dir, n, "# x\n"));
+        let mut ws = workspace();
+        for p in [&a, &b, &c, &d] {
+            ws.open(p).unwrap();
+        }
+        assert!(ws.set_pinned(2, true));
+        assert_eq!(ws.labels(), ["c.md", "a.md", "b.md", "d.md"]);
+        assert_eq!(ws.active(), Some(3), "d stays showing");
+        // Closing the pinned tab is refused with a word; a drag keeps it first.
+        assert!(!ws.close(0));
+        assert_eq!(ws.status(Instant::now()), Some(strings::STATUS_PINNED));
+        assert!(ws.move_tab(3, 0));
+        assert_eq!(
+            ws.labels(),
+            ["c.md", "d.md", "a.md", "b.md"],
+            "dropped after the pin"
+        );
+        assert!(!ws.move_tab(0, 3), "the only pin stays first");
+        assert!(ws.close_others(2));
+        assert_eq!(ws.labels(), ["c.md", "a.md"]);
+        assert_eq!(ws.active(), Some(1), "the kept tab shows");
+        assert!(ws.close_all());
+        assert_eq!(ws.labels(), ["c.md"]);
+        assert_eq!(ws.active(), Some(0));
+        assert!(!ws.close_all(), "nothing left to close");
+        assert!(ws.set_pinned(0, false));
+        assert!(ws.close(0));
+    }
+
+    #[test]
+    fn a_restart_shows_the_tab_left_showing_or_with_the_setting_the_last_pin() {
+        let dir = temp_dir("pin-session");
+        let [a, b, c] = ["a.md", "b.md", "c.md"].map(|n| write(&dir, n, "# x\n"));
+        let settings = dir.join("settings.ini");
+        {
+            let mut ws = Workspace::new(Some(settings.clone()));
+            for p in [&a, &b, &c] {
+                ws.open(p).unwrap();
+            }
+            ws.set_pinned(1, true); // b
+            ws.set_pinned(2, true); // c
+            assert_eq!(ws.labels(), ["b.md", "c.md", "a.md"]);
+            ws.activate(0); // b is the last pin used
+            ws.activate(1); // c showing at close
+            ws.save_session().unwrap();
+        }
+        let ws = Workspace::new(Some(settings.clone()));
+        assert_eq!(ws.labels(), ["b.md", "c.md", "a.md"]);
+        assert!(ws.is_pinned(0) && ws.is_pinned(1) && !ws.is_pinned(2));
+        assert_eq!(ws.active(), Some(1), "the pinned tab left showing");
+        drop(ws);
+        let mut ws = Workspace::new(Some(settings.clone()));
+        ws.activate(0);
+        ws.activate(2);
+        ws.set_start_on_pinned(true);
+        ws.save_session().unwrap();
+        drop(ws);
+        let ws = Workspace::new(Some(settings));
+        assert_eq!(ws.active(), Some(0), "b, the last pinned tab shown, not a");
     }
 
     #[test]
