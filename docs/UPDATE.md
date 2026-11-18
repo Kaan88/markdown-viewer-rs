@@ -296,6 +296,18 @@ test build end to end on KDE Plasma 6.
 Not verified: the Windows files run by hand on a Windows desktop; an installed 0.2.2 updating
 itself to 0.3.0 through the bar; the deb, rpm, tar.gz and PKGBUILD of this exact build installed.
 
+## v1.0.3 (published 2026-11-18 by the release workflow, run by hand with `publish`, at commit 31338da)
+
+Run 44314499684; the `ci` run on the commit (44314064067) passed on every system, Windows
+included: the Settings dialog fits at 1280 x 800 again (the tab settings in the group "Content and
+tabs", fewer help lines). The offer to close tabs not opened in the last 7 days of use
+(`mdshared_ui::stale`, shared `main` at `49de4ec`; setting `offer_stale`, on). Released with
+mdedit 1.0.6 on the owner's word after they had the Windows test build of `63f07fb` (the same
+code, before the version bump). 13 assets (mdview.exe 9,372,672 bytes, AppImage 15,645,176).
+Verified against the live release: both manifests name 1.0.3, and every file they name downloaded
+with the manifest's SHA-256. Not verified: a 1.0.2 install updating itself; the Mac and Linux
+files run on a desktop.
+
 ## v1.0.2 (published 2026-11-18 by the release workflow, run by hand with `publish`, at commit 1ba74a4)
 
 Run 44261632989. Pinned tabs (rules shared with mdedit in `mdshared_ui::pins`, shared `main` at
