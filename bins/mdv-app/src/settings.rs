@@ -72,13 +72,11 @@ pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
         .step(ZOOM_STEP as i32)
         .unit("%"),
         Row::choice(THEME, "Theme", &THEMES, theme_index(ws.theme_choice())),
-        Row::text(PAGE_FONT, "Page font", ws.page_font())
-            .placeholder("Default")
-            .help("Any installed family. Unknown ones are ignored."),
+        Row::text(PAGE_FONT, "Page font", ws.page_font()).placeholder("Default"),
         Row::text(CODE_FONT, "Code font", ws.code_font()).placeholder("Default"),
-        Row::header("Content"),
-        // No help lines from here on: the form is one page at the default window size only
-        // without them (Windows has the backdrop row too).
+        // One group for content and tabs, and help lines only on the Windows rows: the form is one
+        // page at the default window size only so (Windows adds the backdrop and corners rows).
+        Row::header("Content and tabs"),
         Row::toggle(
             REMOTE_IMAGES,
             "Always load remote images",
@@ -95,7 +93,6 @@ pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
             "Preview footnotes and links on hover",
             ws.previews(),
         ),
-        Row::header("Tabs"),
         Row::toggle(
             OFFER_STALE,
             "Offer to close tabs not opened in a week",

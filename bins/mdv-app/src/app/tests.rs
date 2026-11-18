@@ -882,7 +882,7 @@ fn the_settings_dialog_is_one_page_at_the_default_and_the_minimum_window_size() 
         a.compose();
         let f = a.ui.settings.as_ref().expect("the dialog");
         assert!(!f.has_nav(), "no category list at {size:?}");
-        assert_eq!(f.categories().len(), 4, "the headings stay");
+        assert_eq!(f.categories().len(), 3, "the headings stay");
         let card = f.rect();
         let win = Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32);
         assert!(
