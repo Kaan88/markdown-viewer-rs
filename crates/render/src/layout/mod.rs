@@ -106,6 +106,36 @@ pub struct BlockBox {
     pub height: f32,
 }
 
+/// Top-level blocks an editor shows as their source, in place: those that start on a source line
+/// from `first_line` to `last_line` (from 1, both included). The first of them is laid out as
+/// empty room `height` device px tall and the others take no room; none of them is drawn or hit.
+/// Set with [`DocumentRenderer::set_gap`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Gap {
+    pub first_line: u32,
+    pub last_line: u32,
+    pub height: f32,
+}
+
+impl Gap {
+    pub(super) fn covers(&self, doc: &Document, block: u32) -> bool {
+        let line = doc.blocks.get(block as usize).map_or(0, |b| b.line);
+        (self.first_line..=self.last_line).contains(&line)
+    }
+
+    /// The first top-level block it covers. Blocks are in source order, so a binary search finds
+    /// the first block on or after `first_line`; when that one is nested, the top-level block
+    /// after its parent is the candidate.
+    pub(super) fn lead(&self, doc: &Document) -> Option<u32> {
+        let at = doc.blocks.partition_point(|b| b.line < self.first_line) as u32;
+        let mut top = page::top_level(doc, at)?;
+        if top < at {
+            top = doc.blocks[top as usize].end;
+        }
+        (top < doc.blocks.len() as u32 && self.covers(doc, top)).then_some(top)
+    }
+}
+
 /// A rectangle in page device px.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
@@ -225,6 +255,8 @@ pub struct DocumentRenderer {
     fonts: FontContext,
     layouts: LayoutContext<Brush>,
     engine: TextEngine,
+    /// Blocks shown by an editor as source; see [`Gap`].
+    gap: Option<Gap>,
     /// Laid-out paints and caret stops per top-level block, relative to the block's top, for scroll
     /// frames and hit tests.
     cache: HashMap<u32, CachedBlock>,
@@ -267,6 +299,7 @@ impl DocumentRenderer {
             fonts: shared_fonts(),
             layouts: LayoutContext::new(),
             engine: TextEngine::new(4 << 20),
+            gap: None,
             cache: HashMap::new(),
             store: ImageStore::new(mdview_core::limits::IMAGE_CACHE_BYTES),
             details: HashMap::new(),
@@ -288,6 +321,51 @@ impl DocumentRenderer {
     /// the list grows as the page is refined; the count says when to search again.
     pub fn undrawn(&self) -> (&[(u32, u32)], u64) {
         (&self.undrawn, self.undrawn_changes)
+    }
+
+    /// Shows the blocks `gap` covers as empty room, or none with `None`. The blocks it covered
+    /// or covers now are measured again by the next frame; as with any correction, what is on
+    /// screen above them stays where it is.
+    pub fn set_gap(&mut self, doc: &Document, gap: Option<Gap>) {
+        if gap == self.gap {
+            return;
+        }
+        let old = std::mem::replace(&mut self.gap, gap);
+        let Some(page) = self.page.as_ref() else {
+            return;
+        };
+        let touched: Vec<usize> = page
+            .spans
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| [old, gap].iter().flatten().any(|g| g.covers(doc, s.block)))
+            .map(|(i, _)| i)
+            .collect();
+        for index in touched {
+            self.invalidate(index);
+        }
+    }
+
+    /// The gap's top on the page (device px), once its first block is laid out.
+    pub fn gap_y(&self, doc: &Document) -> Option<f32> {
+        let lead = self.gap?.lead(doc)?;
+        let page = self.page.as_ref()?;
+        page.index_of(lead).map(|i| page.spans[i].y)
+    }
+
+    /// The source lines of top-level block `block`: its first line, and the line the next
+    /// top-level block starts on (`None` for the last), from 1. Blank lines before the next
+    /// block are inside the range; an editor trims them.
+    pub fn block_lines(&self, doc: &Document, block: u32) -> Option<(u32, Option<u32>)> {
+        let page = self.page.as_ref()?;
+        let index = page.index_of(block)?;
+        let first = doc.blocks.get(block as usize)?.line;
+        let next = page
+            .spans
+            .get(index + 1)
+            .and_then(|s| doc.blocks.get(s.block as usize))
+            .map(|b| b.line);
+        Some((first, next))
     }
 
     /// The current layout, once [`layout`](Self::layout) has made one.
@@ -344,6 +422,7 @@ impl DocumentRenderer {
             false,
             &mut self.store,
             &self.details,
+            self.gap,
         );
         pager.page();
         pager.finish(&mut self.engine)

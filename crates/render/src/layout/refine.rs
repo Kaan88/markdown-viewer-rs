@@ -44,6 +44,7 @@ impl DocumentRenderer {
             false,
             &mut self.store,
             &self.details,
+            self.gap,
         );
         pager.allow = false;
         let width = pager.content_width();
@@ -134,6 +135,7 @@ impl DocumentRenderer {
             false,
             &mut self.store,
             &self.details,
+            self.gap,
         );
         let metrics = super::estimate::Metrics::measure(&mut pager);
         self.metrics = Some((key.0, key.1, metrics));
