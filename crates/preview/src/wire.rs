@@ -62,6 +62,9 @@ pub enum Request {
     /// Asks which top-level block is at `x, y` (device pixels from the pane's top left): the
     /// next update carries its source lines in [`Update::block`].
     BlockAt { x: f32, y: f32 },
+    /// Asks which top-level block holds source line `line` (from 1): the last one starting on
+    /// it or before. The next update carries it in [`Update::block`], with no `at`.
+    BlockOfLine { line: u32 },
     /// Stop: the server ends.
     Quit,
 }
@@ -103,10 +106,22 @@ pub struct Update {
     /// The page row (device pixels from the page's top) where the room for the editor's box
     /// starts, while a [`Request::Gap`] is set and that row is known.
     pub gap_y: Option<f32>,
-    /// The answer to [`Request::BlockAt`]: `Some(None)` when no block is there, else the block's
-    /// first source line and the line the next top-level block starts on (`None` for the last
-    /// block), both from 1.
-    pub block: Option<Option<(u32, Option<u32>)>>,
+    /// The answer to [`Request::BlockAt`] or [`Request::BlockOfLine`]: `Some(None)` when no
+    /// block is there.
+    pub block: Option<Option<BlockLines>>,
+}
+
+/// A top-level block's source lines, the answer to [`Request::BlockAt`] and
+/// [`Request::BlockOfLine`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlockLines {
+    /// Its first line and the line the next top-level block starts on (`None` for the last),
+    /// from 1.
+    pub first: u32,
+    pub next: Option<u32>,
+    /// For [`Request::BlockAt`]: where the point is in the block, as fractions from 0 to 1 of
+    /// its height and of the page's text column, so the editor can put the caret near it.
+    pub at: Option<(f32, f32)>,
 }
 
 /// The cursor over a place of the page, as mdview shows it there: a hand over a task box (the
@@ -197,6 +212,7 @@ const COPY: u32 = 12;
 const HOVER: u32 = 13;
 const GAP: u32 = 14;
 const BLOCK_AT: u32 = 15;
+const BLOCK_OF_LINE: u32 = 17;
 const UPDATE: u32 = 16;
 
 fn put_u32(out: &mut Vec<u8>, v: u32) {
@@ -341,6 +357,10 @@ pub fn write_request(w: &mut impl Write, req: &Request) -> io::Result<()> {
             put_u32(&mut b, y.to_bits());
             BLOCK_AT
         }
+        Request::BlockOfLine { line } => {
+            put_u32(&mut b, *line);
+            BLOCK_OF_LINE
+        }
         Request::Quit => QUIT,
     };
     frame(kind, &b, w)
@@ -407,6 +427,7 @@ pub fn read_request(r: &mut impl Read) -> io::Result<Option<Request>> {
                 x: f.f32()?,
                 y: f.f32()?,
             },
+            BLOCK_OF_LINE => Request::BlockOfLine { line: f.u32()? },
             QUIT => Request::Quit,
             _ => continue,
         };
@@ -473,15 +494,23 @@ pub fn write_update(w: &mut impl Write, u: &Update) -> io::Result<()> {
             put_u32(&mut b, y.to_bits());
         }
     }
-    // 0: no answer; 1: no block there; 2: a block, its first line, then the next block's
-    // line (0 for none).
+    // 0: no answer; 1: no block there; 2: a block, its first line, the next block's line
+    // (0 for none), then 1 and the two fractions, or 0.
     match u.block {
         None => put_u32(&mut b, 0),
         Some(None) => put_u32(&mut b, 1),
-        Some(Some((first, next))) => {
+        Some(Some(l)) => {
             put_u32(&mut b, 2);
-            put_u32(&mut b, first);
-            put_u32(&mut b, next.unwrap_or(0));
+            put_u32(&mut b, l.first);
+            put_u32(&mut b, l.next.unwrap_or(0));
+            match l.at {
+                None => put_u32(&mut b, 0),
+                Some((y, x)) => {
+                    put_u32(&mut b, 1);
+                    put_u32(&mut b, y.to_bits());
+                    put_u32(&mut b, x.to_bits());
+                }
+            }
         }
     }
     frame(UPDATE, &b, w)
@@ -547,7 +576,16 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
             _ => {
                 let first = f.u32()?;
                 let next = f.u32()?;
-                Some(Some((first, (next != 0).then_some(next))))
+                let at = if f.u32()? != 0 {
+                    Some((f.f32()?, f.f32()?))
+                } else {
+                    None
+                };
+                Some(Some(BlockLines {
+                    first,
+                    next: (next != 0).then_some(next),
+                    at,
+                }))
             }
         };
         return Ok(Some(Update {
@@ -624,6 +662,7 @@ mod tests {
             },
             Request::Gap { gap: None },
             Request::BlockAt { x: 3.0, y: 44.5 },
+            Request::BlockOfLine { line: 12 },
             Request::Quit,
         ];
         let mut buf = Vec::new();
@@ -655,13 +694,22 @@ mod tests {
             task: Some((40, true)),
             pointer: Some(Pointer::Hand),
             gap_y: Some(310.0),
-            block: Some(Some((5, None))),
+            block: Some(Some(BlockLines {
+                first: 5,
+                next: None,
+                at: Some((0.25, 0.5)),
+            })),
         };
         let mut buf = Vec::new();
         write_update(&mut buf, &u).unwrap();
         assert_eq!(read_update(&mut &buf[..]).unwrap(), Some(u));
         // No block at the point is not the same as no answer; a next block's line comes back.
-        for block in [Some(None), Some(Some((3, Some(8)))), None] {
+        let lines = BlockLines {
+            first: 3,
+            next: Some(8),
+            at: None,
+        };
+        for block in [Some(None), Some(Some(lines)), None] {
             let u = Update {
                 block,
                 ..Update::ack(1)

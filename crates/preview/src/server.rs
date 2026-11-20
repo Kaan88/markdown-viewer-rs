@@ -1,7 +1,7 @@
 //! The loop that draws the page for an editor: in mdview's process (`mdview --preview-server`,
 //! [`serve_stdio`]) or on a thread of the editor's own ([`serve`]).
 
-use crate::wire::{self, Copied, Pointer, Request, Update};
+use crate::wire::{self, BlockLines, Copied, Pointer, Request, Update};
 use mdview_core::model::Document;
 use mdview_render::{BlockBox, DARK, DocumentRenderer, Gap, Jump, LIGHT, Options};
 use std::io::{self, BufReader, BufWriter, Write};
@@ -48,7 +48,7 @@ pub struct Server {
     /// The answer to the last `Hover`, until it is sent.
     pointer: Option<Pointer>,
     /// The answer to the last `BlockAt`, until it is sent.
-    block: Option<Option<(u32, Option<u32>)>>,
+    block: Option<Option<BlockLines>>,
     /// Something changed since the last frame (or there has been none).
     dirty: bool,
     /// The editor's copy of the frame is gone: the next frame is sent whole.
@@ -239,6 +239,7 @@ impl Server {
                     .set_gap(self.doc.as_ref().unwrap_or(&empty), gap);
             }
             Request::BlockAt { x, y } => self.block = Some(self.block_at(x, y)),
+            Request::BlockOfLine { line } => self.block = Some(self.block_of_line(line)),
             Request::Quit => return false,
         }
         self.dirty = true;
@@ -354,7 +355,7 @@ impl Server {
 
     /// The top-level block at pane point `x, y` and its source lines, from the layout: a point
     /// in the side margins goes to the block beside it, one below the last block to none.
-    fn block_at(&mut self, x: f32, y: f32) -> Option<(u32, Option<u32>)> {
+    fn block_at(&mut self, x: f32, y: f32) -> Option<BlockLines> {
         if !(x.is_finite() && y.is_finite()) {
             return None;
         }
@@ -364,11 +365,48 @@ impl Server {
         if y + self.top > span.y + span.height {
             return None;
         }
-        self.renderer.block_lines(doc, span.block)
+        let (first, next) = self.renderer.block_lines(doc, span.block)?;
+        // The page's text column, as the renderer lays it out (`Pager::new`).
+        let o = &self.options;
+        let scale = o.scale.max(0.1);
+        let width = o.width.max(120.0);
+        let column = (width - 2.0 * o.theme.margin)
+            .max(80.0)
+            .min(o.theme.reading_width);
+        let left = (width - column) / 2.0 * scale;
+        let down = (y + self.top - span.y) / span.height.max(1.0);
+        let across = (x - left) / (column * scale);
+        Some(BlockLines {
+            first,
+            next,
+            at: Some((down.clamp(0.0, 1.0), across.clamp(0.0, 1.0))),
+        })
+    }
+
+    /// The top-level block that holds source line `line` (from 1): the last that starts on it
+    /// or before.
+    fn block_of_line(&self, line: u32) -> Option<BlockLines> {
+        let doc = self.doc.as_ref()?;
+        let page = self.renderer.page_layout()?;
+        let span = page
+            .blocks()
+            .iter()
+            .take_while(|s| {
+                doc.blocks
+                    .get(s.block as usize)
+                    .is_some_and(|b| b.line <= line)
+            })
+            .last()?;
+        let (first, next) = self.renderer.block_lines(doc, span.block)?;
+        Some(BlockLines {
+            first,
+            next,
+            at: None,
+        })
     }
 
     /// The answer to the last [`Request::BlockAt`], for [`Update::block`].
-    pub fn take_block(&mut self) -> Option<Option<(u32, Option<u32>)>> {
+    pub fn take_block(&mut self) -> Option<Option<BlockLines>> {
         self.block.take()
     }
 
@@ -907,7 +945,22 @@ Last.
             x: 200.0,
             y: list.y + 2.0,
         });
-        assert_eq!(s.take_block(), Some(Some((5, Some(8)))));
+        let got = s.take_block().flatten().expect("the list");
+        assert_eq!((got.first, got.next), (5, Some(8)));
+        let (down, across) = got.at.expect("where in it");
+        assert!(
+            (0.0..0.5).contains(&down) && (0.0..=1.0).contains(&across),
+            "{down} {across}"
+        );
+        s.apply(Request::BlockOfLine { line: 6 });
+        let got = s.take_block().flatten().expect("the list again");
+        assert_eq!((got.first, got.next, got.at), (5, Some(8), None));
+        s.apply(Request::BlockOfLine { line: 7 });
+        assert_eq!(
+            s.take_block().flatten().map(|b| b.first),
+            Some(5),
+            "a blank line after it"
+        );
         assert_eq!(s.take_block(), None, "once per question");
         s.apply(Request::BlockAt { x: 200.0, y: 299.0 });
         assert_eq!(s.take_block(), Some(None), "below the last block");
