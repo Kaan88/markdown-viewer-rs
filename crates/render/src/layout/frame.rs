@@ -48,6 +48,7 @@ impl DocumentRenderer {
             false,
             &mut self.store,
             &self.details,
+            self.gap,
         );
         let width = pager.width.round().max(1.0) as u32;
         let same_size = self
@@ -153,6 +154,7 @@ impl DocumentRenderer {
             false,
             &mut self.store,
             &self.details,
+            self.gap,
         );
         collect(page, &self.cache, &self.floats, &mut pager, top, height);
         pager.finish_slice(top, height, total_height, &mut self.engine)

@@ -241,6 +241,7 @@ impl DocumentRenderer {
             keep,
             &mut self.store,
             &self.details,
+            self.gap,
         );
         pager.allow = allow;
         pager.max_y = f32::MAX;

@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 /// The server's first line: the protocol's name and version.
-pub const MAGIC: &[u8; 12] = b"MDVPREVIEW6\n";
+pub const MAGIC: &[u8; 12] = b"MDVPREVIEW7\n";
 
 /// The largest message either side accepts: a frame of 8K by 8K pixels.
 pub const MAX_MESSAGE: usize = 8192 * 8192 * 4 + 64;
@@ -55,6 +55,13 @@ pub enum Request {
     /// The pointer rests at `x, y` (device pixels from the pane's top left), no button down:
     /// the next update carries the cursor for that place in [`Update::pointer`].
     Hover { x: f32, y: f32 },
+    /// The editor shows source lines `first` to `last` (from 1, both included) itself, in a
+    /// box `height` device pixels tall: the top-level blocks starting on them are left out of
+    /// the page and room is kept for the box ([`Update::gap_y`] says where). `None` puts them back.
+    Gap { gap: Option<(u32, u32, f32)> },
+    /// Asks which top-level block is at `x, y` (device pixels from the pane's top left): the
+    /// next update carries its source lines in [`Update::block`].
+    BlockAt { x: f32, y: f32 },
     /// Stop: the server ends.
     Quit,
 }
@@ -93,6 +100,13 @@ pub struct Update {
     pub task: Option<(u32, bool)>,
     /// The answer to [`Request::Hover`]: the cursor for the place the pointer rests on.
     pub pointer: Option<Pointer>,
+    /// The page row (device pixels from the page's top) where the room for the editor's box
+    /// starts, while a [`Request::Gap`] is set and that row is known.
+    pub gap_y: Option<f32>,
+    /// The answer to [`Request::BlockAt`]: `Some(None)` when no block is there, else the block's
+    /// first source line and the line the next top-level block starts on (`None` for the last
+    /// block), both from 1.
+    pub block: Option<Option<(u32, Option<u32>)>>,
 }
 
 /// The cursor over a place of the page, as mdview shows it there: a hand over a task box (the
@@ -181,6 +195,8 @@ const SELECT_ALL: u32 = 10;
 const UNSELECT: u32 = 11;
 const COPY: u32 = 12;
 const HOVER: u32 = 13;
+const GAP: u32 = 14;
+const BLOCK_AT: u32 = 15;
 const UPDATE: u32 = 16;
 
 fn put_u32(out: &mut Vec<u8>, v: u32) {
@@ -312,6 +328,19 @@ pub fn write_request(w: &mut impl Write, req: &Request) -> io::Result<()> {
             put_u32(&mut b, y.to_bits());
             HOVER
         }
+        Request::Gap { gap } => {
+            let (has, (first, last, height)) = gap.map_or((0, (0, 0, 0.0)), |g| (1, g));
+            put_u32(&mut b, has);
+            put_u32(&mut b, first);
+            put_u32(&mut b, last);
+            put_u32(&mut b, height.to_bits());
+            GAP
+        }
+        Request::BlockAt { x, y } => {
+            put_u32(&mut b, x.to_bits());
+            put_u32(&mut b, y.to_bits());
+            BLOCK_AT
+        }
         Request::Quit => QUIT,
     };
     frame(kind, &b, w)
@@ -364,6 +393,17 @@ pub fn read_request(r: &mut impl Read) -> io::Result<Option<Request>> {
             UNSELECT => Request::Unselect,
             COPY => Request::Copy,
             HOVER => Request::Hover {
+                x: f.f32()?,
+                y: f.f32()?,
+            },
+            GAP => {
+                let has = f.u32()? != 0;
+                let g = (f.u32()?, f.u32()?, f.f32()?);
+                Request::Gap {
+                    gap: has.then_some(g),
+                }
+            }
+            BLOCK_AT => Request::BlockAt {
                 x: f.f32()?,
                 y: f.f32()?,
             },
@@ -426,6 +466,24 @@ pub fn write_update(w: &mut impl Write, u: &Update) -> io::Result<()> {
             Some(Pointer::Hand) => 3,
         },
     );
+    match u.gap_y {
+        None => put_u32(&mut b, 0),
+        Some(y) => {
+            put_u32(&mut b, 1);
+            put_u32(&mut b, y.to_bits());
+        }
+    }
+    // 0: no answer; 1: no block there; 2: a block, its first line, then the next block's
+    // line (0 for none).
+    match u.block {
+        None => put_u32(&mut b, 0),
+        Some(None) => put_u32(&mut b, 1),
+        Some(Some((first, next))) => {
+            put_u32(&mut b, 2);
+            put_u32(&mut b, first);
+            put_u32(&mut b, next.unwrap_or(0));
+        }
+    }
     frame(UPDATE, &b, w)
 }
 
@@ -482,6 +540,16 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
             3 => Some(Pointer::Hand),
             _ => None,
         };
+        let gap_y = if f.u32()? != 0 { Some(f.f32()?) } else { None };
+        let block = match f.u32()? {
+            0 => None,
+            1 => Some(None),
+            _ => {
+                let first = f.u32()?;
+                let next = f.u32()?;
+                Some(Some((first, (next != 0).then_some(next))))
+            }
+        };
         return Ok(Some(Update {
             width,
             height,
@@ -497,6 +565,8 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
             copied,
             task,
             pointer,
+            gap_y,
+            block,
         }));
     }
 }
@@ -549,6 +619,11 @@ mod tests {
             Request::Unselect,
             Request::Copy,
             Request::Hover { x: 3.5, y: 70.0 },
+            Request::Gap {
+                gap: Some((5, 9, 120.5)),
+            },
+            Request::Gap { gap: None },
+            Request::BlockAt { x: 3.0, y: 44.5 },
             Request::Quit,
         ];
         let mut buf = Vec::new();
@@ -579,10 +654,22 @@ mod tests {
             }),
             task: Some((40, true)),
             pointer: Some(Pointer::Hand),
+            gap_y: Some(310.0),
+            block: Some(Some((5, None))),
         };
         let mut buf = Vec::new();
         write_update(&mut buf, &u).unwrap();
         assert_eq!(read_update(&mut &buf[..]).unwrap(), Some(u));
+        // No block at the point is not the same as no answer; a next block's line comes back.
+        for block in [Some(None), Some(Some((3, Some(8)))), None] {
+            let u = Update {
+                block,
+                ..Update::ack(1)
+            };
+            let mut buf = Vec::new();
+            write_update(&mut buf, &u).unwrap();
+            assert_eq!(read_update(&mut &buf[..]).unwrap(), Some(u));
+        }
         // Nothing selected is not the same as the selection unchanged.
         for selection in [Some(vec![]), None] {
             let u = Update {

@@ -7,7 +7,7 @@ use super::hit::{FloatBox, LineGeom, SourceBox, TaskBox};
 use super::inline::{ImageBox, Inline, RubyNote, Style};
 use super::paint::Paint;
 use super::store::{Found, ImageStore};
-use super::{BlockBox, Code, Options, Source, SourceKind};
+use super::{BlockBox, Code, Gap, Options, Source, SourceKind};
 use crate::text::Brush;
 use crate::theme::{Color, Theme};
 use mdview_core::model::{Align, BlockKind, Dir, Document, ImageAlign, Length, NONE};
@@ -88,6 +88,9 @@ pub(super) struct Pager<'a, 'b> {
     pub(super) break_words: bool,
     /// `<details>` open overrides from the shell; empty means use the document.
     pub(super) details: &'b HashMap<u32, bool>,
+    /// The blocks an editor is showing as source, and the top-level block that takes the gap's
+    /// height (the others in it take none). See [`Gap`].
+    pub(super) gap: Option<(Gap, Option<u32>)>,
 }
 
 /// The underline size given to a broken wiki-link's run. Nothing else sets one, so a run that
@@ -107,6 +110,7 @@ fn brush(c: Color) -> Brush {
 }
 
 impl<'a, 'b> Pager<'a, 'b> {
+    #[allow(clippy::too_many_arguments)] // the renderer's parts a pass borrows, no natural grouping
     pub(super) fn new(
         doc: &'a Document,
         options: &Options,
@@ -115,6 +119,7 @@ impl<'a, 'b> Pager<'a, 'b> {
         record: bool,
         store: &'b mut ImageStore,
         details: &'b HashMap<u32, bool>,
+        gap: Option<Gap>,
     ) -> Self {
         let scale = options.scale.max(0.1);
         let logical_width = options.width.max(120.0);
@@ -155,6 +160,7 @@ impl<'a, 'b> Pager<'a, 'b> {
             float_base: 0,
             break_words: false,
             details,
+            gap: gap.map(|g| (g, g.lead(doc))),
         }
     }
 
@@ -230,6 +236,16 @@ impl<'a, 'b> Pager<'a, 'b> {
     }
 
     pub(super) fn block(&mut self, b: u32, left: f32, width: f32, color: Color, depth: usize) {
+        if depth == 0
+            && let Some((gap, lead)) = self.gap
+            && gap.covers(self.doc, b)
+        {
+            // Shown by the editor as source: room for it in the first block, nothing drawn.
+            if lead == Some(b) {
+                self.y += gap.height.max(0.0);
+            }
+            return;
+        }
         if !self.floats.is_empty()
             && !self.doc.clears.is_empty()
             && let Some(side) = self.doc.clear_of(b)

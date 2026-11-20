@@ -3,7 +3,7 @@
 
 use crate::wire::{self, Copied, Pointer, Request, Update};
 use mdview_core::model::Document;
-use mdview_render::{BlockBox, DARK, DocumentRenderer, Jump, LIGHT, Options};
+use mdview_render::{BlockBox, DARK, DocumentRenderer, Gap, Jump, LIGHT, Options};
 use std::io::{self, BufReader, BufWriter, Write};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Instant;
@@ -47,6 +47,8 @@ pub struct Server {
     keep_top: bool,
     /// The answer to the last `Hover`, until it is sent.
     pointer: Option<Pointer>,
+    /// The answer to the last `BlockAt`, until it is sent.
+    block: Option<Option<(u32, Option<u32>)>>,
     /// Something changed since the last frame (or there has been none).
     dirty: bool,
     /// The editor's copy of the frame is gone: the next frame is sent whole.
@@ -79,6 +81,7 @@ impl Server {
             task: None,
             keep_top: false,
             pointer: None,
+            block: None,
             dirty: true,
             whole: true,
         }
@@ -221,6 +224,21 @@ impl Server {
                 }
             }
             Request::Copy => self.copy = true,
+            Request::Gap { gap } => {
+                let gap = gap.map(|(first_line, last_line, height)| Gap {
+                    first_line,
+                    last_line,
+                    height: if height.is_finite() {
+                        height.max(0.0)
+                    } else {
+                        0.0
+                    },
+                });
+                let empty = Document::default();
+                self.renderer
+                    .set_gap(self.doc.as_ref().unwrap_or(&empty), gap);
+            }
+            Request::BlockAt { x, y } => self.block = Some(self.block_at(x, y)),
             Request::Quit => return false,
         }
         self.dirty = true;
@@ -334,6 +352,31 @@ impl Server {
         }
     }
 
+    /// The top-level block at pane point `x, y` and its source lines, from the layout: a point
+    /// in the side margins goes to the block beside it, one below the last block to none.
+    fn block_at(&mut self, x: f32, y: f32) -> Option<(u32, Option<u32>)> {
+        if !(x.is_finite() && y.is_finite()) {
+            return None;
+        }
+        let doc = self.doc.as_ref()?;
+        let page = self.renderer.page_layout()?;
+        let span = page.block_at(y + self.top)?;
+        if y + self.top > span.y + span.height {
+            return None;
+        }
+        self.renderer.block_lines(doc, span.block)
+    }
+
+    /// The answer to the last [`Request::BlockAt`], for [`Update::block`].
+    pub fn take_block(&mut self) -> Option<Option<(u32, Option<u32>)>> {
+        self.block.take()
+    }
+
+    /// Where the room for the editor's box starts on the page, while there is one.
+    pub fn gap_y(&self) -> Option<f32> {
+        self.renderer.gap_y(self.doc.as_ref()?)
+    }
+
     /// The answer to the last [`Request::Hover`], for [`Update::pointer`].
     pub fn take_pointer(&mut self) -> Option<Pointer> {
         self.pointer.take()
@@ -436,6 +479,8 @@ impl Server {
             copied: None,
             task: None,
             pointer: None,
+            gap_y: None,
+            block: None,
         })
     }
 }
@@ -570,6 +615,8 @@ pub fn serve(requests: Receiver<Request>, mut send: impl FnMut(Update) -> bool) 
             copied,
             task: server.take_task(),
             pointer: server.take_pointer(),
+            block: server.take_block(),
+            gap_y: server.gap_y(),
             ..match drawn {
                 Some(update) => Update { answers, ..update },
                 None => Update::ack(answers),
@@ -839,6 +886,60 @@ mod tests {
         s.frame().expect("a frame");
         s.selection_answer(true);
         s
+    }
+
+    #[test]
+    fn a_block_is_found_by_its_place_and_a_gap_keeps_room_where_it_was() {
+        let mut s = shown(
+            "# Title
+
+First.
+
+- one
+- two
+
+Last.
+",
+        );
+        let spans: Vec<BlockBox> = s.renderer.page_layout().unwrap().blocks().to_vec();
+        let list = spans[2];
+        s.apply(Request::BlockAt {
+            x: 200.0,
+            y: list.y + 2.0,
+        });
+        assert_eq!(s.take_block(), Some(Some((5, Some(8)))));
+        assert_eq!(s.take_block(), None, "once per question");
+        s.apply(Request::BlockAt { x: 200.0, y: 299.0 });
+        assert_eq!(s.take_block(), Some(None), "below the last block");
+
+        s.apply(Request::Gap {
+            gap: Some((5, 6, 90.0)),
+        });
+        s.frame().expect("a frame");
+        assert_eq!(s.gap_y(), Some(list.y));
+        let after = s.renderer.page_layout().unwrap().blocks()[3];
+        assert_eq!(after.y, list.y + 90.0);
+        // A new text keeps the gap; clearing it brings the list back.
+        s.apply(Request::Text {
+            text: "# Title
+
+First.
+
+- one
+- two
+- three
+
+Last.
+"
+            .into(),
+            base_dir: None,
+        });
+        s.frame().expect("a frame");
+        assert_eq!(s.gap_y(), Some(list.y));
+        s.apply(Request::Gap { gap: None });
+        s.frame().expect("a frame");
+        assert_eq!(s.gap_y(), None);
+        assert!(s.renderer.page_layout().unwrap().blocks()[2].height > 0.0);
     }
 
     /// Applies `reqs` as one batch and returns what the answer carries.
