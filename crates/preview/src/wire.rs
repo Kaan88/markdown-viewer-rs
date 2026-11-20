@@ -65,6 +65,9 @@ pub enum Request {
     /// Asks which top-level block holds source line `line` (from 1): the last one starting on
     /// it or before. The next update carries it in [`Update::block`], with no `at`.
     BlockOfLine { line: u32 },
+    /// Forget the line last followed: the page no longer goes back to it on a new text or a
+    /// new size (an editor drawing its own box on the page, which the reader scrolls).
+    Unfollow,
     /// Stop: the server ends.
     Quit,
 }
@@ -213,6 +216,7 @@ const HOVER: u32 = 13;
 const GAP: u32 = 14;
 const BLOCK_AT: u32 = 15;
 const BLOCK_OF_LINE: u32 = 17;
+const UNFOLLOW: u32 = 18;
 const UPDATE: u32 = 16;
 
 fn put_u32(out: &mut Vec<u8>, v: u32) {
@@ -361,6 +365,7 @@ pub fn write_request(w: &mut impl Write, req: &Request) -> io::Result<()> {
             put_u32(&mut b, *line);
             BLOCK_OF_LINE
         }
+        Request::Unfollow => UNFOLLOW,
         Request::Quit => QUIT,
     };
     frame(kind, &b, w)
@@ -428,6 +433,7 @@ pub fn read_request(r: &mut impl Read) -> io::Result<Option<Request>> {
                 y: f.f32()?,
             },
             BLOCK_OF_LINE => Request::BlockOfLine { line: f.u32()? },
+            UNFOLLOW => Request::Unfollow,
             QUIT => Request::Quit,
             _ => continue,
         };
@@ -663,6 +669,7 @@ mod tests {
             Request::Gap { gap: None },
             Request::BlockAt { x: 3.0, y: 44.5 },
             Request::BlockOfLine { line: 12 },
+            Request::Unfollow,
             Request::Quit,
         ];
         let mut buf = Vec::new();

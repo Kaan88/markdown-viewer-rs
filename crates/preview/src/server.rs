@@ -240,6 +240,7 @@ impl Server {
             }
             Request::BlockAt { x, y } => self.block = Some(self.block_at(x, y)),
             Request::BlockOfLine { line } => self.block = Some(self.block_of_line(line)),
+            Request::Unfollow => self.follow = None,
             Request::Quit => return false,
         }
         self.dirty = true;
@@ -766,6 +767,46 @@ mod tests {
         });
         let after = s.frame().expect("a frame").top;
         assert!((after - far).abs() < 200.0, "{far} {after}");
+    }
+
+    #[test]
+    fn after_unfollow_a_new_text_or_size_leaves_the_page_where_the_reader_put_it() {
+        let mut s = Server::new();
+        s.apply(Request::View {
+            width: 400,
+            height: 300,
+            scale: 1.0,
+            dark: true,
+        });
+        s.apply(Request::Text {
+            text: text(200),
+            base_dir: None,
+        });
+        s.apply(Request::Follow { line: 1, column: 0 });
+        s.frame();
+        s.apply(Request::Unfollow);
+        s.apply(Request::Scroll { by: 3000.0 });
+        let read = s.frame().expect("scrolled").top;
+        assert!(read > 2000.0, "{read}");
+        s.apply(Request::Text {
+            text: format!(
+                "{}
+more
+",
+                text(200)
+            ),
+            base_dir: None,
+        });
+        let after = s.frame().map_or(read, |u| u.top);
+        assert!((after - read).abs() < 1.0, "{read} {after}");
+        s.apply(Request::View {
+            width: 420,
+            height: 300,
+            scale: 1.0,
+            dark: true,
+        });
+        let resized = s.frame().map_or(read, |u| u.top);
+        assert!(resized > 1500.0, "back to line 1: {resized}");
     }
 
     #[test]
