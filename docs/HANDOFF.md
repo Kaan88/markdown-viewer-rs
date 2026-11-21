@@ -32,7 +32,10 @@ updater's `extras`, empty here).
 - The two notes are a transient status line (and stderr), not a bar.
 - Checks (Windows): fmt, clippy, all tests. Run by hand with a scratch `MDVIEW_SETTINGS`: the lock
   file is made, a second launch handed its file over in 129 ms, and the closed window wrote both
-  tabs with their focused seconds. Not done: budgets not measured; the owner has not seen the
+  tabs with their focused seconds. Budgets, 15 interleaved runs, published 1.0.3 against this
+  main, `showcase.md` at 1280x800, `--no-session`: window shown 112.5 / 113.1 ms, private memory at
+  3 s 25.2 / 25.3 MiB, scroll own work median 0.86 / 0.84 ms, p90 1.51 / 1.48: within noise.
+  Released as 1.0.4. Not done: the owner has not seen the
   settings; nothing on Mac or Linux.
 
 ## START HERE: feature complete, in maintenance (2026-11-17)
