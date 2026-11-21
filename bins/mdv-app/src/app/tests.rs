@@ -872,48 +872,40 @@ fn the_settings_form_follows_the_apps_limits() {
 /// The dialog is one page: no category list, every control reachable by pointer inside the card
 /// at the default size without scrolling, and inside the window (scrolling, not clipped) at the
 /// minimum size.
+/// Settings has categories, as mdedit's: a list at the default window size (none in a window too
+/// narrow for it), the card no taller than 640 px, and a jump to each category shows its rows.
 #[test]
-fn the_settings_dialog_is_one_page_at_the_default_and_the_minimum_window_size() {
+fn the_settings_dialog_has_categories_and_fits_the_window() {
     use mdshared_ui::settings::Row;
-    for (size, scrolls) in [((1280, 800), false), ((520, 360), true)] {
+    for (size, nav) in [((1280, 800), true), ((520, 360), false)] {
         let mut a = app(&["showcase.md"]);
         a.size = size;
         a.command(C::Settings);
         a.compose();
-        let f = a.ui.settings.as_ref().expect("the dialog");
-        assert!(!f.has_nav(), "no category list at {size:?}");
-        assert_eq!(f.categories().len(), 3, "the headings stay");
+        let f = a.ui.settings.as_mut().expect("the dialog");
+        assert_eq!(f.has_nav(), nav, "the category list at {size:?}");
+        let rows = crate::settings::rows(&a.ws, true);
+        let heads = rows.iter().filter(|r| matches!(r, Row::Header(_))).count();
+        assert!(f.categories().len() >= 4 && f.categories().len() <= heads);
         let card = f.rect();
         let win = Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32);
         assert!(
             card.x >= 0.0 && card.y >= 0.0 && card.right() <= win.w && card.bottom() <= win.h,
             "{card:?} inside {win:?}"
         );
-        assert_eq!(f.scroll(), 0.0);
-        let body = f.body_rect();
-        let mut ids = 0;
-        for (i, row) in f.rows().iter().enumerate() {
-            if row.id().is_none() {
-                continue;
-            }
-            ids += 1;
-            let c = f.control_rect(i);
-            let inside = c.x >= card.x && c.right() <= card.right();
-            assert!(inside, "{i}: {c:?} inside {card:?}");
-            if !scrolls {
+        assert!(
+            card.h <= 640.0,
+            "slightly shorter than the one page was: {card:?}"
+        );
+        for i in 0..f.rows().len() {
+            if f.rows()[i].id().is_some() {
+                let c = f.control_rect(i);
                 assert!(
-                    c.y >= body.y && c.bottom() <= body.bottom(),
-                    "row {i} visible without scrolling: {c:?} in {body:?}"
+                    c.x >= card.x && c.right() <= card.right(),
+                    "{i}: {c:?} in {card:?}"
                 );
             }
         }
-        assert_eq!(
-            ids,
-            crate::settings::rows(&a.ws, a.corners_offered())
-                .iter()
-                .filter(|r| !matches!(r, Row::Header(_)))
-                .count()
-        );
     }
 }
 

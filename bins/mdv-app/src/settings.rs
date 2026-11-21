@@ -27,6 +27,8 @@ pub const BACKDROP: u32 = 13;
 pub const PREVIEWS: u32 = 30;
 pub const START_ON_PINNED: u32 = 31;
 pub const OFFER_STALE: u32 = 32;
+pub const SKIP_BRIEF: u32 = 33;
+pub const BRIEF_SECS: u32 = 34;
 
 pub const WIDTHS: [&str; 3] = ["Narrow", "Wide", "Full"];
 pub const THEMES: [&str; 3] = ["System", "Light", "Dark"];
@@ -74,9 +76,8 @@ pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
         Row::choice(THEME, "Theme", &THEMES, theme_index(ws.theme_choice())),
         Row::text(PAGE_FONT, "Page font", ws.page_font()).placeholder("Default"),
         Row::text(CODE_FONT, "Code font", ws.code_font()).placeholder("Default"),
-        // One group for content and tabs, and help lines only on the Windows rows: the form is one
-        // page at the default window size only so (Windows adds the backdrop and corners rows).
-        Row::header("Content and tabs"),
+        // Categories, as mdedit's: a list at the left, the groups in one scrolled body.
+        Row::header("Content"),
         Row::toggle(
             REMOTE_IMAGES,
             "Always load remote images",
@@ -93,11 +94,23 @@ pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
             "Preview footnotes and links on hover",
             ws.previews(),
         ),
+        Row::header("Tabs"),
         Row::toggle(
             OFFER_STALE,
             "Offer to close tabs not opened in a week",
             ws.offers_stale(),
         ),
+        Row::toggle(SKIP_BRIEF, mdshared_app::brief::SWITCH, ws.skips_brief().0)
+            .help("At start. Pinned tabs and the tab you left on always come back."),
+        Row::number(
+            BRIEF_SECS,
+            mdshared_app::brief::SECONDS,
+            ws.skips_brief().1 as i32,
+            mdshared_app::brief::SECS_MIN as i32,
+            mdshared_app::brief::SECS_MAX as i32,
+        )
+        .unit("seconds")
+        .help(mdshared_app::brief::SECONDS_HELP),
         Row::toggle(
             START_ON_PINNED,
             "Start on the last pinned tab",
@@ -165,5 +178,5 @@ fn check_now_label(ws: &Workspace) -> String {
 }
 
 pub fn form(ws: &Workspace, corners: bool) -> Form {
-    Form::new("Settings", rows(ws, corners)).single_page()
+    Form::new("Settings", rows(ws, corners))
 }

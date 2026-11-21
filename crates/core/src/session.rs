@@ -143,6 +143,12 @@ pub struct Session {
     pub seen: Vec<(PathBuf, u32)>,
     /// Offer to close the tabs not opened in a week of use. On by default.
     pub offer_stale: bool,
+    /// Leave out at start the tabs looked at for less than `brief_secs` in all
+    /// ([`mdshared_app::brief`]). Off by default.
+    pub skip_brief: bool,
+    pub brief_secs: u32,
+    /// Each file tab's focused time in seconds: one `focus` line each.
+    pub focus: Vec<(PathBuf, u64)>,
 }
 
 /// The default window corner radius, logical px.
@@ -197,6 +203,9 @@ impl Default for Session {
             use_days: (0, 0),
             seen: Vec::new(),
             offer_stale: true,
+            skip_brief: false,
+            brief_secs: mdshared_app::brief::SECS_DEFAULT,
+            focus: Vec::new(),
         }
     }
 }
@@ -249,6 +258,14 @@ impl Session {
                         s.use_days = (n, d);
                     }
                 }
+                "skip_brief" => s.skip_brief = value.trim() == "1",
+                "brief_secs" => {
+                    if let Ok(n) = value.trim().parse::<u32>() {
+                        use mdshared_app::brief::{SECS_MAX, SECS_MIN};
+                        s.brief_secs = n.clamp(SECS_MIN, SECS_MAX);
+                    }
+                }
+                "focus" => s.focus.extend(mdshared_app::brief::parse(value)),
                 "seen" => {
                     if let Some((day, path)) = value.split_once(' ')
                         && let Ok(day) = day.parse()
@@ -330,6 +347,15 @@ impl Session {
         }
         for (p, day) in &self.seen {
             out.line("seen", &format!("{day} {}", encode_path(p)));
+        }
+        if self.skip_brief {
+            out.line("skip_brief", "1");
+        }
+        if self.brief_secs != mdshared_app::brief::SECS_DEFAULT {
+            out.line("brief_secs", &self.brief_secs.to_string());
+        }
+        for (p, secs) in &self.focus {
+            out.line("focus", &mdshared_app::brief::to_setting(*secs, p));
         }
         self.places.write(&mut out, "place");
         out.finish()

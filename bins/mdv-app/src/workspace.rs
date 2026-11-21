@@ -24,8 +24,16 @@
 
 use crate::updater::{self, Offer, Stage, Updates};
 use mdshared_app::backdrop::Backdrop;
+use mdshared_app::brief;
 use mdshared_fetch::{Fetcher, State as Fetched};
 use mdshared_ui::{pins, stale};
+
+/// Adds `ms` of focused time to the tab at `path`.
+fn add_focus(tabs: &mut [Tab], path: &Path, ms: u64) {
+    if let Some(t) = tabs.iter_mut().find(|t| t.path == path) {
+        t.focus_ms = Some(t.focus_ms.unwrap_or(0).saturating_add(ms));
+    }
+}
 use mdview_core::commands::strings;
 use mdview_core::files::{FileStamp, canonical_or_absolute, read_stable, stamp, tab_labels};
 use mdview_core::links::{LinkAction, classify_link};
@@ -301,6 +309,9 @@ pub struct Tab {
     pinned: bool,
     /// The day of use the tab was last shown on ([`mdshared_ui::stale`]).
     seen: u32,
+    /// How long the tab has shown in a focused window, in milliseconds, added up across runs
+    /// ([`mdshared_app::brief`]); `None` for a file the session has no count for.
+    focus_ms: Option<u64>,
 }
 
 impl pins::Pinnable for Tab {
@@ -406,6 +417,7 @@ impl Tab {
             untitled: None,
             pinned: false,
             seen: 0,
+            focus_ms: Some(0),
         }
     }
 
@@ -579,6 +591,8 @@ pub struct Workspace {
     day: u32,
     /// The tabs offered for closing at start, while the bar offering them shows.
     stale: Vec<PathBuf>,
+    /// The clock of focused time, run for the tab in front ([`Workspace::focus_tick`]).
+    focus_clock: brief::Clock<PathBuf>,
 }
 
 impl Workspace {
@@ -624,12 +638,21 @@ impl Workspace {
             last_pinned: None,
             day: 0,
             stale: Vec::new(),
+            focus_clock: brief::Clock::default(),
         };
-        for path in ws.session.tabs.clone() {
+        for (i, path) in ws.session.tabs.clone().into_iter().enumerate() {
             let path = canonical_or_absolute(&path);
+            if ws.barely_seen(i, &path) {
+                continue;
+            }
             if !ws.tabs.iter().any(|t| same_file(&t.path, &path)) {
                 ws.tabs.push(Tab::unloaded(path));
             }
+        }
+        for tab in &mut ws.tabs {
+            tab.focus_ms = (ws.session.focus.iter())
+                .find(|(p, _)| same_file(p, &tab.path))
+                .map(|&(_, s)| s.saturating_mul(1000));
         }
         // A day of use more when today is a new date; each tab keeps the day it was last shown,
         // and one the session has none for counts as shown today.
@@ -683,6 +706,7 @@ impl Workspace {
     /// after every open, close, move and setting change; call it once more on exit.
     pub fn save_session(&mut self) -> std::io::Result<()> {
         self.note_active_place();
+        self.focus_flush(std::time::Instant::now());
         let Some(path) = self.session_path.as_deref() else {
             return Ok(());
         };
@@ -702,6 +726,9 @@ impl Workspace {
         self.session.active_tab = self.active_tab().and_then(file);
         self.session.seen = (self.tabs.iter())
             .filter_map(|t| Some((file(t)?, t.seen)))
+            .collect();
+        self.session.focus = (self.tabs.iter())
+            .filter_map(|t| Some((file(t)?, t.focus_ms? / 1000)))
             .collect();
         self.session.last_pinned = self.last_pinned.clone().filter(|p| {
             (self.tabs.iter()).any(|t| t.pinned && t.untitled.is_none() && &t.path == p)
@@ -3662,6 +3689,45 @@ impl Workspace {
         self.dirty = true;
     }
 
+    /// Whether the session's tab `i` (at `path`) is left out at start ([`brief::left_out`]): the
+    /// tab that was showing and pinned ones always come back.
+    fn barely_seen(&self, i: usize, path: &Path) -> bool {
+        let s = &self.session;
+        let same = |q: &PathBuf| same_file(&canonical_or_absolute(q), path);
+        let keep = s.active_tab.as_ref().map_or(i == s.active, same) || s.pins.iter().any(same);
+        let counted = s.focus.iter().find(|(q, _)| same(q)).map(|&(_, n)| n);
+        brief::left_out(s.skip_brief, s.brief_secs, counted, keep)
+    }
+
+    /// Counts focused time: `focused` says the window has the focus (not minimized, not behind
+    /// another program); the tab in front then gets the time. Called on every turn of the loop.
+    pub fn focus_tick(&mut self, focused: bool, now: std::time::Instant) {
+        let showing = (self.active)
+            .filter(|_| focused)
+            .map(|i| self.tabs[i].path.clone());
+        let tabs = &mut self.tabs;
+        (self.focus_clock).tick(showing, now, |p, ms| add_focus(tabs, &p, ms));
+    }
+
+    fn focus_flush(&mut self, now: std::time::Instant) {
+        let tabs = &mut self.tabs;
+        (self.focus_clock).flush(now, |p, ms| add_focus(tabs, &p, ms));
+    }
+
+    /// The setting that leaves out tabs barely looked at: on, and its seconds.
+    pub fn skips_brief(&self) -> (bool, u32) {
+        (self.session.skip_brief, self.session.brief_secs)
+    }
+
+    pub fn set_skip_brief(&mut self, on: bool, secs: u32) {
+        use brief::{SECS_MAX, SECS_MIN};
+        let secs = secs.clamp(SECS_MIN, SECS_MAX);
+        if (self.session.skip_brief, self.session.brief_secs) != (on, secs) {
+            (self.session.skip_brief, self.session.brief_secs) = (on, secs);
+            self.persist();
+        }
+    }
+
     /// Whether tabs not opened in a week of use are offered for closing at start.
     pub fn offers_stale(&self) -> bool {
         self.session.offer_stale
@@ -4209,6 +4275,54 @@ mod tests {
         ws.close_stale();
         assert_eq!(ws.labels(), ["d.md", "b.md"]);
         assert_eq!(ws.stale_offer(), 0);
+    }
+
+    /// The setting shared with mdedit ([`brief`]): tabs looked at for less than its seconds, in
+    /// focused time across runs, are left out at start; the one showing, pinned ones and ones
+    /// with no count always come back, and the count goes through the session.
+    #[test]
+    fn tabs_barely_looked_at_are_left_out_at_start_when_asked() {
+        let dir = temp_dir("brief");
+        let [a, b, c, d, e] =
+            ["a.md", "b.md", "c.md", "d.md", "e.md"].map(|n| write(&dir, n, "# x\n"));
+        let settings = dir.join("settings.ini");
+        // a showing, b brief, c long enough, d pinned and brief, e no count.
+        let mut saved = Session {
+            tabs: vec![d.clone(), a.clone(), b.clone(), c.clone(), e.clone()],
+            pins: vec![d.clone()],
+            active_tab: Some(a.clone()),
+            focus: vec![
+                (a.clone(), 1),
+                (b.clone(), 3),
+                (c.clone(), 50),
+                (d.clone(), 2),
+            ],
+            brief_secs: 10,
+            ..Default::default()
+        };
+        saved.save(&settings).unwrap();
+        let all = ["d.md", "a.md", "b.md", "c.md", "e.md"];
+        assert_eq!(Workspace::new(Some(settings.clone())).labels(), all, "off");
+        saved.skip_brief = true;
+        saved.save(&settings).unwrap();
+        let mut ws = Workspace::new(Some(settings.clone()));
+        assert_eq!(ws.labels(), ["d.md", "a.md", "c.md", "e.md"]);
+        // Focused time counts only while the window has the focus.
+        let t0 = std::time::Instant::now();
+        let at = |s: u64| t0 + std::time::Duration::from_secs(s);
+        ws.focus_tick(true, at(0));
+        ws.focus_tick(false, at(4));
+        ws.focus_tick(false, at(90));
+        ws.save_session().unwrap();
+        let back = Session::load(&settings);
+        let secs = |p: &PathBuf| {
+            (back.focus.iter())
+                .find(|(q, _)| same_file(q, p))
+                .map(|x| x.1)
+        };
+        // e has no count until it is shown.
+        assert_eq!((secs(&a), secs(&c), secs(&e)), (Some(5), Some(50), None));
+        assert!(back.skip_brief);
     }
 
     #[test]

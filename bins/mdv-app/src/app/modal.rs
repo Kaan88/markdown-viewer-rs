@@ -321,6 +321,14 @@ impl App {
             (setting::ANIMATIONS, Value::Bool(on)) => self.ws.set_animations(on),
             (setting::START_ON_PINNED, Value::Bool(on)) => self.ws.set_start_on_pinned(on),
             (setting::OFFER_STALE, Value::Bool(on)) => self.ws.set_offer_stale(on),
+            (setting::SKIP_BRIEF, Value::Bool(on)) => {
+                let secs = self.ws.skips_brief().1;
+                self.ws.set_skip_brief(on, secs)
+            }
+            (setting::BRIEF_SECS, Value::Number(n)) => {
+                let on = self.ws.skips_brief().0;
+                self.ws.set_skip_brief(on, n.max(0) as u32)
+            }
             (setting::PREVIEWS, Value::Bool(on)) => {
                 self.ws.set_previews(on);
                 self.ui.card = None;

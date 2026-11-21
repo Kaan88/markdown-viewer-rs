@@ -1663,6 +1663,9 @@ impl ApplicationHandler<Wake> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Focused time: the tab in front while the window has the focus.
+        let showing = self.focused && !self.occluded;
+        self.ws.focus_tick(showing, std::time::Instant::now());
         if self.exit {
             self.finish(event_loop);
             return;
