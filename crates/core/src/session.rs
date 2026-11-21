@@ -211,7 +211,15 @@ impl Default for Session {
 }
 
 impl Session {
-    /// Never fails: a missing or damaged file gives defaults, and unknown lines are skipped.
+    /// The session in `path`, tried again for up to two seconds while it cannot be read
+    /// ([`settings::read_patiently`]): none yet is the defaults; a file that cannot be read is an
+    /// error, never the defaults, which the next save would write over the real session.
+    pub fn read_patiently(path: &Path) -> io::Result<Session> {
+        Ok(settings::read_patiently(path)?.map_or_else(Session::default, |t| Session::parse(&t)))
+    }
+
+    /// Never fails: a missing or damaged file gives defaults, and unknown lines are skipped. For
+    /// tests and tools; a window reads with [`read_patiently`](Self::read_patiently).
     pub fn load(path: &Path) -> Session {
         std::fs::read(path)
             .map(|b| Session::parse(&String::from_utf8_lossy(&b)))
@@ -476,6 +484,26 @@ pub fn default_settings_path() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod window_state_tests {
+
+    /// Audit 2's finding in mdedit, also here: a session that cannot be read is an error, not the
+    /// defaults (which the next save would write over it); a missing one is the defaults.
+    #[test]
+    fn a_session_that_cannot_be_read_is_an_error_not_the_defaults() {
+        let d = std::env::temp_dir().join(format!("mdview-unreadable-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(
+            Session::read_patiently(&d.join("none.ini"))
+                .unwrap()
+                .tabs
+                .len(),
+            0
+        );
+        assert!(
+            Session::read_patiently(&d).is_err(),
+            "a folder in the file's place"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
     use super::{Backdrop, PageWidth, Session};
 
     #[test]

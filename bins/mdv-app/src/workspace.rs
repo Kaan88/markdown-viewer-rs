@@ -605,6 +605,11 @@ impl Workspace {
             .as_deref()
             .map(Session::load)
             .unwrap_or_default();
+        Workspace::from_session(saved, session_path)
+    }
+
+    /// [`new`](Self::new) with the session already read (`saved`, from `session_path`).
+    pub fn from_session(saved: Session, session_path: Option<PathBuf>) -> Workspace {
         let mut ws = Workspace {
             back: Vec::new(),
             forward: Vec::new(),

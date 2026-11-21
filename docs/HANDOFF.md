@@ -11,6 +11,30 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Shared with mdedit: brief tabs, the folder lock, the session read (2026-11-21, `f/brief-tabs`)
+
+The owner: the apps are sisters and more may join; what they can share goes in markdown-shared-rs.
+mdshared-app moved from `49de4ec` to `cb0ffd3` (also bringing the audit 2 synced writes and the
+updater's `extras`, empty here).
+- Don't reopen tabs barely looked at (`mdshared_app::brief`, as mdedit 1.2.1): `Tab::focus_ms`,
+  `Workspace::focus_tick` in `about_to_wait` while the window is focused and not covered, the
+  `focus`, `skip_brief`, `brief_secs` session lines, `barely_seen` at start (the tab that was
+  showing and pinned ones always come back). Test
+  `tabs_barely_looked_at_are_left_out_at_start_when_asked`.
+- Settings in categories, as mdedit's (no longer `single_page`): "Content and tabs" is now
+  "Content" and "Tabs", the card at most 640 px tall (was 760). Test
+  `the_settings_dialog_has_categories_and_fits_the_window`.
+- One window per settings folder (`mdshared_app::folder_lock`, was mdedit's): a launch next to a
+  window still starting waits for it; one next to a hung window runs without the session.
+- The session is read with `Session::read_patiently`: a file that cannot be read is an error, and
+  the window runs without its session rather than writing defaults over it (audit 2's finding in
+  mdedit). Test `a_session_that_cannot_be_read_is_an_error_not_the_defaults`.
+- The two notes are a transient status line (and stderr), not a bar.
+- Checks (Windows): fmt, clippy, all tests. Run by hand with a scratch `MDVIEW_SETTINGS`: the lock
+  file is made, a second launch handed its file over in 129 ms, and the closed window wrote both
+  tabs with their focused seconds. Not done: budgets not measured; the owner has not seen the
+  settings; nothing on Mac or Linux.
+
 ## START HERE: feature complete, in maintenance (2026-11-17)
 
 The owner agreed that mdview is feature complete: see the status at the top of `docs/PLAN.md`

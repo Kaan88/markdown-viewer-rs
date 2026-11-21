@@ -1926,27 +1926,39 @@ pub fn run() -> i32 {
     }
     let explicit = std::env::var_os("MDVIEW_SETTINGS").map(PathBuf::from);
     // A shot never touches the user's session; it may use a scratch one named by MDVIEW_SETTINGS.
-    let session = match (args.no_session, args.shot.is_some()) {
+    let mut session = match (args.no_session, args.shot.is_some()) {
         (true, _) => None,
         (false, true) => explicit,
         (false, false) => explicit.or_else(mdview_core::session::default_settings_path),
     };
-    if let Some(settings) = session.as_ref().filter(|_| args.shot.is_none()) {
+    // Held while the window runs: this launch has the settings folder
+    // (mdshared_app::folder_lock, shared with mdedit).
+    let mut _folder_lock = None;
+    // Why this window runs without its session, shown once it is up.
+    let mut no_session_note: Option<String> = None;
+    if let Some(settings) = session.clone().filter(|_| args.shot.is_none()) {
         // Started by a restart: the window that started it is still closing; wait it out, or the
         // hand-over below would go to it and leave no window.
-        mdshared_app::relaunch::wait_for_predecessor(std::env::args().skip(1), settings);
+        mdshared_app::relaunch::wait_for_predecessor(std::env::args().skip(1), &settings);
         // A window is already open: hand it the files and quit, before any window work. A launch
-        // that asks for a line, a place or a follow hands each file over with that.
+        // that asks for a line, a place or a follow hands each file over with that. One that is
+        // still starting holds the folder and is waited for, not run beside.
         let requests = args.requests();
-        let handed = if requests.is_empty() {
-            mdview_core::single::forward(settings, &args.files)
-        } else {
-            requests
-                .iter()
-                .all(|r| mdview_core::single::forward_request(settings, r))
+        let forward = || {
+            if requests.is_empty() {
+                mdview_core::single::forward(&settings, &args.files)
+            } else {
+                (requests.iter()).all(|r| mdview_core::single::forward_request(&settings, r))
+            }
         };
-        if handed {
-            return 0;
+        use mdshared_app::folder_lock::{self, Claim};
+        match folder_lock::claim(&settings, forward, folder_lock::WAIT) {
+            Claim::Own(lock) => _folder_lock = lock,
+            Claim::Handed => return 0,
+            Claim::Busy => {
+                session = None;
+                no_session_note = Some(folder_lock::busy_note("mdview"));
+            }
         }
     }
     // A live update is for a window that shows the file already: with none, there is nothing to do.
@@ -1954,7 +1966,24 @@ pub fn run() -> i32 {
         return 0;
     }
     stage(started, "single-instance check");
-    let ws = Workspace::new(session.clone());
+    // A session that cannot be read is left as it is: the window runs without it.
+    let saved = match session
+        .as_deref()
+        .map(mdview_core::session::Session::read_patiently)
+    {
+        Some(Err(e)) => {
+            session = None;
+            no_session_note = Some(mdshared_app::folder_lock::unreadable_note(&e));
+            mdview_core::session::Session::default()
+        }
+        Some(Ok(s)) => s,
+        None => mdview_core::session::Session::default(),
+    };
+    let mut ws = Workspace::from_session(saved, session.clone());
+    if let Some(note) = &no_session_note {
+        eprintln!("mdview: {note}");
+        ws.set_status(note);
+    }
     stage(started, "workspace (session, file read, parse)");
     let mut app = App::new(args, ws, session);
     app.started = started;
