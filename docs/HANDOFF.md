@@ -38,6 +38,14 @@ updater's `extras`, empty here).
   Released as 1.0.4. Not done: the owner has not seen the
   settings; nothing on Mac or Linux.
 
+## Release 1.0.4 (2026-11-21, released)
+
+mdview 1.0.4 is released: tag `v1.0.4` at `e31ca91`, `ci` 44890405613 and `mac-look` 44890405659
+green on that commit, release run 44894698628 green. The release holds the Windows, Linux, macOS
+and package files with both update manifests; `mdview.exe` downloaded again hashes
+`bcbf26fd…e369`, which is what `mdview-update.txt` names. Not checked by hand: the macOS and
+Linux files, and an update from 1.0.3 through the updater.
+
 ## START HERE: feature complete, in maintenance (2026-11-17)
 
 The owner agreed that mdview is feature complete: see the status at the top of `docs/PLAN.md`
