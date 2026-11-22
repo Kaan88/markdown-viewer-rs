@@ -27,7 +27,7 @@ impl App {
         self.ui.hover = None;
         self.ui.find_focused = false;
         self.ui.dialog = None;
-        self.ui.settings = None;
+        self.drop_settings();
         self.ui.palette = Some(PaletteState::open(&self.ws, query));
         self.caret_reset();
         self.modal_changed();
@@ -51,7 +51,7 @@ impl App {
         self.ui.hover = None;
         self.ui.find_focused = false;
         self.ui.dialog = None;
-        self.ui.settings = None;
+        self.drop_settings();
         self.ui.palette = Some(PaletteState::open_folder(root, &query, wake));
         self.caret_reset();
         self.modal_changed();
@@ -72,6 +72,8 @@ impl App {
         self.modal_closed();
     }
 
+    /// Opens Settings on the page it last showed this run (Appearance the first time), the
+    /// keyboard in the list.
     pub(super) fn open_settings(&mut self) {
         self.ui.popup = None;
         self.ui.tip = None;
@@ -79,13 +81,47 @@ impl App {
         self.ui.find_focused = false;
         self.ui.dialog = None;
         self.ui.palette = None;
-        self.ui.settings = Some(setting::form(&self.ws, self.corners_offered()));
+        let page = self.ui.settings_page;
+        self.ui.settings = Some(setting::form(&self.ws, self.corners_offered(), page));
         self.modal_changed();
     }
 
+    /// `--settings-section`: shows the page `name` names (`setting::page_for_section`) in the
+    /// open dialog. False when no page has that name or the dialog is not open.
+    pub(super) fn show_settings_section(&mut self, name: &str) -> bool {
+        let Some(page) = setting::page_for_section(name) else {
+            return false;
+        };
+        let Some(f) = self.ui.settings.as_mut() else {
+            return false;
+        };
+        let Some(c) = f.page_names().iter().position(|n| *n == page) else {
+            return false;
+        };
+        f.show_page(c);
+        self.modal_changed();
+        true
+    }
+
     pub(super) fn close_settings(&mut self) {
-        self.ui.settings = None;
+        self.drop_settings();
         self.modal_closed();
+    }
+
+    /// Takes the dialog down, keeping the page it showed for the next time it opens.
+    fn drop_settings(&mut self) {
+        if let Some(f) = self.ui.settings.take() {
+            self.ui.settings_page = f.page();
+        }
+    }
+
+    /// Makes the pages again from what the workspace holds now, so a switch turned off or on
+    /// disables or enables the row under it. The page shown and the keyboard stay.
+    fn settings_refresh(&mut self) {
+        let corners = self.corners_offered();
+        if let Some(f) = self.ui.settings.as_mut() {
+            f.set_pages(setting::pages_here(&self.ws, corners));
+        }
     }
 
     pub(super) fn modal_changed(&mut self) {
@@ -250,6 +286,10 @@ impl App {
             Form::Closed => self.close_settings(),
             Form::Changed { id, value } => {
                 self.apply_setting(id, value);
+                // The one switch with a row under it: the form keeps every other value itself.
+                if id == setting::SKIP_BRIEF {
+                    self.settings_refresh();
+                }
                 self.modal_changed();
             }
             Form::Action(id) => {

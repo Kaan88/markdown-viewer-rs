@@ -178,7 +178,7 @@ fn without_the_keyboard_or_the_setting_every_pixel_is_opaque() {
 #[test]
 fn the_setting_row_is_under_the_theme_and_choosing_keeps_it() {
     let mut app = super::tests::app(&["showcase.md"]);
-    let rows = crate::settings::rows(&app.ws, false);
+    let rows = crate::settings::rows_of(&crate::settings::pages(&app.ws, false, false));
     let at = |id| rows.iter().position(|r| r.id() == Some(id));
     if cfg!(windows) {
         assert_eq!(

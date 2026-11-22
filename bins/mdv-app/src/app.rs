@@ -1791,7 +1791,14 @@ fn shot(mut app: App, path: &Path) -> i32 {
         Some(ShotDialog::Shortcuts) => app.open_dialog(DialogKind::Shortcuts),
         Some(ShotDialog::Recent) => app.open_dialog(DialogKind::Recent),
         Some(ShotDialog::Edit) => app.open_dialog(DialogKind::AllowEdit),
-        Some(ShotDialog::Settings) => app.open_settings(),
+        Some(ShotDialog::Settings) => {
+            app.open_settings();
+            if let Some(name) = app.args.settings_section.clone()
+                && !app.show_settings_section(&name)
+            {
+                eprintln!("mdview: no settings page {name}");
+            }
+        }
         None => {}
     }
     if let Some(n) = app.args.outline_focus {

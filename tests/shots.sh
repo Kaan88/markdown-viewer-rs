@@ -75,6 +75,32 @@ shot dialog-settings-640 --light --size 640x800 --dialog settings "$fx/showcase.
 # The Window backdrop row (offered on Windows) with a choice made. A shot has no window, so
 # there is no backdrop to show: the chrome is the flat colours.
 shot dialog-settings-backdrop --dark --backdrop mica --dialog settings "$fx/showcase.md"
+# Settings, every page at the default size and the smallest, in both themes. "tabs-on" is the
+# Tabs page with the brief-tab rule on (its seconds enabled), read from a scratch settings file
+# (a shot reads one named by MDVIEW_SETTINGS and never the user's); "tabs" is the rule off.
+brief="$(mktemp -d)"
+printf '[mdview]\nskip_brief=1\n' >"$brief/settings.ini"
+for page in appearance reading tabs updates tabs-on; do
+    section="${page%-on}"
+    for theme in light dark; do
+        for size in default min; do
+            suffix="-$theme"
+            dims="1280x800"
+            if [ "$size" = min ]; then
+                suffix="-min-$theme"
+                dims="520x360"
+            fi
+            args=(--"$theme" --size "$dims" --dialog settings --settings-section "$section" "$fx/showcase.md")
+            if [ "$page" = tabs-on ]; then
+                MDVIEW_SETTINGS="$brief/settings.ini" "$exe" --scale 1.0 --shot "$out/settings-$page$suffix.png" "${args[@]}"
+            else
+                shot "settings-$page$suffix" "${args[@]}"
+            fi
+        done
+    done
+done
+rm -rf "$brief"
+
 
 # The command palette: tabs and recent files, commands by prefix, headings by prefix.
 shot palette-empty-light --light --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"

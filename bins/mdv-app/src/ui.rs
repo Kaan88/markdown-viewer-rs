@@ -374,7 +374,9 @@ pub struct Ui {
     /// The command palette, while open. Built when it opens, dropped when it closes.
     pub palette: Option<crate::palette::PaletteState>,
     /// The settings dialog, while open.
-    pub settings: Option<mdshared_ui::settings::Form>,
+    pub settings: Option<mdshared_ui::settings::pages::Form>,
+    /// The page the settings dialog last showed this run, where it opens again.
+    pub settings_page: usize,
     /// Raised by every event the palette or the settings dialog handles, so the overlay signature
     /// changes and the frame is drawn again (neither says what changed inside).
     pub overlay_tick: u64,
@@ -422,6 +424,7 @@ impl Ui {
         Ui {
             palette: None,
             settings: None,
+            settings_page: 0,
             overlay_tick: 0,
             panes: Panes {
                 files: true,

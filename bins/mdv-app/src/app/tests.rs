@@ -852,11 +852,12 @@ fn the_settings_form_follows_the_apps_limits() {
     use crate::settings as s;
     use mdshared_ui::settings::Row;
     let a = app(&["showcase.md"]);
-    let rows = s::rows(&a.ws, true);
+    let rows = s::rows_of(&s::pages(&a.ws, true, true));
     let zoom = rows
         .iter()
         .find_map(|r| match r {
             Row::Number {
+                id: s::TEXT_SIZE,
                 min,
                 max,
                 step,
@@ -869,70 +870,211 @@ fn the_settings_form_follows_the_apps_limits() {
     assert_eq!(zoom, (60, 250, 10, "%".to_string()));
 }
 
-/// The dialog is one page: no category list, every control reachable by pointer inside the card
-/// at the default size without scrolling, and inside the window (scrolling, not clipped) at the
-/// minimum size.
-/// Settings has categories, as mdedit's: a list at the default window size (none in a window too
-/// narrow for it), the card no taller than 640 px, and a jump to each category shows its rows.
-#[test]
-fn the_settings_dialog_has_categories_and_fits_the_window() {
-    use mdshared_ui::settings::Row;
-    for (size, nav) in [((1280, 800), true), ((520, 360), false)] {
+/// The pages in the states that make them tallest or change what they say: the default, the
+/// brief-tab rule on (its seconds enabled), an update to install and one installing (the button's
+/// text), each with every row this copy can offer (corners, "Make mdview the default").
+fn settings_states() -> Vec<(&'static str, Vec<mdshared_ui::settings::pages::Page>)> {
+    use crate::settings as s;
+    let mut out = Vec::new();
+    let mut state = |name: &'static str, f: &dyn Fn(&mut App)| {
         let mut a = app(&["showcase.md"]);
-        a.size = size;
-        a.command(C::Settings);
-        a.compose();
-        let f = a.ui.settings.as_mut().expect("the dialog");
-        assert_eq!(f.has_nav(), nav, "the category list at {size:?}");
-        let rows = crate::settings::rows(&a.ws, true);
-        let heads = rows.iter().filter(|r| matches!(r, Row::Header(_))).count();
-        assert!(f.categories().len() >= 4 && f.categories().len() <= heads);
-        let card = f.rect();
-        let win = Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32);
-        assert!(
-            card.x >= 0.0 && card.y >= 0.0 && card.right() <= win.w && card.bottom() <= win.h,
-            "{card:?} inside {win:?}"
-        );
-        assert!(
-            card.h <= 640.0,
-            "slightly shorter than the one page was: {card:?}"
-        );
-        for i in 0..f.rows().len() {
-            if f.rows()[i].id().is_some() {
-                let c = f.control_rect(i);
+        f(&mut a);
+        out.push((name, s::pages(&a.ws, true, true)));
+    };
+    state("the defaults", &|_| {});
+    state("the brief-tab rule on", &|a| a.ws.set_skip_brief(true, 600));
+    state("an update to install", &|a| {
+        a.ws.preview_update("available")
+    });
+    state("an update installing", &|a| {
+        a.ws.preview_update("installing")
+    });
+    out
+}
+
+/// The design's promise, tested as mdedit's is: every page fits its area at the default window
+/// and at the smallest, at scale 1, 1.5 and 2, in each state; nothing on it is cut, and the list
+/// holds every page. Linux's fonts are wider: mdview's own texts keep at least 15 % spare at the
+/// smallest window (measured with Windows' fonts); the tightest ("Looked at for less than", the
+/// window rows, "Make default") are mdedit's too, whose `ci` runs this check on Linux.
+#[test]
+fn every_settings_page_fits_at_the_default_and_the_minimum_at_every_scale() {
+    use crate::settings as s;
+    use mdshared_ui::settings::pages::Form as Pages;
+    let states = settings_states();
+    // Every setting is on a page in some state.
+    let mut seen = std::collections::HashSet::new();
+    for (_, pages) in &states {
+        seen.extend(s::rows_of(pages).iter().filter_map(|r| r.id()));
+    }
+    for id in [
+        s::PAGE_WIDTH,
+        s::TEXT_SIZE,
+        s::THEME,
+        s::REMOTE_IMAGES,
+        s::TICK_BOXES,
+        s::ANIMATIONS,
+        s::CHECK_AT_LAUNCH,
+        s::CHECK_NOW,
+        s::DEFAULT_APP,
+        s::PAGE_FONT,
+        s::CODE_FONT,
+        s::WINDOW_CORNERS,
+        s::PREVIEWS,
+        s::START_ON_PINNED,
+        s::OFFER_STALE,
+        s::SKIP_BRIEF,
+        s::BRIEF_SECS,
+    ]
+    .into_iter()
+    .chain(cfg!(windows).then_some(s::BACKDROP))
+    {
+        assert!(seen.contains(&id), "setting {id} is on no page");
+    }
+    for (name, pages) in states {
+        let names: Vec<&str> = pages.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, s::PAGES, "{name}");
+        let form = Pages::new("Settings", pages);
+        for (w, h) in [(1280.0, 800.0), (520.0, 360.0)] {
+            for scale in [1.0f32, 1.5, 2.0] {
+                let mut bmp = Bitmap::new((w * scale) as u32, (h * scale) as u32);
+                let mut gfx = Gfx::new();
+                let mut p = Painter::new(&mut bmp, &mut gfx, scale);
+                let fit = form.fit(&mut p, Rect::new(0.0, 0.0, w, h));
+                let problems = fit.problems();
                 assert!(
-                    c.x >= card.x && c.right() <= card.right(),
-                    "{i}: {c:?} in {card:?}"
+                    problems.is_empty(),
+                    "{name}, {w}x{h} at {scale}: {problems:#?}"
                 );
             }
         }
     }
 }
 
-/// Tab walks every control once and then the Close button, with no tab strip in between.
+/// Settings is the paged form: the four pages in the list, the card inside the window at the
+/// default size and the smallest, and on every page every control inside the page's area.
 #[test]
-fn tab_in_the_settings_dialog_visits_every_control_and_then_close() {
-    use mdshared_ui::settings::Row;
+fn the_settings_dialog_has_four_pages_and_every_control_inside_the_card() {
+    use crate::settings as s;
+    for size in [(1280, 800), (520, 360)] {
+        let mut a = app(&["showcase.md"]);
+        a.size = size;
+        a.command(C::Settings);
+        a.compose();
+        let win = Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32);
+        for (c, name) in s::PAGES.iter().enumerate() {
+            let f = a.ui.settings.as_ref().expect("the dialog");
+            assert_eq!(f.page_names(), s::PAGES);
+            assert!(a.show_settings_section(name));
+            a.compose();
+            let f = a.ui.settings.as_ref().unwrap();
+            let card = f.rect();
+            assert!(
+                card.x >= 0.0 && card.y >= 0.0 && card.right() <= win.w && card.bottom() <= win.h,
+                "{card:?} inside {win:?}"
+            );
+            assert!(card.w <= 780.0 && card.h <= 420.0, "{card:?}");
+            let area = f.page_rect();
+            let item = f.list_item_rect(c);
+            assert!(item.h > 0.0 && item.bottom() <= card.bottom(), "{item:?}");
+            let page = &f.pages()[c];
+            for it in &page.items {
+                let Some(id) = it.row().id() else { continue };
+                let r = f.control_rect(id);
+                assert!(r.w > 0.0, "{id} is drawn on {}", page.name);
+                assert!(
+                    r.x >= area.x && r.right() <= area.right() + 0.5 && r.bottom() <= area.bottom(),
+                    "{id}: {r:?} in {area:?} at {size:?}"
+                );
+            }
+        }
+    }
+}
+
+/// From the list, Tab walks the page's controls in order, then the close button, then back to
+/// the list; a disabled row is skipped.
+#[test]
+fn tab_in_the_settings_dialog_walks_each_page_then_close_then_the_list() {
     let mut a = app(&["showcase.md"]);
     a.command(C::Settings);
     a.compose();
-    let controls = crate::settings::rows(&a.ws, a.corners_offered())
-        .iter()
-        .filter(|r| !matches!(r, Row::Header(_)))
-        .count();
-    // The first Tab only shows where the focus already is.
-    key(&mut a, KeyName::Tab, None);
-    let mut seen = vec![a.ui.settings.as_ref().unwrap().focus_id()];
-    for _ in 0..controls - 1 {
+    let pages = a.ui.settings.as_ref().unwrap().pages().len();
+    for c in 0..pages {
+        let f = a.ui.settings.as_mut().unwrap();
+        f.show_page(c);
+        assert!(f.focus_in_list());
+        let page = f.pages()[c].clone();
+        let want: Vec<u32> = page
+            .items
+            .iter()
+            .filter(|it| !it.is_disabled())
+            .filter_map(|it| it.row().id())
+            .collect();
+        let mut seen = Vec::new();
+        for _ in 0..want.len() {
+            key(&mut a, KeyName::Tab, None);
+            seen.extend(a.ui.settings.as_ref().unwrap().focus_id());
+        }
+        assert_eq!(seen, want, "{}", page.name);
         key(&mut a, KeyName::Tab, None);
-        seen.push(a.ui.settings.as_ref().unwrap().focus_id());
+        assert!(a.ui.settings.as_ref().unwrap().focus_on_close());
+        key(&mut a, KeyName::Tab, None);
+        assert!(a.ui.settings.as_ref().unwrap().focus_in_list());
     }
-    assert!(seen.iter().all(Option::is_some));
-    seen.sort();
-    seen.dedup();
-    assert_eq!(seen.len(), controls, "each control once");
-    key(&mut a, KeyName::Tab, None);
-    assert!(a.ui.settings.as_ref().unwrap().focus_on_close());
+}
+
+/// The seconds are disabled, with the reason, while their switch is off; turning it on from the
+/// dialog enables them at once, and both values are kept.
+#[test]
+fn the_brief_tab_switch_enables_its_seconds_in_the_open_dialog() {
+    use crate::settings as s;
+    let mut a = app(&["showcase.md"]);
+    assert!(!a.ws.skips_brief().0, "off by default");
+    a.command(C::Settings);
+    a.compose();
+    let f = a.ui.settings.as_mut().unwrap();
+    assert!(
+        !f.focus_row(s::BRIEF_SECS),
+        "disabled while the switch is off"
+    );
+    assert!(f.focus_row(s::SKIP_BRIEF));
+    assert_eq!(f.page_names()[f.page()], s::TABS);
+    key(&mut a, KeyName::Space, None);
+    assert!(a.ws.skips_brief().0);
+    let f = a.ui.settings.as_mut().unwrap();
+    assert!(f.focus_row(s::BRIEF_SECS), "enabled once the switch is on");
+    let secs = a.ws.skips_brief().1;
+    key(&mut a, KeyName::Right, None);
+    assert_eq!(a.ws.skips_brief(), (true, secs + 1));
+}
+
+/// A section names a page, or the group a setting was in before the pages; the dialog opens
+/// again on the page it was closed on.
+#[test]
+fn a_settings_section_shows_its_page_and_the_dialog_reopens_on_it() {
+    use crate::settings as s;
+    assert_eq!(s::page_for_section("Content"), Some(s::READING));
+    assert_eq!(s::page_for_section("page"), Some(s::APPEARANCE));
+    assert_eq!(s::page_for_section("System"), Some(s::UPDATES));
+    assert_eq!(s::page_for_section("tabs"), Some(s::TABS));
+    assert_eq!(s::page_for_section("nonsense"), None);
+    let mut a = app(&["showcase.md"]);
+    assert!(!a.show_settings_section("Tabs"), "no dialog open");
+    a.command(C::Settings);
+    let page = |a: &App| {
+        let f = a.ui.settings.as_ref().expect("the dialog");
+        f.page_names()[f.page()].to_string()
+    };
+    assert_eq!(page(&a), s::APPEARANCE, "the first page the first time");
+    assert!(a.show_settings_section("content"));
+    assert_eq!(page(&a), s::READING);
+    assert!(!a.show_settings_section("nonsense"));
+    assert_eq!(page(&a), s::READING);
+    key(&mut a, KeyName::Escape, None);
+    assert!(a.ui.settings.is_none());
+    a.command(C::Settings);
+    assert_eq!(page(&a), s::READING);
+    assert!(a.ui.settings.as_ref().unwrap().focus_in_list());
 }
 
 #[test]
@@ -1398,14 +1540,21 @@ fn the_window_corners_setting_is_applied_kept_and_offered() {
     use crate::settings as s;
     use mdshared_ui::settings::{Row, Value};
     let mut a = app(&["showcase.md"]);
-    // Round (8) is the default, listed after Theme; Square and Small are the other choices.
+    // Round (8) is the default, listed after Theme and, where it is offered, Window backdrop (the
+    // order mdedit has); Square and Small are the other choices.
     assert_eq!(a.ws.corners(), 8);
-    let rows = s::rows(&a.ws, true);
+    let rows = s::rows_of(&s::pages(&a.ws, true, false));
     let at = rows
         .iter()
         .position(|r| matches!(r, Row::Choice { id, .. } if *id == s::THEME))
         .unwrap();
-    match &rows[at + 1] {
+    let after = if cfg!(windows) {
+        assert_eq!(rows[at + 1].id(), Some(s::BACKDROP));
+        at + 2
+    } else {
+        at + 1
+    };
+    match &rows[after] {
         Row::Choice {
             id,
             label,
@@ -1422,7 +1571,7 @@ fn the_window_corners_setting_is_applied_kept_and_offered() {
     }
     // Left out where nothing can round the window.
     assert!(
-        !s::rows(&a.ws, false)
+        !s::rows_of(&s::pages(&a.ws, false, false))
             .iter()
             .any(|r| matches!(r, Row::Choice { id, .. } if *id == s::WINDOW_CORNERS))
     );

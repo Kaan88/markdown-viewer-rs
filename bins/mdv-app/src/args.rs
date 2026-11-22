@@ -59,6 +59,9 @@ pub struct Args {
     pub scroll: Option<f32>,
     pub menu: Option<ShotMenu>,
     pub dialog: Option<ShotDialog>,
+    /// `--settings-section <page>`: with `--dialog settings`, the page shown (a page's name, as
+    /// it is or with hyphens for spaces, or an old group's name), for a shot.
+    pub settings_section: Option<String>,
     /// `--outline-focus <n>`: the keyboard on row n (from 0) of the Outline pane, for a shot.
     pub outline_focus: Option<usize>,
     /// `--palette <query>`: the command palette open with this text (an empty one is `""`).
@@ -221,6 +224,7 @@ impl Args {
                         _ => None,
                     }
                 }
+                "--settings-section" => out.settings_section = value(&a),
                 // The mark of a restart after an update, read before this (`relaunch::FLAG`).
                 mdshared_app::relaunch::FLAG => {}
                 f if f.starts_with("--") => eprintln!("mdview: ignoring {f}"),
@@ -275,6 +279,8 @@ mod tests {
         let p = parse("--present 2 --present-overview --present-select");
         assert!(p.present_overview && p.present_select && p.present == Some(2));
         assert_eq!(a.dialog, Some(ShotDialog::Settings));
+        let a = parse("--dialog settings --settings-section reading");
+        assert_eq!(a.settings_section.as_deref(), Some("reading"));
     }
 
     #[test]

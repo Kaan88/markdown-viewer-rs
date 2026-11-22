@@ -1,14 +1,16 @@
-//! The settings dialog's rows, from the options the application has today. The form, its
-//! controls and its layout are `mdshared_ui::settings`; each change comes back as an outcome and
-//! is applied (and saved, where the option is saved) by the same `Workspace` setter the menus
-//! used, so there is no second copy of any setting. It is one page: three small headings, no
-//! category list, and it scrolls only in a window too short for it.
+//! The settings dialog's pages, from the options the application has today. The form, its
+//! controls and its layout are `mdshared_ui::settings::pages` (shared with mdedit): a list of
+//! pages at the left, one page at a time at the right, nothing that scrolls. Each change comes
+//! back as an outcome and is applied (and saved, where the option is saved) by the same
+//! `Workspace` setter the menus used, so there is no second copy of any setting. The pages are
+//! made again after every change, so a switch turned off disables the row under it.
 
 use crate::platform;
 use crate::updater;
 use crate::workspace::{ThemeChoice, Workspace};
 use mdshared_ui::corners::{self, Corners};
-use mdshared_ui::settings::{Form, Row};
+use mdshared_ui::settings::Row;
+use mdshared_ui::settings::pages::{Form, Item, Page};
 use mdview_core::session::{PageWidth, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
 
 pub const PAGE_WIDTH: u32 = 1;
@@ -33,6 +35,17 @@ pub const BRIEF_SECS: u32 = 34;
 pub const WIDTHS: [&str; 3] = ["Narrow", "Wide", "Full"];
 pub const THEMES: [&str; 3] = ["System", "Light", "Dark"];
 
+// The pages, in the list's order. Appearance, Tabs and Updates are mdedit's names, in mdedit's
+// order; Reading is mdview's own.
+pub const APPEARANCE: &str = "Appearance";
+pub const READING: &str = "Reading";
+pub const TABS: &str = "Tabs";
+pub const UPDATES: &str = "Updates";
+pub const PAGES: [&str; 4] = [APPEARANCE, READING, TABS, UPDATES];
+
+/// The reason a row under a switch gives while the switch is off (mdedit's words).
+pub const NEEDS_SWITCH: &str = "Needs the switch above.";
+
 pub fn width_index(w: PageWidth) -> usize {
     PageWidth::ALL.iter().position(|&x| x == w).unwrap_or(0)
 }
@@ -53,85 +66,59 @@ pub fn theme_of(i: usize) -> ThemeChoice {
     }
 }
 
-/// The rows. `corners` is whether the window can be rounded here, so the setting is offered: where
-/// the system gives it no way to (X11 without the margin) the row is left out.
-pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
-    let mut rows = vec![
-        Row::header("Page"),
-        Row::choice(
+/// The page a name refers to (`--settings-section`): a page's name in any case, with hyphens for
+/// spaces or not, or the group a setting was in before the pages (`Page`, `Content`, `System`).
+pub fn page_for_section(name: &str) -> Option<&'static str> {
+    let key = name.trim().to_ascii_lowercase().replace('-', " ");
+    if let Some(p) = PAGES.iter().find(|p| p.to_ascii_lowercase() == key) {
+        return Some(p);
+    }
+    Some(match key.as_str() {
+        "page" | "view" => APPEARANCE,
+        "content" | "content and tabs" => READING,
+        "session" => TABS,
+        "system" => UPDATES,
+        _ => return None,
+    })
+}
+
+/// The pages. `corners` is whether the window can be rounded here, so the setting is offered:
+/// where the system gives it no way to (X11 without the margin) the row is left out.
+/// `offer_default` adds "Make mdview the default" to Updates (an AppImage that is not yet).
+pub fn pages(ws: &Workspace, corners: bool, offer_default: bool) -> Vec<Page> {
+    let mut appearance = vec![
+        Item::new(Row::choice(
             PAGE_WIDTH,
             "Page width",
             &WIDTHS,
             width_index(ws.page_width()),
+        )),
+        Item::new(
+            Row::number(
+                TEXT_SIZE,
+                "Text size",
+                ws.zoom() as i32,
+                ZOOM_MIN as i32,
+                ZOOM_MAX as i32,
+            )
+            .step(ZOOM_STEP as i32)
+            .unit("%"),
         ),
-        Row::number(
-            TEXT_SIZE,
-            "Text size",
-            ws.zoom() as i32,
-            ZOOM_MIN as i32,
-            ZOOM_MAX as i32,
-        )
-        .step(ZOOM_STEP as i32)
-        .unit("%"),
-        Row::choice(THEME, "Theme", &THEMES, theme_index(ws.theme_choice())),
-        Row::text(PAGE_FONT, "Page font", ws.page_font()).placeholder("Default"),
-        Row::text(CODE_FONT, "Code font", ws.code_font()).placeholder("Default"),
-        // Categories, as mdedit's: a list at the left, the groups in one scrolled body.
-        Row::header("Content"),
-        Row::toggle(
-            REMOTE_IMAGES,
-            "Always load remote images",
-            ws.remote_always(),
-        ),
-        Row::toggle(
-            TICK_BOXES,
-            "Tick task boxes without asking",
-            ws.edit_always(),
-        ),
-        Row::toggle(ANIMATIONS, "Play animated images", ws.animations()),
-        Row::toggle(
-            PREVIEWS,
-            "Preview footnotes and links on hover",
-            ws.previews(),
-        ),
-        Row::header("Tabs"),
-        Row::toggle(
-            OFFER_STALE,
-            "Offer to close tabs not opened in a week",
-            ws.offers_stale(),
-        ),
-        Row::toggle(SKIP_BRIEF, mdshared_app::brief::SWITCH, ws.skips_brief().0)
-            .help("At start. Pinned tabs and the tab you left on always come back."),
-        Row::number(
-            BRIEF_SECS,
-            mdshared_app::brief::SECONDS,
-            ws.skips_brief().1 as i32,
-            mdshared_app::brief::SECS_MIN as i32,
-            mdshared_app::brief::SECS_MAX as i32,
-        )
-        .unit("seconds")
-        .help(mdshared_app::brief::SECONDS_HELP),
-        Row::toggle(
-            START_ON_PINNED,
-            "Start on the last pinned tab",
-            ws.start_on_pinned(),
-        ),
-        // The About dialog offers both unconditionally (a copy that cannot update itself says so
-        // when asked), so this does too.
-        Row::header("Updates"),
-        Row::toggle(
-            CHECK_AT_LAUNCH,
-            "Check for updates at launch",
-            ws.checks_updates(),
-        ),
-        Row::action(CHECK_NOW, "Look for a newer version", check_now_label(ws)),
+        Item::new(Row::text(PAGE_FONT, "Page font", ws.page_font()).placeholder("Default")),
+        Item::new(Row::text(CODE_FONT, "Code font", ws.code_font()).placeholder("Default")),
+        // The window rows in mdedit's order: Theme, Window backdrop, Window corners.
+        Item::new(Row::choice(
+            THEME,
+            "Theme",
+            &THEMES,
+            theme_index(ws.theme_choice()),
+        )),
     ];
-    // The backdrop is Windows 11's: the row is offered, under the theme, where it can do something.
+    // The backdrop is Windows 11's: the row is offered where it can do something.
     #[cfg(windows)]
-    if let Some(at) = rows.iter().position(|r| r.id() == Some(THEME)) {
+    {
         use mdshared_app::backdrop::Backdrop;
-        rows.insert(
-            at + 1,
+        appearance.push(Item::new(
             Row::choice(
                 BACKDROP,
                 Backdrop::TITLE,
@@ -139,16 +126,10 @@ pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
                 ws.backdrop().index(),
             )
             .help(Backdrop::HELP),
-        );
+        ));
     }
     if corners {
-        // After Theme, in the Page group.
-        let at = rows
-            .iter()
-            .position(|r| matches!(r, Row::Choice { id, .. } if *id == THEME))
-            .map_or(rows.len(), |i| i + 1);
-        rows.insert(
-            at,
+        appearance.push(Item::new(
             Row::choice(
                 WINDOW_CORNERS,
                 Corners::SETTING_LABEL,
@@ -156,27 +137,129 @@ pub fn rows(ws: &Workspace, corners: bool) -> Vec<Row> {
                 Corners::from_setting(ws.corners()).index(),
             )
             .help(corners::setting_help()),
-        );
-    }
-    if platform::can_offer_default_app() {
-        rows.push(Row::header("System"));
-        rows.push(Row::action(
-            DEFAULT_APP,
-            "Make mdview the default for Markdown files",
-            "Make default",
         ));
     }
-    rows
+
+    let reading = vec![
+        Item::new(Row::toggle(
+            REMOTE_IMAGES,
+            "Always load remote images",
+            ws.remote_always(),
+        )),
+        Item::new(Row::toggle(
+            TICK_BOXES,
+            "Tick task boxes without asking",
+            ws.edit_always(),
+        )),
+        Item::new(Row::toggle(
+            ANIMATIONS,
+            "Play animated images",
+            ws.animations(),
+        )),
+        Item::new(Row::toggle(
+            PREVIEWS,
+            "Preview footnotes and links on hover",
+            ws.previews(),
+        )),
+    ];
+
+    // The seconds are a child of their switch, disabled with the reason while it is off. The
+    // help lines are the design's shorter wording, one line each at the smallest window.
+    let (skip, secs) = ws.skips_brief();
+    let seconds = Item::new(
+        Row::number(
+            BRIEF_SECS,
+            mdshared_app::brief::SECONDS,
+            secs as i32,
+            mdshared_app::brief::SECS_MIN as i32,
+            mdshared_app::brief::SECS_MAX as i32,
+        )
+        .unit("sec")
+        .help("Counted only while in front."),
+    )
+    .child();
+    let tabs = vec![
+        Item::new(Row::toggle(
+            START_ON_PINNED,
+            "Start on the last pinned tab",
+            ws.start_on_pinned(),
+        )),
+        Item::new(Row::toggle(
+            OFFER_STALE,
+            "Offer to close tabs not opened in a week",
+            ws.offers_stale(),
+        )),
+        Item::new(
+            Row::toggle(SKIP_BRIEF, mdshared_app::brief::SWITCH, skip)
+                .help("Pinned tabs and the tab you left on always come back."),
+        ),
+        if skip {
+            seconds
+        } else {
+            seconds.disabled(NEEDS_SWITCH)
+        },
+    ];
+
+    // The About dialog offers both unconditionally (a copy that cannot update itself says so
+    // when asked), so this does too.
+    let mut updates = vec![
+        Item::new(Row::toggle(
+            CHECK_AT_LAUNCH,
+            "Check for updates at launch",
+            ws.checks_updates(),
+        )),
+        Item::new(Row::action(
+            CHECK_NOW,
+            "Look for a newer version",
+            check_now_label(ws),
+        )),
+    ];
+    if offer_default {
+        // The main menu's old label does not fit beside the button at the smallest window.
+        updates.push(Item::new(
+            Row::action(DEFAULT_APP, "Make mdview the default", "Make default")
+                .help("For Markdown files."),
+        ));
+    }
+
+    vec![
+        Page::new(APPEARANCE, appearance),
+        Page::new(READING, reading),
+        Page::new(TABS, tabs),
+        Page::new(UPDATES, updates),
+    ]
 }
 
-/// "Check now", or what the About dialog's button would say when there is something to install.
+/// Every setting and action row of `pages`, in order: what a test reads.
+#[cfg(test)]
+pub fn rows_of(pages: &[Page]) -> Vec<Row> {
+    pages
+        .iter()
+        .flat_map(|p| p.items.iter())
+        .map(|it| it.row().clone())
+        .filter(|r| r.id().is_some())
+        .collect()
+}
+
+/// The button's text: "Check now", "Update" when there is something to install (the About box's
+/// "Update to 1.4.0" in fewer words, beside a label that says the rest: the button is 96 px), or
+/// what the About box says while it installs.
 fn check_now_label(ws: &Workspace) -> String {
     match ws.update_stage() {
-        updater::Stage::Available(_) | updater::Stage::Installing(_) => ws.update_label(),
+        updater::Stage::Available(_) => "Update".to_string(),
+        updater::Stage::Installing(_) => ws.update_label(),
         _ => "Check now".to_string(),
     }
 }
 
-pub fn form(ws: &Workspace, corners: bool) -> Form {
-    Form::new("Settings", rows(ws, corners))
+/// The pages as this copy offers them.
+pub fn pages_here(ws: &Workspace, corners: bool) -> Vec<Page> {
+    pages(ws, corners, platform::can_offer_default_app())
+}
+
+/// The dialog on page `page` (the one last shown this run), the keyboard in the list.
+pub fn form(ws: &Workspace, corners: bool, page: usize) -> Form {
+    let mut f = Form::new("Settings", pages_here(ws, corners));
+    f.show_page(page);
+    f
 }
