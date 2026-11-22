@@ -11,6 +11,57 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Settings as pages, as mdedit's (2026-11-22, branch `f/settings-pages`, not merged)
+
+The settings redesign the owner approved for both apps (mdedit `docs/settings-redesign.md` on
+`mock/settings`, its `view-*` pictures; mdedit D-086, D-087, D-090): the dialog is the shared paged
+form `mdshared_ui::settings::pages::Form`, as mdedit's since D-090. A list of pages at the left,
+one page at the right, a 40 px header with a close button, no footer, nothing that scrolls. The
+card is the window less 6 px each side, at most 780 x 420.
+- Shared moved from `cb0ffd3` to `be0192d` (mdshared-app, -fetch, -highlight, -text, -ui; no new
+  crate in `Cargo.lock`), alone in its own commit. `tests/shots.sh` before and after: all 118
+  pictures byte-identical.
+- Four pages (`settings::pages`), every setting under its old id and stored as before:
+  **Appearance** Page width, Text size, Page font, Code font, Theme, Window backdrop (Windows),
+  Window corners (where offered); **Reading** (was "Content") Always load remote images, Tick task
+  boxes without asking, Play animated images, Preview footnotes and links on hover; **Tabs** Start
+  on the last pinned tab, Offer to close tabs not opened in a week, Don't reopen tabs barely looked
+  at, and under it Looked at for less than (a child, disabled with "Needs the switch above." while
+  the switch is off); **Updates** Check for updates at launch, Look for a newer version, and on an
+  AppImage that is not yet the default, Make mdview the default (was its own "System" group).
+- Reworded, as in the design, to be one line at 520 x 360: the brief switch's help "Pinned tabs
+  and the tab you left on always come back." (no "At start."); the seconds' unit "sec" and help
+  "Counted only while in front."; the update button "Update" when there is one (the About box says
+  "Update to 1.4.0"; the button is 96 px).
+- The dialog opens on the page it last showed this run, the keyboard in the list.
+  `--settings-section <page>` (with `--dialog settings`, for shots) shows a page by name, with
+  hyphens or not, or by the old group's name (Page, Content, System).
+- The pages are made again when the brief switch changes, so its seconds are enabled at once.
+- Tests: `every_settings_page_fits_at_the_default_and_the_minimum_at_every_scale` (1280x800 and
+  520x360, scales 1, 1.5, 2; the defaults, the rule on, an update available and installing),
+  `the_settings_dialog_has_four_pages_and_every_control_inside_the_card`,
+  `tab_in_the_settings_dialog_walks_each_page_then_close_then_the_list`,
+  `the_brief_tab_switch_enables_its_seconds_in_the_open_dialog`,
+  `a_settings_section_shows_its_page_and_the_dialog_reopens_on_it`. They replace
+  `the_settings_dialog_has_categories_and_fits_the_window` and
+  `tab_in_the_settings_dialog_visits_every_control_and_then_close`.
+- Shots: `settings-<page>-<light|dark>` at 1280x800 and `settings-<page>-min-<light|dark>` at
+  520x360 for appearance, reading, tabs (rule off), tabs-on (from a scratch `MDVIEW_SETTINGS`)
+  and updates; the older `dialog-settings-*` shots now show Appearance. Looked at in both themes
+  at both sizes; they match the design's `view-*` pictures.
+- Also reworded: the AppImage row "Make mdview the default for Markdown files" is cut beside its
+  button at 520 x 360; it is "Make mdview the default", help "For Markdown files.".
+- Linux's fonts are wider and nothing here ran on Linux. mdview's own texts keep at least 15 %
+  spare at 520 x 360 with Windows' fonts; the tight ones ("Looked at for less than", "Make
+  default", the window rows) are the same texts in the same columns as mdedit's, whose `ci` runs
+  the same fit check on Linux.
+- Budgets (Windows, 11 interleaved runs, `--no-session`, showcase.md, window off-screen, the PC
+  busy with other builds, so the absolute figures are high): window shown 451.5 ms before (1.0.4
+  main) / 432.7 ms after, private memory at 3 s 25.3 / 25.3 MiB; the pin move alone 397.7 / 399.1
+  ms, 25.3 / 25.2 MiB. The exe grows 64 KiB. The form is built when Settings opens: nothing on
+  the launch, scroll or idle path. Scroll was not measured.
+- Not done: the owner has not seen it; nothing run on Linux or macOS; not merged.
+
 ## Shared with mdedit: brief tabs, the folder lock, the session read (2026-11-21, `f/brief-tabs`)
 
 The owner: the apps are sisters and more may join; what they can share goes in markdown-shared-rs.
