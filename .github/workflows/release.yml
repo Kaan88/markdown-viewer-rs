@@ -267,6 +267,21 @@ jobs:
           # The macOS builds read a manifest of their own.
           packaging/macos/write-manifest.sh mdview Kaan88/markdown-viewer-rs "$VERSION" "$(cat notes/notes-line.txt)" "$all" \
             "$all/mdview-$VERSION-macos-aarch64.zip" "$all/mdview-$VERSION-macos-x86_64.zip"
+      - name: hub.txt (for Hub), checked
+        shell: pwsh
+        run: |
+          $all = 'target/release-files-all'
+          $v = $env:VERSION
+          tools/write-hub-txt.ps1 -App mdview -Repo markdown-viewer-rs -Version $v `
+            -Notes (Get-Content notes/notes-line.txt -Raw) `
+            -Kind files -Exe mdview.exe -Uninstall '{B7E2F4A9-3D1C-4C58-A6E0-91D5C8F27B34}_is1' `
+            -Wait mdview-engine.exe `
+            -Files @(
+              @{ Name = 'mdview.exe'; Path = "$all/mdview.exe" },
+              @{ Name = 'mdview-engine.exe'; Path = "$all/mdview-engine.exe" },
+              @{ Name = "mdview-setup-$v.exe"; Role = 'setup'; Path = "$all/mdview-setup-$v.exe"; Silent = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART'; Scope = 'user' }
+            ) -Out "$all/hub.txt"
+          Get-Content "$all/hub.txt"
       - name: The manifest test, run against the assembled folder
         run: cargo test --release -p mdview the_release_scripts_write_a_manifest_this_build_reads -- --nocapture
       - name: Create the GitHub release
@@ -278,7 +293,7 @@ jobs:
             "mdview-$VERSION-linux-x86_64.AppImage" "mdview-$VERSION-linux-x86_64.tar.gz" \
             "mdview_${VERSION}_amd64.deb" "mdview-$VERSION-1.x86_64.rpm" PKGBUILD \
             mdview.exe mdview-engine.exe "mdview-$VERSION-windows-x86_64.zip" \
-            "mdview-setup-$VERSION.exe" "mdview-update.txt" \
+            "mdview-setup-$VERSION.exe" "mdview-update.txt" "hub.txt" \
             "mdview-$VERSION-macos-aarch64.zip" "mdview-$VERSION-macos-x86_64.zip" "mdview-update-macos.txt" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "mdview $VERSION" \
             --notes-file "$GITHUB_WORKSPACE/notes/release-notes.md" --latest
