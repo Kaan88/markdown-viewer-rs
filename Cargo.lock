@@ -1639,7 +1639,7 @@ dependencies = [
 [[package]]
 name = "mdshared-app"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=cb0ffd3c8e030f7b4f5b3fd5c4c46672ef525450#cb0ffd3c8e030f7b4f5b3fd5c4c46672ef525450"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=be0192d4122d36f6bda4c039fac0cfbf1089b2ba#be0192d4122d36f6bda4c039fac0cfbf1089b2ba"
 dependencies = [
  "notify",
  "windows-sys 0.59.0",
@@ -1648,7 +1648,7 @@ dependencies = [
 [[package]]
 name = "mdshared-fetch"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=cb0ffd3c8e030f7b4f5b3fd5c4c46672ef525450#cb0ffd3c8e030f7b4f5b3fd5c4c46672ef525450"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=be0192d4122d36f6bda4c039fac0cfbf1089b2ba#be0192d4122d36f6bda4c039fac0cfbf1089b2ba"
 dependencies = [
  "libloading",
  "windows-sys 0.59.0",
@@ -1657,7 +1657,7 @@ dependencies = [
 [[package]]
 name = "mdshared-highlight"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=cb0ffd3c8e030f7b4f5b3fd5c4c46672ef525450#cb0ffd3c8e030f7b4f5b3fd5c4c46672ef525450"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=be0192d4122d36f6bda4c039fac0cfbf1089b2ba#be0192d4122d36f6bda4c039fac0cfbf1089b2ba"
 dependencies = [
  "syntect",
 ]
@@ -1665,7 +1665,7 @@ dependencies = [
 [[package]]
 name = "mdshared-text"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=cb0ffd3c8e030f7b4f5b3fd5c4c46672ef525450#cb0ffd3c8e030f7b4f5b3fd5c4c46672ef525450"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=be0192d4122d36f6bda4c039fac0cfbf1089b2ba#be0192d4122d36f6bda4c039fac0cfbf1089b2ba"
 dependencies = [
  "parley",
  "png",
@@ -1675,7 +1675,7 @@ dependencies = [
 [[package]]
 name = "mdshared-ui"
 version = "0.1.0"
-source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=cb0ffd3c8e030f7b4f5b3fd5c4c46672ef525450#cb0ffd3c8e030f7b4f5b3fd5c4c46672ef525450"
+source = "git+https://github.com/Kaan88/markdown-shared-rs?rev=be0192d4122d36f6bda4c039fac0cfbf1089b2ba#be0192d4122d36f6bda4c039fac0cfbf1089b2ba"
 dependencies = [
  "arboard",
  "mdshared-app",
@@ -3383,7 +3383,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a253edfdea34032da21af84e16fcc94f4c7a6ba237f9f3bc2dbf43cea8535c44"
 dependencies = [
- "base64 0.23.1",
+ "base64 0.22.1",
  "nohash-hasher",
  "num-traits",
  "serde_core",
