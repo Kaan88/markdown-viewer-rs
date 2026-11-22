@@ -3743,3 +3743,39 @@ fn the_editor_is_sent_closed_for_its_tab_when_it_closes() {
     unsafe { std::env::remove_var("MD_SISTER_MDEDIT_SETTINGS") };
     _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn closing_the_window_tells_the_editor_of_every_tab_it_asked_for() {
+    let _one = EDITOR_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = std::env::temp_dir().join(format!("mdview-closing-send-{}", std::process::id()));
+    let settings = dir.join("editor").join("settings.ini");
+    let rx = mdshared_app::single::listen_requests_waking("mdedit", &settings, || {}).unwrap();
+    // SAFETY: as in the tests above.
+    unsafe { std::env::set_var("MD_SISTER_MDEDIT_SETTINGS", &settings) };
+    let mut a = app(&["tables.md"]);
+    let showcase = fixture("showcase.md");
+    a.handed_over(vec![Request {
+        from: Some("mdedit".into()),
+        ..Request::new(&showcase)
+    }]);
+    a.compose();
+    // The window closes with the tab still open: the editor is told before the process ends,
+    // the window having waited for it.
+    a.closing();
+    let r = rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+    let canonical = mdview_core::files::canonical_or_absolute;
+    assert!(r.closed && r.follow && canonical(&r.path) == canonical(&showcase));
+    // Nothing about tables.md, which it did not ask for, and nothing more however the window
+    // ends after.
+    a.tell_editor_closed();
+    assert!(
+        a.tell_editor_all_closed(std::time::Duration::ZERO),
+        "nothing left to tell"
+    );
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(300))
+            .is_err()
+    );
+    unsafe { std::env::remove_var("MD_SISTER_MDEDIT_SETTINGS") };
+    _ = std::fs::remove_dir_all(&dir);
+}

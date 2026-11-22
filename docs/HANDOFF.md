@@ -2573,7 +2573,15 @@ while the viewer runs, which `alive` cannot see.
   while any is remembered, one that no tab shows any more (closed in whatever way) is forgotten and
   the editor is sent a `closed` for it, on a helper thread. Nothing is remembered, checked or sent
   for tabs the user opened. An older editor does nothing with the message.
+- **The whole window closing** (`App::closing`, from `finish`, as `CloseRequested` or any other
+  exit ends the loop): every tab the editor asked for and still open is sent a `closed`
+  (`tell_editor_all_closed`), and the window waits for that at most `EDITOR_CLOSE_WAIT` (500 ms)
+  before the process ends. The listener answers until the process ends, so without this the
+  editor's `alive` check, made when closing this window hands it the focus, could find this
+  window still there (the editor also asks once more a second later).
 - Tests in `app/tests.rs`: `closing_a_tab_the_editor_asked_for_tells_the_editor_once`,
   `closing_the_tab_of_the_editors_document_without_a_file_tells_it_by_name`,
-  `the_editor_is_sent_closed_for_its_tab_when_it_closes`; each fails with its part taken out.
+  `the_editor_is_sent_closed_for_its_tab_when_it_closes`,
+  `closing_the_window_tells_the_editor_of_every_tab_it_asked_for`; each fails with its part
+  taken out.
 

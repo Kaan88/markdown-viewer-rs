@@ -66,6 +66,9 @@ mod tests;
 const SCROLLBAR_EDGE: f32 = 3.0;
 /// The editor, as the hand-off names it.
 const EDITOR: &str = "mdedit";
+/// How long a closing window waits for the editor to be told of the tabs it asked for: the
+/// process ends after it, and its listener with it.
+const EDITOR_CLOSE_WAIT: Duration = Duration::from_millis(500);
 const TIP_DELAY: Duration = Duration::from_millis(500);
 const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
@@ -416,13 +419,21 @@ impl App {
         if event_loop.exiting() {
             return;
         }
+        self.closing();
+        event_loop.exit();
+    }
+
+    /// What the window does as it closes, before the loop stops: its size and the session are
+    /// saved, and the editor is told that every tab it asked for is closed with it (its
+    /// previews end now, not when it next finds this process gone).
+    fn closing(&mut self) {
         if !self.leave_side_by_side() {
             self.save_size();
         }
         if let Err(e) = self.ws.save_session() {
             eprintln!("mdview: could not save the session: {e}");
         }
-        event_loop.exit();
+        self.tell_editor_all_closed(EDITOR_CLOSE_WAIT);
     }
 
     fn redraw(&mut self) {

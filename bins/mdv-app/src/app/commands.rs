@@ -903,16 +903,31 @@ impl App {
         self.editor_shown.retain(|(path, doc)| {
             let shown = ws.shows(path, doc.as_deref());
             if !shown {
-                closed.push(Request {
-                    closed: true,
-                    doc: doc.clone(),
-                    from: Some("mdview".into()),
-                    ..Request::new(path)
-                });
+                closed.push(closed_request(path, doc.clone()));
             }
             shown
         });
         closed
+    }
+
+    /// The window closes: the editor is told that every tab it asked for is closed, and this
+    /// waits for that at most `wait`, as the process ends after it. Nothing is sent, and nothing
+    /// waited for, while the editor asked for none. Whether everything was told in time.
+    pub(super) fn tell_editor_all_closed(&mut self, wait: std::time::Duration) -> bool {
+        let closed: Vec<Request> = (self.editor_shown.drain(..))
+            .map(|(path, doc)| closed_request(&path, doc))
+            .collect();
+        if closed.is_empty() {
+            return true;
+        }
+        let (done, told) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for request in &closed {
+                mdshared_app::sister::send(EDITOR, request);
+            }
+            _ = done.send(());
+        });
+        told.recv_timeout(wait).is_ok()
     }
 
     /// Moves and resizes the window to `rect` (physical screen px), or says it cannot be done.
@@ -1485,5 +1500,15 @@ pub(super) fn unplace_request() -> Request {
         unplace: true,
         from: Some("mdview".into()),
         ..Request::default()
+    }
+}
+
+/// `closed`, from this window to the editor, for the file `path` or its document `doc`.
+fn closed_request(path: &Path, doc: Option<String>) -> Request {
+    Request {
+        closed: true,
+        doc,
+        from: Some("mdview".into()),
+        ..Request::new(path)
     }
 }
