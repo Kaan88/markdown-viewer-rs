@@ -11,9 +11,19 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## Settings as pages, as mdedit's (2026-11-22, branch `f/settings-pages`, not merged)
+## On `main`, not released: 1.0.5 (2026-11-23)
 
-The settings redesign the owner approved for both apps (mdedit `docs/settings-redesign.md` on
+`docs/release-notes/1.0.5.md` is the list. Since 1.0.4: Settings as pages (below, merged 2026-11-22);
+a tab mdedit asked to show, closed here, is reported to mdedit with `?closed`, and closing the window
+reports every such tab, waiting at most 500 ms (mdedit D-097); a version resource in `mdview.exe` and a
+`hub.txt` in each release, for Hub (`Kaan88/mdhub`; PR #7, merged 2026-11-23); the seconds under
+"Don't reopen tabs barely looked at" read "Shown for less than", because the shared label needed
+145 px of the row's 139 with Linux's fonts and `ci` failed there (mdedit D-099). The shared crates are
+pinned at `09c67cd`. No release until the owner says so.
+
+## Settings as pages, as mdedit's (2026-11-22, merged)
+
+The settings redesign the owner approved for both apps (mdedit `docs/archive/settings-redesign.md`, and
 `mock/settings`, its `view-*` pictures; mdedit D-086, D-087, D-090): the dialog is the shared paged
 form `mdshared_ui::settings::pages::Form`, as mdedit's since D-090. A list of pages at the left,
 one page at the right, a 40 px header with a close button, no footer, nothing that scrolls. The
