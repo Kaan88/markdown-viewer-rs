@@ -23,9 +23,23 @@ fn main() {
     let icon = manifest.join("../../assets/mdview.ico");
     let script = out.join("mdview.rc");
     let res = out.join("mdview.res");
-    // Resource 1 is the icon Explorer and the taskbar show.
+    // Resource 1 is the icon Explorer and the taskbar show. The version resource is what Hub (and
+    // Explorer's Details tab) reads to learn which version this exe is; it follows Cargo's version.
+    let (major, minor, patch) = (
+        std::env::var("CARGO_PKG_VERSION_MAJOR").unwrap_or_default(),
+        std::env::var("CARGO_PKG_VERSION_MINOR").unwrap_or_default(),
+        std::env::var("CARGO_PKG_VERSION_PATCH").unwrap_or_default(),
+    );
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    let numeric = format!("{major},{minor},{patch},0");
     let text = format!(
-        "1 ICON \"{}\"\n",
+        "1 ICON \"{}\"\n\
+         1 VERSIONINFO\nFILEVERSION {numeric}\nPRODUCTVERSION {numeric}\nFILEOS 0x40004\nFILETYPE 0x1\n{{\n\
+         BLOCK \"StringFileInfo\" {{ BLOCK \"040904B0\" {{\n\
+         VALUE \"CompanyName\", \"Kaan88\"\nVALUE \"FileDescription\", \"mdview\"\n\
+         VALUE \"FileVersion\", \"{version}\"\nVALUE \"ProductVersion\", \"{version}\"\n\
+         VALUE \"InternalName\", \"mdview\"\nVALUE \"OriginalFilename\", \"mdview.exe\"\nVALUE \"ProductName\", \"mdview\"\n\
+         }} }}\nBLOCK \"VarFileInfo\" {{ VALUE \"Translation\", 0x0409, 0x04B0 }}\n}}\n",
         icon.display().to_string().replace('\\', "/")
     );
     if std::fs::write(&script, text).is_err() {
