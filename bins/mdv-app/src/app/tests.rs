@@ -895,7 +895,7 @@ fn settings_states() -> Vec<(&'static str, Vec<mdshared_ui::settings::pages::Pag
 /// The design's promise, tested as mdedit's is: every page fits its area at the default window
 /// and at the smallest, at scale 1, 1.5 and 2, in each state; nothing on it is cut, and the list
 /// holds every page. Linux's fonts are wider: mdview's own texts keep at least 15 % spare at the
-/// smallest window (measured with Windows' fonts); the tightest ("Looked at for less than", the
+/// smallest window (measured with Windows' fonts); the tightest ("Shown for less than", the
 /// window rows, "Make default") are mdedit's too, whose `ci` runs this check on Linux.
 #[test]
 fn every_settings_page_fits_at_the_default_and_the_minimum_at_every_scale() {

@@ -84,6 +84,11 @@ pub fn page_for_section(name: &str) -> Option<&'static str> {
 
 /// The pages. `corners` is whether the window can be rounded here, so the setting is offered:
 /// where the system gives it no way to (X11 without the margin) the row is left out.
+/// The seconds' label under "Don't reopen tabs barely looked at". Shorter than the shared
+/// `brief::SECONDS` ("Looked at for less than"), which needs 145 px of the row's 139 with Linux's
+/// fonts at the smallest window.
+const BRIEF_SECS_LABEL: &str = "Shown for less than";
+
 /// `offer_default` adds "Make mdview the default" to Updates (an AppImage that is not yet).
 pub fn pages(ws: &Workspace, corners: bool, offer_default: bool) -> Vec<Page> {
     let mut appearance = vec![
@@ -169,7 +174,7 @@ pub fn pages(ws: &Workspace, corners: bool, offer_default: bool) -> Vec<Page> {
     let seconds = Item::new(
         Row::number(
             BRIEF_SECS,
-            mdshared_app::brief::SECONDS,
+            BRIEF_SECS_LABEL,
             secs as i32,
             mdshared_app::brief::SECS_MIN as i32,
             mdshared_app::brief::SECS_MAX as i32,
