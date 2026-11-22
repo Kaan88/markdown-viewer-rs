@@ -2555,3 +2555,25 @@ sends it) sets `App::exit`, but the window goes only at the next event (a pointe
 is enough). Measured on the `main` build: still open 8 s after the request, gone right after a
 posted pointer move. mdedit does not have this: its `CloseRequested` also asks for a frame
 (`self.redraw()`), which is probably all mdview needs in `window_event`.
+
+## The editor is told when its tab closes (2026-11-22, branch `fix/viewer-closed`, not merged)
+
+Owner report of 2026-11-22: mdedit kept showing its preview as running after mdview was closed.
+The editor's side (a viewer closed or crashed is found with `sister::alive` when its window gains
+focus or a menu opens) is in mdedit's `docs/DESIGN.md`, section 54. This side covers a tab closed
+while the viewer runs, which `alive` cannot see.
+
+- **Shared**: `Request::closed`, the option `?closed` (SISTER.md, "A view closed"), a `follow`
+  with the file's `?path=` or the document's `?doc=`; delivered whatever is on disk, never to a
+  paths-only listener.
+- **mdview** (`App::editor_shown`; `editor_asked`, `editor_closed`, `tell_editor_closed`,
+  `started_by_editor` in `app/commands.rs`). The tabs the editor asked for are remembered: an
+  opening `from=mdedit` (over the port, or the launch that started this window), a document opened
+  by `?open`, which becomes its file's when the editor says it was saved. Each pass of the loop,
+  while any is remembered, one that no tab shows any more (closed in whatever way) is forgotten and
+  the editor is sent a `closed` for it, on a helper thread. Nothing is remembered, checked or sent
+  for tabs the user opened. An older editor does nothing with the message.
+- Tests in `app/tests.rs`: `closing_a_tab_the_editor_asked_for_tells_the_editor_once`,
+  `closing_the_tab_of_the_editors_document_without_a_file_tells_it_by_name`,
+  `the_editor_is_sent_closed_for_its_tab_when_it_closes`; each fails with its part taken out.
+

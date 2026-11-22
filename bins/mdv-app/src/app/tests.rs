@@ -2711,9 +2711,10 @@ fn the_tab_menu_of_an_unsaved_document_asks_the_editor_by_name() {
     assert!(enabled(CommandId::EditInMdedit));
     assert!(!enabled(CommandId::CopyFilePath) && !enabled(CommandId::ShowInFileManager));
     // The editor is asked for the document by the name it gave, at the line being read.
+    let _one = EDITOR_ENV.lock().unwrap_or_else(|e| e.into_inner());
     let settings = dir.join("editor").join("settings.ini");
     let rx = mdshared_app::single::listen_requests_waking("mdedit", &settings, || {}).unwrap();
-    // SAFETY: no other test reads or writes this variable.
+    // SAFETY: the tests that write this variable take `EDITOR_ENV` first; no other reads it.
     unsafe { std::env::set_var("MD_SISTER_MDEDIT_SETTINGS", &settings) };
     a.tab_command(CommandId::EditInMdedit, 1);
     let r = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
@@ -3630,4 +3631,115 @@ fn a_composition_shows_in_the_find_box_and_is_not_typed() {
     a.compose();
     assert_eq!(a.ui.find.text(), "家");
     assert_eq!(a.ui.find.preedit(), None);
+}
+
+/// The `closed` requests waiting for the editor, as (file, document) pairs, and that each says
+/// who it is from and is a live update, which an older editor does nothing with.
+fn told_closed(a: &mut App) -> Vec<(PathBuf, Option<String>)> {
+    let closed = a.editor_closed();
+    for r in &closed {
+        assert!(r.closed && r.from.as_deref() == Some("mdview"));
+        let message = r.encode("mdedit");
+        let lines = message.lines().skip(1).take_while(|l| !l.is_empty());
+        assert!(Request::parse(lines).iter().all(|p| p.follow && p.closed));
+    }
+    closed.into_iter().map(|r| (r.path, r.doc)).collect()
+}
+
+#[test]
+fn closing_a_tab_the_editor_asked_for_tells_the_editor_once() {
+    let mut a = app(&["tables.md"]);
+    let showcase = fixture("showcase.md");
+    let math = fixture("math.md");
+    // The editor's "Preview in mdview" opens a file; another launch opens one too.
+    a.handed_over(vec![Request {
+        line: Some(3),
+        from: Some("mdedit".into()),
+        ..Request::new(&showcase)
+    }]);
+    a.handed_over(vec![Request {
+        line: Some(3),
+        ..Request::new(&math)
+    }]);
+    a.compose();
+    assert_eq!(a.ws.tab_count(), 3);
+    assert!(told_closed(&mut a).is_empty(), "every tab still shows");
+    // Closing tabs the editor did not ask for tells it nothing.
+    let index = |a: &App, name: &str| {
+        let labels = a.ws.labels();
+        labels.iter().position(|l| l.starts_with(name)).unwrap()
+    };
+    a.ws.close(index(&a, "tables"));
+    a.ws.close(index(&a, "math"));
+    assert!(told_closed(&mut a).is_empty());
+    // Closing the editor's: it is told once, naming the file as it gave it.
+    a.ws.close(index(&a, "showcase"));
+    assert_eq!(told_closed(&mut a), [(showcase.clone(), None)]);
+    assert!(told_closed(&mut a).is_empty());
+    // A window the editor's launch started counts its file the same way.
+    let mut b = app(&["showcase.md"]);
+    b.args.from = Some("mdedit".into());
+    b.started_by_editor();
+    b.ws.close(0);
+    assert_eq!(told_closed(&mut b), [(showcase, None)]);
+}
+
+#[test]
+fn closing_the_tab_of_the_editors_document_without_a_file_tells_it_by_name() {
+    let (mut a, dir, _file) = live_app("closed-doc");
+    a.handed_over(vec![shown(DOC, "# Never saved\n", Some(1))]);
+    a.compose();
+    assert!(told_closed(&mut a).is_empty());
+    a.ws.close(a.ws.active().unwrap());
+    assert_eq!(told_closed(&mut a), [(PathBuf::new(), Some(DOC.into()))]);
+    // Saved before it closes: the tab is the file's, and the editor is told the file.
+    a.handed_over(vec![shown(DOC, "# Draft\n", Some(1))]);
+    a.compose();
+    let saved = dir.join("notes.md");
+    std::fs::write(&saved, "# Draft\n").unwrap();
+    a.handed_over(vec![Request {
+        follow: true,
+        doc: Some(DOC.into()),
+        from: Some("mdedit".into()),
+        ..Request::new(&saved)
+    }]);
+    a.compose();
+    assert!(told_closed(&mut a).is_empty(), "the tab shows the file now");
+    a.ws.close(a.ws.active().unwrap());
+    assert_eq!(told_closed(&mut a), [(saved, None)]);
+    _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The tests that point `MD_SISTER_MDEDIT_SETTINGS` somewhere take this first.
+static EDITOR_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn the_editor_is_sent_closed_for_its_tab_when_it_closes() {
+    let _one = EDITOR_ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = std::env::temp_dir().join(format!("mdview-closed-send-{}", std::process::id()));
+    let settings = dir.join("editor").join("settings.ini");
+    let rx = mdshared_app::single::listen_requests_waking("mdedit", &settings, || {}).unwrap();
+    // SAFETY: as in the test above.
+    unsafe { std::env::set_var("MD_SISTER_MDEDIT_SETTINGS", &settings) };
+    let mut a = app(&["tables.md"]);
+    let showcase = fixture("showcase.md");
+    a.handed_over(vec![Request {
+        from: Some("mdedit".into()),
+        ..Request::new(&showcase)
+    }]);
+    a.tell_editor_closed();
+    let quiet = std::time::Duration::from_millis(300);
+    assert!(rx.recv_timeout(quiet).is_err(), "nothing while it shows");
+    let shown = a.ws.labels().iter().position(|l| l.starts_with("showcase"));
+    a.ws.close(shown.unwrap());
+    a.tell_editor_closed();
+    let r = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    // The path may arrive spelled another way; the editor makes it canonical as it does any.
+    let canonical = mdview_core::files::canonical_or_absolute;
+    assert!(r.closed && r.follow && canonical(&r.path) == canonical(&showcase));
+    assert_eq!(r.from.as_deref(), Some("mdview"));
+    a.tell_editor_closed();
+    assert!(rx.recv_timeout(quiet).is_err(), "told once");
+    unsafe { std::env::remove_var("MD_SISTER_MDEDIT_SETTINGS") };
+    _ = std::fs::remove_dir_all(&dir);
 }

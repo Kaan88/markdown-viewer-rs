@@ -64,6 +64,8 @@ mod tests;
 /// Over a vertical scrollbar at the window's right edge the east resize band is only this wide
 /// (px), so the thumb, which starts 3 px in, can be grabbed.
 const SCROLLBAR_EDGE: f32 = 3.0;
+/// The editor, as the hand-off names it.
+const EDITOR: &str = "mdedit";
 const TIP_DELAY: Duration = Duration::from_millis(500);
 const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
@@ -158,6 +160,10 @@ struct App {
     /// What the window was placed for: the file, or the editor's name for a document that has
     /// no file. When no tab shows it any more the arrangement is over.
     placed_for: Option<(std::path::PathBuf, Option<String>)>,
+    /// The files, and the editor's names of documents that have no file, that the editor asked
+    /// this window to show, while a tab shows each. When one is closed the editor is told
+    /// (`closed`), so that its preview of it ends.
+    editor_shown: Vec<(std::path::PathBuf, Option<String>)>,
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
     proxy: Option<EventLoopProxy<Wake>>,
     /// A file or folder dialog is open (off Windows, where it runs beside the window); a second
@@ -268,6 +274,7 @@ impl App {
             window: None,
             tiling: Default::default(),
             placed_for: None,
+            editor_shown: Vec::new(),
             surface: None,
             proxy: None,
             #[cfg(not(windows))]
@@ -1475,6 +1482,7 @@ impl ApplicationHandler<Wake> for App {
             let file = self.args.files.first().cloned().unwrap_or_default();
             self.place(rect, (file, None));
         }
+        self.started_by_editor();
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, wake: Wake) {
@@ -1701,6 +1709,8 @@ impl ApplicationHandler<Wake> for App {
         {
             self.end_side_by_side(true);
         }
+        // A tab the editor asked for is closed: its preview of it is over.
+        self.tell_editor_closed();
         let refining = self.refine_slice();
         let next = self.timers(Instant::now());
         if refining {

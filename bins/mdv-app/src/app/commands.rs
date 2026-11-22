@@ -796,6 +796,12 @@ impl App {
                     continue;
                 }
                 self.ws.document_saved(doc, &request.path);
+                // A document the editor asked for is its file's tab now.
+                for (path, named) in &mut self.editor_shown {
+                    if named.as_deref() == Some(doc) {
+                        (*path, *named) = (request.path.clone(), None);
+                    }
+                }
                 // The window placed for the document stays placed for its file.
                 if let Some((path, named)) = &mut self.placed_for
                     && named.as_deref() == Some(doc)
@@ -810,10 +816,13 @@ impl App {
                 (self.ws).live_text(&request.path, text.clone(), SourcePlace::of(request));
             } else if request.follow {
                 follow = Some(request);
-            } else if self.ws.open(&request.path).is_ok()
-                && let Some(at) = SourcePlace::of(request)
-            {
-                self.ws.scroll_to_line(at);
+            } else if self.ws.open(&request.path).is_ok() {
+                if request.from.as_deref() == Some(EDITOR) {
+                    self.editor_asked(request.path.clone(), None);
+                }
+                if let Some(at) = SourcePlace::of(request) {
+                    self.ws.scroll_to_line(at);
+                }
             }
         }
         if let Some(request) = follow
@@ -843,6 +852,67 @@ impl App {
         let title = request.title.as_deref();
         let text = request.text.clone();
         (self.ws).document_text(doc, title, text, SourcePlace::of(request), request.open);
+        if request.open && self.ws.shows(Path::new(""), Some(doc)) {
+            self.editor_asked(PathBuf::new(), Some(doc.to_string()));
+        }
+    }
+
+    /// A launch of the editor's "Preview in mdview" (`--from mdedit`) started this window: its
+    /// file is one the editor asked for.
+    pub(super) fn started_by_editor(&mut self) {
+        if self.args.from.as_deref() == Some(EDITOR)
+            && let Some(file) = self.args.files.first()
+        {
+            self.editor_asked(file.clone(), None);
+        }
+    }
+
+    /// The editor asked this window to show the file `path`, or its document without a file
+    /// `doc`: when no tab shows it any more, the editor is told ([`editor_closed`]).
+    ///
+    /// [`editor_closed`]: Self::editor_closed
+    pub(super) fn editor_asked(&mut self, path: PathBuf, doc: Option<String>) {
+        let entry = (path, doc);
+        if !self.editor_shown.contains(&entry) {
+            self.editor_shown.push(entry);
+        }
+    }
+
+    /// Tells the editor of the tabs it asked for that are closed, off this thread (a send waits
+    /// for the answer). Nothing runs while none is closed.
+    pub(super) fn tell_editor_closed(&mut self) {
+        let closed = self.editor_closed();
+        if !closed.is_empty() {
+            std::thread::spawn(move || {
+                for request in &closed {
+                    mdshared_app::sister::send(EDITOR, request);
+                }
+            });
+        }
+    }
+
+    /// What to tell the editor about the tabs it asked for that no tab shows any more (closed,
+    /// in whatever way): one `closed` each. They are forgotten here; nothing is asked while
+    /// the editor has asked for none.
+    pub(super) fn editor_closed(&mut self) -> Vec<Request> {
+        if self.editor_shown.is_empty() {
+            return Vec::new();
+        }
+        let ws = &self.ws;
+        let mut closed = Vec::new();
+        self.editor_shown.retain(|(path, doc)| {
+            let shown = ws.shows(path, doc.as_deref());
+            if !shown {
+                closed.push(Request {
+                    closed: true,
+                    doc: doc.clone(),
+                    from: Some("mdview".into()),
+                    ..Request::new(path)
+                });
+            }
+            shown
+        });
+        closed
     }
 
     /// Moves and resizes the window to `rect` (physical screen px), or says it cannot be done.
