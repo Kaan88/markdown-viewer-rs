@@ -104,6 +104,8 @@ pub struct Session {
     /// Tick task boxes in any file without asking first. Off by default: the first tick in a
     /// file then asks.
     pub edit_tasks: bool,
+    /// The reader said yes once to adding a file to the notes library: later adds do not ask.
+    pub library_ok: bool,
     /// Play animated GIF and WebP images. On by default; off shows their first frame.
     pub animations: bool,
     /// The window's corner radius in logical px: 8 (the default), 4 or 0 (square). The shell
@@ -187,6 +189,7 @@ impl Default for Session {
             remote_images: false,
             page_width: PageWidth::default(),
             edit_tasks: false,
+            library_ok: false,
             animations: true,
             corners: CORNERS_DEFAULT,
             previews: true,
@@ -242,6 +245,7 @@ impl Session {
                 "remote_images" => s.remote_images = value.trim() == "1",
                 "page_width" => s.page_width = PageWidth::from_name(value).unwrap_or_default(),
                 "edit_tasks" => s.edit_tasks = value.trim() == "1",
+                "library_ok" => s.library_ok = value.trim() == "1",
                 "animations" => s.animations = value.trim() != "0",
                 "corners" => {
                     s.corners = clean_corners(value.trim().parse().unwrap_or(CORNERS_DEFAULT))
@@ -312,6 +316,10 @@ impl Session {
         line("remote_images", if self.remote_images { "1" } else { "0" });
         line("page_width", self.page_width.name());
         line("edit_tasks", if self.edit_tasks { "1" } else { "0" });
+        // Only once said, so a session that never chose is the file it always was.
+        if self.library_ok {
+            line("library_ok", "1");
+        }
         line("animations", if self.animations { "1" } else { "0" });
         // Only when not the default, so a session that never chose is the file it always was.
         if self.corners != CORNERS_DEFAULT {
@@ -541,6 +549,18 @@ mod window_state_tests {
             !none.contains("pin") && !none.contains("active_tab"),
             "{none}"
         );
+    }
+
+    #[test]
+    fn the_library_yes_is_written_only_once_given_and_round_trips() {
+        let none = Session::default().serialize();
+        assert!(!none.contains("library_ok"), "{none}");
+        let s = Session {
+            library_ok: true,
+            ..Default::default()
+        };
+        assert!(s.serialize().contains("library_ok=1"));
+        assert!(Session::parse(&s.serialize()).library_ok);
     }
 
     #[test]

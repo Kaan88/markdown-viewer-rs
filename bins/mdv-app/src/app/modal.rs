@@ -28,7 +28,12 @@ impl App {
         self.ui.find_focused = false;
         self.ui.dialog = None;
         self.drop_settings();
-        self.ui.palette = Some(PaletteState::open(&self.ws, query));
+        // The notes library is read when the palette first lists it, as the Notes face reads it
+        // when first shown: one read, kept until Refresh or an add.
+        if self.ui.notes.dir.is_some() && self.ui.notes.library().is_none() {
+            self.ui.notes.load();
+        }
+        self.ui.palette = Some(PaletteState::open(&self.ws, Some(&self.ui.notes), query));
         self.caret_reset();
         self.modal_changed();
     }
@@ -268,7 +273,7 @@ impl App {
             Target::Recent(path) => {
                 let _ = self.ws.open_recent(&path);
             }
-            Target::File(path) => {
+            Target::File(path) | Target::Note(path) => {
                 let _ = self.ws.open(&path);
             }
             Target::Heading(block) => {

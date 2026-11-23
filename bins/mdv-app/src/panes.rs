@@ -21,7 +21,7 @@ fn row_fill(c: &mut Ctx, row: Rect, hit: Hit, selected: bool) {
 }
 
 /// The splitter on a pane's inner edge, and the hairline that marks it.
-fn edge(c: &mut Ctx, r: Rect, side: Side, dragging: bool) {
+pub fn edge(c: &mut Ctx, r: Rect, side: Side, dragging: bool) {
     let hot = dragging || c.hover == Some(Hit::Splitter(side));
     let hit = draw_splitter(c.p, c.pal, r, side == Side::Files, hot);
     c.hit(Hit::Splitter(side), hit);
@@ -29,7 +29,10 @@ fn edge(c: &mut Ctx, r: Rect, side: Side, dragging: bool) {
 
 pub fn draw_files(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
     let pal = *c.pal;
-    pane_head(c, r, strings::FILES_DOCK);
+    if ui.notes.on {
+        return crate::notes::draw(c, ws, ui, r);
+    }
+    crate::notes::draw_head_row(c, ui, r, strings::FILES_DOCK);
     let b = Rect::new(r.right() - 38.0, r.y + 6.0, 28.0, 28.0);
     if let Some(fill) = c.fill_for(Hit::FilesFolder, false, false) {
         c.p.rbox(b, 5.0, fill);

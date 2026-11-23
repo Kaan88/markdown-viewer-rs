@@ -74,6 +74,7 @@ pub fn command_icon(id: C) -> &'static str {
         C::MakeDefault => glyph::CHECK,
         C::ExportHtml => glyph::DOWNLOAD,
         C::Print => glyph::OPEN_WITH,
+        C::LibraryAdd => glyph::BOOKMARK,
         C::Escape => "",
     }
 }
@@ -163,14 +164,16 @@ pub fn recent_menu(ws: &Workspace, x: f32, y: f32, align_right: bool) -> Menu<Ac
     Menu::new(items, x, y, align_right)
 }
 
-pub fn tab_menu(ws: &Workspace, index: usize, x: f32, y: f32) -> Menu<Act> {
+/// `library`: there is a notes library to add the file to (a build with none offers no row, so
+/// the menu is what it was).
+pub fn tab_menu(ws: &Workspace, index: usize, library: bool, x: f32, y: f32) -> Menu<Act> {
     let many = ws.tab_count() > 1;
     // A file that could not be read has no page to export.
     let exportable = ws.tab(index).is_some_and(|t| !t.is_missing());
     // A document mdedit has not saved yet has no path to copy and no place to show.
     let has_file = ws.tab(index).is_some_and(|t| !t.is_untitled());
     let pinned = ws.is_pinned(index);
-    let items = vec![
+    let mut items = vec![
         Item::new(
             Act::TabCmd(C::PinTab, index),
             if pinned { "U&npin tab" } else { "Pi&n tab" },
@@ -216,10 +219,22 @@ pub fn tab_menu(ws: &Workspace, index: usize, x: f32, y: f32) -> Menu<Act> {
         .icon(glyph::OPEN_WITH)
         .enabled(exportable),
     ];
+    if library {
+        items.push(
+            Item::new(
+                Act::TabCmd(C::LibraryAdd, index),
+                mark(mdview_core::commands::command(C::LibraryAdd).label, 'l'),
+            )
+            .icon(glyph::BOOKMARK)
+            .enabled(has_file && exportable)
+            .sep(),
+        );
+    }
     Menu::new(items, x, y, false).access_keys(true)
 }
 
-pub fn page_menu(ctx: &PageContext, x: f32, y: f32) -> Menu<Act> {
+/// `library`: there is a notes library to add the file to (a build with none offers no row).
+pub fn page_menu(ctx: &PageContext, library: bool, x: f32, y: f32) -> Menu<Act> {
     let mut items = Vec::new();
     if let Some(link) = &ctx.link {
         items.push(Item::new(Act::OpenLink(link.clone()), "&Open link").icon(glyph::OPEN_WITH));
@@ -254,6 +269,17 @@ pub fn page_menu(ctx: &PageContext, x: f32, y: f32) -> Menu<Act> {
     items.push(cmd(C::Find, "&Find…", glyph::SEARCH).sep());
     items.push(cmd(C::Refresh, "&Reload", glyph::RELOAD));
     items.push(cmd(C::EditInMdedit, "&Edit in mdedit", glyph::EDIT).enabled(ctx.editable));
+    if library {
+        items.push(
+            cmd(
+                C::LibraryAdd,
+                "Add this file to the notes &library.",
+                glyph::BOOKMARK,
+            )
+            .enabled(ctx.editable)
+            .sep(),
+        );
+    }
     Menu::new(items, x, y, false).access_keys(true)
 }
 
@@ -296,6 +322,7 @@ pub fn card(kind: DialogKind, rows: usize, w: f32, h: f32) -> Rect {
         DialogKind::Shortcuts => (580.0, list(KEY_ROW, 0.0).min(700.0)),
         DialogKind::Recent => (600.0, list(RECENT_ROW, 80.0).min(560.0)),
         DialogKind::AllowEdit => (500.0, 232.0),
+        DialogKind::AddToLibrary => (520.0, 250.0),
     };
     dialog_card(cw, ch, w, h)
 }
@@ -329,6 +356,7 @@ use dialog_button_w as button_w;
 pub fn draw_dialog(
     c: &mut Ctx,
     ws: &Workspace,
+    notes: &crate::notes::Notes,
     d: &mut Dialog,
     w: f32,
     h: f32,
@@ -341,7 +369,7 @@ pub fn draw_dialog(
         DialogKind::About => 0,
         DialogKind::Shortcuts => shortcut_help().len(),
         DialogKind::Recent => ws.recents().len(),
-        DialogKind::AllowEdit => 0,
+        DialogKind::AllowEdit | DialogKind::AddToLibrary => 0,
     };
     let r = card(d.kind, rows, w, h);
     c.hit(Hit::DlgCard, r);
@@ -352,6 +380,7 @@ pub fn draw_dialog(
         DialogKind::Shortcuts => strings::SHORTCUTS_TITLE,
         DialogKind::Recent => strings::MANAGE_RECENT_TITLE,
         DialogKind::AllowEdit => "Change this file?",
+        DialogKind::AddToLibrary => "Add to the notes library?",
     };
     match d.kind {
         DialogKind::About => {
@@ -467,6 +496,67 @@ pub fn draw_dialog(
                 Hit::DlgButton(2),
                 "Always allow",
                 false,
+            );
+            let cw = button_w(c.p, "Cancel");
+            button(
+                c,
+                Rect::new(r.x + PAD, by, cw, 32.0),
+                Hit::DlgButton(0),
+                "Cancel",
+                false,
+            );
+        }
+        DialogKind::AddToLibrary => {
+            let x = r.x + PAD;
+            let tw = r.w - 2.0 * PAD;
+            c.p.text(
+                Face::Semibold,
+                17.0,
+                x,
+                r.y + PAD + 10.0,
+                title,
+                pal.text,
+                tw,
+            );
+            let (name, group, folder) = notes.pending.as_ref().map_or_else(Default::default, |p| {
+                (
+                    p.title.clone(),
+                    p.group.clone(),
+                    p.file
+                        .parent()
+                        .map(|d| d.display().to_string())
+                        .unwrap_or_default(),
+                )
+            });
+            let y = r.y + PAD + 36.0;
+            let used = c.p.paragraph(
+                Face::Ui,
+                13.5,
+                x,
+                y,
+                tw,
+                &format!(
+                    "\u{201c}{name}\u{201d} will be listed in {group}, a file of mdedit's notes \
+                     library. One line is added to that file; the note itself is not changed."
+                ),
+                pal.text,
+            );
+            c.p.paragraph(
+                Face::Ui,
+                12.5,
+                x,
+                y + used + 8.0,
+                tw,
+                &format!("Library folder: {folder}\nThis is asked only the first time."),
+                pal.muted,
+            );
+            let ew = button_w(c.p, "Add");
+            button(
+                c,
+                Rect::new(r.right() - PAD - ew, by, ew, 32.0),
+                Hit::DlgButton(1),
+                "Add",
+                true,
             );
             let cw = button_w(c.p, "Cancel");
             button(
@@ -675,6 +765,7 @@ mod tests {
             DialogKind::Shortcuts,
             DialogKind::Recent,
             DialogKind::AllowEdit,
+            DialogKind::AddToLibrary,
         ] {
             let r = card(kind, 30, 520.0, 360.0);
             assert!(r.x >= 0.0 && r.y >= 0.0 && r.right() <= 520.0 && r.bottom() <= 360.0);

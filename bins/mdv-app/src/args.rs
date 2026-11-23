@@ -19,6 +19,8 @@ pub enum ShotMenu {
     Tab,
     Page,
     Find,
+    /// The groups of the notes library, to choose where the open file is added.
+    Library,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +30,8 @@ pub enum ShotDialog {
     Recent,
     Edit,
     Settings,
+    /// The question before the first file is added to the notes library.
+    AddLibrary,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -73,6 +77,8 @@ pub struct Args {
     /// Show the copy button of the code block under `--hover` with its check mark (for shots).
     pub copied: bool,
     pub focus_mode: bool,
+    /// `--notes`: the Files pane shows the notes library (when there is one), for a shot.
+    pub notes_face: bool,
     /// `--present N`: start presenting at slide N (1 is the first), for shots and checks.
     pub present: Option<usize>,
     /// `--present-overview`: with `--present`, the list of slides open (for shots).
@@ -165,6 +171,7 @@ impl Args {
                 "--outline" => out.outline_pane = Some(true),
                 "--no-outline" => out.outline_pane = Some(false),
                 "--focus-mode" => out.focus_mode = true,
+                "--notes" => out.notes_face = true,
                 "--present" => {
                     out.present = value(&a).and_then(|v| v.parse().ok()).filter(|&n| n >= 1);
                 }
@@ -224,6 +231,7 @@ impl Args {
                         Some("tab") => Some(ShotMenu::Tab),
                         Some("page") => Some(ShotMenu::Page),
                         Some("find") => Some(ShotMenu::Find),
+                        Some("library") => Some(ShotMenu::Library),
                         _ => None,
                     }
                 }
@@ -237,6 +245,7 @@ impl Args {
                         Some("recent") => Some(ShotDialog::Recent),
                         Some("edit") => Some(ShotDialog::Edit),
                         Some("settings") => Some(ShotDialog::Settings),
+                        Some("library-add") => Some(ShotDialog::AddLibrary),
                         _ => None,
                     }
                 }
