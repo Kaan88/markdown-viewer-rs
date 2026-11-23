@@ -323,6 +323,22 @@ impl DocumentRenderer {
         (&self.undrawn, self.undrawn_changes)
     }
 
+    /// The raster of the Mermaid diagram drawn from `source`, at the scale and theme of the
+    /// current layout: what a shell shows when the reader opens the diagram at a reading size.
+    /// `None` before a layout, and when the engine cannot draw the source.
+    pub fn diagram_raster(
+        &mut self,
+        source: &str,
+    ) -> Option<std::rc::Rc<crate::image::DecodedImage>> {
+        let options = self.options.as_ref()?;
+        // The page's own raster: twice the device scale, so text stays sharp above it.
+        let scale = 2.0 * options.scale;
+        let dark = options.theme.name == "dark";
+        // The page has it already; a click may ask for it again after the store let its pixels go.
+        let (id, _) = self.store.mermaid(source, scale, dark, true);
+        self.store.pixels(id)
+    }
+
     /// Shows the blocks `gap` covers as empty room, or none with `None`. The blocks it covered
     /// or covers now are measured again by the next frame; as with any correction, what is on
     /// screen above them stays where it is.

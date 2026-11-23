@@ -3779,3 +3779,92 @@ fn closing_the_window_tells_the_editor_of_every_tab_it_asked_for() {
     unsafe { std::env::remove_var("MD_SISTER_MDEDIT_SETTINGS") };
     _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_diagram_opens_at_reading_size_and_can_be_panned_zoomed_and_closed() {
+    let mut a = app(&["linked.md"]);
+    let raster = Rc::new(mdview_render::DecodedImage {
+        width: 2400,
+        height: 1200,
+        baseline: 1200,
+        rgba: vec![200; 2400 * 1200 * 4],
+    });
+    a.show_zoom(raster);
+    a.compose();
+    let area = a.zoom_area();
+    let view = a.ui.zoom.as_ref().expect("the zoom view opened");
+    assert_eq!(
+        view.zoom, 1.0,
+        "reading size is one logical px per raster px"
+    );
+    assert_eq!(
+        view.image_rect(area),
+        Rect::new(0.0, 0.0, 2400.0, 1200.0),
+        "a diagram wider than the window starts at its left edge"
+    );
+    // The close button is drawn over the window's top right.
+    let close = rect(&a, Hit::ZoomClose);
+    assert!(close.x > area.right() - 60.0 && close.y < 60.0);
+
+    // A wheel notch over the middle zooms in; the point under the pointer stays put.
+    a.ui.mouse = (area.cx(), area.cy());
+    a.wheel(MouseScrollDelta::LineDelta(0.0, 1.0));
+    let zoomed = a.ui.zoom.as_ref().unwrap().zoom;
+    assert!(zoomed > 1.0);
+    assert!(zoomed <= crate::zoom::MAX_ZOOM);
+
+    // A drag moves the diagram with the pointer.
+    a.pointer_moved(area.cx(), area.cy());
+    a.left_press();
+    a.pointer_moved(area.cx() - 100.0, area.cy() + 30.0);
+    a.left_release();
+    let view = a.ui.zoom.as_ref().expect("still open after a pan");
+    assert!(view.pan.0 < 0.0 && view.pan.1 < 0.0);
+
+    // Escape closes it.
+    key(&mut a, KeyName::Escape, None);
+    assert!(a.ui.zoom.is_none());
+
+    // So does its close button.
+    let raster = Rc::new(mdview_render::DecodedImage {
+        width: 300,
+        height: 200,
+        baseline: 200,
+        rgba: vec![200; 300 * 200 * 4],
+    });
+    a.show_zoom(raster);
+    a.compose();
+    click(&mut a, Hit::ZoomClose);
+    assert!(a.ui.zoom.is_none());
+}
+
+fn engine_available() -> bool {
+    let name = if cfg!(windows) {
+        "mdview-engine.exe"
+    } else {
+        "mdview-engine"
+    };
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/release")
+        .join(name)
+        .is_file()
+}
+
+#[test]
+fn a_diagram_click_opens_the_zoom_view_with_the_pages_own_raster() {
+    if !engine_available() {
+        eprintln!("skipping: no mdview-engine in target/release");
+        return;
+    }
+    let mut a = app(&["diagrams.md"]);
+    let source = a.ws.diagram_source(0).expect("a diagram on the page");
+    let raster = a.ws.diagram_raster(&source).expect("the diagram is drawn");
+    a.handle_click(Click::Diagram(source));
+    a.compose();
+    let view = a.ui.zoom.as_ref().expect("the zoom view opened");
+    assert_eq!(
+        (view.image.width, view.image.height),
+        (raster.width, raster.height)
+    );
+    assert_eq!(view.zoom, 1.0);
+}
