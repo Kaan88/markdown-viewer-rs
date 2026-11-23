@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 /// Said when a note's file is not where the library says.
 pub const MISSING: &str = "That note is not where the library says it is.";
-const NO_FOLDER: &str = "No library folder yet";
+pub const NO_FOLDER: &str = "No library folder yet";
 const NO_NOTES: &str = "No notes yet";
 pub const NO_LIBRARY: &str = "There is no notes library: mdedit's settings were not found.";
 pub const NEEDS_FILE: &str = "Save this file first: the library keeps links to files.";
@@ -54,7 +54,7 @@ pub fn settings_file(
     if explicit.is_some() {
         return explicit;
     }
-    if false {
+    if session.is_none() || scratch {
         return None;
     }
     default
@@ -194,9 +194,8 @@ impl Notes {
     /// and the group's name for the toast.
     pub fn put(&mut self, file: &Path, note: &Path) -> Result<(String, String), String> {
         let dir = self.dir.clone().ok_or_else(|| NO_LIBRARY.to_string())?;
-        let title = put::put_note(file, &[], note, &dir).map_err(|e: PutError| {
-            format!("The library file could not be written: {e}")
-        })?;
+        let title = put::put_note(file, &[], note, &dir)
+            .map_err(|e: PutError| format!("The library file could not be written: {e}"))?;
         self.load();
         let group = self
             .library
@@ -303,7 +302,12 @@ pub fn draw(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
 
     let mut area = Rect::new(r.x, r.y + HEAD, r.w, (r.h - HEAD).max(0.0));
     let omitted = ui.notes.library().and_then(|l| {
-        let shown = ui.notes.rows.iter().filter(|r| r.kind == Kind::Group).count();
+        let shown = ui
+            .notes
+            .rows
+            .iter()
+            .filter(|r| r.kind == Kind::Group)
+            .count();
         tree::omitted_label(shown, l.groups.len(), l.omitted)
     });
     let foot = omitted.as_ref().map(|_| {
@@ -399,7 +403,8 @@ pub fn draw(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
     }
     c.p.restore(old);
     let thumb_hit = Hit::ScrollBar(Scroller::Pane(Side::Files));
-    if let Some((track, thumb)) = crate::panes::scrollbar(area, ui.panes.files_content, area.h, scroll)
+    if let Some((track, thumb)) =
+        crate::panes::scrollbar(area, ui.panes.files_content, area.h, scroll)
     {
         let active = c.hover == Some(thumb_hit)
             || matches!(
@@ -477,10 +482,7 @@ mod tests {
         n.show(true);
         let labels: Vec<_> = n.rows.iter().map(|r| r.label.as_str()).collect();
         assert_eq!(labels, ["Personal", "Money", "Budget", "Gone"]);
-        assert!(matches!(
-            n.rows[3].kind,
-            Kind::Note { missing: true, .. }
-        ));
+        assert!(matches!(n.rows[3].kind, Kind::Note { missing: true, .. }));
         n.toggle(1);
         assert_eq!(n.rows.len(), 2, "folding Money hides its notes");
         n.toggle(2);

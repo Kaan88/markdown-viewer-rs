@@ -552,6 +552,18 @@ mod window_state_tests {
     }
 
     #[test]
+    fn the_library_yes_is_written_only_once_given_and_round_trips() {
+        let none = Session::default().serialize();
+        assert!(!none.contains("library_ok"), "{none}");
+        let s = Session {
+            library_ok: true,
+            ..Default::default()
+        };
+        assert!(s.serialize().contains("library_ok=1"));
+        assert!(Session::parse(&s.serialize()).library_ok);
+    }
+
+    #[test]
     fn places_round_trip_after_the_other_keys() {
         let mut s = Session::default();
         s.tabs.push("a.md".into());

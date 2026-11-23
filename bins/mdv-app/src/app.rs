@@ -348,7 +348,7 @@ impl App {
     fn setup(&mut self) {
         let a = self.args.clone();
         self.ws.set_system_dark(self.system_dark);
-        self.ws.set_library_offered(self.ui.notes.dir.is_some());
+        self.ws.set_library_offered(self.ui.notes.available);
         if a.notes_face {
             self.ui.notes.show(true);
         }

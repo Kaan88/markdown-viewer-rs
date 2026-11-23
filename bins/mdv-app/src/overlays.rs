@@ -233,7 +233,8 @@ pub fn tab_menu(ws: &Workspace, index: usize, library: bool, x: f32, y: f32) -> 
     Menu::new(items, x, y, false).access_keys(true)
 }
 
-pub fn page_menu(ctx: &PageContext, x: f32, y: f32) -> Menu<Act> {
+/// `library`: there is a notes library to add the file to (a build with none offers no row).
+pub fn page_menu(ctx: &PageContext, library: bool, x: f32, y: f32) -> Menu<Act> {
     let mut items = Vec::new();
     if let Some(link) = &ctx.link {
         items.push(Item::new(Act::OpenLink(link.clone()), "&Open link").icon(glyph::OPEN_WITH));
@@ -268,6 +269,17 @@ pub fn page_menu(ctx: &PageContext, x: f32, y: f32) -> Menu<Act> {
     items.push(cmd(C::Find, "&Find…", glyph::SEARCH).sep());
     items.push(cmd(C::Refresh, "&Reload", glyph::RELOAD));
     items.push(cmd(C::EditInMdedit, "&Edit in mdedit", glyph::EDIT).enabled(ctx.editable));
+    if library {
+        items.push(
+            cmd(
+                C::LibraryAdd,
+                "Add this file to the notes &library.",
+                glyph::BOOKMARK,
+            )
+            .enabled(ctx.editable)
+            .sep(),
+        );
+    }
     Menu::new(items, x, y, false).access_keys(true)
 }
 

@@ -507,15 +507,21 @@ impl App {
             Some(Hit::Tab(i) | Hit::TabClose(i)) => {
                 self.ui.popup = Some(Popup::new(
                     PopupKind::Tab(i),
-                    overlays::tab_menu(&self.ws, i, self.ui.notes.dir.is_some(), x, y + 2.0),
+                    overlays::tab_menu(&self.ws, i, self.ui.notes.available, x, y + 2.0),
                 ));
             }
             Some(Hit::Page) => {
                 let (_, px, py) = self.page_point(x, y);
                 let ctx = self.ws.context_at(px, py);
+                // A page of a saved file, with a notes library to add it to.
+                let library = self.ui.notes.available
+                    && self
+                        .ws
+                        .active_tab()
+                        .is_some_and(|t| !t.is_untitled() && !t.is_missing());
                 self.ui.popup = Some(Popup::new(
                     PopupKind::Page,
-                    overlays::page_menu(&ctx, x + 2.0, y + 2.0),
+                    overlays::page_menu(&ctx, library, x + 2.0, y + 2.0),
                 ));
             }
             Some(Hit::Find | Hit::FindClear) => {

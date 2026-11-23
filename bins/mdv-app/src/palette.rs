@@ -29,6 +29,8 @@ pub const MAX_FILES: usize = 5_000;
 const G_TABS: u8 = 0;
 const G_RECENT: u8 = 1;
 const G_FILES: u8 = 2;
+/// The notes library: one group per library file, from this number up.
+const G_LIBRARY: u8 = 16;
 const G_FILE: u8 = 10;
 const G_EDIT: u8 = 11;
 const G_VIEW: u8 = 12;
@@ -45,6 +47,8 @@ pub enum Target {
     Tab(usize),
     Recent(PathBuf),
     File(PathBuf),
+    /// A note of the notes library: opened as any file is.
+    Note(PathBuf),
     /// Scrolls to this block of the current document.
     Heading(u32),
     /// A row of the `?` list: puts this prefix in the box.
@@ -69,9 +73,45 @@ fn mode_of(query: &str) -> (Mode, usize) {
     }
 }
 
+/// A note of the library as the card lists it: the title is the row, its section (and that it is
+/// gone) the hint.
+struct Note {
+    title: String,
+    hint: String,
+    path: PathBuf,
+    missing: bool,
+    /// The group (the library file) it is under, as a header.
+    group: u8,
+}
+
+impl Note {
+    fn of(e: &mdshared_app::library::Entry, group: u8) -> Note {
+        let section = e.sections.join(" \u{203a} ");
+        let hint = match (section.as_str(), e.missing) {
+            ("", false) => String::new(),
+            ("", true) => MISSING.to_string(),
+            (section, false) => section.to_string(),
+            (section, true) => format!("{section} \u{2014} {MISSING}"),
+        };
+        Note {
+            title: e.title.clone(),
+            hint,
+            path: e.path.clone(),
+            missing: e.missing,
+            group,
+        }
+    }
+}
+
+/// Said in a note's hint when its file is not where the library says.
+const MISSING: &str = "missing";
+
 pub struct PaletteState {
     pub palette: Palette,
     targets: Vec<Target>,
+    /// The notes library as it was read when the card opened: the titles, each with its section
+    /// and whether it is still where the library says.
+    notes: Vec<Note>,
     /// The source the entries came from; `None` before the first.
     mode: Option<Mode>,
     /// Whether the folder's files are among the entries (only once the query has text).
@@ -82,11 +122,12 @@ pub struct PaletteState {
 }
 
 impl PaletteState {
-    /// A palette open on `query`, with its entries.
-    pub fn open(ws: &Workspace, query: &str) -> PaletteState {
+    /// A palette open on `query`, with its entries. `notes` is the notes library as the window
+    /// has it read: its notes are listed under a header per library file, after the files.
+    pub fn open(ws: &Workspace, notes: Option<&crate::notes::Notes>, query: &str) -> PaletteState {
         let mut palette = Palette::new();
         palette.set_placeholder(PLACEHOLDER);
-        palette.set_groups(vec![
+        let mut groups = vec![
             (G_TABS, "Open tabs".into()),
             (G_RECENT, "Recent".into()),
             (G_FILES, "Files".into()),
@@ -96,11 +137,21 @@ impl PaletteState {
             (G_HELP, "Help".into()),
             (G_TAB, "Tab".into()),
             (G_OTHER, "Other".into()),
-        ]);
+        ];
+        let mut listed = Vec::new();
+        if let Some(library) = notes.and_then(crate::notes::Notes::library) {
+            for (g, group) in library.groups.iter().enumerate() {
+                let id = G_LIBRARY.saturating_add(g as u8);
+                groups.push((id, group.name.clone()));
+                listed.extend(group.entries.iter().map(|e| Note::of(e, id)));
+            }
+        }
+        palette.set_groups(groups);
         palette.open(query);
         let mut state = PaletteState {
             palette,
             targets: Vec::new(),
+            notes: listed,
             mode: None,
             with_files: false,
             folder: None,
@@ -122,6 +173,7 @@ impl PaletteState {
         PaletteState {
             palette,
             targets: Vec::new(),
+            notes: Vec::new(),
             mode: None,
             with_files: false,
             folder: Some(folder),
@@ -187,7 +239,7 @@ impl PaletteState {
         self.with_files = with_files;
         self.palette.set_ignore_prefix(skip);
         let (entries, targets) = match mode {
-            Mode::Files => files(ws, with_files),
+            Mode::Files => files(ws, with_files, &self.notes),
             Mode::Commands => commands(ws),
             Mode::Headings => headings(ws),
             Mode::Help => help(),
@@ -230,9 +282,12 @@ fn folder_name(path: &std::path::Path) -> String {
         .unwrap_or_default()
 }
 
-fn files(ws: &Workspace, with_files: bool) -> (Vec<Entry>, Vec<Target>) {
+fn files(ws: &Workspace, with_files: bool, notes: &[Note]) -> (Vec<Entry>, Vec<Target>) {
     let (mut entries, mut targets) = (Vec::new(), Vec::new());
     let mut listed: HashSet<PathBuf> = HashSet::new();
+    // The same files as the paths may be written another way (a library's link against a tab's
+    // path), for the notes below.
+    let mut seen: HashSet<PathBuf> = HashSet::new();
     for (i, tab) in ws.tabs().iter().enumerate() {
         let label = ws.labels().get(i).cloned().unwrap_or_default();
         let hint = match tab.is_untitled() {
@@ -245,6 +300,7 @@ fn files(ws: &Workspace, with_files: bool) -> (Vec<Entry>, Vec<Target>) {
             glyph::DOC
         };
         listed.insert(tab.path().to_path_buf());
+        seen.insert(mdshared_app::paths::canonical_or_absolute(tab.path()));
         push(&mut entries, &mut targets, Target::Tab(i), |id| {
             Entry::new(id, label).hint(hint).icon(icon).group(G_TABS)
         });
@@ -256,6 +312,7 @@ fn files(ws: &Workspace, with_files: bool) -> (Vec<Entry>, Vec<Target>) {
         let hint = folder_name(&e.path);
         let icon = if e.missing { glyph::WARN } else { glyph::DOC };
         listed.insert(e.path.clone());
+        seen.insert(mdshared_app::paths::canonical_or_absolute(&e.path));
         let label = e.label;
         push(&mut entries, &mut targets, Target::Recent(e.path), |id| {
             Entry::new(id, label).hint(hint).icon(icon).group(G_RECENT)
@@ -266,6 +323,7 @@ fn files(ws: &Workspace, with_files: bool) -> (Vec<Entry>, Vec<Target>) {
             if listed.contains(path) {
                 continue;
             }
+            listed.insert(path.to_path_buf());
             push(
                 &mut entries,
                 &mut targets,
@@ -273,6 +331,25 @@ fn files(ws: &Workspace, with_files: bool) -> (Vec<Entry>, Vec<Target>) {
                 |id| Entry::new(id, rel).icon(glyph::DOC).group(G_FILES),
             );
         }
+    }
+    for n in notes {
+        if listed.contains(&n.path)
+            || seen.contains(&mdshared_app::paths::canonical_or_absolute(&n.path))
+        {
+            continue;
+        }
+        push(
+            &mut entries,
+            &mut targets,
+            Target::Note(n.path.clone()),
+            |id| {
+                Entry::new(id, n.title.as_str())
+                    .hint(n.hint.as_str())
+                    .icon(if n.missing { glyph::WARN } else { glyph::DOC })
+                    .group(n.group)
+                    .enabled(!n.missing)
+            },
+        );
     }
     (entries, targets)
 }

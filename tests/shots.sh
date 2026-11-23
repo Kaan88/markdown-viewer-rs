@@ -256,11 +256,14 @@ for theme in light dark; do
     MDEDIT_SETTINGS="$full" shot "notes-switch-files-$theme" --"$theme" --files --folder "$fx" "$fx/showcase.md"
     MDEDIT_SETTINGS="$empty" shot "notes-empty-$theme" --"$theme" --files --notes "$fx/showcase.md"
     MDEDIT_SETTINGS="$nowhere" shot "notes-nofolder-$theme" --"$theme" --files --notes "$fx/showcase.md"
-    # Add this file: the tab's menu, the palette, the question, the choice of group.
+    # Add this file: the tab's menu, the palette, the question, the choice of group; then the
+    # page's menu with it, and the palette listing the library's notes by title.
     MDEDIT_SETTINGS="$full" shot "menu-tab-library-$theme" --"$theme" --menu tab "$fx/showcase.md" "$fx/tables.md"
     MDEDIT_SETTINGS="$full" shot "palette-library-$theme" --"$theme" --palette ">notes library" "$fx/showcase.md"
     MDEDIT_SETTINGS="$one" shot "dialog-library-add-$theme" --"$theme" --dialog library-add "$fx/showcase.md"
     MDEDIT_SETTINGS="$full" shot "menu-library-groups-$theme" --"$theme" --menu library "$fx/showcase.md"
+    MDEDIT_SETTINGS="$full" shot "menu-page-library-$theme" --"$theme" --menu page "$fx/showcase.md"
+    MDEDIT_SETTINGS="$full" shot "palette-notes-$theme" --"$theme" --palette "" "$fx/showcase.md"
 done
 rm -rf "$nl"
 

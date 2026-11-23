@@ -48,8 +48,12 @@ impl App {
             return;
         }
         let note = tab.path().to_path_buf();
-        if self.ui.notes.dir.is_none() {
+        let Some(dir) = self.ui.notes.dir.clone() else {
             self.ws.set_status(crate::notes::NO_LIBRARY);
+            return;
+        };
+        if !dir.is_dir() {
+            self.ws.set_status(crate::notes::NO_FOLDER);
             return;
         }
         self.ui.notes.load();
@@ -63,7 +67,7 @@ impl App {
                 let Some(file) = self.ui.notes.default_file() else {
                     return;
                 };
-                self.library_ask(file, "notes".into(), note);
+                self.library_ask(file, "Notes".into(), note);
             }
             1 => {
                 let (name, file) = targets.into_iter().next().unwrap_or_default();
