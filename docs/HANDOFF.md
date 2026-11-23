@@ -2734,9 +2734,11 @@ the head; `Ui.notes`,
 `Hit::PaneFace`/`NotesRow`/`NotesRefresh`, `Act::LibraryPut`, `PopupKind::Library`,
 `DialogKind::AddToLibrary`, `C::LibraryAdd` and its label in core, `Session.library_ok`, the
 `--notes` launch argument (for shots), `palette::Target::Note` and the note source, and the row in
-`overlays::page_menu` and `overlays::tab_menu`. The shared pin is `f/library-dir` at `a6b0c9c`
-(whose `mdshared_app::library::put` and `tree` are what this uses), pinned in `eceb83f` alone
-beside its identical shots (138). **Repin to shared `main` before merging.**
+`overlays::page_menu` and `overlays::tab_menu`. The shared pin is shared `main` at `0984eed`
+(whose `mdshared_app::library::put` and `tree` are what this uses; it came through `f/library-dir`
+at `a6b0c9c` during development). Its `runs::Kind` gains (`Rewrite`, `Markdown`) are not used
+here, so no match had to change. The pin move was checked against the merge at the development
+pin: all 166 shots byte-identical.
 
 ### Decisions
 
