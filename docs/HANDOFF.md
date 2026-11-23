@@ -11,6 +11,32 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## For later: sort a table by a column, in the view only (asked 2026-11-23, not designed)
+
+The owner asked on 2026-11-23 for this "for later": a click on a table's header cell sorts the
+rows by that column in the view, and the file is not changed. It is not built and not started.
+mdedit's "Sort table by this column" (0.7.0) is a different command, because it rewrites the text.
+
+- **Where it would go.** In `crates/render/src/layout/table.rs`, rows are placed on a grid
+  (`colspan`/`rowspan`, then widths, heights and the header band). A sort would reorder the body
+  rows before they are placed. The header rows stay first, and only the order changes. Cells are
+  not laid out again, so the column widths stay as they were. A click on a header cell would
+  reach it the way a click on a diagram reaches the zoom (`Click::…` from
+  `Workspace::pointer_release`). The header would show a small arrow for the direction:
+  ascending, descending, then the file's order again.
+- **To decide before building.**
+  - Whether a sort lasts through a reload of the file and through switching tabs, or is
+    forgotten.
+  - How it compares: numbers as numbers (`9` before `10`, a leading sign, thousands
+    separators), text without regard to case, and empty cells last.
+  - What happens to a table with a `rowspan` in its body. Leaving it unsortable, with no arrow,
+    is the cheap answer.
+  - Whether a keyboard path or a "Reset order" menu item is needed.
+- **Price, a guess, not measured.** About one to two days with tests and shots. It needs no new
+  dependency and adds nothing to the launch path. Nothing is computed until a header is clicked,
+  and then it costs one sort of that table's rows and a relayout of the page. Budgets to measure
+  when it is built: the click to the new frame on a 1,000-row table, and scrolling after it.
+
 ## Click to zoom a large diagram (2026-11-23, branch `f/diagram-zoom`, not released)
 
 The owner asked for it on 2026-11-23 ("for later"): a big Mermaid diagram is drawn shrunk to the
