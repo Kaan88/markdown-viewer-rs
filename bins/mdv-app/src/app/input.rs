@@ -11,6 +11,46 @@ impl App {
         Rect::new(0.0, 0.0, w, h)
     }
 
+    /// A trackpad pinch (winit reports it on macOS), `ended` when the fingers are lifted. Over
+    /// the diagram view it zooms the diagram about the pointer, by as much as the fingers moved;
+    /// otherwise the page, in steps (audit 4, E9: it zoomed the page under the view).
+    pub(super) fn pinch(&mut self, delta: f64, ended: bool) {
+        if self.ui.zoom.is_some() {
+            let area = self.zoom_area();
+            let focus = self.ui.mouse;
+            if let Some(view) = self.ui.zoom.as_mut()
+                && delta.is_finite()
+                && delta > -0.5
+            {
+                view.zoom_to(area, view.zoom * (1.0 + delta as f32), focus);
+            }
+            self.pinch.end();
+            self.redraw();
+            return;
+        }
+        let steps = self.pinch.add(delta);
+        for _ in 0..steps.unsigned_abs() {
+            self.command(if steps > 0 { C::ZoomIn } else { C::ZoomOut });
+        }
+        if ended {
+            self.pinch.end();
+        }
+    }
+
+    /// The trackpad's smart-zoom tap (two fingers, twice): the page's actual size, or over the
+    /// diagram view the diagram's reading size.
+    pub(super) fn double_tap(&mut self) {
+        if self.ui.zoom.is_some() {
+            let area = self.zoom_area();
+            if let Some(view) = self.ui.zoom.as_mut() {
+                view.zoom_to(area, 1.0, (area.cx(), area.cy()));
+            }
+            self.redraw();
+            return;
+        }
+        self.command(C::ZoomReset);
+    }
+
     pub(super) fn pointer_moved(&mut self, x: f32, y: f32) {
         if self.presenting() {
             self.present_pointer(x, y);

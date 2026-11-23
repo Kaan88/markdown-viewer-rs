@@ -29,16 +29,24 @@ pub const MAX_FILES: usize = 5_000;
 const G_TABS: u8 = 0;
 const G_RECENT: u8 = 1;
 const G_FILES: u8 = 2;
-/// The notes library: one group per library file, from this number up.
-const G_LIBRARY: u8 = 16;
 const G_FILE: u8 = 10;
 const G_EDIT: u8 = 11;
 const G_VIEW: u8 = 12;
 const G_HELP: u8 = 13;
 const G_TAB: u8 = 14;
 const G_OTHER: u8 = 15;
-/// Headings and the help rows have no header.
-const G_PLAIN: u8 = 100;
+/// The notes library: one group per library file, from this number to [`G_LIBRARY_LAST`]. A
+/// group is a byte, so a library of more files lists the rest under one header,
+/// [`G_LIBRARY_MORE`], each note's hint naming its file (audit 4, E4: the ids ran into
+/// [`G_PLAIN`] from the 85th file and wrapped or repeated past the 240th, listing notes under
+/// another file's header).
+const G_LIBRARY: u8 = 16;
+const G_LIBRARY_LAST: u8 = 253;
+const G_LIBRARY_MORE: u8 = 254;
+/// The header over the library files past [`G_LIBRARY_LAST`].
+const MORE_LIBRARY: &str = "More library files";
+/// Headings and the help rows have no header: no group has this number.
+const G_PLAIN: u8 = 255;
 
 /// What choosing an entry does.
 #[derive(Clone, Debug, PartialEq)]
@@ -79,14 +87,23 @@ struct Note {
     title: String,
     hint: String,
     path: PathBuf,
+    /// `path` as a tab would hold it, resolved once per read of the library
+    /// ([`crate::notes::Notes::resolve_notes`]), to leave out a note already listed as a tab or
+    /// a recent file without asking the disk while the reader types (audit 4, E5).
+    key: PathBuf,
     missing: bool,
     /// The group (the library file) it is under, as a header.
     group: u8,
 }
 
 impl Note {
-    fn of(e: &mdshared_app::library::Entry, group: u8) -> Note {
-        let section = e.sections.join(" \u{203a} ");
+    /// The note `e`, under the header `group`; `file` names its library file in the hint when
+    /// the header is not that file's own.
+    fn of(e: &mdshared_app::library::Entry, group: u8, file: Option<&str>, key: PathBuf) -> Note {
+        let section = (file.into_iter())
+            .chain(e.sections.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" \u{203a} ");
         let hint = match (section.as_str(), e.missing) {
             ("", false) => String::new(),
             ("", true) => MISSING.to_string(),
@@ -97,10 +114,36 @@ impl Note {
             title: e.title.clone(),
             hint,
             path: e.path.clone(),
+            key,
             missing: e.missing,
             group,
         }
     }
+}
+
+/// The headers of the library's files and its notes, in its order: each file its own group up to
+/// [`G_LIBRARY_LAST`], the rest under [`MORE_LIBRARY`] with their file's name in the hint.
+/// `key` gives each note's resolved path.
+fn library_notes(
+    library: &mdshared_app::library::Library,
+    key: impl Fn(&std::path::Path) -> PathBuf,
+) -> (Vec<(u8, String)>, Vec<Note>) {
+    let own = usize::from(G_LIBRARY_LAST - G_LIBRARY) + 1;
+    let mut groups = Vec::new();
+    let mut notes = Vec::new();
+    for (g, group) in library.groups.iter().enumerate() {
+        let (id, file) = match u8::try_from(g).ok().filter(|_| g < own) {
+            Some(g) => (G_LIBRARY + g, None),
+            None => (G_LIBRARY_MORE, Some(group.name.as_str())),
+        };
+        if file.is_none() {
+            groups.push((id, group.name.clone()));
+        } else if g == own {
+            groups.push((id, MORE_LIBRARY.to_string()));
+        }
+        notes.extend((group.entries.iter()).map(|e| Note::of(e, id, file, key(&e.path))));
+    }
+    (groups, notes)
 }
 
 /// Said in a note's hint when its file is not where the library says.
@@ -139,12 +182,12 @@ impl PaletteState {
             (G_OTHER, "Other".into()),
         ];
         let mut listed = Vec::new();
-        if let Some(library) = notes.and_then(crate::notes::Notes::library) {
-            for (g, group) in library.groups.iter().enumerate() {
-                let id = G_LIBRARY.saturating_add(g as u8);
-                groups.push((id, group.name.clone()));
-                listed.extend(group.entries.iter().map(|e| Note::of(e, id)));
-            }
+        if let Some(n) = notes
+            && let Some(library) = n.library()
+        {
+            let (more, these) = library_notes(library, |p| n.resolved(p));
+            groups.extend(more);
+            listed = these;
         }
         palette.set_groups(groups);
         palette.open(query);
@@ -284,9 +327,11 @@ fn folder_name(path: &std::path::Path) -> String {
 
 fn files(ws: &Workspace, with_files: bool, notes: &[Note]) -> (Vec<Entry>, Vec<Target>) {
     let (mut entries, mut targets) = (Vec::new(), Vec::new());
+    // A tab's path and a recent file's are the resolved ones the workspace keeps; a note's link
+    // may spell its file another way, and is compared by the key resolved for it when the
+    // library was read. Nothing here asks the disk: this runs as the reader types (audit 4, E5).
     let mut listed: HashSet<PathBuf> = HashSet::new();
-    // The same files as the paths may be written another way (a library's link against a tab's
-    // path), for the notes below.
+    // The tabs and the recent files, for the notes below.
     let mut seen: HashSet<PathBuf> = HashSet::new();
     for (i, tab) in ws.tabs().iter().enumerate() {
         let label = ws.labels().get(i).cloned().unwrap_or_default();
@@ -300,7 +345,7 @@ fn files(ws: &Workspace, with_files: bool, notes: &[Note]) -> (Vec<Entry>, Vec<T
             glyph::DOC
         };
         listed.insert(tab.path().to_path_buf());
-        seen.insert(mdshared_app::paths::canonical_or_absolute(tab.path()));
+        seen.insert(tab.path().to_path_buf());
         push(&mut entries, &mut targets, Target::Tab(i), |id| {
             Entry::new(id, label).hint(hint).icon(icon).group(G_TABS)
         });
@@ -312,7 +357,7 @@ fn files(ws: &Workspace, with_files: bool, notes: &[Note]) -> (Vec<Entry>, Vec<T
         let hint = folder_name(&e.path);
         let icon = if e.missing { glyph::WARN } else { glyph::DOC };
         listed.insert(e.path.clone());
-        seen.insert(mdshared_app::paths::canonical_or_absolute(&e.path));
+        seen.insert(e.path.clone());
         let label = e.label;
         push(&mut entries, &mut targets, Target::Recent(e.path), |id| {
             Entry::new(id, label).hint(hint).icon(icon).group(G_RECENT)
@@ -333,9 +378,7 @@ fn files(ws: &Workspace, with_files: bool, notes: &[Note]) -> (Vec<Entry>, Vec<T
         }
     }
     for n in notes {
-        if listed.contains(&n.path)
-            || seen.contains(&mdshared_app::paths::canonical_or_absolute(&n.path))
-        {
+        if listed.contains(&n.path) || seen.contains(&n.key) {
             continue;
         }
         push(
@@ -465,4 +508,82 @@ fn help() -> (Vec<Entry>, Vec<Target>) {
         });
     }
     (entries, targets)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mdshared_app::library::{Entry as LibEntry, Group, Library};
+
+    fn library(files: usize) -> Library {
+        let groups = (0..files)
+            .map(|g| Group {
+                name: format!("File {g}"),
+                home: None,
+                file: PathBuf::from(format!("/lib/f{g}.md")),
+                stamp: mdshared_app::files::FileStamp::Missing,
+                sections: Vec::new(),
+                entries: vec![LibEntry {
+                    title: format!("Note {g}"),
+                    path: PathBuf::from(format!("/lib/n{g}.md")),
+                    sections: vec!["Money".into()],
+                    line: 3,
+                    missing: false,
+                }],
+            })
+            .collect();
+        Library {
+            dir: PathBuf::from("/lib"),
+            groups,
+            omitted: 0,
+        }
+    }
+
+    /// Audit 4, E4: a group is a byte. Every library file up to the last id has a header of its
+    /// own; past that the notes go under one "More library files" header that says which file
+    /// each is in. No note is ever under another file's name, and no header takes the number of
+    /// another source's group (the headings' list has none).
+    #[test]
+    fn every_note_is_under_its_own_files_header_or_one_that_names_its_file() {
+        // 512 is the most library files the shared reader keeps.
+        let (groups, notes) = library_notes(&library(512), |p| p.to_path_buf());
+        let name = |id: u8| {
+            groups
+                .iter()
+                .find(|(g, _)| *g == id)
+                .map(|(_, n)| n.as_str())
+        };
+        let mut ids: Vec<u8> = groups.iter().map(|(g, _)| *g).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            groups.len(),
+            "every header has a number of its own"
+        );
+        for (g, n) in notes.iter().enumerate() {
+            assert!(
+                (G_LIBRARY..=G_LIBRARY_MORE).contains(&n.group),
+                "note {g} is in the library's range"
+            );
+            match name(n.group) {
+                Some(MORE_LIBRARY) => {
+                    assert_eq!(n.hint, format!("File {g} \u{203a} Money"), "note {g}")
+                }
+                header => {
+                    assert_eq!(header, Some(format!("File {g}").as_str()), "note {g}");
+                    assert_eq!(n.hint, "Money");
+                }
+            }
+        }
+        let own = usize::from(G_LIBRARY_LAST - G_LIBRARY) + 1;
+        assert_eq!(notes[own - 1].group, G_LIBRARY_LAST);
+        assert_eq!(notes[own].group, G_LIBRARY_MORE);
+        assert_eq!(name(G_PLAIN), None, "the headings keep no header");
+        for g in [
+            G_TABS, G_RECENT, G_FILES, G_FILE, G_EDIT, G_VIEW, G_HELP, G_TAB, G_OTHER,
+        ] {
+            assert!(g < G_LIBRARY && name(g).is_none());
+        }
+    }
 }

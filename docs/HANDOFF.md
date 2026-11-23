@@ -45,10 +45,13 @@ zoom, and Esc should close it. Built by a session; **the owner has not looked at
 driven by hand in a real window (tests and `--shot` only), and nothing ran off Windows.
 
 - **What it does.** A click on a rendered Mermaid diagram opens it over the whole window, on a
-  sheet of the page's colour over a dimmed page. It opens at one logical px per raster px: the
+  sheet of the page's colour over a dimmed page. It opens at one device px per raster px: the
   page's own raster is drawn at twice the device scale and the page halves it, so this is twice
-  the size the page showed, where the 11 px labels read. The wheel zooms between 0.1 and 4.0
-  logical px per raster px about the pointer; a drag pans, the image stopping at the window's
+  the size the page showed, where the 11 px labels read, at every device scale (audit 4, E2: it
+  was one logical px, which opened it at 3x the page's size at 150 % and 4x at 200 %). The wheel
+  zooms between 0.1 and 4.0 device px per raster px (a fifth of the page's size to eight times
+  it) about the pointer, and a fit of a diagram too large for 0.1 goes below it; a trackpad pinch
+  over the view zooms the diagram, not the page. A drag pans, the image stopping at the window's
   edges (a diagram smaller than the window stays centred). `Esc` and a close button at the top
   right close it; `+`, `-` and `0` zoom at the centre and fit the whole diagram. A hint line
   under it says all of this. A diagram wider than the window opens at its top left (the start of
@@ -665,7 +668,7 @@ document with SVG, math or Mermaid.
 | `--find q`, `--scroll px`, `--hover x,y` | Find query, scroll offset, pointer position. `--scroll` also applies to a real window's first document |
 | `--menu main\|recent\|cascade\|tab\|page\|find`, `--dialog about\|shortcuts\|recent` | Open a popup or dialog in the shot |
 | `--scroll-steps n` | Open a real window, wait until the page is refined, scroll n wheel steps, log timings, exit |
-| `--zoom-diagram N`, `--zoom-level F`, `--zoom-pan X,Y` | Open the N-th diagram (from 1) of the first document in the zoom view, at F logical px per raster px (default 1.0) and panned to X,Y (logical px), for a shot |
+| `--zoom-diagram N`, `--zoom-level F`, `--zoom-pan X,Y` | Open the N-th diagram (from 1) of the first document in the zoom view, at F device px per raster px (default 1.0, twice the page's size) and panned to X,Y (logical px), for a shot |
 | `--update-bar available\|installing\|installed\|installed-plain` | Show the update bar at that stage with a made-up version, for a shot |
 | `--check-update` | Look for a newer version as the app would, print the answer, exit. No window |
 
@@ -2728,8 +2731,10 @@ A run must never read the owner's library by accident (mdedit D-067): an explici
 `MDEDIT_SETTINGS` always counts; otherwise a run with no session (a shot, `--no-session`) or a
 scratch `MDVIEW_SETTINGS` has no library, and a normal run uses mdedit's own settings file.
 
-**When it is read.** At start only mdedit's settings file is read and the folder checked, so the
-head knows whether to offer the face. The library itself is read when the face is first shown,
+**When it is read.** Once the window runs, a helper thread reads mdedit's settings file and
+checks the folder (`App::look_for_library`, answered by `Wake::Library`; audit 4, E12: a folder
+on a share that did not answer held the first frame), so the head knows whether to offer the
+face; until the answer comes it offers none. A shot looks at once, as it has no loop. The library itself is read when the face is first shown,
 on Refresh, after an add, and when the palette first lists it; that read is kept until Refresh
 or an add.
 There is no watcher: a change made in mdedit shows after Refresh or the next add.

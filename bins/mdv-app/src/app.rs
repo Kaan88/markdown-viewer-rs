@@ -128,6 +128,8 @@ pub enum Wake {
     Dialog(DialogAnswer),
     /// Export as HTML or Print made progress on its helper thread.
     Export(export::Progress),
+    /// The helper thread found where the notes library is, as the window started.
+    Library(crate::notes::Found),
 }
 
 /// What a closed file dialog chose.
@@ -141,6 +143,19 @@ fn sig<T: Hash>(t: T) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     t.hash(&mut h);
     h.finish()
+}
+
+/// A tab the editor asked this window to show ([`App::editor_asked`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EditorTab {
+    /// The file as the editor named it, which its `closed` names back; empty for a document
+    /// that has no file.
+    path: PathBuf,
+    /// The editor's name for a document that has no file.
+    doc: Option<String>,
+    /// `path` resolved when the editor asked, which is what the tabs are compared with on every
+    /// turn of the loop: nothing is asked of the disk there (audit 4, E1).
+    file: PathBuf,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -163,13 +178,14 @@ struct App {
     /// Where the window was before the editor's "Preview side by side" placed it, while it is
     /// still there.
     tiling: mdshared_ui::place::Tiling,
-    /// What the window was placed for: the file, or the editor's name for a document that has
-    /// no file. When no tab shows it any more the arrangement is over.
+    /// What the window was placed for: the file (resolved when it was placed, as it is looked
+    /// for on every turn of the loop), or the editor's name for a document that has no file.
+    /// When no tab shows it any more the arrangement is over.
     placed_for: Option<(std::path::PathBuf, Option<String>)>,
     /// The files, and the editor's names of documents that have no file, that the editor asked
     /// this window to show, while a tab shows each. When one is closed the editor is told
     /// (`closed`), so that its preview of it ends.
-    editor_shown: Vec<(std::path::PathBuf, Option<String>)>,
+    editor_shown: Vec<EditorTab>,
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
     proxy: Option<EventLoopProxy<Wake>>,
     /// A file or folder dialog is open (off Windows, where it runs beside the window); a second
@@ -271,16 +287,20 @@ impl App {
     fn new(args: Args, ws: Workspace, session: Option<PathBuf>) -> App {
         let system_dark = platform::system_is_dark();
         let trace = std::env::var_os("MDVIEW_TRACE").is_some();
+        let mut ui = Ui::new();
+        // A shot has no loop to wait in, so it looks for the library now; a window looks on a
+        // helper thread once it runs (`look_for_library`), so neither mdedit's settings file nor
+        // the folder it names is on the way to the first frame (audit 4, E12).
+        if args.shot.is_some() {
+            let dir = crate::notes::library_dir(session.as_deref());
+            ui.notes = crate::notes::Notes::new(dir);
+        }
         App {
             started: Instant::now(),
             steps: args.scroll_steps,
             args,
             ws,
-            ui: {
-                let mut ui = Ui::new();
-                ui.notes = crate::notes::Notes::new(crate::notes::library_dir(session.as_deref()));
-                ui
-            },
+            ui,
             window: None,
             tiling: Default::default(),
             placed_for: None,
@@ -698,10 +718,19 @@ impl App {
             self.areas = areas;
             self.full = true;
         }
-        // A zoom view follows the window: keep its diagram inside the new area.
+        // A zoom view is a picture of the tab it was opened on: another tab, a new text of it or
+        // another theme under it, and it closes (audit 4, E8). Otherwise it follows the window:
+        // its diagram is kept inside the new area, at the new device scale.
+        if let Some(view) = &self.ui.zoom
+            && let Some(origin) = &view.origin
+            && !(self.ws.active_tab())
+                .is_some_and(|t| origin.is(t.path(), t.revision(), self.pal.dark))
+        {
+            self.close_zoom();
+        }
         if let Some(view) = self.ui.zoom.as_mut() {
             let area = Rect::new(0.0, 0.0, w, h);
-            view.clamp(area);
+            view.set_scale(area, self.scale);
         }
         // Lay the page out first: the outline's current heading and a pending jump depend on it.
         let (vw, vh) = self.page_device();
@@ -1696,16 +1725,11 @@ impl ApplicationHandler<Wake> for App {
             WindowEvent::MouseWheel { delta, .. } => self.wheel(delta),
             // A trackpad: a pinch zooms in steps; the smart-zoom tap (two fingers, twice) is the
             // actual size. winit reports both on macOS only.
-            WindowEvent::PinchGesture { delta, phase, .. } => {
-                let steps = self.pinch.add(delta);
-                for _ in 0..steps.unsigned_abs() {
-                    self.command(if steps > 0 { C::ZoomIn } else { C::ZoomOut });
-                }
-                if matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
-                    self.pinch.end();
-                }
-            }
-            WindowEvent::DoubleTapGesture { .. } => self.command(C::ZoomReset),
+            WindowEvent::PinchGesture { delta, phase, .. } => self.pinch(
+                delta,
+                matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled),
+            ),
+            WindowEvent::DoubleTapGesture { .. } => self.double_tap(),
 
             WindowEvent::KeyboardInput {
                 event,
@@ -1763,11 +1787,7 @@ impl ApplicationHandler<Wake> for App {
         }
         self.watch_tree(files_changed);
         // The tab the window was placed for is closed: the side-by-side arrangement is over.
-        if self.tiling.is_some()
-            && let Some((path, doc)) = &self.placed_for
-            && !(path.as_os_str().is_empty() && doc.is_none())
-            && !self.ws.shows(path, doc.as_deref())
-        {
+        if self.tiling.is_some() && self.placed_tab_gone() {
             self.end_side_by_side(true);
         }
         // A tab the editor asked for is closed: its preview of it is over.
@@ -2144,6 +2164,7 @@ pub fn run() -> i32 {
         let _ = p.send_event(Wake::Preview);
     });
     app.proxy = Some(proxy);
+    app.look_for_library();
     app.updates_at_launch();
     stage(started, "ready to run");
     let _ = event_loop.run_app(&mut app);

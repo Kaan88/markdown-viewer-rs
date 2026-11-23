@@ -93,7 +93,8 @@ pub struct Args {
     /// `--zoom-diagram N`: open the N-th (from 1) Mermaid diagram of the first document at a
     /// reading size, for a shot.
     pub zoom_diagram: Option<usize>,
-    /// `--zoom-level F`: with `--zoom-diagram`, its drawing size in logical px per raster px.
+    /// `--zoom-level F`: with `--zoom-diagram`, its drawing size in device px per raster px (1.0,
+    /// the default, is twice the page's size at any scale).
     pub zoom_level: Option<f32>,
     /// `--zoom-pan X,Y`: with `--zoom-diagram`, its top left inside the window, logical px.
     pub zoom_pan: Option<(f32, f32)>,

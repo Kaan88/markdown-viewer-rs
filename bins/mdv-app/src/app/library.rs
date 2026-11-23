@@ -7,6 +7,35 @@ use crate::notes::{MISSING, Pending};
 use crate::ui::{Act, DialogKind, Popup, PopupKind};
 
 impl App {
+    /// Looks for the notes library on a helper thread: mdedit's settings file is read and the
+    /// folder it names looked at there, and the answer comes back as [`Wake::Library`]. Until
+    /// then the head offers no Notes face and there is no add (audit 4, E12: a folder on a share
+    /// that does not answer held the first frame).
+    pub(super) fn look_for_library(&mut self) {
+        let Some(proxy) = self.proxy.clone() else {
+            return;
+        };
+        let session = self.session.clone();
+        std::thread::spawn(move || {
+            let found = crate::notes::find_library(session.as_deref());
+            let _ = proxy.send_event(Wake::Library(found));
+        });
+    }
+
+    /// Where the notes library is, from [`look_for_library`](Self::look_for_library).
+    pub(super) fn library_found(&mut self, found: crate::notes::Found) {
+        if self.trace {
+            let ms = self.started.elapsed().as_secs_f64() * 1e3;
+            eprintln!("mdview: notes library looked for at {ms:.1} ms: {found:?}");
+        }
+        self.ui.notes.found(found);
+        self.ws.set_library_offered(self.ui.notes.available);
+        if self.args.notes_face {
+            self.ui.notes.show(true);
+        }
+        self.wants_frame = true;
+    }
+
     /// A switch of the Files pane's head was clicked: 0 the files, 1 the notes library.
     pub(super) fn pane_face(&mut self, face: usize) {
         let on = face == 1;

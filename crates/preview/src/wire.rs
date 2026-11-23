@@ -13,6 +13,10 @@ pub const MAGIC: &[u8; 12] = b"MDVPREVIEW7\n";
 /// The largest message either side accepts: a frame of 8K by 8K pixels.
 pub const MAX_MESSAGE: usize = 8192 * 8192 * 4 + 64;
 
+/// The widest and tallest pane a server draws, in device pixels: the largest frame a message
+/// carries. A larger [`Request::View`] is drawn at this size.
+pub const MAX_SIDE: u32 = 8192;
+
 /// What the editor asks for. A server applies everything that is waiting and then draws once.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Request {
@@ -247,6 +251,17 @@ impl Fields<'_> {
         let (head, rest) = self.0.split_at_checked(n).ok_or_else(short)?;
         self.0 = rest;
         Ok(head)
+    }
+
+    /// A count of records of `each` bytes that follow: refused when the message has not that
+    /// many bytes left, so nothing is set aside for records that are not there (audit 4, E10: a
+    /// count of 16 million rectangles set aside 268 MB before the first was read).
+    fn count(&mut self, each: usize) -> io::Result<usize> {
+        let n = self.u32()? as usize;
+        if n > self.0.len() / each.max(1) {
+            return Err(short());
+        }
+        Ok(n)
     }
 
     fn string(&mut self) -> io::Result<String> {
@@ -544,10 +559,7 @@ pub fn read_update(r: &mut impl Read) -> io::Result<Option<Update>> {
         let line = f.f32()?;
         let pixels = f.bytes()?.to_vec();
         let selection = if f.u32()? != 0 {
-            let n = f.u32()? as usize;
-            if n > MAX_MESSAGE / 16 {
-                return Err(short());
-            }
+            let n = f.count(16)?;
             let mut rects = Vec::with_capacity(n);
             for _ in 0..n {
                 rects.push([f.f32()?, f.f32()?, f.f32()?, f.f32()?]);
@@ -624,6 +636,25 @@ pub fn read_magic(r: &mut impl Read) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Audit 4, E10: a count is held to the bytes the message has left.
+    #[test]
+    fn a_count_larger_than_what_follows_is_refused_before_anything_is_set_aside() {
+        let mut body = Vec::new();
+        put_u32(&mut body, 3);
+        body.extend_from_slice(&[0; 32]);
+        assert!(
+            Fields(&body).count(16).is_err(),
+            "3 records of 16 in 32 bytes"
+        );
+        let mut body = Vec::new();
+        put_u32(&mut body, 2);
+        body.extend_from_slice(&[0; 32]);
+        assert_eq!(Fields(&body).count(16).unwrap(), 2);
+        let mut body = Vec::new();
+        put_u32(&mut body, u32::MAX);
+        assert!(Fields(&body).count(16).is_err());
+    }
 
     #[test]
     fn requests_and_updates_go_over_a_pipe_unchanged() {

@@ -2,49 +2,98 @@
 //! labels can be read, panned with the pointer and zoomed with the wheel. `Esc`, the close
 //! button and a click on the backdrop's button close it.
 //!
-//! The raster is the page's own (twice the device scale); one raster pixel per logical pixel
-//! shows it at twice the size the page shrank it to, which is where its text is readable.
+//! The raster is the page's own, made at twice the device scale, which the page draws at half
+//! its size. The view's size is counted in device px per raster px: at 1.0 each raster pixel
+//! falls on one device pixel, which is twice the size the page shrank the diagram to, where its
+//! text is readable, and as sharp as the raster is, at every device scale (audit 4, E2: it was
+//! counted in logical px, so it opened at 3x the page's size at 150 % and 4x at 200 %).
 
 use crate::chrome::{Ctx, glyph};
 use crate::gfx::{Face, Rect};
 use mdview_render::DecodedImage;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-/// The smallest and largest drawing size, in logical px per raster px.
+/// The smallest and largest drawing size the wheel goes to, in device px per raster px: from a
+/// fifth of the page's own size to eight times it (the page draws half a device px a raster
+/// px). Fitting a diagram too large for the smallest goes below it, and the wheel can then go
+/// back to the fit.
 pub const MIN_ZOOM: f32 = 0.1;
 pub const MAX_ZOOM: f32 = 4.0;
+/// Below this nothing is drawn usefully: a fit never goes smaller.
+const FIT_FLOOR: f32 = 0.001;
 /// How much one wheel notch changes the size.
 pub const WHEEL_STEP: f32 = 1.1;
 
 /// The line under the diagram.
 pub const HINT: &str = "Scroll to zoom · drag to pan · Esc to close";
 
+/// What the view is a picture of: the tab it was opened on, the revision of that tab's text, and
+/// the theme. When any of them changes under it (the editor opened another file, the file was
+/// read again, the theme changed), the view closes rather than show a diagram the page no longer
+/// has (audit 4, E8).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Origin {
+    pub tab: PathBuf,
+    pub revision: u64,
+    pub dark: bool,
+}
+
+impl Origin {
+    pub fn is(&self, tab: &Path, revision: u64, dark: bool) -> bool {
+        self.revision == revision && self.dark == dark && self.tab == tab
+    }
+}
+
 pub struct ZoomView {
     pub image: Rc<DecodedImage>,
-    /// Logical px per raster px, never outside [`MIN_ZOOM`]..[`MAX_ZOOM`].
+    /// Device px per raster px: [`MIN_ZOOM`]..[`MAX_ZOOM`], or the fit when that is smaller.
     pub zoom: f32,
+    /// The window's device scale: a logical px is this many device px.
+    pub scale: f32,
     /// The image's top left, logical px from the area's top left. Clamped so no part of it can
     /// be moved past an edge of the area, and centred while it is smaller than the area.
     pub pan: (f32, f32),
+    /// What it shows, when the window knows; `None` keeps it open whatever changes.
+    pub origin: Option<Origin>,
 }
 
 impl ZoomView {
-    /// Opens a diagram at reading size, centred in `area`.
-    pub fn open(image: Rc<DecodedImage>, area: Rect) -> ZoomView {
+    /// Opens a diagram at reading size, centred in `area`, in a window of device scale `scale`.
+    pub fn open(image: Rc<DecodedImage>, area: Rect, scale: f32) -> ZoomView {
         let mut view = ZoomView {
             image,
             zoom: 1.0,
+            scale: 1.0,
             pan: (0.0, 0.0),
+            origin: None,
         };
-        view.clamp(area);
+        view.set_scale(area, scale);
         view
+    }
+
+    /// The window's device scale changed (or is first known): the raster keeps its density in
+    /// device px, so its logical size follows.
+    pub fn set_scale(&mut self, area: Rect, scale: f32) {
+        self.scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+        self.clamp(area);
+    }
+
+    /// Logical px per raster px.
+    fn logical(&self) -> f32 {
+        self.zoom / self.scale
     }
 
     /// The drawn size, logical px.
     pub fn image_size(&self) -> (f32, f32) {
+        let per = self.logical();
         (
-            self.image.width as f32 * self.zoom,
-            self.image.height as f32 * self.zoom,
+            self.image.width as f32 * per,
+            self.image.height as f32 * per,
         )
     }
 
@@ -70,18 +119,41 @@ impl ZoomView {
         };
     }
 
-    /// Zooms to `zoom`, keeping the raster point under `focus` where it is.
+    /// The size, device px per raster px, that shows the whole diagram in `area` (at most
+    /// [`MAX_ZOOM`]).
+    fn fit_zoom(&self, area: Rect) -> f32 {
+        let (w, h) = (self.image.width as f32, self.image.height as f32);
+        if w <= 0.0 || h <= 0.0 {
+            return 1.0;
+        }
+        let fit = (area.w / w).min(area.h / h) * self.scale;
+        if fit.is_finite() {
+            fit.clamp(FIT_FLOOR, MAX_ZOOM)
+        } else {
+            1.0
+        }
+    }
+
+    /// The smallest size the wheel goes to: [`MIN_ZOOM`], or the fit of a diagram larger than
+    /// that shows (audit 4, E9: a diagram over ten windows wide could not be shown whole).
+    fn floor(&self, area: Rect) -> f32 {
+        MIN_ZOOM.min(self.fit_zoom(area))
+    }
+
+    /// Zooms to `zoom` (device px per raster px), keeping the raster point under `focus` where
+    /// it is.
     pub fn zoom_to(&mut self, area: Rect, zoom: f32, focus: (f32, f32)) {
-        let before = self.zoom;
-        self.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        if !zoom.is_finite() {
+            return;
+        }
+        let before = self.logical();
+        self.zoom = zoom.clamp(self.floor(area), MAX_ZOOM);
         let at = (
             (focus.0 - area.x - self.pan.0) / before,
             (focus.1 - area.y - self.pan.1) / before,
         );
-        self.pan = (
-            focus.0 - area.x - at.0 * self.zoom,
-            focus.1 - area.y - at.1 * self.zoom,
-        );
+        let per = self.logical();
+        self.pan = (focus.0 - area.x - at.0 * per, focus.1 - area.y - at.1 * per);
         self.clamp(area);
     }
 
@@ -95,11 +167,7 @@ impl ZoomView {
 
     /// Shows the whole diagram, centred.
     pub fn fit(&mut self, area: Rect) {
-        let (w, h) = (self.image.width as f32, self.image.height as f32);
-        if w <= 0.0 || h <= 0.0 {
-            return;
-        }
-        self.zoom = (area.w / w).min(area.h / h).clamp(MIN_ZOOM, MAX_ZOOM);
+        self.zoom = self.fit_zoom(area);
         self.clamp(area);
     }
 
@@ -176,7 +244,7 @@ mod tests {
 
     #[test]
     fn a_diagram_opens_at_reading_size_and_is_centred() {
-        let view = ZoomView::open(image(300, 200), area());
+        let view = ZoomView::open(image(300, 200), area(), 1.0);
         assert_eq!(view.zoom, 1.0);
         let r = view.image_rect(area());
         assert_eq!((r.x, r.y, r.w, r.h), (350.0, 300.0, 300.0, 200.0));
@@ -184,7 +252,7 @@ mod tests {
 
     #[test]
     fn a_diagram_wider_than_the_window_starts_at_reading_size_and_pans_within_it() {
-        let mut view = ZoomView::open(image(3000, 1500), area());
+        let mut view = ZoomView::open(image(3000, 1500), area(), 1.0);
         // Wider than the area: its left edge is at the area's left, not centred off screen.
         assert_eq!(view.pan.0, 0.0);
         view.pan_by(area(), -500.0, -500.0);
@@ -198,7 +266,7 @@ mod tests {
 
     #[test]
     fn zooming_keeps_the_point_under_the_pointer_and_stays_in_range() {
-        let mut view = ZoomView::open(image(1200, 1000), area());
+        let mut view = ZoomView::open(image(1200, 1000), area(), 1.0);
         let focus = (600.0, 450.0);
         let before = (
             (focus.0 - view.image_rect(area()).x) / view.zoom,
@@ -217,10 +285,87 @@ mod tests {
 
     #[test]
     fn fitting_shows_the_whole_diagram_and_centres_it() {
-        let mut view = ZoomView::open(image(3000, 1500), area());
+        let mut view = ZoomView::open(image(3000, 1500), area(), 1.0);
         view.fit(area());
         let r = view.image_rect(area());
         assert!(r.w <= area().w + 0.01 && r.h <= area().h + 0.01);
         assert_eq!((r.cx(), r.cy()), (area().cx(), area().cy()));
+    }
+
+    /// The page's raster of a diagram the page drew `page` logical px wide, at device scale
+    /// `scale`: made at twice the device scale, as the page makes it.
+    fn page_raster(page: f32, scale: f32) -> Rc<DecodedImage> {
+        image((page * 2.0 * scale) as u32, 100)
+    }
+
+    /// Audit 4, E2: the view opens at twice the size the page drew the diagram, with each raster
+    /// pixel on one device pixel, at every device scale; it opened at 3x at 150 % and 4x at 200 %,
+    /// stretching each raster pixel over 1.5 and 2 device pixels.
+    #[test]
+    fn a_diagram_opens_at_twice_the_pages_size_at_every_device_scale() {
+        for scale in [1.0, 1.5, 2.0] {
+            let raster = page_raster(300.0, scale);
+            let view = ZoomView::open(raster.clone(), area(), scale);
+            let r = view.image_rect(area());
+            assert_eq!(r.w, 600.0, "twice the page's 300 logical px at {scale}");
+            assert_eq!(
+                r.w * scale,
+                raster.width as f32,
+                "one device px a raster px"
+            );
+            assert_eq!(r.x, 200.0, "centred at {scale}");
+        }
+    }
+
+    /// The sizes the wheel stops at are the same against the page at every scale: from a fifth
+    /// of the page's size (a tenth of reading size) to eight times it.
+    #[test]
+    fn the_wheel_stops_at_the_same_sizes_against_the_page_at_every_scale() {
+        for scale in [1.0, 1.5, 2.0] {
+            let mut view = ZoomView::open(page_raster(300.0, scale), area(), scale);
+            let focus = (area().cx(), area().cy());
+            view.zoom_to(area(), 100.0, focus);
+            assert_eq!(
+                view.image_rect(area()).w,
+                300.0 * 2.0 * MAX_ZOOM,
+                "at {scale}"
+            );
+            view.zoom_to(area(), 0.0, focus);
+            let w = view.image_rect(area()).w;
+            assert!((w - 300.0 * 2.0 * MIN_ZOOM).abs() < 0.01, "{w} at {scale}");
+        }
+    }
+
+    /// Zooming keeps the point under the pointer at a device scale other than 1 too.
+    #[test]
+    fn zooming_keeps_the_point_under_the_pointer_at_scale_two() {
+        let mut view = ZoomView::open(image(4000, 3000), area(), 2.0);
+        let focus = (610.0, 430.0);
+        let at = |v: &ZoomView| {
+            let r = v.image_rect(area());
+            ((focus.0 - r.x) / r.w, (focus.1 - r.y) / r.h)
+        };
+        let before = at(&view);
+        view.zoom_by(area(), 3.0, focus);
+        assert!(view.zoom > 1.0);
+        let after = at(&view);
+        assert!((after.0 - before.0).abs() < 1e-4 && (after.1 - before.1).abs() < 1e-4);
+    }
+
+    /// Audit 4, E9: `0` shows the whole of a diagram more than ten windows wide (the smallest
+    /// wheel size used to stop the fit), and the wheel goes no smaller than that fit, nor jumps
+    /// back up to the smallest size on its first notch out.
+    #[test]
+    fn a_diagram_wider_than_ten_windows_still_fits_whole() {
+        let mut view = ZoomView::open(image(30_000, 300), area(), 1.0);
+        view.fit(area());
+        let r = view.image_rect(area());
+        assert!(r.w <= area().w + 0.01, "{r:?}");
+        assert!(view.zoom < MIN_ZOOM);
+        let fit = view.zoom;
+        view.zoom_by(area(), -1.0, (area().cx(), area().cy()));
+        assert_eq!(view.zoom, fit, "no smaller than the fit");
+        view.zoom_by(area(), 1.0, (area().cx(), area().cy()));
+        assert!(view.zoom > fit && view.zoom < MIN_ZOOM);
     }
 }

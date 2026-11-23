@@ -231,6 +231,10 @@ shot zoom-diagram-fit-light --light --size 1280x800 --zoom-diagram 1 --zoom-leve
 shot zoom-diagram-fit-dark --dark --size 1280x800 --zoom-diagram 1 --zoom-level 0.42 "$fx/wide-diagram.md"
 shot zoom-diagram-pan-light --light --size 1280x800 --zoom-diagram 1 --zoom-level 1.8 --zoom-pan -900,-500 "$fx/wide-diagram.md"
 shot zoom-diagram-pan-dark --dark --size 1280x800 --zoom-diagram 1 --zoom-level 1.8 --zoom-pan -900,-500 "$fx/wide-diagram.md"
+# At a device scale of 2 it opens at the same size against the page as at 1, each raster pixel on
+# one device pixel (audit 4, E2: it opened at four times the page's size).
+shot zoom-diagram-2x-light --light --scale 2.0 --size 1280x800 --zoom-diagram 1 "$fx/wide-diagram.md"
+shot zoom-diagram-2x-dark --dark --scale 2.0 --size 1280x800 --zoom-diagram 1 "$fx/wide-diagram.md"
 
 # More HTML and notes: a wrapping ruby base, a figure with its margin, `<abbr title>` (and its hover card).
 shot render-more-light --light --size 640x640 "$fx/render-more.md"

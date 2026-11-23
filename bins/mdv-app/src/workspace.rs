@@ -437,6 +437,12 @@ impl Tab {
         &self.path
     }
 
+    /// Counts the documents the tab has taken: it changes whenever its text is read or sent
+    /// again.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     /// False for a restored tab that has not been shown yet (or was unloaded by `drop_idle`).
     pub fn is_loaded(&self) -> bool {
         self.doc.is_some()
@@ -1736,14 +1742,22 @@ impl Workspace {
         (self.tabs.iter()).position(|t| t.untitled.as_deref() == Some(doc))
     }
 
-    /// Whether a tab shows the file `path`, or (`doc`) the editor's document of that name.
+    /// Whether a tab shows the file `path`, or (`doc`) the editor's document of that name. The
+    /// path is resolved on disk ([`resolve`]); a caller that asks again and again resolves it once
+    /// and asks [`shows_resolved`](Self::shows_resolved).
     pub fn shows(&self, path: &Path, doc: Option<&str>) -> bool {
         match doc {
+            Some(_) if path.as_os_str().is_empty() => self.shows_resolved(path, doc),
+            _ => self.shows_resolved(&resolve(path), doc),
+        }
+    }
+
+    /// [`shows`](Self::shows) for a `path` already [`resolve`]d: nothing is asked of the disk, so
+    /// it costs a few compares per tab (audit 4, E1: it is asked on every turn of the loop).
+    pub fn shows_resolved(&self, path: &Path, doc: Option<&str>) -> bool {
+        match doc {
             Some(doc) if path.as_os_str().is_empty() => self.untitled_tab(doc).is_some(),
-            _ => {
-                let path = canonical_or_absolute(path);
-                (self.tabs.iter()).any(|t| t.untitled.is_none() && same_file(&t.path, &path))
-            }
+            _ => (self.tabs.iter()).any(|t| t.untitled.is_none() && same_file(&t.path, path)),
         }
     }
 
@@ -4069,6 +4083,22 @@ fn names_image(doc: &Document, url: &str) -> bool {
             .into_iter()
             .any(|src| doc.str(src).trim() == url)
     })
+}
+
+/// Where the file `path` is, as a tab holds it: [`canonical_or_absolute`], which asks the disk
+/// (one open of the file, or of each folder above a missing one). What runs on every turn of the
+/// loop or every key resolves its paths once, when they arrive, and compares after that; the
+/// tests count the calls ([`RESOLVES`]) to hold that.
+pub fn resolve(path: &Path) -> PathBuf {
+    #[cfg(test)]
+    RESOLVES.with(|n| n.set(n.get() + 1));
+    canonical_or_absolute(path)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many paths this thread has [`resolve`]d.
+    pub static RESOLVES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Whether two paths name the same file (case-insensitive on Windows).
