@@ -118,6 +118,9 @@ pub fn draw(c: &mut Ctx, view: &ZoomView, area: Rect) {
     c.p.fill_a(area, [0, 0, 0], if pal.dark { 0.70 } else { 0.52 });
     let r = view.image_rect(area);
     c.p.shadow(r, 8.0, pal.dark);
+    // A sheet of the page's own colour under the diagram: a Mermaid raster is transparent
+    // between its shapes, and the dimmed page's text must not show through the gaps.
+    c.p.fill(r, pal.page);
     let scale = c.p.scale;
     c.p.bmp.image(
         &view.image.rgba,
