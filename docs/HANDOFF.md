@@ -19,8 +19,6 @@ that last changed this file is the state it describes; check `git log --oneline 
   LR` with nested subgraphs and about twenty nodes, in a private document on this PC
   (`Desktop\kweb Homelab Map.md`); it is not to be copied into this repository. Not designed,
   not priced. The same view could serve a large image or SVG.
-- M1, a read-only Notes face in the left pane, and M2, "Add this file to the notes library…"
-  (the owner's yes, mdedit D-100).
 
 ## Release 1.0.5 (2026-11-23, released)
 
@@ -2615,3 +2613,163 @@ while the viewer runs, which `alive` cannot see.
   `closing_the_window_tells_the_editor_of_every_tab_it_asked_for`; each fails with its part
   taken out.
 
+## The notes library in the viewer (2026-11-23, branch `f/notes-face`, not merged)
+
+M1 and M2 of mdedit's `docs/ai-library-plan.md` 7.5, the owner's yes in its D-100: a read-only
+Notes face over mdedit's notes library, and "Add this file to the notes library.".
+
+### DESIGN
+
+**The face.** The Files pane has a second face, as mdedit's has: the head's switches read Files
+and Notes (folder and bookmark icons, the lit one underlined), and Notes is offered only where
+there is a library folder. The face lists the library as the shared
+`mdshared_app::library::tree` sees it: a group is a library file, a section is its level-2 and
+deeper headings, a note is a list item. A click on a group or a section folds it; on a note it
+opens the note in a tab (or switches to its tab). A note whose file is gone is drawn with the
+warning icon, in the muted colour, and a click says "That note is not where the library says it
+is." and opens nothing. Each note's folder relative to the library is dimmed at the right of its
+row, elided from the left, and left out in a pane narrower than 210 px. The count of a library
+too large to read whole is said under the list. Refresh in the head reads the library again.
+Nothing watches the folder and there is no timer; folds last while the face is shown.
+
+**Where the library is.** mdedit's: `library_dir` in mdedit's `settings.ini`, through the shared
+`mdshared_app::library::put` (`dir_from_settings`, `dir_for`, `pref_in`). mdview never writes it.
+A run must never read the owner's library by accident (mdedit D-067): an explicit
+`MDEDIT_SETTINGS` always counts; otherwise a run with no session (a shot, `--no-session`) or a
+scratch `MDVIEW_SETTINGS` has no library, and a normal run uses mdedit's own settings file.
+
+**When it is read.** At start only mdedit's settings file is read and the folder checked, so the
+head knows whether to offer the face. The library itself is read when the face is first shown,
+on Refresh, after an add, and when the palette first lists it; that read is kept until Refresh
+or an add.
+There is no watcher: a change made in mdedit shows after Refresh or the next add.
+
+**Add this file to the notes library.** On a tab's menu, on the page's menu, and in the command
+palette (`Menu::None`, so it is in the palette only); absent where there is no library folder,
+the tab's menu greys it out for a document with no file and the page's menu leaves it out. It is
+the shared `put::put_note`: the note is linked relative
+when it is inside the library folder, the new text must read back as the old notes plus this one,
+and it is written in one atomic write. A file the library already lists says so and writes
+nothing. With one group it goes in that group; with several, a menu at the pointer asks which;
+with none, `notes.md` is made there from the shared template and the note goes in it. The note's
+own file is never changed. The first add in a run asks: "Add to the notes library?", with the
+note's title, the group, the library folder and Add/Cancel; the yes is kept as `library_ok` in
+the session and later adds write at once, a no writes nothing and asks again next time. The
+status strip says “Budget 2026” is in Personal now, or why nothing was written.
+
+**The palette.** The library's notes are listed by title under a header per library file, after
+the open tabs and the recents (a note already open is not listed twice); the hint is the note's
+section, or "missing", and a missing note is greyed. Enter opens the chosen note.
+
+### Built
+
+`bins/mdv-app/src/notes.rs` (the face and the library state, `Notes`), `app/library.rs` (the
+commands: the switch, the row click, Refresh, Add, the group menu, the question), with
+`app/library_tests.rs`; `panes.rs` calls `notes::draw` for the face and `notes::draw_head_row` for
+the head; `Ui.notes`,
+`Hit::PaneFace`/`NotesRow`/`NotesRefresh`, `Act::LibraryPut`, `PopupKind::Library`,
+`DialogKind::AddToLibrary`, `C::LibraryAdd` and its label in core, `Session.library_ok`, the
+`--notes` launch argument (for shots), `palette::Target::Note` and the note source, and the row in
+`overlays::page_menu` and `overlays::tab_menu`. The shared pin is `f/library-dir` at `a6b0c9c`
+(whose `mdshared_app::library::put` and `tree` are what this uses), pinned in `eceb83f` alone
+beside its identical shots (138). **Repin to shared `main` before merging.**
+
+### Decisions
+
+1. The face is a switch in the pane's head, as mdedit's, not a menu row: that is what the plan
+   asks for ("the face and its head switch").
+2. A group's row shows its `home:` folder dimmed when it has one; a note's shows the folder it is
+   in relative to the library, unless the pane is narrower than 210 px, where the titles need the
+   room.
+3. No shortcut of its own. The plan gives none; mdedit's Ctrl+Shift+N is not taken here.
+4. Without a library folder the add is absent rather than greyed: a command that could only say
+   why it cannot run would be noise, and the face's switch is absent for the same reason.
+5. The palette reads the library when it first lists it (once), not at start, and lists it as
+   last read: Refresh in the face, or an add, reads it again. Nothing watches mdedit's folder.
+6. The viewer's own wording for the question and the toast; mdedit's "Add this file" card is not
+   shared.
+
+### Tests
+
+`cargo test --release -p mdview`:
+`the_head_offers_the_notes_face_only_with_a_library_and_the_switch_swaps_the_faces`,
+`a_click_opens_a_note_and_folds_a_group_and_a_missing_note_says_so`,
+`refresh_reads_the_library_again`,
+`add_this_file_asks_the_first_time_then_writes_and_does_not_ask_again`,
+`with_two_groups_the_reader_picks_one_from_a_menu`,
+`a_run_with_no_library_is_told_so_and_writes_nothing`,
+`a_document_mdedit_has_not_saved_is_told_to_be_saved_first`,
+`the_tab_menu_and_the_palette_list_the_command_only_with_a_library`,
+`the_palette_lists_the_library_notes_by_title_and_opens_the_one_chosen`,
+`a_note_the_library_lists_but_disk_does_not_is_listed_and_cannot_be_chosen`,
+`the_page_menu_offers_adding_the_file_only_when_there_is_a_library`,
+`a_library_folder_that_is_not_there_offers_no_add_and_writes_nothing`, and in `notes.rs`
+`a_run_without_a_session_or_with_a_scratch_one_finds_no_library_unless_told_to`,
+`the_face_lists_the_library_folds_and_marks_what_is_missing`,
+`a_missing_folder_is_not_offered_and_says_so_when_shown`,
+`adding_a_file_lists_it_and_a_second_add_finds_it_listed`,
+`a_library_with_no_file_gets_notes_md_from_the_first_add`; in core's session,
+`the_library_yes_is_written_only_once_given_and_round_trips`. Nothing reads the owner's library:
+every test makes its own under the temp folder.
+
+Four were checked by taking their part out: the guard in `settings_file` (a scratch run would
+read mdedit's real file), the palette's note source (the notes would not be listed), the page
+menu's row (it would be there without a library), and the missing-note check on a row click (the
+status would be the operating system's error rather than the sentence).
+
+### Shots
+
+`tests/shots.sh`, both themes, on scratch copies of a settings file and a library
+(`tests/notes-library/`; `MDEDIT_SETTINGS` names the scratch file, so a shot never reads the
+owner's): `notes-pane-*` the face with a note open and selected, its folder dimmed, a missing
+note marked; `notes-pane-min-*` the same at 520 x 360, folders left out and a
+long title elided; `notes-switch-files-*` the Files face with both switches; `notes-empty-*` a
+library folder with no library file; `notes-nofolder-*` a settings file naming a folder that is
+not there; `menu-tab-library-*` the tab menu with the row; `menu-page-library-*` the page menu
+with it; `palette-library-*` the palette on `>notes library`; `dialog-library-add-*` the question
+first asked; `menu-library-groups-*` the choice of two groups; `palette-notes-*` the palette
+listing the notes by title under Personal and Work, with the missing one greyed.
+`tests/shots-check.sh`: 118 wanted, 0 bad, 160 PNGs.
+
+### Release note
+
+> **The notes library, read-only.** The Files pane has a second face showing mdedit's notes
+> library: groups, sections and notes; a click opens a note in a tab, a note whose file is gone
+> is marked, and the palette lists the notes by title.
+>
+> **Add this file to the notes library.** On a tab's menu, on the page's menu and in the command
+> palette, with a question the first time: one link is written into one of mdedit's library
+> files, and the note itself is not changed.
+
+### Numbers
+
+Release builds of `eceb83f` (before) and of this branch (after), each copied beside the same
+`mdview-engine.exe` (a copy without one is not comparable: diagrams and math are not rendered
+into the page), a scratch `MDVIEW_SETTINGS` and `MDEDIT_SETTINGS` naming a copy of
+`tests/notes-library/`, `fixtures/showcase.md`, both panes open, four runs alternating
+before/after on this PC (other sessions were building, so the first frame was 90-140 ms where a
+quiet PC gives 80):
+
+| | before | after |
+|---|---|---|
+| first frame after (window shown), ms | 92.5, 95.3, 106.8 (one run 140.4) | 88.9, 93.9, 95.6, 97.6 |
+| scroll frame, own work, ms (median / p90) | 0.67-0.87 / 1.37-2.11 | 0.67-1.03 / 1.43-2.08 |
+| private memory at 3 s, MiB | 23.8-24.1 | 23.9-24.3 |
+| `mdview.exe`, bytes | 9,388,544 | 9,507,840 (+116.5 KiB) |
+
+Within the runs' spread. At start the feature reads mdedit's settings file and checks that the
+library folder is there (one open and one stat); the library itself is read on first use, so
+nothing else is added to the launch, scroll or idle path. The palette's first open on a large
+library was not measured (see below).
+
+### Not run
+
+Nobody has looked at it in a real window (rule 6: the owner approves by looking); every picture
+above is from `--shot`, and the tests are headless. Not measured: the palette's first open on a
+library of 500 or 2,000 notes (the plan's fault I, measured for mdedit's own read, not here), a
+library on a network drive, a library folder that is deleted while the window runs (the face says
+so after Refresh), the same in Linux's fonts, or macOS. Not tried by hand: the dialog's Add and
+Cancel, the group menu, and a second add in the same run (the tests do all three, but nobody has
+clicked them). The pin is still `f/library-dir`, not shared `main`; merging waits for that branch
+to land. The viewer keeps no memory of the face across launches: a new window starts on Files
+unless `--notes` is given (mdedit remembers its face; mdview does not).
