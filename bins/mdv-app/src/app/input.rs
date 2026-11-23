@@ -5,12 +5,38 @@ use super::*;
 impl App {
     // ---- pointer -------------------------------------------------------------------------------
 
+    /// The whole window, logical px: where the diagram zoom view draws.
+    pub(super) fn zoom_area(&self) -> Rect {
+        let (w, h) = self.logical();
+        Rect::new(0.0, 0.0, w, h)
+    }
+
     pub(super) fn pointer_moved(&mut self, x: f32, y: f32) {
         if self.presenting() {
             self.present_pointer(x, y);
             return;
         }
         self.ui.mouse = (x, y);
+        if self.ui.zoom.is_some() {
+            let hover = self.hit_at(x, y);
+            if hover != self.ui.hover {
+                self.ui.hover = hover;
+            }
+            if let Some(Drag::Zoom { last }) = self.ui.drag {
+                let area = self.zoom_area();
+                if let Some(view) = self.ui.zoom.as_mut() {
+                    view.pan_by(area, x - last.0, y - last.1);
+                }
+                self.ui.drag = Some(Drag::Zoom { last: (x, y) });
+            }
+            self.set_cursor(match (self.ui.drag, hover) {
+                (Some(_), _) => CursorIcon::Grabbing,
+                (None, Some(Hit::ZoomClose)) => CursorIcon::Pointer,
+                _ => CursorIcon::Grab,
+            });
+            self.redraw();
+            return;
+        }
         if self.ui.modal() {
             self.modal_pointer(x, y);
             return;
@@ -226,6 +252,13 @@ impl App {
                     self.caret_reset();
                 }
             }
+            Drag::Zoom { last } => {
+                let area = self.zoom_area();
+                if let Some(view) = self.ui.zoom.as_mut() {
+                    view.pan_by(area, x - last.0, y - last.1);
+                }
+                self.ui.drag = Some(Drag::Zoom { last: (x, y) });
+            }
         }
     }
 
@@ -326,6 +359,20 @@ impl App {
     pub(super) fn left_press(&mut self) {
         if self.presenting() {
             self.present_press();
+            return;
+        }
+        if self.ui.zoom.is_some() {
+            self.ui.tip = None;
+            self.ui.card = None;
+            self.ui.link_hint = None;
+            let (x, y) = self.ui.mouse;
+            if self.hit_at(x, y) == Some(Hit::ZoomClose) {
+                self.ui.pressed = Some(Hit::ZoomClose);
+            } else {
+                self.ui.drag = Some(Drag::Zoom { last: (x, y) });
+            }
+            self.set_cursor(CursorIcon::Grabbing);
+            self.redraw();
             return;
         }
         let (x, y) = self.ui.mouse;
@@ -452,6 +499,17 @@ impl App {
             self.present_release();
             return;
         }
+        if self.ui.zoom.is_some() {
+            if self.ui.pressed.take() == Some(Hit::ZoomClose)
+                && self.hit_at(x, y) == Some(Hit::ZoomClose)
+            {
+                self.close_zoom();
+            }
+            self.ui.drag = None;
+            self.set_cursor(CursorIcon::Grab);
+            self.redraw();
+            return;
+        }
         if self.ui.modal() {
             self.modal_release();
             return;
@@ -493,7 +551,7 @@ impl App {
     }
 
     pub(super) fn right_press(&mut self) {
-        if self.presenting() {
+        if self.presenting() || self.ui.zoom.is_some() {
             return;
         }
         let (x, y) = self.ui.mouse;
@@ -535,7 +593,11 @@ impl App {
 
     /// The mouse's Back and Forward buttons, and Alt+Left and Alt+Right.
     pub(super) fn travel(&mut self, back: bool) {
-        if self.presenting() || self.ui.dialog.is_some() || self.ui.modal() {
+        if self.presenting()
+            || self.ui.zoom.is_some()
+            || self.ui.dialog.is_some()
+            || self.ui.modal()
+        {
             return;
         }
         self.ui.popup = None;
@@ -550,7 +612,7 @@ impl App {
     }
 
     pub(super) fn middle_press(&mut self) {
-        if self.presenting() {
+        if self.presenting() || self.ui.zoom.is_some() {
             return;
         }
         let (x, y) = self.ui.mouse;
@@ -573,6 +635,14 @@ impl App {
         };
         if self.presenting() {
             self.present_wheel(notches, pixels);
+            return;
+        }
+        if self.ui.zoom.is_some() {
+            let area = self.zoom_area();
+            if let Some(view) = self.ui.zoom.as_mut() {
+                view.zoom_by(area, notches, (x, y));
+            }
+            self.redraw();
             return;
         }
         if self.ui.modal() {
@@ -654,6 +724,7 @@ impl App {
             Click::Task(crate::workspace::TaskClick::Ask) => {
                 self.open_dialog(DialogKind::AllowEdit);
             }
+            Click::Diagram(source) => self.open_zoom(source),
             _ => {}
         }
     }
@@ -763,6 +834,41 @@ impl App {
         // A presentation takes the keyboard before anything else.
         if self.presenting() {
             self.present_key(name, mods, typed);
+            return;
+        }
+        // The diagram view too: Escape closes it, and the keys a reader reaches for change its
+        // size or show the whole of it.
+        if self.ui.zoom.is_some() {
+            let area = self.zoom_area();
+            let centre = (area.cx(), area.cy());
+            let used = match name {
+                KeyName::Escape => {
+                    self.close_zoom();
+                    true
+                }
+                KeyName::Char('+') | KeyName::Char('=') => {
+                    if let Some(view) = self.ui.zoom.as_mut() {
+                        view.zoom_by(area, 1.0, centre);
+                    }
+                    true
+                }
+                KeyName::Char('-') | KeyName::Char('_') => {
+                    if let Some(view) = self.ui.zoom.as_mut() {
+                        view.zoom_by(area, -1.0, centre);
+                    }
+                    true
+                }
+                KeyName::Char('0') => {
+                    if let Some(view) = self.ui.zoom.as_mut() {
+                        view.fit(area);
+                    }
+                    true
+                }
+                _ => false,
+            };
+            if used {
+                self.redraw();
+            }
             return;
         }
         // The palette and the settings dialog take the keyboard before anything else.

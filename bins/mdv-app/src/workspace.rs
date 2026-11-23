@@ -43,7 +43,7 @@ use mdview_core::session::{self, PageWidth, RecentEntry, Recents, Session};
 use mdview_core::{Document, parse_bytes, tasks};
 use mdview_render::{
     DARK, DocumentRenderer, Frame, Hit, Jump, LIGHT, Options, PageLayout, Rect, RemoteState,
-    SourceKind, Theme,
+    Source, SourceKind, Theme,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -137,6 +137,8 @@ pub enum Click {
     Details,
     /// A click on a task-list box.
     Task(TaskClick),
+    /// A click on a rendered Mermaid diagram: its source, for the zoom view.
+    Diagram(String),
 }
 
 /// What a click on a task-list box came to.
@@ -536,6 +538,8 @@ struct Press {
     footnote: Option<u32>,
     details: Option<u32>,
     task: Option<u32>,
+    /// The rendered formula or diagram the press landed on.
+    source: Option<Source>,
     moved: bool,
 }
 
@@ -2858,7 +2862,8 @@ impl Workspace {
             pointing: hit.link.is_some()
                 || hit.footnote.is_some()
                 || hit.details.is_some()
-                || hit.task.is_some(),
+                || hit.task.is_some()
+                || hit.source.is_some_and(|s| s.kind == SourceKind::Diagram),
             text: hit.on_text,
             code: hit.code.map(|c| c.start),
             preview: self.preview_target(&hit),
@@ -3022,6 +3027,29 @@ impl Workspace {
         }
     }
 
+    /// The source of the `index`-th (from 0) Mermaid diagram of the active document that can be
+    /// drawn, laid out or not: what `--zoom-diagram` opens.
+    pub fn diagram_source(&self, index: usize) -> Option<String> {
+        let doc = self.active_document()?;
+        doc.blocks
+            .iter()
+            .filter(|b| matches!(b.kind, BlockKind::Diagram { oversize: None, .. }))
+            .filter_map(|b| {
+                let text = doc.text.get(b.text.start as usize..b.text.end as usize)?;
+                (!text.trim().is_empty()).then(|| text.trim().to_string())
+            })
+            .nth(index)
+    }
+
+    /// The raster of a Mermaid diagram at the page's scale and theme, for the zoom view.
+    pub fn diagram_raster(
+        &mut self,
+        source: &str,
+    ) -> Option<std::rc::Rc<mdview_render::DecodedImage>> {
+        self.ensure_layout();
+        self.renderer.diagram_raster(source)
+    }
+
     /// The destination of link `index` in the active document, as written; a wiki-link's
     /// target after [`WIKI_SCHEME`], which [`open_link`](Self::open_link) understands.
     pub fn link_destination(&self, index: u32) -> Option<String> {
@@ -3061,6 +3089,7 @@ impl Workspace {
             footnote: hit.footnote.filter(|_| !multi),
             details: hit.details.filter(|_| !multi),
             task: hit.task.filter(|_| !multi),
+            source: hit.source.filter(|_| !multi),
             moved: multi,
         });
         self.dirty = true;
@@ -3123,6 +3152,17 @@ impl Workspace {
         if let Some(block) = press.task {
             self.clear_selection();
             return Click::Task(self.click_task(block));
+        }
+        if let Some(source) = press.source.filter(|s| s.kind == SourceKind::Diagram) {
+            self.clear_selection();
+            let text = self
+                .active_document()
+                .and_then(|doc| doc.text.get(source.start as usize..source.end as usize))
+                .map(|text| text.trim().to_string())
+                .unwrap_or_default();
+            if !text.is_empty() {
+                return Click::Diagram(text);
+            }
         }
         self.clear_selection();
         Click::Deselected
@@ -5939,6 +5979,52 @@ A line of text here.
             .join("../../target/release")
             .join(name)
             .is_file()
+    }
+
+    #[test]
+    fn a_click_on_a_diagram_opens_it_and_its_raster_is_there() {
+        if !engine_available() {
+            eprintln!("skipping: no mdview-engine in target/release");
+            return;
+        }
+        let dir = temp_dir("zoom-diagram");
+        let path = write(
+            &dir,
+            "a.md",
+            "A diagram:\n\n```mermaid\ngraph TD\n  A --> B\n```\n",
+        );
+        let mut ws = workspace();
+        ws.open(&path).unwrap();
+        ws.paint(800, 600, 1.0).unwrap();
+        let mut at = None;
+        let mut y = 2.0;
+        while y < 600.0 && at.is_none() {
+            let mut x = 2.0;
+            while x < 800.0 {
+                if ws
+                    .hit(x, y)
+                    .and_then(|h| h.source)
+                    .is_some_and(|s| s.kind == SourceKind::Diagram)
+                {
+                    at = Some((x, y));
+                    break;
+                }
+                x += 4.0;
+            }
+            y += 3.0;
+        }
+        let (x, y) = at.expect("the diagram is under some point");
+        // The pointer shows it can be opened, and a click hands its source over.
+        assert!(ws.hover(x, y).pointing);
+        assert!(ws.pointer_press(x, y, 1));
+        assert_eq!(
+            ws.pointer_release(),
+            Click::Diagram("graph TD\n  A --> B".to_string())
+        );
+        // The page's own raster is there for the view, at twice the device scale.
+        let raster = ws.diagram_raster("graph TD\n  A --> B").expect("drawn");
+        assert!(raster.width > 0 && raster.height > 0);
+        _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

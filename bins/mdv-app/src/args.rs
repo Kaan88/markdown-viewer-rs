@@ -84,6 +84,13 @@ pub struct Args {
     /// Show the update bar at this stage (`available`, `installing` or `installed`) with a
     /// made-up version, for a shot. Nothing is looked up or downloaded.
     pub update_bar: Option<String>,
+    /// `--zoom-diagram N`: open the N-th (from 1) Mermaid diagram of the first document at a
+    /// reading size, for a shot.
+    pub zoom_diagram: Option<usize>,
+    /// `--zoom-level F`: with `--zoom-diagram`, its drawing size in logical px per raster px.
+    pub zoom_level: Option<f32>,
+    /// `--zoom-pan X,Y`: with `--zoom-diagram`, its top left inside the window, logical px.
+    pub zoom_pan: Option<(f32, f32)>,
     /// `--demo-untitled <file>`: show the text of `file` as a document mdedit previews
     /// before it has a file (a tab named "Untitled 1", live), for a shot. No editor is
     /// asked or needed.
@@ -165,6 +172,15 @@ impl Args {
                 "--present-select" => out.present_select = true,
                 "--load-remote" => out.load_remote = true,
                 "--update-bar" => out.update_bar = value(&a),
+                "--zoom-diagram" => {
+                    out.zoom_diagram = value(&a).and_then(|v| v.parse().ok()).filter(|&n| n >= 1);
+                }
+                "--zoom-level" => {
+                    out.zoom_level = value(&a)
+                        .and_then(|v| v.parse().ok())
+                        .filter(|f: &f32| *f > 0.0);
+                }
+                "--zoom-pan" => out.zoom_pan = value(&a).and_then(|v| pair(&v, ',')),
                 "--demo-untitled" => out.demo_untitled = value(&a).map(PathBuf::from),
                 "--backdrop" => {
                     out.backdrop = value(&a)
@@ -281,6 +297,16 @@ mod tests {
         assert_eq!(a.dialog, Some(ShotDialog::Settings));
         let a = parse("--dialog settings --settings-section reading");
         assert_eq!(a.settings_section.as_deref(), Some("reading"));
+    }
+
+    #[test]
+    fn the_diagram_zoom_shot_flags() {
+        let a = parse("--zoom-diagram 2 --zoom-level 1.5 --zoom-pan -120,40");
+        assert_eq!(a.zoom_diagram, Some(2));
+        assert_eq!(a.zoom_level, Some(1.5));
+        assert_eq!(a.zoom_pan, Some((-120.0, 40.0)));
+        assert_eq!(parse("--zoom-diagram 0 --zoom-level 0").zoom_diagram, None);
+        assert_eq!(parse("--zoom-level 0").zoom_level, None);
     }
 
     #[test]

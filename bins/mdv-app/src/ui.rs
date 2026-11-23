@@ -125,6 +125,8 @@ pub enum Hit {
     DlgRemove(usize),
     DlgCard,
     Backdrop,
+    /// The close button of the diagram zoom view.
+    ZoomClose,
 }
 
 impl Hit {
@@ -321,6 +323,10 @@ pub enum Drag {
     Select,
     /// Selecting in the find box.
     FindSelect,
+    /// Panning the diagram zoom view; the pointer's last position, logical px.
+    Zoom {
+        last: (f32, f32),
+    },
 }
 
 /// A tooltip waiting to show, or showing.
@@ -384,6 +390,8 @@ pub struct Ui {
     pub focus_mode: bool,
     /// Presentation mode, while it runs. See `present`.
     pub present: Option<crate::present::Show>,
+    /// A large diagram opened at a reading size, while it shows. See `zoom`.
+    pub zoom: Option<crate::zoom::ZoomView>,
     pub tree: FileTree,
     pub find: TextField,
     pub find_focused: bool,
@@ -440,6 +448,7 @@ impl Ui {
             },
             focus_mode: false,
             present: None,
+            zoom: None,
             tree: new_tree(),
             find: TextField::new(),
             find_focused: false,
