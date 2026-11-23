@@ -93,6 +93,12 @@ pub enum Hit {
     FilesRow(usize),
     FilesFolder,
     FilesOpenFolder,
+    /// A switch in the Files pane's head: 0 the files, 1 the notes library.
+    PaneFace(usize),
+    /// A row of the Notes face.
+    NotesRow(usize),
+    /// The Notes face's button that reads the library again.
+    NotesRefresh,
     OutlineRow(usize),
     /// An entry of the Backlinks list under the outline.
     BacklinkRow(usize),
@@ -136,7 +142,12 @@ impl Hit {
             }
             Hit::WinMin | Hit::WinMax | Hit::WinClose => Region::Title,
             Hit::Bar(_) | Hit::Find | Hit::FindClear => Region::Bar,
-            Hit::FilesRow(_) | Hit::FilesFolder | Hit::FilesOpenFolder => Region::Files,
+            Hit::FilesRow(_)
+            | Hit::FilesFolder
+            | Hit::FilesOpenFolder
+            | Hit::PaneFace(_)
+            | Hit::NotesRow(_)
+            | Hit::NotesRefresh => Region::Files,
             Hit::Splitter(Side::Files) | Hit::ScrollBar(Scroller::Pane(Side::Files)) => {
                 Region::Files
             }
@@ -187,6 +198,8 @@ pub enum Act {
     /// A tab context menu command for this tab.
     TabCmd(CommandId, usize),
     Recent(PathBuf),
+    /// Add the file waiting to be added to the notes library group `i` of its list.
+    LibraryPut(usize),
     /// Open the Recent menu beside the item.
     RecentMenu,
     OpenLink(String),
@@ -222,6 +235,8 @@ pub enum PopupKind {
     Page,
     /// The find box's editing menu.
     Find,
+    /// The groups of the notes library, to choose where a file is added.
+    Library,
 }
 
 pub struct Popup {
@@ -274,6 +289,8 @@ pub enum DialogKind {
     Recent,
     /// Asks before the first task box is ticked in a file.
     AllowEdit,
+    /// Asks before the first note is added to the notes library.
+    AddToLibrary,
 }
 
 pub struct Dialog {
@@ -385,6 +402,8 @@ pub struct Ui {
     /// Presentation mode, while it runs. See `present`.
     pub present: Option<crate::present::Show>,
     pub tree: FileTree,
+    /// The Notes face of the Files pane and the notes library behind it.
+    pub notes: crate::notes::Notes,
     pub find: TextField,
     pub find_focused: bool,
     /// The Outline pane's focused row while the keyboard is in that pane: the headings first,
@@ -441,6 +460,7 @@ impl Ui {
             focus_mode: false,
             present: None,
             tree: new_tree(),
+            notes: crate::notes::Notes::new(None),
             find: TextField::new(),
             find_focused: false,
             outline_focus: None,

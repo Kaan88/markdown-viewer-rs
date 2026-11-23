@@ -60,6 +60,8 @@ pub enum CommandId {
     CopyMarkdown,
     /// Save the document as one self-contained HTML file.
     ExportHtml,
+    /// Writes the open file into mdedit's notes library (a link in one of its library files).
+    LibraryAdd,
     /// Hand the document to the default browser to print.
     Print,
     /// Pin the tab, or unpin it: pinned tabs come first and stay open until unpinned.
@@ -313,6 +315,12 @@ pub const COMMANDS: &[Command] = &[
     // menu and the command palette offer them.
     cmd(C::ExportHtml, Menu::None, "Export as HTML…", &[]),
     cmd(C::Print, Menu::None, "Print (opens in browser)", &[]),
+    cmd(
+        C::LibraryAdd,
+        Menu::None,
+        "Add this file to the notes library…",
+        &[],
+    ),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -2285,7 +2285,7 @@ fn export_and_print_are_in_the_tab_menu_and_the_palette_and_need_a_document() {
     let a = app(&["showcase.md", "tables.md"]);
     // Not in the main menu: it has to fit the default window without scrolling.
     let main = overlays::main_menu(&a.ws, &a.ui, 0.0, 0.0).items;
-    let items = overlays::tab_menu(&a.ws, 0, 0.0, 0.0).items;
+    let items = overlays::tab_menu(&a.ws, 0, false, 0.0, 0.0).items;
     for (id, label) in [
         (C::ExportHtml, "Export as HTML…"),
         (C::Print, "Print (opens in browser)"),
@@ -2703,7 +2703,7 @@ fn the_tab_menu_of_an_unsaved_document_asks_the_editor_by_name() {
     a.handed_over(vec![shown(DOC, "# Draft\n\nBody.\n", Some(3))]);
     a.compose();
     // No path to copy and nowhere to show; Edit in mdedit stays.
-    let menu = overlays::tab_menu(&a.ws, 1, 0.0, 0.0);
+    let menu = overlays::tab_menu(&a.ws, 1, false, 0.0, 0.0);
     let enabled = |id: CommandId| {
         let item = menu.items.iter().find(|it| it.id == Act::TabCmd(id, 1));
         item.is_some_and(|it| it.enabled)
@@ -3431,7 +3431,7 @@ fn every_menu_with_fixed_labels_has_one_access_key_per_item() {
     let a = app(&["showcase.md", "tables.md"]);
     let main = overlays::main_menu(&a.ws, &a.ui, 0.0, 0.0);
     assert_distinct_access_keys(&main.items, "main menu");
-    assert_distinct_access_keys(&overlays::tab_menu(&a.ws, 0, 0.0, 0.0).items, "tab menu");
+    assert_distinct_access_keys(&overlays::tab_menu(&a.ws, 0, false, 0.0, 0.0).items, "tab menu");
     assert_distinct_access_keys(
         &overlays::find_menu(true, true, 0.0, 0.0).items,
         "find menu",

@@ -228,4 +228,40 @@ shot render-more-light --light --size 640x640 "$fx/render-more.md"
 shot render-more-narrow-light --light --size 430x560 "$fx/render-more.md"
 shot render-more-abbr-card --light --size 640x640 --hover 89,254 "$fx/render-more.md"
 
+# The Notes face of the Files pane and "Add this file to the notes library…", on scratch copies
+# of mdedit's settings and libraries (MDEDIT_SETTINGS names a settings file of mdedit's; a shot
+# never reads the owner's). `notes-library` is the fixture; `one` lacks Work.md, `empty` has no
+# library file, `nowhere` names a folder that is not there.
+nl="$root/target/shots-notes"
+rm -rf "$nl"
+abs() { (cd "$1" && (pwd -W 2>/dev/null || pwd)); }
+mkdir -p "$nl/full" "$nl/one" "$nl/empty" "$nl/small"
+cp -r "tests/notes-library/." "$nl/full/"
+cp -r "tests/notes-library/." "$nl/one/"
+rm -f "$nl/one/Work.md"
+notes_settings() { # name library-folder
+    mkdir -p "$nl/$1"
+    printf '[preferences]\nlibrary_dir=%s\n' "$2" >"$nl/$1/settings.ini"
+    echo "$nl/$1/settings.ini"
+}
+full="$(notes_settings s-full "$(abs "$nl/full")")"
+one="$(notes_settings s-one "$(abs "$nl/one")")"
+empty="$(notes_settings s-empty "$(abs "$nl/empty")")"
+nowhere="$(notes_settings s-nowhere "$(abs "$nl")/not-made")"
+for theme in light dark; do
+    # The face, with a note of the library open (its row selected); a group folded is in the unit test.
+    MDEDIT_SETTINGS="$full" shot "notes-pane-$theme" --"$theme" --files --notes "$nl/full/Personal/Budget.md"
+    MDEDIT_SETTINGS="$full" shot "notes-pane-min-$theme" --"$theme" --size 520x360 --files --notes "$nl/full/Personal/Budget.md"
+    # The Files face beside it, with the two switches in its head.
+    MDEDIT_SETTINGS="$full" shot "notes-switch-files-$theme" --"$theme" --files --folder "$fx" "$fx/showcase.md"
+    MDEDIT_SETTINGS="$empty" shot "notes-empty-$theme" --"$theme" --files --notes "$fx/showcase.md"
+    MDEDIT_SETTINGS="$nowhere" shot "notes-nofolder-$theme" --"$theme" --files --notes "$fx/showcase.md"
+    # Add this file: the tab's menu, the palette, the question, the choice of group.
+    MDEDIT_SETTINGS="$full" shot "menu-tab-library-$theme" --"$theme" --menu tab "$fx/showcase.md" "$fx/tables.md"
+    MDEDIT_SETTINGS="$full" shot "palette-library-$theme" --"$theme" --palette ">notes library" "$fx/showcase.md"
+    MDEDIT_SETTINGS="$one" shot "dialog-library-add-$theme" --"$theme" --dialog library-add "$fx/showcase.md"
+    MDEDIT_SETTINGS="$full" shot "menu-library-groups-$theme" --"$theme" --menu library "$fx/showcase.md"
+done
+rm -rf "$nl"
+
 ls "$out" | wc -l

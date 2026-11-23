@@ -575,6 +575,9 @@ pub struct Workspace {
     held: Vec<String>,
     /// The task box (its block) whose tick waits for the reader's answer.
     pending_task: Option<u32>,
+    /// There is a notes library to add files to: the palette lists "Add this file to the notes
+    /// library…" (a build with none lists nothing new).
+    library_offered: bool,
     /// A newer version found, being installed, or installed, and whether its bar is closed.
     updates: Updates,
     /// Last time's crash report, offered on a bar until the reader answers it.
@@ -635,6 +638,7 @@ impl Workspace {
             remote_scale: 0.0,
             held: Vec::new(),
             pending_task: None,
+            library_offered: false,
             updates: Updates::default(),
             crash: None,
             notes: notes::Notes::new(),
@@ -1852,6 +1856,27 @@ impl Workspace {
             self.tabs.iter_mut().for_each(|t| t.edit_allowed = false);
         }
         self.persist();
+    }
+
+    pub fn library_offered(&self) -> bool {
+        self.library_offered
+    }
+
+    pub fn set_library_offered(&mut self, on: bool) {
+        self.library_offered = on;
+    }
+
+    /// Whether the reader already said yes to adding a file to the notes library.
+    pub fn library_ok(&self) -> bool {
+        self.session.library_ok
+    }
+
+    /// Remembers that the reader said yes to adding to the notes library: it asks only once.
+    pub fn set_library_ok(&mut self) {
+        if !self.session.library_ok {
+            self.session.library_ok = true;
+            self.persist();
+        }
     }
 
     /// The name of the file a tick would change, for the question put to the reader.

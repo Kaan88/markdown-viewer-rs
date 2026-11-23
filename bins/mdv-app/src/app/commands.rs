@@ -69,6 +69,9 @@ impl App {
                 }
             }
             Hit::FilesFolder | Hit::FilesOpenFolder => self.command(C::OpenFolder),
+            Hit::PaneFace(face) => self.pane_face(face),
+            Hit::NotesRow(i) => self.notes_row(i),
+            Hit::NotesRefresh => self.notes_refresh(),
             Hit::OutlineRow(i) => {
                 self.ui.outline_focus = Some(i);
                 self.outline_enter(i);
@@ -102,6 +105,14 @@ impl App {
                         2 => Some(true),
                         _ => None,
                     });
+                }
+                Some(DialogKind::AddToLibrary) => {
+                    self.close_dialog();
+                    if n == 1 {
+                        self.library_write();
+                    } else {
+                        self.ui.notes.pending = None;
+                    }
                 }
                 Some(DialogKind::About) if n == 1 => {
                     // The answer shows on the page (the bar or a toast), so the dialog goes.
@@ -142,6 +153,7 @@ impl App {
         match act {
             Act::Cmd(id) => self.command(id),
             Act::TabCmd(id, i) => self.tab_command(id, i),
+            Act::LibraryPut(i) => self.library_put_in(i),
             Act::Recent(path) => {
                 let _ = self.ws.open_recent(&path);
             }
@@ -286,6 +298,7 @@ impl App {
                         .set_status(mdview_core::commands::strings::EDITOR_NOT_RUNNING);
                 }
             }
+            C::LibraryAdd => self.library_add(index),
             C::CloseTab => {
                 self.ws.close(index);
             }
@@ -655,6 +668,7 @@ impl App {
             | C::CopyFilePath
             | C::ShowInFileManager
             | C::EditInMdedit
+            | C::LibraryAdd
             | C::PinTab => {
                 if let Some(i) = self.ws.active() {
                     self.tab_command(id, i);

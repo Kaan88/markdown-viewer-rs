@@ -318,6 +318,7 @@ fn commands(ws: &Workspace) -> (Vec<Entry>, Vec<Target>) {
             C::MakeDefault => platform::can_offer_default_app(),
             // The tab menu's Close tab is the File menu's.
             C::CloseTab => c.menu != Menu::TabContext,
+            C::LibraryAdd => ws.library_offered(),
             _ => true,
         })
         .collect();
@@ -334,6 +335,7 @@ fn commands(ws: &Workspace) -> (Vec<Entry>, Vec<Target>) {
             | C::EditInMdedit
             | C::ExportHtml
             | C::Print
+            | C::LibraryAdd
             | C::PinTab
             | C::Present => has_tab,
             C::CloseOtherTabs | C::NextTab | C::PreviousTab => many,

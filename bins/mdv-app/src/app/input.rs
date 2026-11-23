@@ -507,7 +507,7 @@ impl App {
             Some(Hit::Tab(i) | Hit::TabClose(i)) => {
                 self.ui.popup = Some(Popup::new(
                     PopupKind::Tab(i),
-                    overlays::tab_menu(&self.ws, i, x, y + 2.0),
+                    overlays::tab_menu(&self.ws, i, self.ui.notes.dir.is_some(), x, y + 2.0),
                 ));
             }
             Some(Hit::Page) => {

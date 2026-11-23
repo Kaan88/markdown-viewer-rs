@@ -56,6 +56,9 @@ mod export;
 #[cfg(test)]
 mod frost_tests;
 mod input;
+mod library;
+#[cfg(test)]
+mod library_tests;
 mod modal;
 mod slides;
 #[cfg(test)]
@@ -273,7 +276,11 @@ impl App {
             steps: args.scroll_steps,
             args,
             ws,
-            ui: Ui::new(),
+            ui: {
+                let mut ui = Ui::new();
+                ui.notes = crate::notes::Notes::new(crate::notes::library_dir(session.as_deref()));
+                ui
+            },
             window: None,
             tiling: Default::default(),
             placed_for: None,
@@ -341,6 +348,10 @@ impl App {
     fn setup(&mut self) {
         let a = self.args.clone();
         self.ws.set_system_dark(self.system_dark);
+        self.ws.set_library_offered(self.ui.notes.dir.is_some());
+        if a.notes_face {
+            self.ui.notes.show(true);
+        }
         if let Some(dark) = a.dark {
             self.ws.set_theme_choice(if dark {
                 ThemeChoice::Dark
@@ -562,6 +573,7 @@ impl App {
                     common,
                     ui.tree.root(),
                     ui.tree.rows().len(),
+                    ui.notes.sig(),
                     self.tree_sig(),
                     active,
                     ui.panes.files_scroll.to_bits(),
@@ -942,7 +954,15 @@ impl App {
                 };
                 c.hits.clear();
                 if let Some(d) = self.ui.dialog.as_mut() {
-                    overlays::draw_dialog(&mut c, &self.ws, d, w, h, self.ui.dlg_hover_row);
+                    overlays::draw_dialog(
+                        &mut c,
+                        &self.ws,
+                        &self.ui.notes,
+                        d,
+                        w,
+                        h,
+                        self.ui.dlg_hover_row,
+                    );
                 }
                 if let Some(popup) = self.ui.popup.as_mut() {
                     let room = menu_room(self.areas.title, w, h);
@@ -1799,6 +1819,7 @@ fn shot(mut app: App, path: &Path) -> i32 {
             app.ui.mouse = (page.x + page.w * 0.3, page.y + 160.0);
             app.right_press();
         }
+        Some(ShotMenu::Library) => app.library_groups_for_shot(),
         Some(ShotMenu::Find) => {
             if let Some(r) = app.hit_rect(Hit::Find) {
                 app.ui.mouse = (r.x + 60.0, r.cy());
@@ -1812,6 +1833,7 @@ fn shot(mut app: App, path: &Path) -> i32 {
         Some(ShotDialog::Shortcuts) => app.open_dialog(DialogKind::Shortcuts),
         Some(ShotDialog::Recent) => app.open_dialog(DialogKind::Recent),
         Some(ShotDialog::Edit) => app.open_dialog(DialogKind::AllowEdit),
+        Some(ShotDialog::AddLibrary) => app.library_add_for_shot(),
         Some(ShotDialog::Settings) => {
             app.open_settings();
             if let Some(name) = app.args.settings_section.clone()

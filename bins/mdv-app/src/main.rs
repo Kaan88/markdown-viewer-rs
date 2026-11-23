@@ -8,6 +8,7 @@ mod codebtn;
 mod folder_search;
 mod frost;
 mod keys;
+mod notes;
 mod overlays;
 mod page;
 mod palette;
