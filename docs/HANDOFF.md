@@ -11,6 +11,17 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Asked for by the owner, not started
+
+- **Click to zoom a large diagram** (2026-11-23, "for later"). A big Mermaid diagram is drawn
+  shrunk to the page's width and its labels cannot be read. A click on it should open it at a
+  readable size, to pan and zoom, and Esc should close it. The owner's sample is a wide `flowchart
+  LR` with nested subgraphs and about twenty nodes, in a private document on this PC
+  (`Desktop\kweb Homelab Map.md`); it is not to be copied into this repository. Not designed,
+  not priced. The same view could serve a large image or SVG.
+- M1, a read-only Notes face in the left pane, and M2, "Add this file to the notes library…"
+  (the owner's yes, mdedit D-100).
+
 ## Release 1.0.5 (2026-11-23, released)
 
 mdview 1.0.5 is released: tag `v1.0.5` at `0a9bc7c`, `ci` 45081989369 green on that commit, release run
