@@ -11,7 +11,16 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## On `main`, not released: 1.0.5 (2026-11-23)
+## Release 1.0.5 (2026-11-23, released)
+
+mdview 1.0.5 is released: tag `v1.0.5` at `0a9bc7c`, `ci` 45081989369 green on that commit, release run
+45084294417 green. Fourteen assets, `hub.txt` the new one. Every file the three manifests name
+(the exe, the engine, the setup, the AppImage, both Mac zips) downloaded again with the SHA-256
+they give. The note line was published as "mdview 1.0.5 (not released yet): Settings as pages.";
+with the owner's yes the three manifests and the release text were replaced the same hour with
+"mdview 1.0.5: Settings as pages, and mdedit is told when its preview is closed." (only that
+line; the hashes are unchanged). Not checked by hand: the installer, an update from 1.0.4, the
+macOS and Linux files.
 
 `docs/release-notes/1.0.5.md` is the list. Since 1.0.4: Settings as pages (below, merged 2026-11-22);
 a tab mdedit asked to show, closed here, is reported to mdedit with `?closed`, and closing the window
