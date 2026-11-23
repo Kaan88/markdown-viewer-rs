@@ -91,6 +91,7 @@ impl App {
             Hit::CrashOpen | Hit::CrashCopy | Hit::CrashClose => self.crash_bar(hit),
             Hit::StaleClose => self.ws.close_stale(),
             Hit::StaleKeep => self.ws.keep_stale(),
+            Hit::ZoomClose => self.close_zoom(),
             Hit::StaleDismiss => self.ws.dismiss_stale(),
             Hit::EmptyRecent(i) => {
                 if let Some(p) = self.ws.recents().get(i).cloned() {
@@ -460,6 +461,56 @@ impl App {
         self.wants_frame = true;
         // The regions under the dialog are redrawn next frame; their hits come back then.
         let _ = (x, y);
+    }
+
+    /// Opens a rendered diagram at a reading size, over the whole window.
+    pub(super) fn open_zoom(&mut self, source: String) {
+        let Some(image) = self.ws.diagram_raster(&source) else {
+            self.ws.set_status("The diagram could not be drawn again");
+            self.redraw();
+            return;
+        };
+        self.show_zoom(image);
+    }
+
+    /// The zoom view with a raster already in hand.
+    pub(super) fn show_zoom(&mut self, image: Rc<mdview_render::DecodedImage>) {
+        let area = self.zoom_area();
+        self.ui.zoom = Some(crate::zoom::ZoomView::open(image, area));
+        self.ui.popup = None;
+        self.ui.tip = None;
+        self.ui.card = None;
+        self.ui.link_hint = None;
+        self.ui.hover = None;
+        self.ui.pressed = None;
+        self.ui.drag = None;
+        self.set_cursor(CursorIcon::Grab);
+        self.redraw();
+    }
+
+    /// Opens the `n`-th (from 1) drawable Mermaid diagram of the showing document: what
+    /// `--zoom-diagram` does, for shots and checks. False when there is no such diagram.
+    pub(super) fn open_zoom_nth(&mut self, n: usize) -> bool {
+        let Some(source) = self.ws.diagram_source(n.saturating_sub(1)) else {
+            return false;
+        };
+        self.open_zoom(source);
+        self.ui.zoom.is_some()
+    }
+
+    pub(super) fn close_zoom(&mut self) {
+        if self.ui.zoom.take().is_none() {
+            return;
+        }
+        self.ui.pressed = None;
+        self.ui.drag = None;
+        self.ui.hover = None;
+        self.overlay_hits.clear();
+        self.set_cursor(CursorIcon::Default);
+        self.wants_frame = true;
+        // The regions under the view are drawn again next frame.
+        self.full = true;
+        self.redraw();
     }
 
     pub(super) fn start_dir(&self) -> Option<PathBuf> {

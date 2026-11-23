@@ -698,6 +698,11 @@ impl App {
             self.areas = areas;
             self.full = true;
         }
+        // A zoom view follows the window: keep its diagram inside the new area.
+        if let Some(view) = self.ui.zoom.as_mut() {
+            let area = Rect::new(0.0, 0.0, w, h);
+            view.clamp(area);
+        }
         // Lay the page out first: the outline's current heading and a pending jump depend on it.
         let (vw, vh) = self.page_device();
         if vw > 0 && vh > 0 {
@@ -782,6 +787,9 @@ impl App {
         if self.ui.dialog.is_some() || self.ui.settings.is_some() {
             bounds.push(Rect::new(0.0, 0.0, w, h));
         }
+        if self.ui.zoom.is_some() {
+            bounds.push(Rect::new(0.0, 0.0, w, h));
+        }
         if let Some(p) = self.ui.palette.as_mut() {
             // The card's place is needed here, to redraw what it covers; drawing lays it out again.
             let card = p
@@ -831,6 +839,14 @@ impl App {
                 self.ui.overlay_tick,
                 self.ui.palette.is_some().then_some(self.ui.caret_on),
             )),
+            self.ui
+                .zoom
+                .as_ref()
+                .map(|z| (z.zoom.to_bits(), z.pan.0.to_bits(), z.pan.1.to_bits())),
+            self.ui
+                .zoom
+                .is_some()
+                .then_some((self.ui.hover, self.ui.pressed)),
         ));
         let overlay_changed = osig != self.overlay_sig;
         self.overlay_sig = osig;
@@ -985,6 +1001,10 @@ impl App {
                 }
                 if let Some(f) = self.ui.settings.as_mut() {
                     f.draw(c.p, &pal, window, self.ui.caret_on);
+                }
+                // The diagram view covers everything, so it is drawn after them all.
+                if let Some(z) = self.ui.zoom.as_ref() {
+                    crate::zoom::draw(&mut c, z, window);
                 }
             }
         }
@@ -1251,6 +1271,15 @@ impl App {
     // ---- hit testing ---------------------------------------------------------------------------
 
     fn hit_at(&self, x: f32, y: f32) -> Option<Hit> {
+        // The diagram view covers the window; only its close button is a target.
+        if self.ui.zoom.is_some() {
+            return self
+                .overlay_hits
+                .iter()
+                .rev()
+                .find(|(_, r)| r.contains(x, y))
+                .map(|(h, _)| *h);
+        }
         // The palette and the settings dialog do their own hit testing.
         if self.ui.modal() {
             return None;
@@ -1294,6 +1323,7 @@ impl App {
         };
         let covered = self.ui.dialog.is_some()
             || self.ui.modal()
+            || self.ui.zoom.is_some()
             || self.ui.present.is_some()
             || window.fullscreen().is_some();
         let rect = (!covered).then(|| chrome::max_button_rect(self.logical().0, self.maximized));
@@ -1864,6 +1894,23 @@ fn shot(mut app: App, path: &Path) -> i32 {
             }
             p.poll_folder();
         }
+    }
+    // The diagram zoom view, at the size and place the arguments ask for.
+    if let Some(n) = app.args.zoom_diagram {
+        if !app.open_zoom_nth(n) {
+            eprintln!("mdview: no diagram {n}");
+        }
+        let area = app.zoom_area();
+        if let Some(view) = app.ui.zoom.as_mut() {
+            if let Some(level) = app.args.zoom_level {
+                view.zoom_to(area, level, (area.cx(), area.cy()));
+            }
+            if let Some(pan) = app.args.zoom_pan {
+                view.pan = pan;
+                view.clamp(area);
+            }
+        }
+        app.compose();
     }
     if app.ui.dialog.is_some() || app.ui.popup.is_some() || app.ui.modal() {
         app.compose();

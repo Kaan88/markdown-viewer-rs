@@ -1,0 +1,9 @@
+mdview next: click a large diagram to open it at a reading size, and the notes library.
+
+## New
+
+- **Click a large diagram to read it.** A Mermaid diagram the page had to shrink to its column now opens over the window when clicked, at twice the size the page showed it: scroll to zoom (between 0.1x and 4x), drag to pan, and Esc or the close button to go back. +, - and 0 zoom at the centre and fit the whole diagram.
+
+- **The notes library, read-only.** The Files pane has a second face showing mdedit's notes library: groups, sections and notes; a click opens a note in a tab, a note whose file is gone is marked, and the palette lists the notes by title.
+
+- **Add this file to the notes library.** On a tab's menu, on the page's menu and in the command palette, with a question the first time: one link is written into one of mdedit's library files, and the note itself is not changed.

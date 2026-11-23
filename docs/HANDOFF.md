@@ -11,14 +11,75 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## Asked for by the owner, not started
+## Click to zoom a large diagram (2026-11-23, branch `f/diagram-zoom`, not released)
 
-- **Click to zoom a large diagram** (2026-11-23, "for later"). A big Mermaid diagram is drawn
-  shrunk to the page's width and its labels cannot be read. A click on it should open it at a
-  readable size, to pan and zoom, and Esc should close it. The owner's sample is a wide `flowchart
-  LR` with nested subgraphs and about twenty nodes, in a private document on this PC
-  (`Desktop\kweb Homelab Map.md`); it is not to be copied into this repository. Not designed,
-  not priced. The same view could serve a large image or SVG.
+The owner asked for it on 2026-11-23 ("for later"): a big Mermaid diagram is drawn shrunk to the
+page's width and its labels cannot be read; a click should open it at a readable size, to pan and
+zoom, and Esc should close it. Built by a session; **the owner has not looked at it**, nothing was
+driven by hand in a real window (tests and `--shot` only), and nothing ran off Windows.
+
+- **What it does.** A click on a rendered Mermaid diagram opens it over the whole window, on a
+  sheet of the page's colour over a dimmed page. It opens at one logical px per raster px: the
+  page's own raster is drawn at twice the device scale and the page halves it, so this is twice
+  the size the page showed, where the 11 px labels read. The wheel zooms between 0.1 and 4.0
+  logical px per raster px about the pointer; a drag pans, the image stopping at the window's
+  edges (a diagram smaller than the window stays centred). `Esc` and a close button at the top
+  right close it; `+`, `-` and `0` zoom at the centre and fit the whole diagram. A hint line
+  under it says all of this. A diagram wider than the window opens at its top left (the start of
+  an LR flow), not its middle.
+- **Where it lives.** `bins/mdv-app/src/zoom.rs` (`ZoomView`: open, clamp, zoom about a point,
+  fit, pan; the drawing of the dim, sheet, close button and hint) with the state in `Ui::zoom`;
+  the input is in `app/input.rs` (pointer, wheel and keys take the view before everything else),
+  `App::open_zoom`, `show_zoom`, `close_zoom`, `open_zoom_nth` in `app/commands.rs`, and the
+  overlay in `App::compose` (last, over every other overlay). A click reaches it as
+  `Click::Diagram(source)` from `Workspace::pointer_release`; `Workspace::diagram_source(n)` finds
+  the n-th diagram for `--zoom-diagram`. The raster is `DocumentRenderer::diagram_raster(source)`
+  (`crates/render/src/layout/mod.rs`), which asks the image store for the Mermaid job the page
+  already made at `2 * scale` in the current theme, so opening costs no engine job while the
+  pixels are cached; after eviction it draws again. The pointer shows the hand over a diagram.
+- **Decisions taken without the owner.** Over the whole window, dimmed, rather than inside the
+  page or a window of its own: the reader asked for a reading size and the page column is the
+  thing that is too narrow. The raster is the page's 2x one, not a new engine job at each zoom:
+  sharp up to the page's own density, and at 4x it is pixel-doubled, not re-rendered. The view is
+  for Mermaid diagrams only, not formulas, file images or SVG files, although the owner's note
+  said the same view could serve a large image or SVG; a formula or image click still selects
+  text as before. `--zoom-diagram`, `--zoom-level` and `--zoom-pan` exist for shots only.
+- **Tests.** `zoom::tests` (4): a diagram opens centred and at reading size; one wider than the
+  window starts at its edge, pans and stops at the edges; zooming keeps the point under the
+  pointer and stops at 0.1 and 4.0; fitting shows the whole of it. `app::tests`: one drives a
+  headless `App` (open, close button drawn, wheel, drag, Esc, close by button) and one (with the
+  engine in `target/release`) opens the fixture's diagram through `handle_click` and compares the
+  raster; `args::tests` the three flags; `workspace::tests`
+  `a_click_on_a_diagram_opens_it_and_its_raster_is_there` (with the engine) finds a diagram under
+  the pointer, checks the hand, the `Click::Diagram` and the raster. Each of the three behaviours
+  was checked to fail with its line reverted (below).
+- **Ran** (Windows PC, release): `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
+  warnings` (with `--config build.rustc-wrapper=""`, because the global wrapper's command line was
+  too long), `cargo test --release --workspace` (668 passed, 0 failed, 6 ignored),
+  `tests/shots.sh` into two folders with a baseline build of `origin/main` (`149db12`) for
+  comparison: the baseline's 138 pictures are byte-identical to this branch's 138 (six first
+  differed only because the baseline ran in its own worktree — the Recent dialog lists full
+  paths — and a pane scrollbar was caught mid-fade; rerun with this worktree as the working
+  directory, all six compared equal). The six `zoom-diagram-*` pictures are the new states, looked
+  at in both themes. The three behaviours were each checked to fail with their line reverted: the
+  click arm (the app test panics with the view not opened), the wheel's `zoom_by` (the App test
+  fails `zoomed > 1.0`), and the press recording its source (the workspace test gets
+  `Deselected` instead of `Diagram(..)`). Budgets: `--shot` of `showcase.md` at 1280x800, 8
+  interleaved runs, median 80.5 ms against the baseline's 84.5; the first frame shown in a real
+  window (`MDVIEW_STARTUP_TRACE`, 3 interleaved runs) 379.2 ms against 392.0; private memory 3 s
+  after launch 25.6 MiB against 25.5. The feature adds nothing to launch, layout, paint or the
+  scroll path: the view only exists after a click. How long one pan or wheel frame takes was not
+  measured, and scroll was not measured.
+- **Not verified.** The owner's look; a real pointer and keyboard in a real window (Esc, the
+  wheel, a drag, the close button, the cursor shape), hence how the hand feels over a diagram and
+  whether a click that begins a selection ever opens the view; other device scales than the shots'
+  1.0 (the draw is in logical px and the raster at 2x device scale, so a 2.0 shot was looked at,
+  not a 2.0 display); Linux and macOS; a diagram opened while an animation ticks or a menu is
+  open (the view takes input first and closes neither); a diagram whose engine draw fails at the
+  click (the toast "The diagram could not be drawn again" was not triggered).
+- **Shots.** `zoom-diagram-{light,dark}` (as it opens), `zoom-diagram-fit-{light,dark}` (the
+  whole of it), `zoom-diagram-pan-{light,dark}` (1.8x, panned); `fixtures/wide-diagram.md` is the
+  wide `flowchart LR` with nested subgraphs they show.
 
 ## Release 1.0.5 (2026-11-23, released)
 
@@ -578,6 +639,7 @@ document with SVG, math or Mermaid.
 | `--find q`, `--scroll px`, `--hover x,y` | Find query, scroll offset, pointer position. `--scroll` also applies to a real window's first document |
 | `--menu main\|recent\|cascade\|tab\|page\|find`, `--dialog about\|shortcuts\|recent` | Open a popup or dialog in the shot |
 | `--scroll-steps n` | Open a real window, wait until the page is refined, scroll n wheel steps, log timings, exit |
+| `--zoom-diagram N`, `--zoom-level F`, `--zoom-pan X,Y` | Open the N-th diagram (from 1) of the first document in the zoom view, at F logical px per raster px (default 1.0) and panned to X,Y (logical px), for a shot |
 | `--update-bar available\|installing\|installed\|installed-plain` | Show the update bar at that stage with a made-up version, for a shot |
 | `--check-update` | Look for a newer version as the app would, print the answer, exit. No window |
 
@@ -2618,6 +2680,8 @@ while the viewer runs, which `alive` cannot see.
 M1 and M2 of mdedit's `docs/ai-library-plan.md` 7.5, the owner's yes in its D-100: a read-only
 Notes face over mdedit's notes library, and "Add this file to the notes library.".
 
+Its release note is in `docs/release-notes/NEXT.md`, with the diagram zoom's.
+
 ### DESIGN
 
 **The face.** The Files pane has a second face, as mdedit's has: the head's switches read Files
@@ -2730,16 +2794,6 @@ with it; `palette-library-*` the palette on `>notes library`; `dialog-library-ad
 first asked; `menu-library-groups-*` the choice of two groups; `palette-notes-*` the palette
 listing the notes by title under Personal and Work, with the missing one greyed.
 `tests/shots-check.sh`: 118 wanted, 0 bad, 160 PNGs.
-
-### Release note
-
-> **The notes library, read-only.** The Files pane has a second face showing mdedit's notes
-> library: groups, sections and notes; a click opens a note in a tab, a note whose file is gone
-> is marked, and the palette lists the notes by title.
->
-> **Add this file to the notes library.** On a tab's menu, on the page's menu and in the command
-> palette, with a question the first time: one link is written into one of mdedit's library
-> files, and the note itself is not changed.
 
 ### Numbers
 

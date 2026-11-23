@@ -223,6 +223,15 @@ shot wiki-embeds-light --light --size 900x700 "$fx/wiki-embeds/Embeds.md"
 shot floats-clear-light --light --size 900x700 "$fx/floats-clear.md"
 shot floats-table-light --light --size 900x700 "$fx/floats-table.md"
 
+# A large diagram opened at a reading size: as it opens (the first diagram of the fixture), the
+# whole of it fitted, and zoomed in and panned; in both themes.
+shot zoom-diagram-light --light --size 1280x800 --zoom-diagram 1 "$fx/wide-diagram.md"
+shot zoom-diagram-dark --dark --size 1280x800 --zoom-diagram 1 "$fx/wide-diagram.md"
+shot zoom-diagram-fit-light --light --size 1280x800 --zoom-diagram 1 --zoom-level 0.42 "$fx/wide-diagram.md"
+shot zoom-diagram-fit-dark --dark --size 1280x800 --zoom-diagram 1 --zoom-level 0.42 "$fx/wide-diagram.md"
+shot zoom-diagram-pan-light --light --size 1280x800 --zoom-diagram 1 --zoom-level 1.8 --zoom-pan -900,-500 "$fx/wide-diagram.md"
+shot zoom-diagram-pan-dark --dark --size 1280x800 --zoom-diagram 1 --zoom-level 1.8 --zoom-pan -900,-500 "$fx/wide-diagram.md"
+
 # More HTML and notes: a wrapping ruby base, a figure with its margin, `<abbr title>` (and its hover card).
 shot render-more-light --light --size 640x640 "$fx/render-more.md"
 shot render-more-narrow-light --light --size 430x560 "$fx/render-more.md"

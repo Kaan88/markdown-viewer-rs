@@ -21,6 +21,7 @@ mod tree;
 mod ui;
 mod updater;
 mod workspace;
+mod zoom;
 
 use mdshared_ui::{gfx, menu, textfield, theme};
 
