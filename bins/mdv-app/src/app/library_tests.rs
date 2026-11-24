@@ -482,8 +482,11 @@ fn a_library_file_that_is_not_utf8_is_left_as_it_is_and_the_reader_is_told_why()
 }
 
 /// Audit 4, E12: a window does not look for the library on the way to its first frame. Neither
-/// mdedit's settings file nor the folder it names is read when the window is made; the answer
-/// of the helper thread then offers the face and the add.
+/// mdedit's settings file nor the folder it names is read when the window is made; the loop's
+/// start, `loop_ready` (the call `run` makes), looks on a helper thread, and its answer offers
+/// the face and the add. Review of the audit 4 fixes, W2: the look is driven through that call,
+/// with a test proxy; T5: the settings file is this window's own, not a process-wide
+/// `MDEDIT_SETTINGS` every other test would see.
 #[test]
 fn a_window_looks_for_the_library_after_it_is_made_not_before() {
     let root = scratch("launch-look");
@@ -495,20 +498,37 @@ fn a_window_looks_for_the_library_after_it_is_made_not_before() {
         format!("[preferences]\nlibrary_dir={}\n", lib.display()),
     )
     .unwrap();
-    // SAFETY: only `notes::library_dir` reads this variable, and no other test sets it; a window
-    // made while it is set (any test's) does not read it.
-    unsafe { std::env::set_var("MDEDIT_SETTINGS", &settings) };
-    let mut a = app(&["linked.md"]);
-    let found = crate::notes::find_library(None);
-    unsafe { std::env::remove_var("MDEDIT_SETTINGS") };
+    let args = Args {
+        files: vec![super::tests::fixture("linked.md")],
+        dark: Some(true),
+        files_pane: Some(true),
+        outline_pane: Some(true),
+        no_session: true,
+        ..Args::default()
+    };
+    let mut a = App::with_library_settings(args, Workspace::new(None), None, Some(settings));
+    a.scale = 1.0;
+    a.size = (1280, 800);
+    a.setup();
+    a.compose();
     assert!(
         a.ui.notes.dir.is_none() && !a.ui.notes.has_switch(),
         "nothing was looked at when the window was made"
     );
     assert!(!a.ws.library_offered());
-    assert_eq!(found.dir.as_deref(), Some(lib.as_path()));
-    assert!(found.available);
-    a.woken(Wake::Library(found));
+    let (tx, rx) = std::sync::mpsc::channel();
+    a.loop_ready(LoopProxy::Test(tx));
+    let wake = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the window looks for the library as its loop starts");
+    match &wake {
+        Wake::Library(found) => {
+            assert_eq!(found.dir.as_deref(), Some(lib.as_path()));
+            assert!(found.available);
+        }
+        _ => panic!("the first wake is the library's"),
+    }
+    a.woken(wake);
     a.compose();
     assert!(a.ui.notes.has_switch() && a.ws.library_offered());
     assert!(

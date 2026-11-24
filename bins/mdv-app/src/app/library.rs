@@ -15,11 +15,20 @@ impl App {
         let Some(proxy) = self.proxy.clone() else {
             return;
         };
-        let session = self.session.clone();
+        let settings = self.library_settings.clone();
         std::thread::spawn(move || {
-            let found = crate::notes::find_library(session.as_deref());
+            let found = crate::notes::find_library(settings.as_deref());
             let _ = proxy.send_event(Wake::Library(found));
         });
+    }
+
+    /// The loop is about to run (`run`): other threads can wake the window from now on, and it
+    /// looks for the notes library. One call, so that a window is not given its proxy without
+    /// the look; the test of the look drives this call, as `run` makes it (review of the audit 4
+    /// fixes, W2).
+    pub(super) fn loop_ready(&mut self, proxy: LoopProxy) {
+        self.proxy = Some(proxy);
+        self.look_for_library();
     }
 
     /// Where the notes library is, from [`look_for_library`](Self::look_for_library).

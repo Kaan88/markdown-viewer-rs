@@ -132,6 +132,27 @@ pub enum Wake {
     Library(crate::notes::Found),
 }
 
+/// What another thread wakes the loop with: winit's proxy in a window; in a test, a channel the
+/// test reads, so that the window's own start (`loop_ready`) is driven as `run` makes it (review
+/// of the audit 4 fixes, W2).
+#[derive(Clone)]
+pub(crate) enum LoopProxy {
+    Loop(EventLoopProxy<Wake>),
+    #[cfg(test)]
+    Test(std::sync::mpsc::Sender<Wake>),
+}
+
+impl LoopProxy {
+    /// Sends `wake` to the loop: false when the loop has ended.
+    pub(crate) fn send_event(&self, wake: Wake) -> bool {
+        match self {
+            LoopProxy::Loop(proxy) => proxy.send_event(wake).is_ok(),
+            #[cfg(test)]
+            LoopProxy::Test(tx) => tx.send(wake).is_ok(),
+        }
+    }
+}
+
 /// What a closed file dialog chose.
 #[cfg(not(windows))]
 pub enum DialogAnswer {
@@ -187,7 +208,11 @@ struct App {
     /// (`closed`), so that its preview of it ends.
     editor_shown: Vec<EditorTab>,
     surface: Option<softbuffer::Surface<Rc<Window>, Rc<Window>>>,
-    proxy: Option<EventLoopProxy<Wake>>,
+    proxy: Option<LoopProxy>,
+    /// The settings file of mdedit's that names the notes library, decided from the environment
+    /// as the window is made and read only on the helper thread (`look_for_library`); `None`
+    /// when this run has no library (a scratch or session-less run without `MDEDIT_SETTINGS`).
+    library_settings: Option<PathBuf>,
     /// A file or folder dialog is open (off Windows, where it runs beside the window); a second
     /// request is ignored until its answer arrives.
     #[cfg(not(windows))]
@@ -285,6 +310,22 @@ struct App {
 
 impl App {
     fn new(args: Args, ws: Workspace, session: Option<PathBuf>) -> App {
+        // Which settings file names the library is a matter of the environment alone: nothing
+        // on disk is read here.
+        let library_settings = crate::notes::library_settings(session.as_deref());
+        App::with_library_settings(args, ws, session, library_settings)
+    }
+
+    /// [`new`](Self::new), with the settings file of mdedit's that names the library given
+    /// rather than taken from the environment: a test's window has its own, and no other test
+    /// sees it, as a process-wide `MDEDIT_SETTINGS` would be seen (review of the audit 4 fixes,
+    /// T5).
+    fn with_library_settings(
+        args: Args,
+        ws: Workspace,
+        session: Option<PathBuf>,
+        library_settings: Option<PathBuf>,
+    ) -> App {
         let system_dark = platform::system_is_dark();
         let trace = std::env::var_os("MDVIEW_TRACE").is_some();
         let mut ui = Ui::new();
@@ -292,7 +333,7 @@ impl App {
         // helper thread once it runs (`look_for_library`), so neither mdedit's settings file nor
         // the folder it names is on the way to the first frame (audit 4, E12).
         if args.shot.is_some() {
-            let dir = crate::notes::library_dir(session.as_deref());
+            let dir = crate::notes::library_dir(library_settings.as_deref());
             ui.notes = crate::notes::Notes::new(dir);
         }
         App {
@@ -307,6 +348,7 @@ impl App {
             editor_shown: Vec::new(),
             surface: None,
             proxy: None,
+            library_settings,
             #[cfg(not(windows))]
             dialog_open: false,
             exporting: false,
@@ -2163,8 +2205,7 @@ pub fn run() -> i32 {
     app.ui.previews.set_wake(move || {
         let _ = p.send_event(Wake::Preview);
     });
-    app.proxy = Some(proxy);
-    app.look_for_library();
+    app.loop_ready(LoopProxy::Loop(proxy));
     app.updates_at_launch();
     stage(started, "ready to run");
     let _ = event_loop.run_app(&mut app);

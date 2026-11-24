@@ -5,7 +5,7 @@ use super::*;
 use mdview_core::commands::CommandId;
 use mdview_core::session::PageWidth;
 
-fn fixture(name: &str) -> PathBuf {
+pub(super) fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures")
         .join(name)

@@ -82,15 +82,20 @@ pub fn settings_file(
     default
 }
 
-/// The library folder this run uses, for mdview's `session` file.
-pub fn library_dir(session: Option<&Path>) -> Option<PathBuf> {
-    let file = settings_file(
+/// The settings file of mdedit's that names the library this run uses, for mdview's `session`
+/// file: [`settings_file`] from the environment. Nothing on disk is read.
+pub fn library_settings(session: Option<&Path>) -> Option<PathBuf> {
+    settings_file(
         std::env::var_os("MDEDIT_SETTINGS").map(PathBuf::from),
         session,
         std::env::var_os("MDVIEW_SETTINGS").is_some(),
         mdshared_app::settings::default_settings_path("mdedit"),
-    )?;
-    put::dir_from_settings(&file)
+    )
+}
+
+/// The library folder mdedit's settings file `settings` names, read from it.
+pub fn library_dir(settings: Option<&Path>) -> Option<PathBuf> {
+    put::dir_from_settings(settings?)
 }
 
 /// The library folder a run found, and whether it was there.
@@ -103,8 +108,8 @@ pub struct Found {
 /// Reads mdedit's settings file and looks at the library folder it names: what a window does
 /// on a helper thread once it runs ([`Notes::found`] takes the answer), so a folder on a share
 /// that does not answer holds no frame (audit 4, E12).
-pub fn find_library(session: Option<&Path>) -> Found {
-    let dir = library_dir(session);
+pub fn find_library(settings: Option<&Path>) -> Found {
+    let dir = library_dir(settings);
     let available = dir.as_deref().is_some_and(Path::is_dir);
     Found { dir, available }
 }

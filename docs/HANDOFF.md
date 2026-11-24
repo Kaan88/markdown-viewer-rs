@@ -15,9 +15,10 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 Audit 4's findings against mdview (mdedit's `docs/review-prompts/audit4/e-mdview.md`; mdedit's
 FIXES names them E1 to E12) are fixed on the branch `fix/audit4`, which is **not merged**. The
-shared crates are pinned there at `d1330b0`, the tip of shared's own `fix/audit4`, for
-development only: the pin moves to shared's `main` once that branch is merged there. Nothing
-was driven by hand in a real window and nothing ran off Windows.
+shared crates are pinned there at `ef88814`, the tip of shared's own `fix/audit4` after the
+review of the fixes (it was `d1330b0`), for development only: the pin moves to shared's `main`
+once that branch is merged there. Nothing was driven by hand in a real window and nothing ran
+off Windows.
 
 - **Fixed, each with a test that fails with its fix reverted.** Each fix was switched back to
   the old code in turn, behind a temporary switch since removed, and its tests failed; with the
@@ -68,6 +69,23 @@ was driven by hand in a real window and nothing ran off Windows.
     not in `App::new`, and the empty face says what the folder was at the last read instead of
     looking at every repaint. `a_window_looks_for_the_library_after_it_is_made_not_before`,
     `the_empty_face_says_what_the_folder_was_at_the_last_read`.
+- **The review of the fixes** (mdedit's FIXES, W2 and T5). The E12 test called `find_library`
+  itself, so with the look in `run()` deleted every test passed, and it set `MDEDIT_SETTINGS`
+  for the whole test process. Now:
+  - `run()` makes one call, `loop_ready(LoopProxy::Loop(proxy))`, which gives the window its
+    proxy and starts the look. `LoopProxy` is winit's proxy in a window and, in a test, a
+    channel the test reads (`LoopProxy::Test`). The test drives `loop_ready`, takes the
+    `Wake::Library` the helper thread sends, and hands it to `woken`.
+  - Which settings file of mdedit's names the library is decided from the environment when the
+    window is made (`notes::library_settings`, nothing read) and kept on the `App`
+    (`library_settings`); the helper thread reads only that file. The test gives its window its
+    own (`App::with_library_settings`), and no test sets `MDEDIT_SETTINGS` any more.
+  - Four mutations, each failing the test: the look taken out of `loop_ready`, the answer not
+    sent, the settings taken from the environment again, and the look made in `App::new`.
+  - `run()` itself is reached by no test (it needs a real event loop). Its look cannot be lost
+    alone: the same line is the one that gives the window its proxy, without which no thread
+    can wake it. No window was launched by hand to see it: mdview has no way to start behind
+    the owner's windows.
 - **Not a bug.** E9's title bar: the zoom view's close button sits over the window's own, as
   every dialog's does (`hit_at` gives only the overlay's hits while one is open).
 - **Left, and why.**
@@ -77,6 +95,14 @@ was driven by hand in a real window and nothing ran off Windows.
     number in the protocol, in both apps. The window is milliseconds.
   - E6's other half: asking mdedit to add the note over the sister channel, so that only mdedit
     writes the library, is a new feature in both apps.
+  - E5's first open (review of the fixes): the first Ctrl+P after each read of the library still
+    resolves every note on the UI thread, 1.6 ms for 400 notes. Moving it to the reading thread
+    needs the read's answer to carry the resolved paths and a wake of its own; at once per read,
+    it is not worth that.
+  - E7 after a rejected tick (review of the fixes): when the editor refuses a tick (its own `[ ]`
+    check), it sends nothing, so `keep_top` stays set and the next text the owner types keeps
+    the page still once rather than following the caret. The protocol has no answer that says a
+    tick was refused; it is the same change as E7 across batches.
 - **Decisions taken without the owner.** The zoom view closes on a theme change rather than
   draw the old theme's raster; a scale change keeps it open at the same density. Library files
   past the 238th share one header rather than be left out. A shot looks for the library at once,
@@ -108,6 +134,15 @@ was driven by hand in a real window and nothing ran off Windows.
   `paths::comparable`, a section name of only dots in `split`, the words of one refusal in
   `moves` and two doc comments. mdview calls none of `runs`, `split`, `moves` or
   `comparable`.
+- **Checks after the review of the fixes**, on the pin at `ef88814` with W2 and T5: fmt and
+  clippy clean; `cargo test --release --workspace` 704 passed, 0 failed, 6 ignored (the E12
+  test was rewritten, not added); the preview server's 19 passed; `tests/shots.sh` 168 PNGs,
+  every one byte for byte those of `target/shots/final`; `tests/shots-check.sh` 126 wanted, 0
+  bad. Budgets not measured: of the shared changes after `d1330b0`, mdview calls only
+  `put_note`, whose UTF-16 test now looks past a UTF-8 byte order mark, and `files::replace`,
+  whose temporary name changes only for a name too long to carry `.part`; both run on "Add to
+  the library", not on launch, a key or a scroll. W2 moves no work: the look was already on a
+  thread started from `run()`.
 
 ## For later: sort a table by a column, in the view only (asked 2026-11-23, not designed)
 

@@ -130,7 +130,7 @@ fn clean_print_folder(dir: &Path, keep: Duration) {
     }
 }
 
-fn send(proxy: &EventLoopProxy<Wake>, progress: Progress) {
+fn send(proxy: &LoopProxy, progress: Progress) {
     let _ = proxy.send_event(Wake::Export(progress));
 }
 

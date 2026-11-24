@@ -531,7 +531,7 @@ impl App {
     /// answer and says whether the dialog opened. The window keeps drawing meanwhile; a request
     /// made while one is open is ignored. The answer comes back as `Wake::Dialog`.
     #[cfg(not(windows))]
-    fn open_dialog_async(&mut self, start: impl FnOnce(EventLoopProxy<Wake>) -> bool) {
+    fn open_dialog_async(&mut self, start: impl FnOnce(LoopProxy) -> bool) {
         if self.dialog_open {
             return;
         }
