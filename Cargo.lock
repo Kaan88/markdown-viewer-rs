@@ -746,9 +746,9 @@ checksum = "edf234dd1594d6dd434a8fb8cada51ddbbc593e40e4a01556a0b31c62da2775b"
 
 [[package]]
 name = "dugong"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4994fa1094ddf0d95bdf4c6615367779fc2af7ae1d4d8e336334cf07245ace7a"
+checksum = "2fff8a6ba14e51cb57cc4876ea63ab9d12293c23d8cd8954867a34cd6479fd53"
 dependencies = [
  "dugong-graphlib",
  "rustc-hash",
@@ -758,9 +758,9 @@ dependencies = [
 
 [[package]]
 name = "dugong-graphlib"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb6a3100cd9ceabcec9e7e6345e30c63e72f65423316314707c5c070a003d751"
+checksum = "21cf787ce4a9bb4ee094dfff7bb766e2b9ae51c1d5907f16537dc74f6cec80e8"
 dependencies = [
  "hashbrown 0.17.1",
  "rustc-hash",
@@ -1800,9 +1800,9 @@ dependencies = [
 
 [[package]]
 name = "merman"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e95a601a95395f286f1f7775ba00c352a11c85ab4debe3bdbef5fa0426a21809"
+checksum = "6cdaadb8ae102baadbf04be16508f0c487ccfca6d2a3c992f09e01d8d2e00663"
 dependencies = [
  "merman-analysis",
  "merman-ascii",
@@ -1815,9 +1815,9 @@ dependencies = [
 
 [[package]]
 name = "merman-analysis"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "882ce663eb2f27f327204e46beeb0cbe69952eff735119a8cc189ffa339a27cc"
+checksum = "24a49ce7fcdf3efa305d2012a29ab6826999361c87fc86b73dd90617a977b307"
 dependencies = [
  "merman-core",
  "serde",
@@ -1828,9 +1828,9 @@ dependencies = [
 
 [[package]]
 name = "merman-ascii"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ef6776b79df107d266f5dd2f5227c4e4549a5c36533550e45bf73848bb31cb3"
+checksum = "986dbba1f22553552c07ca0df24952a0a05277e9eaa83dac6408d7e5f5c94bbc"
 dependencies = [
  "dugong",
  "merman-core",
@@ -1844,9 +1844,9 @@ dependencies = [
 
 [[package]]
 name = "merman-core"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c65e0018fccd603956d97daf22c76f9877513d49aea9655a91240e503c5d17b"
+checksum = "52c165712785a691e888fd370747fb9a07a78791dc5a2bc1402d623013713450"
 dependencies = [
  "cssparser",
  "euclid",
@@ -1869,9 +1869,9 @@ dependencies = [
 
 [[package]]
 name = "merman-editor-core"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97e3cdc39dfdc5dd88e76e66566a75f4935cfad28fe4776e18067daa1aa11647"
+checksum = "753075cf24f8fd8f0aeabce788d4b01be312caa07f7a7775945e461a3deb8d33"
 dependencies = [
  "merman-analysis",
  "merman-core",
@@ -1880,9 +1880,9 @@ dependencies = [
 
 [[package]]
 name = "merman-render"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cf1f994f9fe91cd7f5e0fbb4f7c9982585813c79aacad50d9351a23ee4d1520"
+checksum = "aac8367621a041d8ef498d5dee6595db3611285e5074d936d4c60f88a45b5a23"
 dependencies = [
  "base64 0.23.1",
  "cssparser",
@@ -1909,9 +1909,9 @@ dependencies = [
 
 [[package]]
 name = "merman-unicode-linebreak"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a3f1647028ecc1f9e0c6bafd851d8915a38ce8f93877f46b5157d35ad3903c3"
+checksum = "5a529c723f2d33b453fab6f895d436e819206ccbaae0102ed5374fd8352326fc"
 
 [[package]]
 name = "mime"
