@@ -11,7 +11,26 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## Audit 4 fixed on `fix/audit4` (2026-11-24, not merged)
+## Release 1.1.0 (2026-11-24, released)
+
+mdview 1.1.0 is released: tag `v1.1.0` at `0310e01`, `ci` 45388338950 green on that commit, release
+run 45392743083 green. Fourteen assets, not a draft or pre-release. `mdview-update.txt`,
+`mdview-update-macos.txt` and `hub.txt` name 1.1.0 with the note line "mdview 1.1.0: click a large
+diagram to open it at a reading size, and the notes library."; every file they name (the exe, the
+engine, the setup, the AppImage, both Mac zips) downloaded with the SHA-256 they give. The published
+1.1.0 `--check-update` answered "nothing newer"; 1.0.5 answered "mdview 1.1.0 is available".
+Budgets against 1.0.5: `docs/measurements/2026-11-24-1.0.6-against-1.0.5.md`. Not checked by hand:
+the installer, an update from 1.0.5, Hub reading this `hub.txt`, the macOS and Linux files.
+Released on the owner's word with shared's own `ci` still red on Linux and macOS (font-dependent
+layout tests in `mdshared-ui`, to be fixed later); mdview's `ci` was green on all four runners.
+
+`docs/release-notes/1.1.0.md` is the list: click to zoom a large diagram, the notes library, and
+audit 4's fixes (report E).
+
+## Audit 4 fixed on `fix/audit4` (2026-11-24, merged at `340fddf`, released in 1.1.0)
+
+Merged to `main` at `340fddf` and released in 1.1.0; the shared pin is shared `main` at `ef88814`.
+What follows was written before the merge.
 
 Audit 4's findings against mdview (mdedit's `docs/review-prompts/audit4/e-mdview.md`; mdedit's
 FIXES names them E1 to E12) are fixed on the branch `fix/audit4`, which is **not merged**. The
@@ -170,7 +189,7 @@ mdedit's "Sort table by this column" (0.7.0) is a different command, because it 
   and then it costs one sort of that table's rows and a relayout of the page. Budgets to measure
   when it is built: the click to the new frame on a 1,000-row table, and scrolling after it.
 
-## Click to zoom a large diagram (2026-11-23, branch `f/diagram-zoom`, not released)
+## Click to zoom a large diagram (2026-11-23, merged, released in 1.1.0)
 
 The owner asked for it on 2026-11-23 ("for later"): a big Mermaid diagram is drawn shrunk to the
 page's width and its labels cannot be read; a click should open it at a readable size, to pan and
