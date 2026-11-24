@@ -410,3 +410,147 @@ fn a_library_folder_that_is_not_there_offers_no_add_and_writes_nothing() {
     assert!(a.ui.dialog.is_none());
     assert!(!missing.exists(), "no folder was made behind mdedit's back");
 }
+
+/// Audit 4, E5: the palette resolves the library's notes once per read of the library, when it
+/// first lists them, and asks the disk nothing about them after that: not as the reader types
+/// (each change between an empty box and a typed one builds the list again), not when it is
+/// opened again. It was a `canonicalize` per note at each: 20 ms a keystroke with 400 notes.
+#[test]
+fn the_palette_asks_the_disk_nothing_about_the_notes_as_the_reader_types() {
+    use super::tests::type_text;
+    use crate::workspace::RESOLVES;
+    let (_, lib, _) = library("palette-typing", 2);
+    let mut a = app_with(&lib, &["linked.md"]);
+    let count = || RESOLVES.with(|n| n.get());
+    let before = count();
+    a.command(CommandId::CommandPalette);
+    a.compose();
+    let once = count();
+    assert_eq!(once - before, 2, "the two notes, resolved once");
+    for _ in 0..3 {
+        type_text(&mut a, "b");
+        a.key_named(KeyName::Backspace, None);
+        a.compose();
+    }
+    a.key_named(KeyName::Escape, None);
+    a.command(CommandId::CommandPalette);
+    a.compose();
+    type_text(&mut a, "bu");
+    assert_eq!(count(), once, "nothing more was resolved");
+    // A note open in a tab is still left out by the key resolved for it.
+    a.key_named(KeyName::Escape, None);
+    a.ws.open(&lib.join("Personal/Budget.md")).unwrap();
+    a.command(CommandId::CommandPalette);
+    a.compose();
+    type_text(&mut a, "budget");
+    let notes = palette_targets(&a);
+    assert!(
+        !notes
+            .iter()
+            .any(|t| matches!(t, crate::palette::Target::Note(_))),
+        "{notes:?}"
+    );
+    // Read again (Refresh), the library's notes are resolved again, once.
+    a.key_named(KeyName::Escape, None);
+    a.notes_refresh();
+    let read = count();
+    a.command(CommandId::CommandPalette);
+    a.compose();
+    type_text(&mut a, "x");
+    assert_eq!(count() - read, 2);
+}
+
+/// Audit 4, E6 and D3: a library file in another code page is refused by the shared writer and
+/// left as it was, byte for byte, and the status strip says why in the viewer's words.
+#[test]
+fn a_library_file_that_is_not_utf8_is_left_as_it_is_and_the_reader_is_told_why() {
+    let (_, lib, outside) = library("not-utf8", 1);
+    // `- [Çağrı](<cagri.md>)` in Windows-1254: Ç is C7, ğ is F0, ı is FD.
+    let before: &[u8] = b"# Personal\n\n- [\xC7a\xF0r\xFD](<cagri.md>)\n";
+    std::fs::write(lib.join("Personal.md"), before).unwrap();
+    let mut a = app_with(&lib, &[]);
+    a.ws.set_library_ok();
+    a.ws.open(&outside).unwrap();
+    a.compose();
+    a.command(CommandId::LibraryAdd);
+    a.compose();
+    assert_eq!(std::fs::read(lib.join("Personal.md")).unwrap(), before);
+    assert_eq!(
+        status(&a),
+        "Personal.md is not UTF-8 text, so nothing was written. Save it as UTF-8 in mdedit first."
+    );
+}
+
+/// Audit 4, E12: a window does not look for the library on the way to its first frame. Neither
+/// mdedit's settings file nor the folder it names is read when the window is made; the loop's
+/// start, `loop_ready` (the call `run` makes), looks on a helper thread, and its answer offers
+/// the face and the add. Review of the audit 4 fixes, W2: the look is driven through that call,
+/// with a test proxy; T5: the settings file is this window's own, not a process-wide
+/// `MDEDIT_SETTINGS` every other test would see.
+#[test]
+fn a_window_looks_for_the_library_after_it_is_made_not_before() {
+    let root = scratch("launch-look");
+    let lib = root.join("library");
+    std::fs::create_dir_all(&lib).unwrap();
+    let settings = root.join("settings.ini");
+    std::fs::write(
+        &settings,
+        format!("[preferences]\nlibrary_dir={}\n", lib.display()),
+    )
+    .unwrap();
+    let args = Args {
+        files: vec![super::tests::fixture("linked.md")],
+        dark: Some(true),
+        files_pane: Some(true),
+        outline_pane: Some(true),
+        no_session: true,
+        ..Args::default()
+    };
+    let mut a = App::with_library_settings(args, Workspace::new(None), None, Some(settings));
+    a.scale = 1.0;
+    a.size = (1280, 800);
+    a.setup();
+    a.compose();
+    assert!(
+        a.ui.notes.dir.is_none() && !a.ui.notes.has_switch(),
+        "nothing was looked at when the window was made"
+    );
+    assert!(!a.ws.library_offered());
+    let (tx, rx) = std::sync::mpsc::channel();
+    a.loop_ready(LoopProxy::Test(tx));
+    let wake = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the window looks for the library as its loop starts");
+    match &wake {
+        Wake::Library(found) => {
+            assert_eq!(found.dir.as_deref(), Some(lib.as_path()));
+            assert!(found.available);
+        }
+        _ => panic!("the first wake is the library's"),
+    }
+    a.woken(wake);
+    a.compose();
+    assert!(a.ui.notes.has_switch() && a.ws.library_offered());
+    assert!(
+        a.hit_rect(Hit::PaneFace(1)).is_some(),
+        "the head offers the face"
+    );
+}
+
+/// Audit 4, E12: the face's empty state is drawn on every repaint, so it is what the folder was
+/// at the last read, not a look at the disk each time; Refresh looks again.
+#[test]
+fn the_empty_face_says_what_the_folder_was_at_the_last_read() {
+    let root = scratch("empty-state");
+    let lib = root.join("library");
+    std::fs::create_dir_all(&lib).unwrap();
+    let mut a = app_with(&lib, &[]);
+    click(&mut a, Hit::PaneFace(1));
+    assert_eq!(a.ui.notes.empty(), Some(crate::notes::NO_NOTES));
+    std::fs::remove_dir_all(&lib).unwrap();
+    a.wants_frame = true;
+    a.compose();
+    assert_eq!(a.ui.notes.empty(), Some(crate::notes::NO_NOTES));
+    click(&mut a, Hit::NotesRefresh);
+    assert_eq!(a.ui.notes.empty(), Some(crate::notes::NO_FOLDER));
+}

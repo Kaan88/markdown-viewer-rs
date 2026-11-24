@@ -5,7 +5,7 @@ use super::*;
 use mdview_core::commands::CommandId;
 use mdview_core::session::PageWidth;
 
-fn fixture(name: &str) -> PathBuf {
+pub(super) fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures")
         .join(name)
@@ -3713,6 +3713,55 @@ fn closing_the_tab_of_the_editors_document_without_a_file_tells_it_by_name() {
     _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Audit 4, E1: on every turn of the loop the window looks for the tabs the editor asked for and
+/// for the one it was placed for. That asks the disk nothing, however many there are: each path
+/// was resolved once, when it arrived. (It was a `canonicalize` per tab per turn: 131 µs a turn
+/// with three such tabs.)
+#[test]
+fn looking_for_the_editors_tabs_on_each_turn_asks_the_disk_nothing() {
+    use crate::workspace::{RESOLVES, resolve};
+    let mut a = app(&["tables.md"]);
+    for f in ["showcase.md", "math.md", "linked.md"] {
+        a.handed_over(vec![Request {
+            from: Some("mdedit".into()),
+            ..Request::new(fixture(f))
+        }]);
+    }
+    a.placed_for = Some((resolve(&fixture("linked.md")), None));
+    a.compose();
+    let before = RESOLVES.with(|n| n.get());
+    for _ in 0..100 {
+        assert!(told_closed(&mut a).is_empty());
+        assert!(!a.placed_tab_gone());
+    }
+    assert_eq!(RESOLVES.with(|n| n.get()), before, "no path was resolved");
+    // They are still found by their files: closing one tells the editor, by the name it gave.
+    let math = a.ws.labels().iter().position(|l| l.starts_with("math"));
+    a.ws.close(math.unwrap());
+    assert_eq!(told_closed(&mut a), [(fixture("math.md"), None)]);
+    let linked = a.ws.labels().iter().position(|l| l.starts_with("linked"));
+    a.ws.close(linked.unwrap());
+    assert!(a.placed_tab_gone(), "the tab placed for is gone");
+}
+
+/// Audit 4, E11: a file the editor asked for that cannot be opened has no tab, so the editor is
+/// told at once, as for a tab closed, and its preview ends instead of waiting for one.
+#[test]
+fn a_file_the_editor_asked_for_that_cannot_be_opened_is_told_closed() {
+    let mut a = app(&["tables.md"]);
+    let gone = fixture("no-such-file.md");
+    a.handed_over(vec![Request {
+        from: Some("mdedit".into()),
+        ..Request::new(&gone)
+    }]);
+    assert_eq!(a.ws.tab_count(), 1, "nothing opened");
+    assert_eq!(told_closed(&mut a), [(gone, None)]);
+    assert!(told_closed(&mut a).is_empty(), "told once");
+    // A file another launch asked for, and could not be opened, tells the editor nothing.
+    a.handed_over(vec![Request::new(fixture("no-such-either.md"))]);
+    assert!(told_closed(&mut a).is_empty());
+}
+
 /// The tests that point `MD_SISTER_MDEDIT_SETTINGS` somewhere take this first.
 static EDITOR_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -3798,7 +3847,7 @@ fn a_diagram_opens_at_reading_size_and_can_be_panned_zoomed_and_closed() {
     let view = a.ui.zoom.as_ref().expect("the zoom view opened");
     assert_eq!(
         view.zoom, 1.0,
-        "reading size is one logical px per raster px"
+        "reading size is one device px per raster px, twice the page's size"
     );
     assert_eq!(
         view.image_rect(area),
@@ -3816,13 +3865,16 @@ fn a_diagram_opens_at_reading_size_and_can_be_panned_zoomed_and_closed() {
     assert!(zoomed > 1.0);
     assert!(zoomed <= crate::zoom::MAX_ZOOM);
 
-    // A drag moves the diagram with the pointer.
+    // A drag moves the diagram with the pointer, by as much as the pointer moved. (The wheel
+    // above has already moved the pan off zero on both axes, so the drag is measured from where
+    // it was: audit 4, E3, an assertion that held with the drag taken out.)
     a.pointer_moved(area.cx(), area.cy());
+    let before = a.ui.zoom.as_ref().unwrap().pan;
     a.left_press();
     a.pointer_moved(area.cx() - 100.0, area.cy() + 30.0);
     a.left_release();
     let view = a.ui.zoom.as_ref().expect("still open after a pan");
-    assert!(view.pan.0 < 0.0 && view.pan.1 < 0.0);
+    assert_eq!(view.pan, (before.0 - 100.0, before.1 + 30.0));
 
     // Escape closes it.
     key(&mut a, KeyName::Escape, None);
@@ -3839,6 +3891,117 @@ fn a_diagram_opens_at_reading_size_and_can_be_panned_zoomed_and_closed() {
     a.compose();
     click(&mut a, Hit::ZoomClose);
     assert!(a.ui.zoom.is_none());
+}
+
+/// Audit 4, E2: the view opens at twice the size the page drew the diagram at every device
+/// scale, each raster pixel on one device pixel. (At 150 % it opened at 3x, at 200 % at 4x.)
+#[test]
+fn the_zoom_view_opens_at_twice_the_pages_size_at_every_device_scale() {
+    for scale in [1.0f32, 1.5, 2.0] {
+        let mut a = app(&["linked.md"]);
+        a.scale = scale;
+        a.size = ((1280.0 * scale) as u32, (800.0 * scale) as u32);
+        a.compose();
+        // The raster the page makes, at twice the device scale, of a diagram it draws 500
+        // logical px wide.
+        let w = (500.0 * 2.0 * scale) as u32;
+        let raster = Rc::new(mdview_render::DecodedImage {
+            width: w,
+            height: 100,
+            baseline: 100,
+            rgba: vec![200; w as usize * 100 * 4],
+        });
+        a.show_zoom(raster);
+        a.compose();
+        let r = a.ui.zoom.as_ref().unwrap().image_rect(a.zoom_area());
+        assert_eq!(r.w, 1000.0, "twice the page's 500 logical px at {scale}");
+        assert_eq!(
+            r.w * scale,
+            w as f32,
+            "one device px a raster px at {scale}"
+        );
+    }
+}
+
+/// Audit 4, E8: the view is a picture of the tab it was opened on. When the editor opens another
+/// file, the tab's text changes, or the theme does, it closes rather than show a diagram the page
+/// no longer has; a frame that changes none of them leaves it open.
+#[test]
+fn the_zoom_view_closes_when_the_page_under_it_changes() {
+    let raster = || {
+        Rc::new(mdview_render::DecodedImage {
+            width: 300,
+            height: 200,
+            baseline: 200,
+            rgba: vec![200; 300 * 200 * 4],
+        })
+    };
+    // Another file, from the editor.
+    let mut a = app(&["linked.md"]);
+    a.show_zoom(raster());
+    a.compose();
+    a.compose();
+    assert!(a.ui.zoom.is_some(), "frames alone leave it open");
+    a.handed_over(vec![Request {
+        from: Some("mdedit".into()),
+        ..Request::new(fixture("math.md"))
+    }]);
+    a.compose();
+    assert!(a.ui.zoom.is_none(), "closed over another tab");
+    // A new text of the same tab, as the editor sends it while the reader types.
+    let (mut b, _dir, file) = live_app("zoom-live");
+    b.show_zoom(raster());
+    b.compose();
+    assert!(b.ui.zoom.is_some());
+    b.handed_over(vec![live(
+        &file,
+        "# Changed
+
+New text.
+",
+        None,
+    )]);
+    b.compose();
+    assert!(b.ui.zoom.is_none(), "closed over a new text");
+    // Another theme.
+    let mut c = app(&["linked.md"]);
+    c.show_zoom(raster());
+    c.compose();
+    c.ws.set_theme_choice(ThemeChoice::Light);
+    c.compose();
+    assert!(c.ui.zoom.is_none(), "closed over another theme");
+}
+
+/// Audit 4, E9: a trackpad pinch over the view zooms the diagram, about the pointer, and the
+/// smart-zoom tap takes it back to reading size; neither changes the page's zoom under it. With
+/// no view, a pinch zooms the page as before.
+#[test]
+fn a_pinch_over_the_zoom_view_zooms_the_diagram_not_the_page() {
+    let mut a = app(&["linked.md"]);
+    let page = a.ws.zoom();
+    a.show_zoom(Rc::new(mdview_render::DecodedImage {
+        width: 600,
+        height: 400,
+        baseline: 400,
+        rgba: vec![200; 600 * 400 * 4],
+    }));
+    a.compose();
+    let area = a.zoom_area();
+    a.ui.mouse = (area.cx(), area.cy());
+    for _ in 0..5 {
+        a.pinch(0.1, false);
+    }
+    a.pinch(0.0, true);
+    let zoomed = a.ui.zoom.as_ref().unwrap().zoom;
+    assert!(zoomed > 1.5, "{zoomed}");
+    assert_eq!(a.ws.zoom(), page, "the page is as it was");
+    a.double_tap();
+    assert_eq!(a.ui.zoom.as_ref().unwrap().zoom, 1.0);
+    assert_eq!(a.ws.zoom(), page);
+    a.close_zoom();
+    a.pinch(0.1, false);
+    a.pinch(0.0, true);
+    assert!(a.ws.zoom() > page, "without the view the page zooms");
 }
 
 fn engine_available() -> bool {

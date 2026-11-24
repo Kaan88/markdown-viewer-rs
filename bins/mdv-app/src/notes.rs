@@ -4,8 +4,9 @@
 //! The library is mdedit's: its folder is named by `library_dir` in mdedit's `settings.ini`,
 //! found and read by [`mdshared_app::library::put`], and its rows are the shared
 //! [`mdshared_app::library::tree`]. Nothing here reads the library at launch: the folder is
-//! looked at once (is there one, so the head offers the face) and read when the face is first
-//! shown, and again on Refresh or after an add. There is no timer and no watcher.
+//! looked at once, on a helper thread once the window runs ([`find_library`]; is there one, so
+//! the head offers the face), and read when the face is first shown, and again on Refresh or
+//! after an add. There is no timer and no watcher.
 //!
 //! A build never reads the owner's library by accident (mdedit D-067): with no session (a shot,
 //! `--no-session`) or with a scratch `MDVIEW_SETTINGS`, the library is found only through an
@@ -21,13 +22,13 @@ use mdshared_app::library::{self, Library};
 use mdshared_ui::pane::{
     HEAD, HEAD_ACTION, ROW, ROW_H, Switch, draw_head, draw_head_switches, draw_row_fill,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Said when a note's file is not where the library says.
 pub const MISSING: &str = "That note is not where the library says it is.";
 pub const NO_FOLDER: &str = "No library folder yet";
-const NO_NOTES: &str = "No notes yet";
+pub const NO_NOTES: &str = "No notes yet";
 pub const NO_LIBRARY: &str = "There is no notes library: mdedit's settings were not found.";
 pub const NEEDS_FILE: &str = "Save this file first: the library keeps links to files.";
 
@@ -37,6 +38,27 @@ pub fn added(title: &str, group: &str) -> String {
 
 pub fn already(title: &str) -> String {
     format!("\u{201c}{title}\u{201d} is already in the notes library.")
+}
+
+/// Why nothing was added to the library file `file`. The shared writer refuses a file that is
+/// not UTF-8 text, rather than write its letters back changed, and one that changed on disk
+/// between its read and the write: mdedit, which owns the library, may have saved it just then
+/// (audit 4, E6 and D3).
+pub fn not_added(file: &Path, why: &PutError) -> String {
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    match why {
+        PutError::Changed => format!(
+            "{name} changed on disk just then (mdedit may have saved it), so nothing was \
+             written. Add the file again."
+        ),
+        PutError::NotUtf8 => format!(
+            "{name} is not UTF-8 text, so nothing was written. Save it as UTF-8 in mdedit first."
+        ),
+        other => format!("The library file could not be written: {other}"),
+    }
 }
 /// A pane narrower than this leaves the notes' folders out: the titles need the room.
 const FOLDER_MIN_PANE: f32 = 210.0;
@@ -60,15 +82,36 @@ pub fn settings_file(
     default
 }
 
-/// The library folder this run uses, for mdview's `session` file.
-pub fn library_dir(session: Option<&Path>) -> Option<PathBuf> {
-    let file = settings_file(
+/// The settings file of mdedit's that names the library this run uses, for mdview's `session`
+/// file: [`settings_file`] from the environment. Nothing on disk is read.
+pub fn library_settings(session: Option<&Path>) -> Option<PathBuf> {
+    settings_file(
         std::env::var_os("MDEDIT_SETTINGS").map(PathBuf::from),
         session,
         std::env::var_os("MDVIEW_SETTINGS").is_some(),
         mdshared_app::settings::default_settings_path("mdedit"),
-    )?;
-    put::dir_from_settings(&file)
+    )
+}
+
+/// The library folder mdedit's settings file `settings` names, read from it.
+pub fn library_dir(settings: Option<&Path>) -> Option<PathBuf> {
+    put::dir_from_settings(settings?)
+}
+
+/// The library folder a run found, and whether it was there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Found {
+    pub dir: Option<PathBuf>,
+    pub available: bool,
+}
+
+/// Reads mdedit's settings file and looks at the library folder it names: what a window does
+/// on a helper thread once it runs ([`Notes::found`] takes the answer), so a folder on a share
+/// that does not answer holds no frame (audit 4, E12).
+pub fn find_library(settings: Option<&Path>) -> Found {
+    let dir = library_dir(settings);
+    let available = dir.as_deref().is_some_and(Path::is_dir);
+    Found { dir, available }
 }
 
 /// A file waiting for the reader's yes before it is written into a library file.
@@ -92,9 +135,18 @@ pub struct Notes {
     pub pending: Option<Pending>,
     /// Raised by every change of what the face draws, for the region's signature.
     pub stamp: u64,
+    /// The library's notes resolved as a tab holds a path, for the palette: made the first time
+    /// the palette lists the library after a read ([`resolve_notes`](Self::resolve_notes)), so
+    /// the palette asks the disk nothing as the reader types (audit 4, E5).
+    keys: Option<HashMap<PathBuf, PathBuf>>,
+    /// What the face says with no rows, as the folder was when the library was last read: the
+    /// drawing asks the disk nothing (audit 4, E12).
+    no_rows: &'static str,
 }
 
 impl Notes {
+    /// The library in the folder `dir`, looked at now (a shot, a test). A window looks on a
+    /// helper thread instead: [`Notes::new`] of `None`, then [`found`](Self::found).
     pub fn new(dir: Option<PathBuf>) -> Notes {
         let available = dir.as_deref().is_some_and(Path::is_dir);
         Notes {
@@ -106,7 +158,23 @@ impl Notes {
             folded: HashSet::new(),
             pending: None,
             stamp: 0,
+            keys: None,
+            no_rows: NO_FOLDER,
         }
+    }
+
+    /// The answer of [`find_library`], which a window asks on a helper thread as it starts: the
+    /// folder, and whether the head offers the face.
+    pub fn found(&mut self, found: Found) {
+        if (self.dir.as_ref(), self.available) == (found.dir.as_ref(), found.available) {
+            return;
+        }
+        self.dir = found.dir;
+        self.available = found.available;
+        self.library = None;
+        self.keys = None;
+        self.rows.clear();
+        self.stamp += 1;
     }
 
     /// The head shows its two switches.
@@ -130,7 +198,35 @@ impl Notes {
     pub fn load(&mut self) {
         self.available = self.dir.as_deref().is_some_and(Path::is_dir);
         self.library = self.dir.as_deref().map(library::read);
+        self.keys = None;
+        // What `tree::empty_state` says, from the look just taken.
+        self.no_rows = if self.available { NO_NOTES } else { NO_FOLDER };
         self.rebuild();
+    }
+
+    /// Resolves the library's notes for the palette, once per read of the library: one look at
+    /// the disk per note, here, rather than one per note at every change of the palette's list.
+    pub fn resolve_notes(&mut self) {
+        if self.keys.is_some() {
+            return;
+        }
+        let keys = self.library.as_ref().map(|l| {
+            l.entries()
+                .map(|(_, e)| (e.path.clone(), crate::workspace::resolve(&e.path)))
+                .collect()
+        });
+        self.keys = keys;
+    }
+
+    /// The note at `path` resolved as a tab would hold it, as [`resolve_notes`] found it; the
+    /// path itself before that.
+    ///
+    /// [`resolve_notes`]: Self::resolve_notes
+    pub fn resolved(&self, path: &Path) -> PathBuf {
+        (self.keys.as_ref())
+            .and_then(|k| k.get(path))
+            .cloned()
+            .unwrap_or_else(|| path.to_path_buf())
     }
 
     fn rebuild(&mut self) {
@@ -179,23 +275,17 @@ impl Notes {
         Some(self.dir.as_ref()?.join(library::DEFAULT_FILE))
     }
 
-    /// What the face says when there are no rows.
+    /// What the face says when there are no rows: whether the folder was there when the library
+    /// was last read. It is drawn on every repaint, so it asks the disk nothing.
     pub fn empty(&self) -> Option<&'static str> {
-        if !self.rows.is_empty() {
-            return None;
-        }
-        Some(match self.dir.as_deref().map(tree::empty_state) {
-            Some(tree::Empty::NoNotes) => NO_NOTES,
-            _ => NO_FOLDER,
-        })
+        self.rows.is_empty().then_some(self.no_rows)
     }
 
     /// Writes `note` into the library file `file` and reads the library again. Gives the title
     /// and the group's name for the toast.
     pub fn put(&mut self, file: &Path, note: &Path) -> Result<(String, String), String> {
         let dir = self.dir.clone().ok_or_else(|| NO_LIBRARY.to_string())?;
-        let title = put::put_note(file, &[], note, &dir)
-            .map_err(|e: PutError| format!("The library file could not be written: {e}"))?;
+        let title = put::put_note(file, &[], note, &dir).map_err(|e| not_added(file, &e))?;
         self.load();
         let group = self
             .library
@@ -523,6 +613,27 @@ mod tests {
         assert_eq!((title.as_str(), group.as_str()), ("Plan", "Personal"));
         assert_eq!(n.listed(&note).as_deref(), Some("Plan"));
         assert!(n.rows.iter().any(|r| r.label == "Plan"));
+    }
+
+    /// Audit 4, E6: the shared writer's refusals are said in the viewer's words, naming the
+    /// library file: one that changed on disk between the read and the write (mdedit may have
+    /// saved it just then) and one that is not UTF-8 text. Nothing was written in either case.
+    #[test]
+    fn a_refused_write_says_why_and_names_the_library_file() {
+        let file = Path::new("library").join("Personal.md");
+        assert_eq!(
+            not_added(&file, &PutError::Changed),
+            "Personal.md changed on disk just then (mdedit may have saved it), so nothing was \
+             written. Add the file again."
+        );
+        assert_eq!(
+            not_added(&file, &PutError::NotUtf8),
+            "Personal.md is not UTF-8 text, so nothing was written. Save it as UTF-8 in mdedit first."
+        );
+        assert_eq!(
+            not_added(&file, &PutError::Io("denied".into())),
+            "The library file could not be written: denied"
+        );
     }
 
     #[test]

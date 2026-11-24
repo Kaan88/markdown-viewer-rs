@@ -107,6 +107,12 @@ impl Server {
                 self.selection = None;
                 self.press = None;
                 self.selection_dirty = true;
+                // A tick not answered yet was found in the old text, so its offset says nothing
+                // of this one: it is dropped (the click does nothing), and this text is not the
+                // editor's answer to it, so the page follows the caret as for any (audit 4, E7).
+                if self.task.take().is_some() {
+                    self.keep_top = false;
+                }
                 // The page shows the caret in the new text; it stays still while it does. After a
                 // tick the reader is looking at the box, not the caret: the page stays.
                 if std::mem::take(&mut self.keep_top) {
@@ -121,6 +127,9 @@ impl Server {
                 scale,
                 dark,
             } => {
+                // No larger than a frame can carry: a few hundred thousand px a side asked for
+                // tens of gigabytes (audit 4, E10).
+                let (width, height) = (width.min(wire::MAX_SIDE), height.min(wire::MAX_SIDE));
                 let scale = if scale.is_finite() && scale > 0.1 {
                     scale
                 } else {
@@ -1160,6 +1169,76 @@ Last.
             base_dir: None,
         });
         assert!(s.frame().map_or(s.top, |u| u.top) < bottom);
+    }
+
+    /// Audit 4, E10: a view larger than a frame can carry is drawn at the largest that can.
+    #[test]
+    fn a_view_larger_than_a_frame_can_carry_is_drawn_at_the_largest_one() {
+        let mut s = Server::new();
+        s.apply(Request::Text {
+            text: "# Wide
+"
+            .into(),
+            base_dir: None,
+        });
+        s.apply(Request::View {
+            width: wire::MAX_SIDE + 808,
+            height: 12,
+            scale: 1.0,
+            dark: false,
+        });
+        let f = s.frame().expect("drawn");
+        assert_eq!((f.width, f.height), (wire::MAX_SIDE, 12));
+        assert_eq!(f.pixels.len(), wire::MAX_SIDE as usize * 12 * 4);
+    }
+
+    /// Audit 4, E7: a tick and a new text in the same batch (the reader clicked a box while the
+    /// editor sent what was typed): the tick's offset was into the old text, so it is not
+    /// answered, and the page follows the caret for the new text instead of staying still.
+    #[test]
+    fn a_tick_followed_by_a_new_text_before_its_answer_is_dropped() {
+        let mut text: String = (0..120)
+            .map(|i| {
+                format!(
+                    "Line {i}.
+
+"
+                )
+            })
+            .collect();
+        text.push_str(
+            "- [ ] far down
+",
+        );
+        let mut s = shown(&text);
+        s.apply(Request::Follow { line: 1, column: 0 });
+        s.apply(Request::Scroll { by: 1e6 });
+        let bottom = s.frame().expect("scrolled").top;
+        let (bx, by) = (0..300)
+            .step_by(2)
+            .flat_map(|y| (0..200).step_by(2).map(move |x| (x as f32, y as f32)))
+            .find(|&(x, y)| s.task_at(x, y).is_some())
+            .expect("the box in view");
+        s.apply(Request::Press {
+            x: bx,
+            y: by,
+            clicks: 1,
+        });
+        s.apply(Request::Release);
+        // Three characters typed at the top: every offset below them moved.
+        s.apply(Request::Text {
+            text: format!("ab {text}"),
+            base_dir: None,
+        });
+        assert_eq!(
+            s.take_task(),
+            None,
+            "no tick against a text it was not found in"
+        );
+        assert!(
+            s.frame().map_or(s.top, |u| u.top) < bottom,
+            "the page follows the caret"
+        );
     }
 
     #[test]

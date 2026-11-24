@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::ui::EditAct;
-use crate::workspace::SourcePlace;
+use crate::workspace::{SourcePlace, resolve};
 
 use mdview_core::session::PageWidth;
 use mdview_render::SourceKind;
@@ -476,7 +476,13 @@ impl App {
     /// The zoom view with a raster already in hand.
     pub(super) fn show_zoom(&mut self, image: Rc<mdview_render::DecodedImage>) {
         let area = self.zoom_area();
-        self.ui.zoom = Some(crate::zoom::ZoomView::open(image, area));
+        let mut view = crate::zoom::ZoomView::open(image, area, self.scale);
+        view.origin = self.ws.active_tab().map(|t| crate::zoom::Origin {
+            tab: t.path().to_path_buf(),
+            revision: t.revision(),
+            dark: self.pal.dark,
+        });
+        self.ui.zoom = Some(view);
         self.ui.popup = None;
         self.ui.tip = None;
         self.ui.card = None;
@@ -525,7 +531,7 @@ impl App {
     /// answer and says whether the dialog opened. The window keeps drawing meanwhile; a request
     /// made while one is open is ignored. The answer comes back as `Wake::Dialog`.
     #[cfg(not(windows))]
-    fn open_dialog_async(&mut self, start: impl FnOnce(EventLoopProxy<Wake>) -> bool) {
+    fn open_dialog_async(&mut self, start: impl FnOnce(LoopProxy) -> bool) {
         if self.dialog_open {
             return;
         }
@@ -861,17 +867,19 @@ impl App {
                     continue;
                 }
                 self.ws.document_saved(doc, &request.path);
-                // A document the editor asked for is its file's tab now.
-                for (path, named) in &mut self.editor_shown {
-                    if named.as_deref() == Some(doc) {
-                        (*path, *named) = (request.path.clone(), None);
+                // A document the editor asked for is its file's tab now. The file is resolved
+                // here, once, for the checks each turn of the loop makes.
+                let file = resolve(&request.path);
+                for t in &mut self.editor_shown {
+                    if t.doc.as_deref() == Some(doc) {
+                        (t.path, t.doc, t.file) = (request.path.clone(), None, file.clone());
                     }
                 }
                 // The window placed for the document stays placed for its file.
                 if let Some((path, named)) = &mut self.placed_for
                     && named.as_deref() == Some(doc)
                 {
-                    (*path, *named) = (request.path.clone(), None);
+                    (*path, *named) = (file, None);
                 }
             }
             if request.live_off {
@@ -881,11 +889,14 @@ impl App {
                 (self.ws).live_text(&request.path, text.clone(), SourcePlace::of(request));
             } else if request.follow {
                 follow = Some(request);
-            } else if self.ws.open(&request.path).is_ok() {
+            } else {
+                let opened = self.ws.open(&request.path).is_ok();
+                // Remembered even when it could not be opened: no tab shows it, so the editor is
+                // told at once that its preview has none (audit 4, E11).
                 if request.from.as_deref() == Some(EDITOR) {
                     self.editor_asked(request.path.clone(), None);
                 }
-                if let Some(at) = SourcePlace::of(request) {
+                if opened && let Some(at) = SourcePlace::of(request) {
                     self.ws.scroll_to_line(at);
                 }
             }
@@ -937,10 +948,16 @@ impl App {
     ///
     /// [`editor_closed`]: Self::editor_closed
     pub(super) fn editor_asked(&mut self, path: PathBuf, doc: Option<String>) {
-        let entry = (path, doc);
-        if !self.editor_shown.contains(&entry) {
-            self.editor_shown.push(entry);
+        if (self.editor_shown.iter()).any(|t| t.path == path && t.doc == doc) {
+            return;
         }
+        // Resolved once, here, not on each turn of the loop that looks for its tab.
+        let file = if path.as_os_str().is_empty() {
+            PathBuf::new()
+        } else {
+            resolve(&path)
+        };
+        self.editor_shown.push(EditorTab { path, doc, file });
     }
 
     /// Tells the editor of the tabs it asked for that are closed, off this thread (a send waits
@@ -958,17 +975,18 @@ impl App {
 
     /// What to tell the editor about the tabs it asked for that no tab shows any more (closed,
     /// in whatever way): one `closed` each. They are forgotten here; nothing is asked while
-    /// the editor has asked for none.
+    /// the editor has asked for none. Called on every turn of the loop, so it compares the paths
+    /// resolved when the editor asked and asks the disk nothing (audit 4, E1).
     pub(super) fn editor_closed(&mut self) -> Vec<Request> {
         if self.editor_shown.is_empty() {
             return Vec::new();
         }
         let ws = &self.ws;
         let mut closed = Vec::new();
-        self.editor_shown.retain(|(path, doc)| {
-            let shown = ws.shows(path, doc.as_deref());
+        self.editor_shown.retain(|t| {
+            let shown = ws.shows_resolved(&t.file, t.doc.as_deref());
             if !shown {
-                closed.push(closed_request(path, doc.clone()));
+                closed.push(closed_request(&t.path, t.doc.clone()));
             }
             shown
         });
@@ -980,7 +998,7 @@ impl App {
     /// waited for, while the editor asked for none. Whether everything was told in time.
     pub(super) fn tell_editor_all_closed(&mut self, wait: std::time::Duration) -> bool {
         let closed: Vec<Request> = (self.editor_shown.drain(..))
-            .map(|(path, doc)| closed_request(&path, doc))
+            .map(|t| closed_request(&t.path, t.doc))
             .collect();
         if closed.is_empty() {
             return true;
@@ -995,6 +1013,16 @@ impl App {
         told.recv_timeout(wait).is_ok()
     }
 
+    /// Whether no tab shows what the window was placed for any more. Asked on every turn of the
+    /// loop while the window is placed, so it compares the path resolved when it was placed and
+    /// asks the disk nothing (audit 4, E1).
+    pub(super) fn placed_tab_gone(&self) -> bool {
+        self.placed_for.as_ref().is_some_and(|(path, doc)| {
+            !(path.as_os_str().is_empty() && doc.is_none())
+                && !self.ws.shows_resolved(path, doc.as_deref())
+        })
+    }
+
     /// Moves and resizes the window to `rect` (physical screen px), or says it cannot be done.
     /// Where it was is remembered, to go back to when the tab it was placed `for_tab` closes or
     /// the editor says the arrangement is over.
@@ -1007,7 +1035,14 @@ impl App {
             return;
         };
         if self.tiling.set(&w, rect) {
-            self.placed_for = Some(for_tab);
+            // Resolved once, here: the loop looks for its tab on every turn.
+            let (path, doc) = for_tab;
+            let path = if path.as_os_str().is_empty() {
+                path
+            } else {
+                resolve(&path)
+            };
+            self.placed_for = Some((path, doc));
         } else {
             self.ws
                 .set_status("This desktop does not let a window be placed");
@@ -1108,6 +1143,7 @@ impl App {
             Wake::Images => {
                 self.ws.remote_completed();
             }
+            Wake::Library(found) => self.library_found(found),
             Wake::FolderSearch => {
                 if self.ui.palette.as_mut().is_some_and(|p| p.poll_folder()) {
                     self.modal_changed();

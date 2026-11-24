@@ -11,6 +11,139 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Audit 4 fixed on `fix/audit4` (2026-11-24, not merged)
+
+Audit 4's findings against mdview (mdedit's `docs/review-prompts/audit4/e-mdview.md`; mdedit's
+FIXES names them E1 to E12) are fixed on the branch `fix/audit4`, which is **not merged**. The
+shared crates are pinned there at `ef88814`, the tip of shared's own `fix/audit4` after the
+review of the fixes (it was `d1330b0`), for development only: the pin moves to shared's `main`
+once that branch is merged there. Nothing was driven by hand in a real window and nothing ran
+off Windows.
+
+- **Fixed, each with a test that fails with its fix reverted.** Each fix was switched back to
+  the old code in turn, behind a temporary switch since removed, and its tests failed; with the
+  fixes in, they pass.
+  - **E1.** The loop looked for the editor's tabs and the placed-for tab with a `canonicalize` per
+    tab on every turn (104 to 128 µs a turn with three tabs). The paths are resolved once, when
+    they arrive (`EditorTab::file`, `placed_for`), and compared with `Workspace::shows_resolved`:
+    0.7 µs. `looking_for_the_editors_tabs_on_each_turn_asks_the_disk_nothing`.
+  - **E2.** The zoom view counted its size in logical px per raster px, so it opened at 3x the
+    page's size at 150 % and 4x at 200 %. It is now device px per raster px, the same against
+    the page at every scale, and it follows a change of scale.
+    `a_diagram_opens_at_twice_the_pages_size_at_every_device_scale`,
+    `the_wheel_stops_at_the_same_sizes_against_the_page_at_every_scale` (`zoom::tests`) and
+    `the_zoom_view_opens_at_twice_the_pages_size_at_every_device_scale`; a fourth,
+    `zooming_keeps_the_point_under_the_pointer_at_scale_two`, holds in either unit. The shots
+    `zoom-diagram-2x-light` and `-dark`.
+  - **E3.** The zoom test's drag asserted a pan the wheel had already made; it now measures the
+    drag from where the wheel left it, and fails when a drag does nothing
+    (`a_diagram_opens_at_reading_size_and_can_be_panned_zoomed_and_closed`).
+  - **E4.** A palette group is a byte: the library's ids ran into the headings' `G_PLAIN` (100)
+    from the 85th file and saturated past the 240th. Files 1 to 238 have their own header
+    (`G_LIBRARY..=G_LIBRARY_LAST`), the rest go under "More library files" with the file's name
+    in each note's hint, and `G_PLAIN` is 255.
+    `every_note_is_under_its_own_files_header_or_one_that_names_its_file` (512 files).
+  - **E5.** The palette resolved every note's path at each change of its list: 17 to 21 ms a
+    keystroke with 400 notes. They are resolved once per read of the library
+    (`Notes::resolve_notes`, when the palette opens): 1.6 ms.
+    `the_palette_asks_the_disk_nothing_about_the_notes_as_the_reader_types`.
+  - **E6.** The shared writer's new refusals are said in the viewer's words, naming the file:
+    `notes::not_added` for `PutError::Changed` and `PutError::NotUtf8`.
+    `a_refused_write_says_why_and_names_the_library_file`,
+    `a_library_file_that_is_not_utf8_is_left_as_it_is_and_the_reader_is_told_why`.
+  - **E7 (within a batch).** A tick not yet answered when a new text arrives is dropped, and the
+    page follows the caret. `a_tick_followed_by_a_new_text_before_its_answer_is_dropped`.
+  - **E8.** The zoom view remembers its tab, the tab's revision and the theme (`zoom::Origin`)
+    and closes when any of them changes. `the_zoom_view_closes_when_the_page_under_it_changes`.
+  - **E9.** A fit goes below `MIN_ZOOM` for a diagram too large for it, and a pinch over the view
+    zooms the diagram, not the page. `a_diagram_wider_than_ten_windows_still_fits_whole`,
+    `a_pinch_over_the_zoom_view_zooms_the_diagram_not_the_page`.
+  - **E10.** A `View` is drawn at most `wire::MAX_SIDE` (8192) a side, and a count of records is
+    held to the bytes the message has left (`Fields::count`).
+    `a_view_larger_than_a_frame_can_carry_is_drawn_at_the_largest_one`,
+    `a_count_larger_than_what_follows_is_refused_before_anything_is_set_aside`.
+  - **E11.** A file the editor asked for that could not be opened is remembered all the same, so
+    the editor is told `closed` at once.
+    `a_file_the_editor_asked_for_that_cannot_be_opened_is_told_closed`.
+  - **E12.** The library is looked for on a helper thread once the window runs (`Wake::Library`),
+    not in `App::new`, and the empty face says what the folder was at the last read instead of
+    looking at every repaint. `a_window_looks_for_the_library_after_it_is_made_not_before`,
+    `the_empty_face_says_what_the_folder_was_at_the_last_read`.
+- **The review of the fixes** (mdedit's FIXES, W2 and T5). The E12 test called `find_library`
+  itself, so with the look in `run()` deleted every test passed, and it set `MDEDIT_SETTINGS`
+  for the whole test process. Now:
+  - `run()` makes one call, `loop_ready(LoopProxy::Loop(proxy))`, which gives the window its
+    proxy and starts the look. `LoopProxy` is winit's proxy in a window and, in a test, a
+    channel the test reads (`LoopProxy::Test`). The test drives `loop_ready`, takes the
+    `Wake::Library` the helper thread sends, and hands it to `woken`.
+  - Which settings file of mdedit's names the library is decided from the environment when the
+    window is made (`notes::library_settings`, nothing read) and kept on the `App`
+    (`library_settings`); the helper thread reads only that file. The test gives its window its
+    own (`App::with_library_settings`), and no test sets `MDEDIT_SETTINGS` any more.
+  - Four mutations, each failing the test: the look taken out of `loop_ready`, the answer not
+    sent, the settings taken from the environment again, and the look made in `App::new`.
+  - `run()` itself is reached by no test (it needs a real event loop). Its look cannot be lost
+    alone: the same line is the one that gives the window its proxy, without which no thread
+    can wake it. No window was launched by hand to see it: mdview has no way to start behind
+    the owner's windows.
+- **Not a bug.** E9's title bar: the zoom view's close button sits over the window's own, as
+  every dialog's does (`hit_at` gives only the overlay's hits while one is open).
+- **Left, and why.**
+  - E7 across batches: a tick answered by a text sent after a second one needs a count of texts
+    in `Update::task`, a protocol change in both apps. mdedit's own `[ ]` check catches most of it.
+  - E11b: a `closed` that arrives late, after the editor asked again at once, needs a sequence
+    number in the protocol, in both apps. The window is milliseconds.
+  - E6's other half: asking mdedit to add the note over the sister channel, so that only mdedit
+    writes the library, is a new feature in both apps.
+  - E5's first open (review of the fixes): the first Ctrl+P after each read of the library still
+    resolves every note on the UI thread, 1.6 ms for 400 notes. Moving it to the reading thread
+    needs the read's answer to carry the resolved paths and a wake of its own; at once per read,
+    it is not worth that.
+  - E7 after a rejected tick (review of the fixes): when the editor refuses a tick (its own `[ ]`
+    check), it sends nothing, so `keep_top` stays set and the next text the owner types keeps
+    the page still once rather than following the caret. The protocol has no answer that says a
+    tick was refused; it is the same change as E7 across batches.
+- **Decisions taken without the owner.** The zoom view closes on a theme change rather than
+  draw the old theme's raster; a scale change keeps it open at the same density. Library files
+  past the 238th share one header rather than be left out. A shot looks for the library at once,
+  as it has no loop to wait in.
+- **Budgets.** Release builds on this PC, five launches of each build in turn on the showcase,
+  `--no-session` with scratch `MDVIEW_SETTINGS` and `MDEDIT_SETTINGS`, against the build of
+  `2e329da` (the pinned tree before the fixes). Other builds kept the PC about 40 % busy, so
+  every stage of startup ran about three times slower than in section 9, and the first frame's
+  time says nothing against its budget here: 322 to 1170 ms before (median 485), 322 to 1139 ms
+  after (median 367), each stage taking the same time in both. The launch path only lost work:
+  `App::new` no longer reads mdedit's settings or looks at the folder, and a thread is started
+  instead, whose answer came 23 to 43 ms after the first frame in every run. Private memory at
+  3 s: 25.0 to 25.2 MiB before, 24.9 to 25.2 after (working set 43.1 to 43.3, 42.9 to 43.2).
+  CPU from 3 s to 6 s: none, but for one 15.6 ms tick (one tick of Windows' clock) in one run
+  of the new build, which drew two extra frames then; two runs of the old build drew extra
+  frames too. The exe: 9,516,544 to 9,546,240 bytes. With a test-only probe, not committed: a keystroke in the
+  palette with 400 notes went from 17.3 to 20.9 ms to 1.6 ms, and the loop's look for three
+  tabs the editor asked for from 104 to 128 µs to 0.7 µs. The scroll frame was not measured: a
+  frame gains one look at `ui.zoom`, and loses the disk on the turns where the editor asked for
+  tabs.
+- **Checks.** `cargo test --release --workspace`: 704 passed, 0 failed, 6 ignored;
+  `-p mdview-preview --features mdview-preview/server`: 19 passed. fmt and clippy are clean.
+  `tests/shots.sh`: 168 PNGs, every one byte for byte as before but the two new
+  `zoom-diagram-2x-*`, which frame the diagram as `zoom-diagram-light` and `-dark` do at scale 1;
+  `tests/shots-check.sh`: 126 wanted, 0 bad. Run again on the pin at `d1330b0`, all the same:
+  704 and 19 passed, fmt and clippy clean, and the 168 PNGs byte for byte those of `dd87553`
+  (the pin at `f0f8159`). The budgets were not measured again: the shared commits after
+  `f0f8159` are tests, a stand-in for a crash in `runs` that only a test can set, the fold in
+  `paths::comparable`, a section name of only dots in `split`, the words of one refusal in
+  `moves` and two doc comments. mdview calls none of `runs`, `split`, `moves` or
+  `comparable`.
+- **Checks after the review of the fixes**, on the pin at `ef88814` with W2 and T5: fmt and
+  clippy clean; `cargo test --release --workspace` 704 passed, 0 failed, 6 ignored (the E12
+  test was rewritten, not added); the preview server's 19 passed; `tests/shots.sh` 168 PNGs,
+  every one byte for byte those of `target/shots/final`; `tests/shots-check.sh` 126 wanted, 0
+  bad. Budgets not measured: of the shared changes after `d1330b0`, mdview calls only
+  `put_note`, whose UTF-16 test now looks past a UTF-8 byte order mark, and `files::replace`,
+  whose temporary name changes only for a name too long to carry `.part`; both run on "Add to
+  the library", not on launch, a key or a scroll. W2 moves no work: the look was already on a
+  thread started from `run()`.
+
 ## For later: sort a table by a column, in the view only (asked 2026-11-23, not designed)
 
 The owner asked on 2026-11-23 for this "for later": a click on a table's header cell sorts the
@@ -45,10 +178,13 @@ zoom, and Esc should close it. Built by a session; **the owner has not looked at
 driven by hand in a real window (tests and `--shot` only), and nothing ran off Windows.
 
 - **What it does.** A click on a rendered Mermaid diagram opens it over the whole window, on a
-  sheet of the page's colour over a dimmed page. It opens at one logical px per raster px: the
+  sheet of the page's colour over a dimmed page. It opens at one device px per raster px: the
   page's own raster is drawn at twice the device scale and the page halves it, so this is twice
-  the size the page showed, where the 11 px labels read. The wheel zooms between 0.1 and 4.0
-  logical px per raster px about the pointer; a drag pans, the image stopping at the window's
+  the size the page showed, where the 11 px labels read, at every device scale (audit 4, E2: it
+  was one logical px, which opened it at 3x the page's size at 150 % and 4x at 200 %). The wheel
+  zooms between 0.1 and 4.0 device px per raster px (a fifth of the page's size to eight times
+  it) about the pointer, and a fit of a diagram too large for 0.1 goes below it; a trackpad pinch
+  over the view zooms the diagram, not the page. A drag pans, the image stopping at the window's
   edges (a diagram smaller than the window stays centred). `Esc` and a close button at the top
   right close it; `+`, `-` and `0` zoom at the centre and fit the whole diagram. A hint line
   under it says all of this. A diagram wider than the window opens at its top left (the start of
@@ -665,7 +801,7 @@ document with SVG, math or Mermaid.
 | `--find q`, `--scroll px`, `--hover x,y` | Find query, scroll offset, pointer position. `--scroll` also applies to a real window's first document |
 | `--menu main\|recent\|cascade\|tab\|page\|find`, `--dialog about\|shortcuts\|recent` | Open a popup or dialog in the shot |
 | `--scroll-steps n` | Open a real window, wait until the page is refined, scroll n wheel steps, log timings, exit |
-| `--zoom-diagram N`, `--zoom-level F`, `--zoom-pan X,Y` | Open the N-th diagram (from 1) of the first document in the zoom view, at F logical px per raster px (default 1.0) and panned to X,Y (logical px), for a shot |
+| `--zoom-diagram N`, `--zoom-level F`, `--zoom-pan X,Y` | Open the N-th diagram (from 1) of the first document in the zoom view, at F device px per raster px (default 1.0, twice the page's size) and panned to X,Y (logical px), for a shot |
 | `--update-bar available\|installing\|installed\|installed-plain` | Show the update bar at that stage with a made-up version, for a shot |
 | `--check-update` | Look for a newer version as the app would, print the answer, exit. No window |
 
@@ -2728,8 +2864,10 @@ A run must never read the owner's library by accident (mdedit D-067): an explici
 `MDEDIT_SETTINGS` always counts; otherwise a run with no session (a shot, `--no-session`) or a
 scratch `MDVIEW_SETTINGS` has no library, and a normal run uses mdedit's own settings file.
 
-**When it is read.** At start only mdedit's settings file is read and the folder checked, so the
-head knows whether to offer the face. The library itself is read when the face is first shown,
+**When it is read.** Once the window runs, a helper thread reads mdedit's settings file and
+checks the folder (`App::look_for_library`, answered by `Wake::Library`; audit 4, E12: a folder
+on a share that did not answer held the first frame), so the head knows whether to offer the
+face; until the answer comes it offers none. A shot looks at once, as it has no loop. The library itself is read when the face is first shown,
 on Refresh, after an add, and when the palette first lists it; that read is kept until Refresh
 or an add.
 There is no watcher: a change made in mdedit shows after Refresh or the next add.
