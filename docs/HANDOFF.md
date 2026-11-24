@@ -15,9 +15,9 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 Audit 4's findings against mdview (mdedit's `docs/review-prompts/audit4/e-mdview.md`; mdedit's
 FIXES names them E1 to E12) are fixed on the branch `fix/audit4`, which is **not merged**. The
-shared crates are pinned there at `f0f8159`, shared's own `fix/audit4`, for development only:
-the pin moves to shared's `main` once that branch is merged there. Nothing was driven by hand
-in a real window and nothing ran off Windows.
+shared crates are pinned there at `d1330b0`, the tip of shared's own `fix/audit4`, for
+development only: the pin moves to shared's `main` once that branch is merged there. Nothing
+was driven by hand in a real window and nothing ran off Windows.
 
 - **Fixed, each with a test that fails with its fix reverted.** Each fix was switched back to
   the old code in turn, behind a temporary switch since removed, and its tests failed; with the
@@ -101,7 +101,13 @@ in a real window and nothing ran off Windows.
   `-p mdview-preview --features mdview-preview/server`: 19 passed. fmt and clippy are clean.
   `tests/shots.sh`: 168 PNGs, every one byte for byte as before but the two new
   `zoom-diagram-2x-*`, which frame the diagram as `zoom-diagram-light` and `-dark` do at scale 1;
-  `tests/shots-check.sh`: 126 wanted, 0 bad.
+  `tests/shots-check.sh`: 126 wanted, 0 bad. Run again on the pin at `d1330b0`, all the same:
+  704 and 19 passed, fmt and clippy clean, and the 168 PNGs byte for byte those of `dd87553`
+  (the pin at `f0f8159`). The budgets were not measured again: the shared commits after
+  `f0f8159` are tests, a stand-in for a crash in `runs` that only a test can set, the fold in
+  `paths::comparable`, a section name of only dots in `split`, the words of one refusal in
+  `moves` and two doc comments. mdview calls none of `runs`, `split`, `moves` or
+  `comparable`.
 
 ## For later: sort a table by a column, in the view only (asked 2026-11-23, not designed)
 
