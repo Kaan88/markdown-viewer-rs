@@ -1524,10 +1524,7 @@ impl App {
         {
             self.contrast_reads += 1;
         }
-        !self.still
-            && self
-                .contrast
-                .unwrap_or_else(platform::system_high_contrast)
+        !self.still && self.contrast.unwrap_or_else(platform::system_high_contrast)
     }
 
     fn watch_motion(&mut self) {
@@ -2424,14 +2421,12 @@ fn shot(mut app: App, path: &Path) -> i32 {
 /// the shared form does not say whether one is open: any such row keeps the whole window in the
 /// frame's business instead.
 fn has_dropdown(f: &mdshared_ui::settings::pages::Form) -> bool {
-    (f.pages().iter())
-        .flat_map(|p| p.items.iter())
-        .any(|it| {
-            matches!(
-                it.row(),
-                mdshared_ui::settings::Row::Choice { options, .. } if options.len() > 3
-            )
-        })
+    (f.pages().iter()).flat_map(|p| p.items.iter()).any(|it| {
+        matches!(
+            it.row(),
+            mdshared_ui::settings::Row::Choice { options, .. } if options.len() > 3
+        )
+    })
 }
 
 /// What two rectangles share (empty, zero wide or high, when nothing).
