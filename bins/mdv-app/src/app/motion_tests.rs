@@ -724,8 +724,8 @@ fn an_exports_progress_then_its_result_leave_one_toast() {
     let shown = toasts(&a);
     assert_eq!(
         shown,
-        [("Exported to x.html".into(), 0.0, 0.0)],
-        "the progress went at once"
+        [("Exported to x.html".into(), 1.0, 0.0)],
+        "in the progress's place, at once"
     );
     settle(&mut a);
     assert_eq!(toasts(&a), [("Exported to x.html".into(), 1.0, 0.0)]);
@@ -919,4 +919,107 @@ fn a_window_too_short_for_a_toast_still_shows_its_one_status() {
         "too short: {rest:?} in {page:?}"
     );
     assert_eq!(a.overlay_bounds.len(), 1, "the bottom toast is drawn");
+}
+
+#[test]
+fn a_zoom_step_while_its_toast_is_at_rest_changes_it_in_place() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.zoom_in();
+    a.compose();
+    settle(&mut a);
+    assert_eq!(toasts(&a)[0].1, 1.0);
+    a.ws.zoom_in();
+    a.compose();
+    let shown = toasts(&a);
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert_eq!(
+        shown[0].0,
+        format!("Zoom {}%", a.ws.zoom()),
+        "the new text at once"
+    );
+    assert_eq!(shown[0].1, 1.0, "no frame without it, no entrance");
+}
+
+#[test]
+fn under_repeated_zoom_steps_the_toast_never_fades() {
+    let mut a = moving(&["showcase.md"]);
+    let mut last = 0.0_f32;
+    for i in 0..40 {
+        // In and out, so every step is a new message (a step past the limit says nothing).
+        if i % 2 == 0 {
+            a.ws.zoom_in();
+        } else {
+            a.ws.zoom_out();
+        }
+        a.compose();
+        step(&mut a, FRAME);
+        let shown = toasts(&a);
+        assert_eq!(shown.len(), 1, "step {i}: {shown:?}");
+        assert!(shown[0].1 >= last, "step {i}: {} after {last}", shown[0].1);
+        assert_eq!(shown[0].2, 0.0, "step {i}: nothing lifts");
+        last = shown[0].1;
+    }
+    assert_eq!(last, 1.0, "in, and staying in");
+}
+
+#[test]
+fn a_replacing_status_with_none_showing_comes_in_from_nothing() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.set_status("Hello");
+    a.compose();
+    assert_eq!(toasts(&a)[0].1, 0.0, "it enters");
+    settle(&mut a);
+    // Cleared, it leaves; the clock stays this side of the next message's time.
+    a.ws.set_status("");
+    a.compose();
+    settle(&mut a);
+    assert!(a.toasts.is_empty());
+    a.ws.zoom_in();
+    a.compose();
+    assert_eq!(
+        toasts(&a)[0].1,
+        0.0,
+        "after the last has gone, the next enters again"
+    );
+}
+
+#[test]
+fn a_confirmation_said_again_while_it_leaves_comes_back() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.confirm("Copied");
+    a.compose();
+    settle(&mut a);
+    a.ws.set_status("");
+    a.compose();
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    let going = toasts(&a)[0].1;
+    assert!(going > 0.0 && going < 1.0, "leaving: {going}");
+    a.ws.confirm("Copied");
+    a.compose();
+    let shown = toasts(&a);
+    assert_eq!(shown.len(), 1, "no second Copied: {shown:?}");
+    assert!(
+        shown[0].1 >= going - 0.2,
+        "turns round where it is: {}",
+        shown[0].1
+    );
+    settle(&mut a);
+    assert_eq!(toasts(&a), [("Copied".into(), 1.0, 0.0)]);
+}
+
+#[test]
+fn a_replacing_status_takes_the_place_of_the_confirmations_showing() {
+    let mut a = moving(&["showcase.md"]);
+    for text in ["Copied", "Link address copied"] {
+        a.ws.confirm(text);
+        a.compose();
+    }
+    settle(&mut a);
+    a.ws.zoom_in();
+    a.compose();
+    let shown = toasts(&a);
+    assert_eq!(shown.len(), 1, "the others went at once: {shown:?}");
+    assert_eq!(shown[0].1, 1.0, "in the newest one's place");
+    assert_eq!(shown[0].2, 0.0);
 }

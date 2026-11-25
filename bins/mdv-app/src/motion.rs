@@ -60,11 +60,13 @@ pub const TOASTS_MAX: usize = 3;
 pub const TOASTS: &str = "toasts";
 
 /// The toasts' stack, entering and leaving by [`TOAST`]; at most [`TOASTS_MAX`] are there at
-/// once (the stack counts the ones not leaving; the window draws no more than that in all).
+/// once, those leaving included (a fourth sends the oldest away, and drops at once one already
+/// leaving).
 pub fn toasts() -> Stack<String> {
     Stack::new()
         .with_motion(TOAST.enter, TOAST.exit)
         .with_max(TOASTS_MAX)
+        .with_max_drawn(TOASTS_MAX)
 }
 
 /// What the animator may do: `still` is a run that must not depend on time (a shot, the

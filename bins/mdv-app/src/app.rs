@@ -329,9 +329,6 @@ struct App {
     toasts: mdshared_ui::anim::stack::Stack<String>,
     toast_seen: Option<(String, Instant, bool)>,
     toast_frame: Vec<(u64, String, f32, f32)>,
-    /// Which stack the toasts are: a message that takes the others' place starts a new one, so
-    /// the old go at once and the new enters as new.
-    toast_gen: u64,
     /// A shot part way through a motion: it moves whatever the setting and the system say.
     forced_motion: bool,
 }
@@ -441,7 +438,6 @@ impl App {
             toasts: crate::motion::toasts(),
             toast_seen: None,
             toast_frame: Vec::new(),
-            toast_gen: 0,
             forced_motion: false,
         }
     }
@@ -805,10 +801,12 @@ impl App {
     /// taken for new. Each leaves of itself when its time is up; a status cleared sends them
     /// all away.
     ///
-    /// A message set by `set_status` takes the place of the toasts showing: they go at once,
-    /// with no exit and no lift, and it comes in as a new toast (a zoom step, a width, a
-    /// progress and its result). One set by `confirm`, a one-shot confirmation, comes in under
-    /// them. Either way the same text still showing keeps its toast for longer instead.
+    /// A message set by `set_status` takes the place of the toasts showing: the newest shown
+    /// one takes its text at once, keeping its presence and its place (a zoom step under key
+    /// repeat changes in place, with no exit and no entrance), and the others go at once; with
+    /// none shown it comes in as a new toast. One set by `confirm`, a one-shot confirmation,
+    /// comes in under them, or keeps the toast of the same text for longer, bringing it back
+    /// if it is leaving.
     fn sync_toasts(&mut self, now: Instant) {
         self.toasts.tick(now);
         let line = (self.ws.status_line()).map(|s| (s.text.clone(), s.at, s.stack));
@@ -828,35 +826,28 @@ impl App {
             return;
         }
         // The height of a toast as `Bubble::toast` makes it (the same for every text).
-        let h = {
-            let mut p = Painter::new(&mut self.screen, &mut self.gfx, self.scale);
-            Bubble::toast(&mut p, "", self.areas.page).rect.h
-        };
+        let h = mdshared_ui::overlay::TOAST_H;
         let gap = crate::motion::TOAST_GAP;
-        let id = (crate::motion::TOASTS, self.toast_gen);
-        let shown = (self.toasts).frame(&mut self.anim, id, |_| h, gap);
-        // The newest first; never more than the most, those leaving included.
+        let shown = (self.toasts).frame(&mut self.anim, crate::motion::TOASTS, |_| h, gap);
+        // The newest first; the stack keeps no more than the most, those leaving included.
         self.toast_frame = (shown.into_iter())
-            .take(crate::motion::TOASTS_MAX)
             .map(|s| (s.key, s.item.clone(), s.t, s.lift))
             .collect();
     }
 
     /// Shows `text` until `until`: under the others when `stack`, in their place otherwise.
     fn show_toast(&mut self, text: &str, until: Instant, stack: bool) {
-        let same = (self.toasts.current()).find(|(_, t)| *t == text);
-        let same = same.map(|(k, _)| k);
-        let alone = self.toasts.current().count() == 1;
-        match same {
-            Some(key) if stack || alone => self.toasts.keep(key, Some(until)),
-            _ if stack => _ = self.toasts.push(text.to_string(), Some(until)),
-            _ => {
-                // In their place: a stack of its own, under a new name in the animator, so
-                // the old toasts are not drawn again and the new one enters from nothing.
-                self.toasts = crate::motion::toasts();
-                self.toast_gen += 1;
-                self.toasts.push(text.to_string(), Some(until));
-            }
+        if stack {
+            self.toasts.show(text.to_string(), Some(until));
+            return;
+        }
+        let key = self.toasts.replace_newest(text.to_string(), Some(until));
+        let others: Vec<u64> = (self.toasts.current())
+            .map(|(k, _)| k)
+            .filter(|k| *k != key)
+            .collect();
+        for k in others {
+            self.toasts.remove(k);
         }
     }
 
