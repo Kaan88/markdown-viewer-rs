@@ -1131,6 +1131,31 @@ fn two_settings_rows_changed_while_the_dialog_moves_are_drawn_as_a_whole_redraw_
 
 // ---- tooltips, from resting -----------------------------------------------------------------
 
+#[test]
+fn opening_settings_asks_the_system_for_contrast_and_applies_it_at_once() {
+    let mut a = moving(&["showcase.md"]);
+    a.contrast = Some(true);
+    // With the dialog closed nothing asks the system: on Linux that read opens a D-Bus
+    // connection and may wait half a second on the window's thread.
+    a.read_motion();
+    assert_eq!(a.contrast_reads, 0, "a closed Settings asks nothing");
+    settings_at(&mut a, s::TICK_BOXES);
+    assert!(a.contrast_reads >= 1, "opening the dialog asks");
+    settle(&mut a);
+    // Under high contrast the page list's hover fill changes at once: no fade, no frame asked.
+    let item = a.ui.settings.as_ref().unwrap().list_item_rect(0);
+    a.pointer_moved(item.cx(), item.cy());
+    a.compose();
+    assert!(
+        a.anim_due.is_none(),
+        "the hover fill is there at once, not fading"
+    );
+    // While it is open, a focus gain or a theme change asks again.
+    let reads = a.contrast_reads;
+    a.read_motion();
+    assert_eq!(a.contrast_reads, reads + 1);
+}
+
 /// The middle of the minimize button, which has a tip.
 fn minimize(a: &mut App) -> (f32, f32) {
     a.compose();

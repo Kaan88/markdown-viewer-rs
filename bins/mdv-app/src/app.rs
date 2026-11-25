@@ -342,6 +342,13 @@ struct App {
     toast_frame: Vec<(u64, String, f32, f32)>,
     /// A shot part way through a motion: it moves whatever the setting and the system say.
     forced_motion: bool,
+    /// The system's contrast theme as a test gives it; `None` reads the platform's answer. Only
+    /// the settings dialog ever asks (see `high_contrast`).
+    contrast: Option<bool>,
+    /// How many times the system's contrast theme was read (tests see that a closed Settings
+    /// asks for none).
+    #[cfg(test)]
+    contrast_reads: u32,
 }
 
 impl App {
@@ -452,6 +459,9 @@ impl App {
             toast_seen: None,
             toast_frame: Vec::new(),
             forced_motion: false,
+            contrast: None,
+            #[cfg(test)]
+            contrast_reads: 0,
         }
     }
 
@@ -1475,6 +1485,13 @@ impl App {
         if !self.still {
             self.anim.set_system_reduced(platform::motion_reduced());
         }
+        // The contrast theme is the settings dialog's alone. With the dialog closed nothing asks
+        // the system: on Linux the read opens a D-Bus connection and may wait half a second,
+        // which must never be on the window's thread (and the shared host treats it as off
+        // there). The dialog asks when it opens and, while it is open, on these events.
+        if self.ui.settings.is_none() {
+            return;
+        }
         let on = self.high_contrast();
         if let Some(f) = self.ui.settings.as_mut()
             && f.set_high_contrast(on)
@@ -1485,8 +1502,15 @@ impl App {
 
     /// Whether the system's contrast theme is on (never for a still run: a shot or a test
     /// draws the same everywhere). The settings dialog's highlights then change at once.
-    pub(crate) fn high_contrast(&self) -> bool {
-        !self.still && platform::system_high_contrast()
+    pub(crate) fn high_contrast(&mut self) -> bool {
+        #[cfg(test)]
+        {
+            self.contrast_reads += 1;
+        }
+        !self.still
+            && self
+                .contrast
+                .unwrap_or_else(platform::system_high_contrast)
     }
 
     fn watch_motion(&mut self) {
