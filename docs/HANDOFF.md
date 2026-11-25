@@ -11,7 +11,118 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## Motion, milestone 1: menus fade in (2026-11-25, branch `f/motion`, not merged)
+## Motion, milestone 2: chevrons turn, toasts rise and stack (2026-11-25, branch `f/motion2`, not merged)
+
+Built on `main` `01f67b2` (milestone 1 merged). Six commits: a pin move, the chevron, the
+toasts, a second pin move, the menu's preset, the docs.
+
+- **Pins.** Shared moved from `48eb3ce` to `a3bfca4` (X3 the turning disclosure, L10 the
+  settings form in motion): all 172 shots byte-identical, the workspace tests passed. Then to
+  `6ec1dee` (shared `main`, PR 15: `document::MENU` enters in 117 ms, ANIMATION.md): all 182
+  shots byte-identical. Each time `Cargo.lock` changed only the five `mdshared-*` sources; no
+  crate added or bumped.
+- **The menu's preset.** `motion::MENU` is `document::MENU` itself now; the local 117 ms
+  override (`MENU_IN`) is gone, as the shared preset is 117 ms. The half-faded menu shots are
+  byte-identical.
+- **A folder's chevron turns.** In the Files pane, and for a group or a section of the Notes
+  pane, the chevron is `glyph::draw_disclosure_animated` (the shared `DISCLOSURE_MOTION`,
+  `fluent::MOVE`, 167 ms) instead of a swap of `RIGHT` and `DOWN`. Each is named by what it
+  is, not where (`motion::folder(path)`, `motion::notes_fold(key)`), so a row pushed down by a
+  folder opening above it keeps its turn. The pane's values are in the animator's group
+  `motion::FILES`: the Files region is drawn on each frame while the group has anything in
+  flight (`group_deadlines`, whenever the frame comes, so a frame a little before the deadline
+  still draws it), and a frame that leaves the region undrawn calls `keep_group`, so a folder
+  clicked after a quiet spell turns from where it was drawn instead of being taken for new.
+  At rest it is the old glyph, pixel for pixel (every Files and Notes shot byte-identical).
+- **Toasts rise and stack.** The status line is shown through the shared `anim::Stack`
+  (`App::sync_toasts`, asked in `compose` on every frame, as the menus are): a new message is
+  pushed under the ones still showing (at most three) and those move up into place by
+  `fluent::MOVE`; the same message said again keeps its toast for longer instead of adding
+  one; a cleared status sends them all away; each leaves of itself at its time by
+  `document::TOAST`'s exit (167 ms each way, `motion::TOAST`). Drawn by
+  `Bubble::draw_presence` (plain `draw` at rest); the redraw holds each toast's
+  `presence_bounds` and the overlay signature its presence. `toast_until` is now the stack's
+  deadline. Before this a new message replaced the old one at once.
+- **Nothing moves** under `Policy::Never` (a shot, a test, the setting off, the system's
+  reduced motion): the chevron is open or closed at once; a toast is there at once and gone on
+  the frame its time is up. Every new motion goes through the one `Animator` and `anim_due`;
+  nothing new runs at launch.
+- **`--turn <folder>`, `--toast <text>` (repeatable), `--motion-at <ms>`** (shot only): open a
+  top-level folder of the Files tree, show messages as toasts; with `--motion-at`, the last of
+  them is set moving on a clock set by hand and drawn that long in (16 ms frames, as
+  `--menu-at`, whose loop is now the shared `frames_until`).
+
+### Not done: the Settings form's motion (a shared gap)
+
+`Form::draw_animated` and `set_high_contrast` exist only on `mdshared_ui::settings::Form`, the
+single-page form. mdview's Settings is `mdshared_ui::settings::pages::Form` (pages, as
+mdedit's), which has neither at `a3bfca4` nor `6ec1dee`. Nothing was wired; reported to the shared session.
+No number row was turned into a slider.
+
+### Decisions
+
+- **The owner (2026-11-25):** tooltips wait from the pointer coming to rest on a control, not
+  from entering it ("From resting"). The shared `Tooltip` counts from entry today; an opt-in
+  resting variant was asked of the shared session. Tooltips are left as they are here.
+- Without the owner: toasts stack (the shared X4 design) where a new message used to replace
+  the old; the same text said again keeps its toast. The toast's timings are the shared preset
+  as it is (167 ms in, 167 ms out), set in `motion.rs`; the chevron's are the shared
+  `DISCLOSURE_MOTION`, which `draw_disclosure_animated` fixes (`motion.rs` cannot tune it).
+  The Files region is redrawn whole on each frame of a turn (one pane).
+
+### Tests
+
+`app/motion_tests.rs`, eight more, each failing with its fix reverted (checked one by one: the
+`keep_group` removed, the in-flight redraw removed, the folder named by its row index, the
+Notes chevron drawn as before, `draw_presence` replaced by `draw`, `bounds` for
+`presence_bounds`, the presence out of the overlay signature, a repeated message pushed again):
+a folder that opens turns its chevron on frames nothing else changed, after quiet frames, and
+ends at the still run's pixels with no timer left; a chevron named by its folder keeps turning
+when a folder above opens; the setting off and reduced motion open a folder at once; a Notes
+group's chevron turns as it folds; a toast rises in, rests at the still run's pixels, leaves
+of itself by its timer and an exit, and leaves nothing on screen nor any timer; a second toast
+stacks under the first, which lifts by 44 px, the same message again adds none, a cleared
+status sends them away; the redraw holds a rising toast's `presence_bounds`; the setting off
+and reduced motion show and drop a toast at once. Workspace: 725 passed, 6 ignored.
+
+### Shots
+
+New, looked at (crops at 2x and 10x): `files-turning-light` / `-dark` (`--turn wiki
+--motion-at 67`: the wiki folder's chevron part way round, its rows already shown),
+`files-turned-light` (open at rest); `toast-light` / `-dark` (one toast at rest),
+`toast-rising-light` / `-dark` (50 ms in: paler, a few px below its place),
+`toasts-stacking-light` / `-dark` (a second toast 67 ms in under the first, which is part way
+up and still overlaps its top), `toasts-stacked-light` (both at rest, 8 px apart). Every
+other shot is byte-identical to `main` (172 of them), the menu fades included, at both pins.
+
+### Numbers
+
+Release builds, `main` (A, `01f67b2`) against this branch at `4e58bd0` (B: the toasts, pin
+`a3bfca4`; the two commits after it only make the menu's 117 ms the shared constant, the same
+value, so they were not measured again), seven interleaved runs,
+showcase, default window, `--no-session`, scratch `MDVIEW_SETTINGS`/`MDEDIT_SETTINGS`, the
+window moved off screen as soon as it exists. The PC was loaded by other builds all along:
+first frames were four to five times section 9's in both builds. Medians: first frame A 535.5
+ms, B 542.3 ms (ranges 406 to 2129 / 418 to 2895, one slow run each); private memory at 3 s A
+25.03 MiB, B 25.24 MiB; CPU 3 to 6 s A 0 in all seven, B 0 in five, 15.6 in one and 62.5 in
+the run whose first frame took 2.9 s. Six more runs with `MDVIEW_TRACE` (A, B, A, B, A, B):
+no CPU and no frame drawn from 3 s to 6 s in any. Scroll frame (`--scroll-steps 300`)
+medians 0.64 to 0.85 ms in both (one B run with an 842 ms stall, the PC). Before the change,
+seven runs of A alone: first frame median 454 ms, 25.29 MiB, no CPU. `mdview.exe` 9,651,712
+(A) to 9,667,072 bytes (B). Not measured: the frames of a turn or a toast in a real window
+(posted clicks on the Files pane drew nothing in this session's attempt; the tests and shots
+cover the frames, not their cost); Linux, macOS; the owner's look.
+
+### Not verified, for the owner's look
+
+- **Two toasts overlap while the first lifts.** The new one fades in at the bottom while the
+  older one is still moving up (`fluent::MOVE`, 167 ms), so for part of that time the older
+  covers the new one's top (`toasts-stacking-*`). As the shared notes say; left as it is.
+- **The chevron mid-turn at 8 px.** At scale 1 the turned chevron is a few anti-aliased
+  pixels; how it reads in motion has not been seen in a window.
+- Linux and macOS: nothing run.
+
+## Motion, milestone 1: menus fade in (2026-11-25, merged into `main` at `01f67b2`, not released)
 
 The shared crates are pinned at shared `main` `48eb3ce` (was `ef88814`), which carries the
 toolkit's motion (`mdshared_ui::anim`, shared `docs/ANIMATION.md`). The pin move alone changed
@@ -30,7 +141,8 @@ What the pin move did to `Cargo.lock`, plainly:
 - **What moves.** The main menu, the context menus and the Open recent submenu fade in as they
   open (`Menu::draw_in_presence`, 6 px drop; the submenu `draw_in_entering` from its side), by
   `anim::document::MENU`'s curve over 117 ms: the owner tried 167 ms, asked for it "slightly
-  faster", and said of 117 "this is better" (2026-11-25). Closing is instant.
+  faster", and said of 117 "this is better" (2026-11-25); since shared `6ec1dee` that is the
+  shared `document::MENU` itself (milestone 2). Closing is instant.
   `bins/mdv-app/src/motion.rs` is the one place the timings are chosen.
 - **The loop.** One `Animator` on the `App`. `compose` begins and ends the animator's frame (the
   menus' presence is asked there on every frame a menu is open, so a frame that skips the
