@@ -11,6 +11,106 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Motion, milestone 1: menus fade in (2026-11-25, branch `f/motion`, not merged)
+
+The shared crates are pinned at shared `main` `48eb3ce` (was `ef88814`), which carries the
+toolkit's motion (`mdshared_ui::anim`, shared `docs/ANIMATION.md`). The pin move alone changed
+nothing drawn: all 168 shots of `tests/shots.sh` byte-identical, the workspace tests passing.
+
+What the pin move did to `Cargo.lock`, plainly:
+- `libloading` 0.9.1 is new, pinned (`=0.9.1`) by `mdshared-fetch`, which loads the system
+  libcurl with it on Linux and macOS. `libloading` 0.8.9 stays for what already used it, so
+  Linux and macOS builds now carry two copies of `libloading`. Not linked on Windows.
+- `mdshared-text` now depends on `zune-jpeg`. The crate was already in the tree through
+  `crates/render`, so nothing new is downloaded, but new code of it is linked into the Windows
+  exe, likely part of the exe's growth (`mdview.exe` 9,547,264 bytes on `main`, 9,651,712 on
+  this branch: +104,448, the motion work included).
+- **The owner accepted both (2026-11-25), in their word: "accept".**
+
+- **What moves.** The main menu, the context menus and the Open recent submenu fade in as they
+  open (`Menu::draw_in_presence`, 6 px drop; the submenu `draw_in_entering` from its side), by
+  `anim::document::MENU`'s curve over 117 ms: the owner tried 167 ms, asked for it "slightly
+  faster", and said of 117 "this is better" (2026-11-25). Closing is instant.
+  `bins/mdv-app/src/motion.rs` is the one place the timings are chosen.
+- **The loop.** One `Animator` on the `App`. `compose` begins and ends the animator's frame (the
+  menus' presence is asked there on every frame a menu is open, so a frame that skips the
+  overlays forgets nothing); its deadline is `anim_due`, a timer in `timers` like the others:
+  when it is reached it asks for one frame and is cleared, and the next frame sets it again or
+  leaves none. A covered window draws no frame, so it sets none: nothing spins. Each popup and
+  submenu opening has a serial (`Popup::serial`, `sub_serial`), so a menu opened again, or put
+  in another's place, fades in again.
+- **Damage.** The overlays' bounds are each menu's `presence_bounds()` (was `rect().inset(-20)`),
+  and the presence is in the overlay signature, so each frame of the fade redraws what lies under
+  the menu, shadow and drop included. The painter has the frost key (`set_frost_key`), so a menu
+  fading over the frosted chrome lets the backdrop through less and less.
+- **Nothing moves** in a `--shot`, a `--scroll-steps` run and the tests (`App::still`), when the
+  new "Animations" setting is off, or when the system asks for less motion
+  (`platform::motion_reduced`, read after the first frame, on focus and on a theme change;
+  `watch_motion_reduced` started after the first frame on a short-lived helper thread, since
+  on Windows it waits up to 5 s for its hidden window; it wakes the window with `Wake::Motion`).
+- **`--menu-at <ms>`** (shot only): with `--menu`, the menu that long into its fade, drawn in
+  16 ms frames as a window draws them (one step over the animator's 50 ms would be cut short);
+  a number past the end of the fade shows the menu at rest.
+
+### Decisions
+
+- **The owner (2026-11-25):** a new setting, "Animations", one on/off switch on the Appearance
+  page, on by default, saved as `motion=0` only when off. Off is the same path as reduced motion
+  (`Policy::Never`); the system's reduced motion makes everything instant even with it on. The
+  existing "Play animated images" (Reading, `animations=`) is the GIF and WebP playback only and
+  is unchanged; neither switch touches the other. The row is last on the page and has no help
+  line: with one, the page overflowed at the smallest window (520x360).
+- **The owner (2026-11-25):** closing stays instant; the durations are the shared presets as they
+  are, kept in `motion.rs` to be tuned later.
+- Without the owner: the animator's frame is begun and ended in `compose`, not around the
+  present, so the tests and shots (which compose without presenting) run the same frames; the
+  deadline is counted from the frame's start either way. Damage groups (`Animator::group`,
+  `keep_group`) are not used: every frame with a menu open asks for its presence.
+
+### Tests
+
+`app/motion_tests.rs`, eight, each failing with its fix reverted (checked one by one): a menu
+opening asks for frames, they are drawn, and they stop with no timer left; a submenu fades in
+beside its menu and does not fade again when put in its own place; a menu opened again or put in
+another's place fades in from the start; closing half way leaves nothing on screen; the redraw
+holds `presence_bounds`; the setting off, reduced motion and a still run draw the menu at rest on
+its first frame; the setting is on by default and apart from the images'; a menu fading over
+frosted chrome is part way in. `session.rs`: `motion` is on unless turned off and apart from
+`animations`. After Fable's review: a covered window is left with no deadline once the timer
+fired; `Wake::Motion` reads the system again and asks for a frame; the watch starts off the
+window's thread (a watch that takes 5 s does not hold it); the Appearance page at 520x360 with
+every row (corners and the backdrop with their help lines) has the Animations row inside the
+card. Workspace: 717 passed, 6 ignored.
+
+### Shots
+
+`menu-main-fading-light` / `-dark` (`--menu-at 21`: about half there, 3 px above its place) and
+`settings-appearance-motion-off-min-light` / `-dark`. Against `main` only the Appearance page
+changed (its new row): `dialog-settings-*` and `settings-appearance-*`; every menu shot is
+byte-identical.
+
+### Numbers
+
+Seven interleaved runs, `main` (A) against this branch (B), showcase, default window,
+`--no-session` and scratch `MDVIEW_SETTINGS`/`MDEDIT_SETTINGS`, the window moved off screen and to
+the bottom as soon as it exists (it still shows for a moment: mdview has no `--behind`); the main
+menu opened and closed by posted clicks at 3 s. Medians: first frame A 107.9 ms, B 99.5 ms; private
+memory at 3 s A 25.08 MiB, B 25.17 MiB; CPU from 3 s to 6 s after the close A 0 (one run 15.6),
+B 0 in all seven, and no frame drawn then. The fade is 11 frames over about 170 ms, each 3.3 to
+5.6 ms of compose (the page under the menu is drawn again each frame). `mdview.exe` 9,547,264
+(main) to 9,646,080 bytes (9,651,712 after the review's fixes; three more runs then: first
+frame 89 to 132 ms, 25 MiB, no CPU and no frame from 3 s to 6 s after the close). Not run: Linux, macOS; a frosted window by eye; the owner's look.
+
+### Not verified, for the owner's look (from Fable's review, left as they are)
+
+- **Two fades over frosted chrome at once.** A submenu fading in over its menu while the menu
+  itself still fades, over frosted chrome: the second fade mixes over pixels the first already
+  wrote with their own alpha, which `crossfade_keyed` says nothing should be drawn over. How it
+  looks there has not been seen; it lasts at most one fade (about 170 ms).
+- **A menu's first frame is empty.** A menu opens at presence 0, so the frame drawn at the click
+  shows nothing of it and it appears from the next frame (16 ms later). Starting a step in would
+  show it at once; left for the owner to judge by eye.
+
 ## Release 1.1.0 (2026-11-24, released)
 
 mdview 1.1.0 is released: tag `v1.1.0` at `0310e01`, `ci` 45388338950 green on that commit, release

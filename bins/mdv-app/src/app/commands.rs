@@ -429,6 +429,10 @@ impl App {
         if keyboard {
             menu.step(true);
         }
+        // A submenu that opens fades in; one put in the place of the one showing does not.
+        if p.sub.is_none() {
+            p.sub_serial += 1;
+        }
         p.sub = Some(menu);
         self.ui.tip = None;
     }
@@ -1168,6 +1172,11 @@ impl App {
             // A decoded frame is waiting: `timers` puts it up when it is due, and asks for a
             // frame only if something on screen changed.
             Wake::Animation => return,
+            Wake::Motion => {
+                self.read_motion();
+                self.wants_frame = true;
+                return;
+            }
             Wake::Update(updater::Event::Checked { manual, result }) => {
                 self.ws.update_checked(unix_now(), manual, result);
             }
@@ -1311,6 +1320,16 @@ impl App {
         }
         if let Some(t) = self.present_tick(now) {
             at(t);
+        }
+        // The next frame of what is moving: asked for once, then the frame's `end_frame` sets
+        // it again or leaves none. A covered window draws no frame, so it sets none either.
+        if let Some(due) = self.anim_due {
+            if now >= due {
+                self.anim_due = None;
+                self.wants_frame = true;
+            } else {
+                at(due);
+            }
         }
         // The pointer resting on a submenu item: open it when the dwell is up. Nothing is
         // scheduled when no menu is open, because the dwell lives in the popup.

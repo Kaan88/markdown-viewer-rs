@@ -31,6 +31,7 @@ pub const START_ON_PINNED: u32 = 31;
 pub const OFFER_STALE: u32 = 32;
 pub const SKIP_BRIEF: u32 = 33;
 pub const BRIEF_SECS: u32 = 34;
+pub const MOTION: u32 = 35;
 
 pub const WIDTHS: [&str; 3] = ["Narrow", "Wide", "Full"];
 pub const THEMES: [&str; 3] = ["System", "Light", "Dark"];
@@ -89,6 +90,10 @@ pub fn page_for_section(name: &str) -> Option<&'static str> {
 /// fonts at the smallest window.
 const BRIEF_SECS_LABEL: &str = "Shown for less than";
 
+/// The motion switch, in the owner's word. "Play animated images" under Reading is the images'
+/// own switch; the two do not touch each other.
+pub const MOTION_LABEL: &str = "Animations";
+
 /// `offer_default` adds "Make mdview the default" to Updates (an AppImage that is not yet).
 pub fn pages(ws: &Workspace, corners: bool, offer_default: bool) -> Vec<Page> {
     let mut appearance = vec![
@@ -144,6 +149,9 @@ pub fn pages(ws: &Workspace, corners: bool, offer_default: bool) -> Vec<Page> {
             .help(corners::setting_help()),
         ));
     }
+    // The window's own motion (owner, 2026-11-25), apart from the images' playback under
+    // Reading. Last, and with no help line: the page has no room for one at the smallest window.
+    appearance.push(Item::new(Row::toggle(MOTION, MOTION_LABEL, ws.motion())));
 
     let reading = vec![
         Item::new(Row::toggle(

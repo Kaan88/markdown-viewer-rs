@@ -251,6 +251,16 @@ pub struct Popup {
     /// The marked letters of the items are underlined: the menu was opened with Alt held, or Alt
     /// was pressed since (the Windows convention; a menu opened with the pointer shows none).
     pub access: bool,
+    /// This opening of the menu, and of its submenu: what their fade-in is known by
+    /// (`crate::motion`), so a menu opened again fades in again.
+    pub serial: u64,
+    pub sub_serial: u64,
+}
+
+/// A number no popup had before: each opening of a menu is a new one.
+fn next_serial() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// How long the pointer rests on an item that leads to a submenu before it opens, as in Windows.
@@ -265,6 +275,8 @@ impl Popup {
             sub: None,
             dwell: None,
             access: false,
+            serial: next_serial(),
+            sub_serial: 0,
         }
     }
 
