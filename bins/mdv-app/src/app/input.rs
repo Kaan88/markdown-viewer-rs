@@ -140,8 +140,9 @@ impl App {
         };
         if hit != self.ui.hover {
             self.ui.hover = hit;
-            self.update_tip(hit);
         }
+        // On every move: the tip's wait starts again while the pointer moves on its control.
+        self.update_tip(hit, (x, y));
         if let Some(d) = self.ui.dialog.as_ref() {
             let row = overlays::dialog_row_at(d, x, y);
             if row != self.ui.dlg_hover_row {
@@ -182,28 +183,19 @@ impl App {
         self.redraw();
     }
 
-    pub(super) fn update_tip(&mut self, hit: Option<Hit>) {
-        if self.ui.tip_blocked.is_some() && self.ui.tip_blocked != hit {
-            self.ui.tip_blocked = None;
+    /// The pointer is at `at` over `hit`: the tooltip waits for it to rest there (the owner's
+    /// rule, "From resting"), shows at once beside one showing, and goes when it leaves.
+    pub(super) fn update_tip(&mut self, hit: Option<Hit>, at: (f32, f32)) {
+        let over = hit.and_then(|h| {
+            Some(mdshared_ui::tooltip::Over {
+                key: h,
+                text: chrome::tooltip(h, &self.ws, self.maximized)?,
+                anchor: self.hit_rect(h).unwrap_or_default(),
+            })
+        });
+        if self.ui.tips.hover_at(Instant::now(), over, at) {
+            self.wants_frame = true;
         }
-        let text = hit
-            .filter(|h| Some(*h) != self.ui.tip_blocked)
-            .and_then(|h| chrome::tooltip(h, &self.ws, self.maximized));
-        self.ui.tip = match (hit, text) {
-            (Some(h), Some(text)) => {
-                // Moving between neighbouring buttons while a tip shows keeps tips immediate.
-                let shown = self.ui.tip.as_ref().is_some_and(|t| t.shown);
-                let anchor = self.hit_rect(h).unwrap_or_default();
-                Some(Tip {
-                    hit: h,
-                    text,
-                    anchor,
-                    due: Instant::now() + if shown { Duration::ZERO } else { TIP_DELAY },
-                    shown: false,
-                })
-            }
-            _ => None,
-        };
     }
 
     pub(super) fn drag_to(&mut self, drag: Drag, x: f32, y: f32) {
@@ -402,7 +394,7 @@ impl App {
             return;
         }
         if self.ui.zoom.is_some() {
-            self.ui.tip = None;
+            self.ui.tips.hide();
             self.ui.card = None;
             self.ui.link_hint = None;
             let (x, y) = self.ui.mouse;
@@ -416,9 +408,8 @@ impl App {
             return;
         }
         let (x, y) = self.ui.mouse;
-        self.ui.tip = None;
+        self.ui.tips.press(self.ui.hover);
         self.ui.card = None;
-        self.ui.tip_blocked = self.ui.hover;
         if let Some(dir) = self.edge_at(x, y) {
             if let Some(w) = &self.window {
                 let _ = w.drag_resize_window(dir);
@@ -595,7 +586,7 @@ impl App {
             return;
         }
         let (x, y) = self.ui.mouse;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.card = None;
         if self.ui.dialog.is_some() || self.ui.modal() {
             return;
@@ -647,7 +638,7 @@ impl App {
             return;
         }
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.card = None;
         if back {
             self.ws.go_back();
@@ -873,7 +864,7 @@ impl App {
     /// drive it without a winit event.
     pub(super) fn key_named(&mut self, name: KeyName, typed: Option<&str>) {
         let mods = self.mods;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.card = None;
         self.redraw();
 

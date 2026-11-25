@@ -1086,3 +1086,70 @@ fn with_animations_off_a_settings_switch_changes_at_once() {
         "the switch is on at once"
     );
 }
+
+// ---- tooltips, from resting -----------------------------------------------------------------
+
+/// The middle of the minimize button, which has a tip.
+fn minimize(a: &mut App) -> (f32, f32) {
+    a.compose();
+    let r = a.hit_rect(Hit::WinMin).expect("the minimize button");
+    (r.cx(), r.cy())
+}
+
+#[test]
+fn a_move_on_the_same_control_starts_the_tips_wait_again() {
+    let mut a = app(&["showcase.md"]);
+    let (x, y) = minimize(&mut a);
+    a.pointer_moved(x, y);
+    let first = a.ui.tips.deadline().expect("it waits");
+    std::thread::sleep(Duration::from_millis(5));
+    a.pointer_moved(x + 1.0, y);
+    let again = a.ui.tips.deadline().expect("it still waits");
+    assert!(again > first, "counted from the last move");
+    // A move event to where the pointer already is is not a move.
+    a.pointer_moved(x + 1.0, y);
+    assert_eq!(a.ui.tips.deadline(), Some(again));
+    assert!(a.ui.tips.shown().is_none());
+}
+
+#[test]
+fn resting_the_delay_shows_the_tip_and_leaving_hides_it() {
+    let mut a = app(&["showcase.md"]);
+    let (x, y) = minimize(&mut a);
+    a.pointer_moved(x, y);
+    let due = a.ui.tips.deadline().expect("it waits");
+    a.timers(due - Duration::from_millis(1));
+    assert!(a.ui.tips.shown().is_none(), "not before the delay");
+    a.timers(due);
+    assert_eq!(a.ui.tips.shown().map(|t| t.text.as_str()), Some("Minimize"));
+    a.compose();
+    assert_eq!(a.tip_t, 1.0);
+    let page = a.areas.page;
+    a.pointer_moved(page.cx(), page.cy());
+    assert!(a.ui.tips.shown().is_none() && a.ui.tips.deadline().is_none());
+    a.compose();
+    assert_eq!(a.tip_t, 0.0, "gone at once");
+}
+
+#[test]
+fn a_tip_fades_in_as_it_shows_and_with_animations_off_is_there_at_once() {
+    for animations in [true, false] {
+        let mut a = moving(&["showcase.md"]);
+        a.apply_setting(s::MOTION, Value::Bool(animations));
+        let (x, y) = minimize(&mut a);
+        a.pointer_moved(x, y);
+        let due = a.ui.tips.deadline().expect("it waits");
+        a.timers(due);
+        a.compose();
+        if animations {
+            assert_eq!(a.tip_t, 0.0, "it fades in");
+            step(&mut a, FRAME);
+            assert!(a.tip_t > 0.0 && a.tip_t < 1.0, "part way: {}", a.tip_t);
+            settle(&mut a);
+            assert_eq!(a.tip_t, 1.0);
+        } else {
+            assert_eq!(a.tip_t, 1.0, "at once");
+            assert!(a.anim_due.is_none(), "no frames asked");
+        }
+    }
+}

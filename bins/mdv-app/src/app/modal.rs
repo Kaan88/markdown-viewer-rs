@@ -23,7 +23,7 @@ impl App {
     /// Opens the command palette with `query` in its box (the shots pass one).
     pub(super) fn open_palette(&mut self, query: &str) {
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.hover = None;
         self.ui.find_focused = false;
         self.ui.dialog = None;
@@ -54,7 +54,7 @@ impl App {
         });
         let query = self.ui.find.text().to_string();
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.hover = None;
         self.ui.find_focused = false;
         self.ui.dialog = None;
@@ -83,7 +83,7 @@ impl App {
     /// keyboard in the list.
     pub(super) fn open_settings(&mut self) {
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.hover = None;
         self.ui.find_focused = false;
         self.ui.dialog = None;

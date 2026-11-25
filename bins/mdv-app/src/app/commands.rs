@@ -401,7 +401,7 @@ impl App {
             popup.show_access();
         }
         self.ui.popup = Some(popup);
-        self.ui.tip = None;
+        self.ui.tips.hide();
     }
 
     /// Opens the submenu of the highlighted item of the open menu beside that item. `keyboard`
@@ -434,7 +434,7 @@ impl App {
             p.sub_serial += 1;
         }
         p.sub = Some(menu);
-        self.ui.tip = None;
+        self.ui.tips.hide();
     }
 
     /// What choosing a menu item does: a submenu item opens its submenu and keeps the menus,
@@ -450,7 +450,7 @@ impl App {
 
     pub(super) fn open_dialog(&mut self, kind: DialogKind) {
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.find_focused = false;
         self.ui.dialog = Some(Dialog::new(kind));
         self.ui.dlg_hover_row = None;
@@ -488,7 +488,7 @@ impl App {
         });
         self.ui.zoom = Some(view);
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.card = None;
         self.ui.link_hint = None;
         self.ui.hover = None;
@@ -1357,13 +1357,11 @@ impl App {
                 at(due);
             }
         }
-        if let Some(tip) = self.ui.tip.as_mut().filter(|t| !t.shown) {
-            if now >= tip.due {
-                tip.shown = true;
-                self.wants_frame = true;
-            } else {
-                at(tip.due);
-            }
+        if self.ui.tips.tick(now) {
+            self.wants_frame = true;
+        }
+        if let Some(due) = self.ui.tips.deadline() {
+            at(due);
         }
         if let Some((_, until)) = self.ui.copied {
             if now >= until {

@@ -1780,8 +1780,10 @@ fn a_code_block_shows_a_copy_button_under_the_pointer_only() {
     a.compose();
     assert_eq!(a.ui.hover, Some(Hit::CopyCode));
     assert!(a.hit_rect(Hit::CopyCode).is_some());
+    assert!(a.ui.tips.deadline().is_some(), "its tip waits");
+    a.timers(std::time::Instant::now() + std::time::Duration::from_secs(1));
     assert_eq!(
-        a.ui.tip.as_ref().map(|t| t.text.as_str()),
+        a.ui.tips.shown().map(|t| t.text.as_str()),
         Some("Copy code")
     );
     // Back out to the paragraph: gone. A menu over the page hides it as well.

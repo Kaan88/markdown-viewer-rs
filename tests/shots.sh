@@ -186,6 +186,10 @@ shot scale-200-dark --dark --scale 2.0 --focus-mode "$fx/showcase.md"
 # Pointer positions: a title-bar button, a link in the text, a menu row, the page.
 shot hover-titlebar --light --hover 1200,16 "$fx/showcase.md"
 shot hover-open --light --hover 46,63 "$fx/showcase.md"
+# The Open button's tip 41 ms into its fade-in (83 ms), once the pointer has rested.
+for theme in light dark; do
+    shot "tip-fading-$theme" --"$theme" --hover 46,63 --motion-at 41 "$fx/showcase.md"
+done
 shot hover-page --light --hover 640,300 "$fx/showcase.md"
 shot hover-menu --light --menu main --hover 1100,120 "$fx/showcase.md"
 

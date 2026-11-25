@@ -50,7 +50,7 @@ impl App {
         show.set_subpixel(platform::subpixel_order());
         self.ui.popup = None;
         self.ui.dialog = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.find_focused = false;
         self.ui.drag = None;
         self.ui.link_hint = None;

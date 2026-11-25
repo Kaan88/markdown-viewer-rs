@@ -358,16 +358,6 @@ pub enum Drag {
     },
 }
 
-/// A tooltip waiting to show, or showing.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Tip {
-    pub hit: Hit,
-    pub text: String,
-    pub anchor: Rect,
-    pub due: Instant,
-    pub shown: bool,
-}
-
 pub struct Panes {
     pub files: bool,
     pub outline: bool,
@@ -439,9 +429,9 @@ pub struct Ui {
     pub drag: Option<Drag>,
     pub popup: Option<Popup>,
     pub dialog: Option<Dialog>,
-    pub tip: Option<Tip>,
-    /// A tooltip was dismissed by a press; it stays hidden until the pointer leaves that hit.
-    pub tip_blocked: Option<Hit>,
+    /// The tooltip waiting to show or showing, by the shared rules: the delay counted from the
+    /// pointer coming to rest (`hover_at`), a pressed control showing none until left.
+    pub tips: mdshared_ui::tooltip::Tooltip<Hit>,
     /// The link under the pointer on the page.
     pub link_hint: Option<String>,
     /// The card for a footnote or link the pointer rests on, and what files showed before.
@@ -493,8 +483,7 @@ impl Ui {
             drag: None,
             popup: None,
             dialog: None,
-            tip: None,
-            tip_blocked: None,
+            tips: mdshared_ui::tooltip::Tooltip::new().with_delay(crate::motion::TIP_DELAY),
             link_hint: None,
             card: None,
             previews: Default::default(),

@@ -34,6 +34,18 @@ pub fn submenu(anim: &mut Animator, serial: u64, sub: u64) -> f32 {
 /// is (`fluent::MOVE`, 167 ms), chosen here so every timing of the window is in this file.
 pub const DISCLOSURE: Motion = fluent::MOVE;
 
+/// How long the pointer rests on a control before its tooltip shows, counted from its last
+/// move (owner, 2026-11-25: "From resting"): the shared preset, 500 ms, as before.
+pub const TIP_DELAY: std::time::Duration = document::TIP_DELAY;
+
+/// A tooltip's entrance: the shared preset (a fade, 83 ms). A tip goes at once.
+pub const TIP: document::Pair = document::TIP;
+
+/// The presence of the tooltip showing (asked on every frame one shows).
+pub fn tip(anim: &mut Animator) -> f32 {
+    anim.presence("tip", true, TIP.enter, TIP.exit)
+}
+
 /// The animator's group for the Files pane's values (the Notes pane is drawn in the same
 /// region): a frame that leaves the region undrawn keeps them (`keep_group`), and the region is
 /// drawn again while one of them moves.

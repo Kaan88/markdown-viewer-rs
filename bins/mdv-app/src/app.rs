@@ -24,7 +24,7 @@ use crate::textfield::EditKey;
 use crate::theme::{self, Palette};
 use crate::ui::{
     Act, Areas, BarItem, Dialog, DialogKind, Drag, Hit, PAGE_MIN, PANE_MAX, PANE_MIN, Popup,
-    PopupKind, REGIONS, Region, Scroller, Side, Tip, Ui,
+    PopupKind, REGIONS, Region, Scroller, Side, Ui,
 };
 use crate::updater;
 use crate::workspace::{Click, LinkOutcome, ThemeChoice, Workspace};
@@ -76,7 +76,6 @@ const EDITOR: &str = "mdedit";
 /// How long a closing window waits for the editor to be told of the tabs it asked for: the
 /// process ends after it, and its listener with it.
 const EDITOR_CLOSE_WAIT: Duration = Duration::from_millis(500);
-const TIP_DELAY: Duration = Duration::from_millis(500);
 const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
 /// While a tab shows the editor's text: how often to ask whether the editor still answers.
@@ -322,6 +321,8 @@ struct App {
     frame_clock: Option<Instant>,
     /// How present the open menu and its submenu are this frame, 0 to 1.
     menu_t: (f32, f32),
+    /// How present the tooltip is this frame, 0 to 1 (0: none shows).
+    tip_t: f32,
     /// The system's wish for less motion is watched (from the first frame on).
     motion_watched: bool,
     /// The toasts on screen and leaving (`crate::motion::toasts`), the status line they were
@@ -435,6 +436,7 @@ impl App {
             frame_clock: None,
             menu_t: (1.0, 1.0),
             motion_watched: false,
+            tip_t: 0.0,
             toasts: crate::motion::toasts(),
             toast_seen: None,
             toast_frame: Vec::new(),
@@ -964,9 +966,16 @@ impl App {
                 }
                 bubbles.push((b, *t));
             }
-            if let Some(tip) = self.ui.tip.as_ref().filter(|t| t.shown) {
-                bubbles.push((Bubble::tip(&mut p, &tip.text, tip.anchor, w, h), 1.0));
-            }
+            // The tip fades in as it shows (`motion::TIP`), and goes at once. One name for
+            // every tip: a neighbour's, shown at once while one shows, is there at once.
+            self.tip_t = match self.ui.tips.shown() {
+                Some(tip) => {
+                    let t = crate::motion::tip(&mut self.anim);
+                    bubbles.push((Bubble::tip(&mut p, &tip.text, tip.anchor, w, h), t));
+                    t
+                }
+                None => 0.0,
+            };
             if let Some(popup) = self.ui.popup.as_mut() {
                 let room = menu_room(self.areas.title, w, h);
                 popup.menu.place_in(&mut p, room);
@@ -1940,7 +1949,7 @@ impl ApplicationHandler<Wake> for App {
                 }
                 if !focused {
                     self.ui.caret_on = true;
-                    self.ui.tip = None;
+                    self.ui.tips.hide();
                     self.ui.card = None;
                 }
                 self.redraw();
@@ -1971,7 +1980,7 @@ impl ApplicationHandler<Wake> for App {
             WindowEvent::CursorLeft { .. } => {
                 if self.ui.drag.is_none() {
                     self.ui.hover = None;
-                    self.ui.tip = None;
+                    self.ui.tips.hide();
                     self.ui.card = None;
                     self.ui.link_hint = None;
                     self.redraw();
@@ -2231,8 +2240,9 @@ fn shot(mut app: App, path: &Path) -> i32 {
                 app.ui.copied = Some((spot.start, Instant::now() + crate::codebtn::COPIED_FOR));
             }
         }
-        if let Some(t) = app.ui.tip.as_mut() {
-            t.shown = true;
+        // The tip waiting under `--hover` shows now (with `--motion-at`, as the motion starts).
+        if app.args.motion_at.is_none() {
+            app.ui.tips.tick(Instant::now() + Duration::from_secs(3600));
         }
         app.show_card_now();
         if let Some(p) = app.ui.popup.as_mut() {
@@ -2271,6 +2281,9 @@ fn shot(mut app: App, path: &Path) -> i32 {
     }
     if flip.is_some() {
         app.key_named(KeyName::Space, None);
+    }
+    if moving.is_some() {
+        app.ui.tips.tick(Instant::now() + Duration::from_secs(3600));
     }
     if let Some(name) = app.args.turn.clone() {
         match (app.ui.tree.rows().iter()).position(|r| r.is_dir && r.depth == 0 && r.name == name) {
