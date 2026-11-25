@@ -69,7 +69,9 @@ the clipped frame for a dialog that only moves, four pin moves and the review's 
     `App::show_toast` calls `revive` on the key right after a push when the animator does not
     animate, which drops the wait, so every still frame is whole at once. Shared keeps a delay
     under reduced motion on purpose (a delay is a wait); a caller that never animates has no way
-    to say so, so this is the window's correction, and shared should offer one.
+    to say so, so this is the window's correction. Shared PR #24 (unmerged, 2026-11-25) makes
+    `with_wait_for_lift` skip the delay under `Policy::Never`; when the pin moves past it, the
+    `revive` in `App::show_toast` (and its test's second half) goes.
   - A toast that would reach above the page (a short window) is left out, except the bottom one
     (no lift), so a window however short still shows its one status; a lifting toast moves
     by whole device pixels (`toast_y`), so its text keeps the grid it has at rest; the height
@@ -212,7 +214,7 @@ goes at once on leaving. The review's tests, each with the revert it fails under
   given to `pointer_moved_at` ignored, `Instant::now` used instead);
 - `--motion-at` gives at most 10000 ms (the cap removed).
 
-Workspace: 756 passed, 6 ignored (`mdview`'s own tests: 316 passed, 1 ignored).
+Workspace: 757 passed, 6 ignored (`mdview`'s own tests: 316 passed, 1 ignored).
 
 ### Shots
 
