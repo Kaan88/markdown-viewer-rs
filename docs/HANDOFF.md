@@ -34,23 +34,48 @@ toasts, a second pin move, the menu's preset, the docs.
   still draws it), and a frame that leaves the region undrawn calls `keep_group`, so a folder
   clicked after a quiet spell turns from where it was drawn instead of being taken for new.
   At rest it is the old glyph, pixel for pixel (every Files and Notes shot byte-identical).
-- **Toasts rise and stack.** The status line is shown through the shared `anim::Stack`
-  (`App::sync_toasts`, asked in `compose` on every frame, as the menus are): a new message is
-  pushed under the ones still showing (at most three) and those move up into place by
-  `fluent::MOVE`; the same message said again keeps its toast for longer instead of adding
-  one; a cleared status sends them all away; each leaves of itself at its time by
-  `document::TOAST`'s exit (167 ms each way, `motion::TOAST`). Drawn by
-  `Bubble::draw_presence` (plain `draw` at rest); the redraw holds each toast's
-  `presence_bounds` and the overlay signature its presence. `toast_until` is now the stack's
-  deadline. Before this a new message replaced the old one at once.
+- **Toasts rise in; confirmations stack.** The status line is shown through the shared
+  `anim::Stack` (`App::sync_toasts`, asked in `compose` on every frame, as the menus are).
+  A status says whether it **replaces** or **stacks** (`StatusLine::stack`):
+  - `Workspace::set_status` (the default, every caller but those below) **replaces**, as
+    before: the toasts showing go at once, with no exit and no lift, and the new one enters with
+    its fade. Done by starting a new stack under a new name in the animator (`toast_gen`), since
+    the shared `Stack` has no way to drop an entry without its exit. Zoom steps, page width,
+    an export's or a print's progress and then its result, refusals, errors: one toast, as
+    before.
+  - `Workspace::confirm` **stacks** under the toasts still showing, which move up by
+    `fluent::MOVE`. Used only by one-shot confirmations that are separate events: "Copied"
+    (Copy, Copy as Markdown, a slide's copy), "Code copied", "Link address copied",
+    "Formula source copied", "Diagram source copied", "File path copied", the crash report's
+    "copied" message.
+  - The same text still showing (anywhere in the stack, not only the newest) keeps its toast
+    for longer instead of adding one; a replacing message does so only when that toast is alone.
+    A matching toast already **leaving** cannot be brought back (the shared `Stack` has no
+    `show` for a leaving entry): a new one is added and the old finishes leaving. Reported to
+    shared.
+  - Never more than three are drawn, those leaving included (`motion::TOASTS_MAX`; the shared
+    stack counts only those not leaving, so a fourth push could show four for 167 ms: the
+    window draws the newest three).
+  - A toast that would reach above the page (a short window) is left out; a lifting toast moves
+    by whole device pixels (`toast_y`), so its text keeps the grid it has at rest; the height
+    used for the lift is `Bubble::toast`'s own `rect.h` (shared exports no constant for it).
+  - Each leaves of itself at its time by `document::TOAST`'s exit (167 ms each way,
+    `motion::TOAST`); a cleared status sends them all away; a status already past its time when
+    the first frame after it comes (a covered window) shows no toast. Drawn by
+    `Bubble::draw_presence` (plain `draw` at rest); the redraw holds each toast's
+    `presence_bounds` and the overlay signature its presence. `toast_until` is the stack's
+    deadline.
 - **Nothing moves** under `Policy::Never` (a shot, a test, the setting off, the system's
   reduced motion): the chevron is open or closed at once; a toast is there at once and gone on
   the frame its time is up. Every new motion goes through the one `Animator` and `anim_due`;
   nothing new runs at launch.
 - **`--turn <folder>`, `--toast <text>` (repeatable), `--motion-at <ms>`** (shot only): open a
-  top-level folder of the Files tree, show messages as toasts; with `--motion-at`, the last of
-  them is set moving on a clock set by hand and drawn that long in (16 ms frames, as
-  `--menu-at`, whose loop is now the shared `frames_until`).
+  top-level folder of the Files tree (no such folder: the shot exits with 2), show messages as
+  stacking toasts; with `--motion-at`, the last of them is set moving on a clock set by hand
+  and drawn that long in (16 ms frames, as `--menu-at`, whose loop is now the shared
+  `frames_until`). A moving shot (`--menu-at`, `--motion-at`) runs under `Policy::Always`
+  (`App::forced_motion`), so its picture does not depend on the Animations setting or the
+  system's reduced motion. With `MDVIEW_TRACE` it prints each frame's cost.
 
 ### Not done: the Settings form's motion (a shared gap)
 
@@ -64,8 +89,10 @@ No number row was turned into a slider.
 - **The owner (2026-11-25):** tooltips wait from the pointer coming to rest on a control, not
   from entering it ("From resting"). The shared `Tooltip` counts from entry today; an opt-in
   resting variant was asked of the shared session. Tooltips are left as they are here.
-- Without the owner: toasts stack (the shared X4 design) where a new message used to replace
-  the old; the same text said again keeps its toast. The toast's timings are the shared preset
+- The coordinator, after Fable's review (for the owner's look): a status replaces by default
+  (the old behaviour) and stacks only for one-shot confirmations; never more than three shown,
+  leaving ones included. The first version stacked every message, which made zoom steps a
+  ladder and left "Exporting…" above "Exported to …". The toast's timings are the shared preset
   as it is (167 ms in, 167 ms out), set in `motion.rs`; the chevron's are the shared
   `DISCLOSURE_MOTION`, which `draw_disclosure_animated` fixes (`motion.rs` cannot tune it).
   The Files region is redrawn whole on each frame of a turn (one pane).
@@ -85,6 +112,26 @@ stacks under the first, which lifts by 44 px, the same message again adds none, 
 status sends them away; the redraw holds a rising toast's `presence_bounds`; the setting off
 and reduced motion show and drop a toast at once. Workspace: 725 passed, 6 ignored.
 
+After Fable's review, twelve more (`motion_tests.rs`, and `motion_shot_flags` in `args.rs`),
+with the revert each fails under:
+- three zoom steps leave one toast, and an export's progress then its result leave one (the
+  replace turned back into a push);
+- a fourth stacked push still draws three, the leaving one left out (the cap removed);
+- the same confirmation keeps its toast when it is not the newest (the look at the newest only);
+- a status already past its time shows no toast (the `until > now` guard removed);
+- a window resized while a toast comes in shows it at rest in its new place (the presence out
+  of the overlay signature);
+- toasts that would reach above the page in a 520x200 window are left out (the clamp removed);
+- a lift moves by whole device pixels at 1, 1.25, 1.5 and 2 (the rounding removed);
+- a moving shot moves with the setting off and reduced motion on (the forced policy removed);
+- the stacking test's 44 px lift fails with the lift's height taken as any other number than
+  the bubble's own;
+- the shot flags parse (the `--turn` arm removed);
+- **two with no revert that makes them fail**, kept as guards: a toast leaving while a menu or
+  a dialog is open (those overlays redraw the window anyway), and the Files pane hidden mid-turn
+  (the shared `keep_group` arrival gives one more frame, then none: nothing of mdview's own to
+  revert; removing `keep_group` fails the chevron tests instead).
+
 ### Shots
 
 New, looked at (crops at 2x and 10x): `files-turning-light` / `-dark` (`--turn wiki
@@ -92,7 +139,10 @@ New, looked at (crops at 2x and 10x): `files-turning-light` / `-dark` (`--turn w
 `files-turned-light` (open at rest); `toast-light` / `-dark` (one toast at rest),
 `toast-rising-light` / `-dark` (50 ms in: paler, a few px below its place),
 `toasts-stacking-light` / `-dark` (a second toast 67 ms in under the first, which is part way
-up and still overlaps its top), `toasts-stacked-light` (both at rest, 8 px apart). Every
+up and still overlaps its top; after the review, moved by whole device pixels: the text sits a
+fraction of a pixel differently, nothing else), `toasts-stacked-light` (both at rest, 8 px
+apart), `toasts-short-light` / `-dark` (520x220, three confirmations: two fit under the bar,
+the third is left out). Every
 other shot is byte-identical to `main` (172 of them), the menu fades included, at both pins.
 
 ### Numbers
@@ -112,6 +162,17 @@ seven runs of A alone: first frame median 454 ms, 25.29 MiB, no CPU. `mdview.exe
 (A) to 9,667,072 bytes (B). Not measured: the frames of a turn or a toast in a real window
 (posted clicks on the Files pane drew nothing in this session's attempt; the tests and shots
 cover the frames, not their cost); Linux, macOS; the owner's look.
+
+The cost of a toast frame, after the review: `MDVIEW_TRACE` on a moving shot (release build,
+1280x800, two confirmations stacking, every frame of 400 ms), which composes as a window does
+but does not copy to a window or present. Each frame redraws the whole Page region (716 device
+rows at scale 1, 1432 at 2) through the overlay signature. Compose per frame: `everything.md`
+at scale 1, 0.27 to 0.53 ms (three runs); `showcase.md` 0.23 to 0.51 ms; `everything.md` at
+scale 2, 1.87 to 3.09 ms (two runs). A chevron turn's frames (the Files region only) 0.13 to
+0.29 ms. All under 4 ms, so the redraw was not narrowed to the toast's bounds; at scale 2 a
+window adds its copy of those rows (about 1 ms for a whole 800-row frame at scale 1 at
+launch), which may bring a frame near 4 ms there. Not measured in a real window: posted mouse
+messages drew no frame in this session.
 
 ### Not verified, for the owner's look
 
