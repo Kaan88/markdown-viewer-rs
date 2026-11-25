@@ -1056,11 +1056,11 @@ impl App {
             bounds.push(Rect::new(0.0, 0.0, w, h));
         }
         if let Some(p) = self.ui.palette.as_mut() {
-            // The card's place is needed here, to redraw what it covers; drawing lays it out again.
-            let card = p
-                .palette
+            // The card's place is needed here, to redraw what it covers and its shadow; drawing
+            // lays it out again. Its presence bounds are the card, shadow and drop as one.
+            p.palette
                 .layout(Rect::new(0.0, 0.0, w, h), crate::ui::TITLE_H);
-            bounds.push(card.inset(-20.0));
+            bounds.push(p.palette.presence_bounds());
         }
         let osig = sig((
             bubbles

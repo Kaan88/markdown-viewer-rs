@@ -706,6 +706,26 @@ fn a_confirmation_pushed_onto_others_waits_until_they_have_lifted() {
 }
 
 #[test]
+fn the_palette_is_damaged_by_its_presence_bounds_not_a_hand_made_margin() {
+    let mut a = app(&["showcase.md"]);
+    a.open_palette("");
+    a.compose();
+    let Some(p) = a.ui.palette.as_ref() else {
+        panic!("the palette is open");
+    };
+    let want = p.palette.presence_bounds();
+    assert!(
+        a.overlay_bounds.contains(&want),
+        "{want:?} is not among {:?}",
+        a.overlay_bounds
+    );
+    assert!(
+        want != p.palette.rect().inset(-20.0),
+        "a hand-made margin is another rectangle"
+    );
+}
+
+#[test]
 fn the_redraw_covers_everything_a_toast_touches_as_it_rises() {
     let mut a = moving(&["showcase.md"]);
     a.ws.set_status("Hello");
