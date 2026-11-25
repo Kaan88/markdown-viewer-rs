@@ -1,4 +1,4 @@
-mdview next: menus fade in as they open, folders' arrows turn, toasts rise in and confirmations stack, and an Animations setting.
+mdview next: menus fade in as they open, folders' arrows turn, toasts rise in and confirmations stack, Settings moves, tooltips wait for the pointer to rest, and an Animations setting.
 
 ## New
 
@@ -6,6 +6,10 @@ mdview next: menus fade in as they open, folders' arrows turn, toasts rise in an
 
 - **A folder's arrow turns.** In the Files pane, and for a group or a section of the Notes pane, the arrow beside a folder turns down as it opens and back as it closes.
 
-- **Toasts rise in, and confirmations stack.** A message rises and fades in at the bottom of the page, and fades and sinks away when its time is up. A message still takes the place of the one showing (a zoom step, an export and its result), but a confirmation such as "Copied" or "Link address copied" comes in under the ones showing, which move up; at most three show at once.
+- **Toasts rise in, and confirmations stack.** A message rises and fades in at the bottom of the page, and fades and sinks away when its time is up. A message still takes the place of the one showing (a zoom step, an export and its result), but a confirmation such as "Copied" or "Link address copied" comes in under the ones showing, which move up first so that nothing covers it; at most three show at once.
 
-- **An "Animations" setting.** On the Appearance page of Settings, on unless turned off: off, menus open at once with no fade, folders' arrows do not turn and toasts come and go at once. When the system asks for less motion (Windows: Settings, Accessibility, Visual effects, "Animation effects" off; macOS: "Reduce motion"), nothing moves whatever this setting says. "Play animated images" under Reading is a separate setting, for animated GIF and WebP pictures only, and is unchanged.
+- **Settings in motion.** In the Settings dialog a switch's knob slides across and its fill comes in, the chosen option of a segmented row slides to its place, and the page list's highlight fades in and out. Under a high-contrast theme the highlights change at once, as the system's own controls do.
+
+- **Tooltips wait for the pointer to rest.** A tooltip now appears after the pointer has rested on its control for half a second, and fades in; moving across the control starts that wait again. Tooltips go at once when the pointer leaves.
+
+- **An "Animations" setting.** On the Appearance page of Settings, on unless turned off: off, menus open at once with no fade, folders' arrows do not turn, toasts come and go at once, Settings changes at once and tooltips appear without a fade. When the system asks for less motion (Windows: Settings, Accessibility, Visual effects, "Animation effects" off; macOS: "Reduce motion"), nothing moves whatever this setting says. "Play animated images" under Reading is a separate setting, for animated GIF and WebP pictures only, and is unchanged.
