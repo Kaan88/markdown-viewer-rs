@@ -1167,14 +1167,18 @@ fn minimize(a: &mut App) -> (f32, f32) {
 fn a_move_on_the_same_control_starts_the_tips_wait_again() {
     let mut a = app(&["showcase.md"]);
     let (x, y) = minimize(&mut a);
-    a.pointer_moved(x, y);
+    let t0 = Instant::now();
+    a.pointer_moved_at(x, y, t0);
     let first = a.ui.tips.deadline().expect("it waits");
-    std::thread::sleep(Duration::from_millis(5));
-    a.pointer_moved(x + 1.0, y);
+    a.pointer_moved_at(x + 1.0, y, t0 + Duration::from_millis(5));
     let again = a.ui.tips.deadline().expect("it still waits");
-    assert!(again > first, "counted from the last move");
+    assert_eq!(
+        again,
+        first + Duration::from_millis(5),
+        "counted from the last move"
+    );
     // A move event to where the pointer already is is not a move.
-    a.pointer_moved(x + 1.0, y);
+    a.pointer_moved_at(x + 1.0, y, t0 + Duration::from_millis(90));
     assert_eq!(a.ui.tips.deadline(), Some(again));
     assert!(a.ui.tips.shown().is_none());
 }

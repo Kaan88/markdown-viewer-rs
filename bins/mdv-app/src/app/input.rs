@@ -52,6 +52,12 @@ impl App {
     }
 
     pub(super) fn pointer_moved(&mut self, x: f32, y: f32) {
+        self.pointer_moved_at(x, y, Instant::now());
+    }
+
+    /// [`pointer_moved`](Self::pointer_moved) with the time given, so a test counts the
+    /// tooltip's rest from a clock of its own instead of sleeping.
+    pub(super) fn pointer_moved_at(&mut self, x: f32, y: f32, now: Instant) {
         if self.presenting() {
             self.present_pointer(x, y);
             return;
@@ -124,7 +130,7 @@ impl App {
                         if p.menu.items[i].id.is_submenu() == p.sub.is_some() {
                             p.dwell = None;
                         } else if p.dwell.map(|d| d.0) != Some(i) {
-                            p.dwell = Some((i, Instant::now() + crate::ui::SUBMENU_DWELL));
+                            p.dwell = Some((i, now + crate::ui::SUBMENU_DWELL));
                         }
                     }
                 }
@@ -142,7 +148,7 @@ impl App {
             self.ui.hover = hit;
         }
         // On every move: the tip's wait starts again while the pointer moves on its control.
-        self.update_tip(hit, (x, y));
+        self.update_tip(hit, (x, y), now);
         if let Some(d) = self.ui.dialog.as_ref() {
             let row = overlays::dialog_row_at(d, x, y);
             if row != self.ui.dlg_hover_row {
@@ -185,7 +191,9 @@ impl App {
 
     /// The pointer is at `at` over `hit`: the tooltip waits for it to rest there (the owner's
     /// rule, "From resting"), shows at once beside one showing, and goes when it leaves.
-    pub(super) fn update_tip(&mut self, hit: Option<Hit>, at: (f32, f32)) {
+    /// The tooltip under the pointer at `now`: its rest is counted from the pointer's last move,
+    /// so a test gives it a clock of its own (`pointer_moved_at`).
+    pub(super) fn update_tip(&mut self, hit: Option<Hit>, at: (f32, f32), now: Instant) {
         let over = hit.and_then(|h| {
             Some(mdshared_ui::tooltip::Over {
                 key: h,
@@ -193,7 +201,7 @@ impl App {
                 anchor: self.hit_rect(h).unwrap_or_default(),
             })
         });
-        if self.ui.tips.hover_at(Instant::now(), over, at) {
+        if self.ui.tips.hover_at(now, over, at) {
             self.wants_frame = true;
         }
     }
