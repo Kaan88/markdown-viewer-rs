@@ -1242,7 +1242,7 @@ fn a_behind_window_is_not_focused_by_a_hand_over() {
         Some(mdview_core::files::canonical_or_absolute(&showcase))
     );
     a.args.behind = false;
-    a.handed_over(vec![Request::new(&fixture("tables.md"))]);
+    a.handed_over(vec![Request::new(fixture("tables.md"))]);
     assert_eq!(a.hand_overs_focused, 1, "an ordinary hand-over focuses");
 }
 
