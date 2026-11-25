@@ -916,7 +916,10 @@ impl App {
             self.place(rect, (request.path.clone(), request.doc.clone()));
         }
         let only_following = !requests.is_empty() && requests.iter().all(|r| r.follow);
-        if !only_following && let Some(w) = &self.window {
+        if !only_following
+            && !self.args.behind
+            && let Some(w) = &self.window
+        {
             w.set_minimized(false);
             w.focus_window();
         }

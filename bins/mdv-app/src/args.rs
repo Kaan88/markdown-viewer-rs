@@ -127,6 +127,9 @@ pub struct Args {
     pub scroll_steps: Option<u32>,
     /// Start maximized (for checking the frameless maximized geometry).
     pub maximize: bool,
+    /// `--behind`: open without taking the focus, under every other window, so that a test run
+    /// does not cover what the owner is working in. For tests only.
+    pub behind: bool,
     /// `--line N`: scroll to the block holding source line N (counting from 1) of the file.
     pub line: Option<u32>,
     /// `--follow`: a live update from the editor, not an opening. It only ever reaches a window
@@ -212,6 +215,7 @@ impl Args {
                 "--check-update" => out.check_update = true,
                 "--install-update" => out.install_update = true,
                 "--maximize" => out.maximize = true,
+                "--behind" => out.behind = true,
                 "--follow" => out.follow = true,
                 "--line" => out.line = value(&a).and_then(|v| v.parse().ok()).filter(|&n| n >= 1),
                 "--place" => out.place = value(&a).and_then(|v| Rect::parse(&v)),
@@ -303,6 +307,12 @@ mod tests {
         assert_eq!(a.zoom, Some(125));
         assert_eq!(a.folder, Some(PathBuf::from("docs")));
         assert!(a.no_session);
+    }
+
+    #[test]
+    fn behind_is_asked_for_by_its_flag_only() {
+        assert!(parse("--no-session --behind a.md").behind);
+        assert!(!parse("--no-session a.md").behind);
     }
 
     #[test]

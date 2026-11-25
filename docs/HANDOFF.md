@@ -1091,6 +1091,7 @@ document with SVG, math or Mermaid.
 | `--light` / `--dark` | Override the theme |
 | `--zoom <pct>`, `--page-width narrow\|wide\|full`, `--folder <dir>`, `--maximize` | Start-up overrides |
 | `--no-session` | Neither reads nor writes the session and skips the single-instance hand-over. Use it for every test |
+| `--behind` | Opens the window without taking the focus, under every other window, and never brings it forward. Use it for every test run that opens a real window (`--scroll-steps`, a measured launch) |
 | `--load-remote` | Load the first document's remote images without the bar (for checks) |
 | `--shot out.png` | Draw one frame of the state the other flags describe, write it, exit. No window |
 | `--size WxH`, `--scale f` | Shot size and device scale |
