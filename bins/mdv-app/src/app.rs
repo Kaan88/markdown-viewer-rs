@@ -331,6 +331,8 @@ struct App {
     /// while it is open), and this opening of it: a palette opened again fades in again.
     palette_t: f32,
     palette_serial: u64,
+    /// How high each notice bar shows this frame: the page is laid out under them.
+    bars: page::Bars,
     /// How present the tooltip is this frame, 0 to 1 (0: none shows).
     tip_t: f32,
     /// The settings the dialog changed while `motion::SETTINGS` was in flight: each one's row
@@ -466,6 +468,7 @@ impl App {
             menu_t: (1.0, 1.0),
             palette_t: 1.0,
             palette_serial: 0,
+            bars: page::Bars::FULL,
             motion_watched: false,
             tip_t: 0.0,
             settings_changed: Vec::new(),
@@ -776,7 +779,7 @@ impl App {
                 });
                 let crash = (self.ws.crash_report().is_some(), self.ws.stale_offer());
                 // The code box whose copy button shows, and its check mark.
-                let vr = page::viewport(&self.ws, self.areas.page);
+                let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
                 let code = crate::codebtn::spot(&mut self.ws, &self.ui, vr, self.scale)
                     .map(|c| (c.start, self.ui.copied.is_some_and(|(s, _)| s == c.start)));
                 sig((
@@ -803,7 +806,7 @@ impl App {
 
     /// The page viewport in device px, and whether there is an active tab to lay out.
     fn page_device(&self) -> (u32, u32) {
-        let vr = page::viewport(&self.ws, self.areas.page);
+        let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
         let d = |v: f32| (v * self.scale).round() as i32;
         (
             (d(vr.right()) - d(vr.x)).max(0) as u32,
@@ -836,6 +839,18 @@ impl App {
             true => crate::motion::palette(&mut self.anim, self.palette_serial),
             false => 0.0,
         };
+        // The notice bars' entrance, asked every frame: a bar that goes is forgotten instead of
+        // playing out, since nothing draws it any more.
+        let (update, crash, stale) = (
+            self.ws.update_bar().is_some(),
+            self.ws.crash_report().is_some(),
+            self.ws.stale_offer() > 0,
+        );
+        self.bars = page::Bars {
+            update: self.bar_t("update", update),
+            crash: self.bar_t("crash", crash),
+            stale: self.bar_t("stale", stale),
+        };
         self.sync_toasts(now);
         let done = self.compose_frame();
         self.anim_due = self.anim.end_frame();
@@ -847,6 +862,16 @@ impl App {
             self.settings_changed.clear();
         }
         done
+    }
+
+    /// How present notice bar `key` is, `shown` being whether the workspace has it. A bar that
+    /// goes is forgotten: the page is laid out without it at once, so nothing would draw its exit.
+    fn bar_t(&mut self, key: &str, shown: bool) -> f32 {
+        if !shown {
+            self.anim.forget(("bar", key));
+            return 0.0;
+        }
+        crate::motion::bar(&mut self.anim, key)
     }
 
     /// Brings the toasts up to date with the status line at `now`, the frame's time, and asks
@@ -1160,7 +1185,7 @@ impl App {
             && self.areas.region(Region::Page).is_some()
             && self.ws.active().is_some()
         {
-            let vr = page::viewport(&self.ws, self.areas.page);
+            let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
             let y0 = (vr.y * self.scale).round();
             // A device row to spare on each side, against rounding back and forth.
             let band = Rect::new(
@@ -1251,7 +1276,8 @@ impl App {
                     }
                     Region::Outline => panes::draw_outline(&mut c, &self.ws, &mut self.ui, rect),
                     Region::Page => {
-                        times.paint = page::draw_page(&mut c, &mut self.ws, &self.ui, rect)
+                        times.paint =
+                            page::draw_page(&mut c, &mut self.ws, &self.ui, rect, self.bars)
                     }
                 }
                 p.restore(old);
@@ -1338,7 +1364,6 @@ impl App {
                 let window = Rect::new(0.0, 0.0, w, h);
                 if let Some(p) = self.ui.palette.as_mut() {
                     let caret_on = self.ui.caret_on;
-                    let t = self.palette_t;
                     let t = self.palette_t;
                     if t >= 1.0 {
                         p.palette
@@ -1833,7 +1858,7 @@ impl App {
 
     /// The page viewport (logical) and a logical point in it as device px.
     fn page_point(&self, x: f32, y: f32) -> (Rect, f32, f32) {
-        let vr = page::viewport(&self.ws, self.areas.page);
+        let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
         (vr, (x - vr.x) * self.scale, (y - vr.y) * self.scale)
     }
 
@@ -2371,10 +2396,18 @@ fn shot(mut app: App, path: &Path) -> i32 {
             p.poll_folder();
         }
     }
-    // A palette part of the way into its own entrance: the clock must start before its first
-    // frame, since a still frame would put it in place at once.
-    let early = if app.ui.palette.is_some() {
-        app.args.motion_at.map(|ms| (start_moving(&mut app), ms))
+    // A notice bar or a palette part of the way into its own entrance: the clock must start
+    // before its first frame, since a still frame would put it in place at once.
+    let has_bar = app.ws.update_bar().is_some()
+        || app.ws.crash_report().is_some()
+        || app.ws.stale_offer() > 0;
+    let early = if app.ui.palette.is_some() || has_bar {
+        app.args.motion_at.map(|ms| {
+            if has_bar {
+                restart_bars(&mut app);
+            }
+            (start_moving(&mut app), ms)
+        })
     } else {
         None
     };
@@ -2527,6 +2560,15 @@ fn toast_y(rest: f32, lift: f32, scale: f32) -> f32 {
 
 /// A shot from here on moves, as a window does, on a clock set by hand: the frame drawn now is
 /// the start. Returns the start.
+/// Starts the notice bars' entrance again: a shot of one mid-slide needs the clock to start
+/// before their first frame, which a still run has already drawn in place.
+fn restart_bars(app: &mut App) {
+    for key in ["update", "crash", "stale"] {
+        app.anim.forget(("bar", key));
+    }
+}
+
+/// Starts a moving shot's clock and draws its first frame.
 fn start_moving(app: &mut App) -> Instant {
     app.still = false;
     app.forced_motion = true;

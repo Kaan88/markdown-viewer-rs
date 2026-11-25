@@ -15,6 +15,35 @@ use std::time::{Duration, Instant};
 /// The page viewport inside the region: below the banner when the file is missing, and below
 /// the bar that offers to load remote images when the document holds some back.
 pub fn viewport(ws: &Workspace, r: Rect) -> Rect {
+    viewport_bars(ws, r, Bars::FULL)
+}
+
+/// How much of each notice bar shows this frame, 0 (gone) to 1 (there), in the order they sit:
+/// the update bar, the crash bar, the stale-tab bar. The page is laid out under what shows, and
+/// a bar's own height is [`notice::bar_height`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bars {
+    pub update: f32,
+    pub crash: f32,
+    pub stale: f32,
+}
+
+impl Bars {
+    /// Every bar the workspace has, whole: the layout a still run has.
+    pub const FULL: Bars = Bars {
+        update: 1.0,
+        crash: 1.0,
+        stale: 1.0,
+    };
+
+    /// The height a bar of this presence takes out of the page, in logical px.
+    fn height(self, t: f32, w: f32) -> f32 {
+        notice::bar_height(Rect::new(0.0, 0.0, w, BANNER_H), t)
+    }
+}
+
+/// [`viewport`] with the notice bars as high as they show now.
+pub fn viewport_bars(ws: &Workspace, r: Rect, bars: Bars) -> Rect {
     let mut top = 0.0;
     if ws.active_tab().is_some_and(|t| t.is_missing()) {
         top += BANNER_H;
@@ -22,18 +51,38 @@ pub fn viewport(ws: &Workspace, r: Rect) -> Rect {
     if ws.remote_blocked() > 0 {
         top += BANNER_H;
     }
-    let r = below_update_bar(ws, r);
+    // The notice bars, in the order they sit, each as high as it shows.
+    let mut shown = 0.0;
+    if ws.update_bar().is_some() {
+        shown += bars.height(bars.update, r.w);
+    }
+    if ws.crash_report().is_some() {
+        shown += bars.height(bars.crash, r.w);
+    }
+    if ws.stale_offer() > 0 {
+        shown += bars.height(bars.stale, r.w);
+    }
+    let top = top + shown;
     Rect::new(r.x, r.y + top, r.w, (r.h - top).max(0.0))
 }
 
-/// The region without the update bar, the crash bar and the stale-tab bar, which sit at its top, in that order,
-/// over a document or the empty state.
-fn below_update_bar(ws: &Workspace, r: Rect) -> Rect {
-    let bars = ws.update_bar().is_some() as u8
-        + ws.crash_report().is_some() as u8
-        + (ws.stale_offer() > 0) as u8;
-    let top = BANNER_H * f32::from(bars);
-    Rect::new(r.x, r.y + top, r.w, (r.h - top).max(0.0))
+/// [`notice::draw_sliding`] with one of this module's bars: the bar's drawing gets a `Ctx` of
+/// its own, so its buttons are recorded where they are drawn.
+fn sliding(c: &mut Ctx, bar: Rect, t: f32, draw: impl FnOnce(&mut Ctx, Rect)) -> bool {
+    let pal = c.pal;
+    let (hover, pressed) = (c.hover, c.pressed);
+    let hits = &mut *c.hits;
+    notice::draw_sliding(c.p, bar, t, |p, b| {
+        let mut cc = Ctx {
+            p,
+            pal,
+            hits,
+            hover,
+            pressed,
+        };
+        draw(&mut cc, b);
+    })
+    .is_some()
 }
 
 /// The bar that offers last time's crash report: open it, copy it, or close the bar.
@@ -163,37 +212,38 @@ fn draw_remote_bar(c: &mut Ctx, bar: Rect, count: usize) {
 const EMPTY_RECENTS: usize = 6;
 
 /// Draws the page region. Returns the time the workspace spent laying out and painting.
-pub fn draw_page(c: &mut Ctx, ws: &mut Workspace, ui: &Ui, r: Rect) -> Duration {
+pub fn draw_page(c: &mut Ctx, ws: &mut Workspace, ui: &Ui, r: Rect, bars: Bars) -> Duration {
     let pal = *c.pal;
     let whole = r;
-    let r = below_update_bar(ws, whole);
+    // The notice bars, in the order they sit, each sliding into the height it shows: the page
+    // is laid out under them.
+    let mut y = whole.y;
     if let Some(stage) = ws.update_bar() {
         let can_restart = ws.update_relaunch_target().is_some();
-        draw_update_bar(
-            c,
-            Rect::new(whole.x, whole.y, whole.w, BANNER_H),
-            stage,
-            can_restart,
-        );
+        let slot = Rect::new(whole.x, y, whole.w, BANNER_H);
+        sliding(c, slot, bars.update, |cc, b| {
+            draw_update_bar(cc, b, stage, can_restart);
+        });
+        y += bars.height(bars.update, whole.w);
     }
     let stale = ws.stale_offer();
     if ws.crash_report().is_some() {
-        let y = r.y - BANNER_H * if stale > 0 { 2.0 } else { 1.0 };
-        draw_crash_bar(c, Rect::new(whole.x, y, whole.w, BANNER_H));
+        let slot = Rect::new(whole.x, y, whole.w, BANNER_H);
+        sliding(c, slot, bars.crash, draw_crash_bar);
+        y += bars.height(bars.crash, whole.w);
     }
     if stale > 0 {
-        draw_stale_bar(
-            c,
-            Rect::new(whole.x, r.y - BANNER_H, whole.w, BANNER_H),
-            stale,
-        );
+        let slot = Rect::new(whole.x, y, whole.w, BANNER_H);
+        sliding(c, slot, bars.stale, |cc, b| draw_stale_bar(cc, b, stale));
+        y += bars.height(bars.stale, whole.w);
     }
+    let r = Rect::new(whole.x, y, whole.w, (whole.h - (y - whole.y)).max(0.0));
     if ws.active().is_none() {
         c.p.fill(r, pal.page);
         draw_empty(c, ws, r);
         return Duration::ZERO;
     }
-    let vr = viewport(ws, whole);
+    let vr = viewport_bars(ws, whole, bars);
     let blocked = ws.remote_blocked();
     if blocked > 0 {
         draw_remote_bar(c, Rect::new(r.x, vr.y - BANNER_H, r.w, BANNER_H), blocked);

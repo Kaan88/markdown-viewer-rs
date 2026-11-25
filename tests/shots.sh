@@ -211,6 +211,9 @@ shot preview-remote --light --size 1000x600 --hover 240,242 "$fx/previews.md"
 
 # The update bar.
 shot update-available --light --update-bar available "$fx/showcase.md"
+# 67 ms into the bar's 117 ms slide: about 19 of its 34 px, the page under it.
+shot update-rising-light --light --update-bar available --motion-at 67 "$fx/showcase.md"
+shot update-rising-dark --dark --update-bar available --motion-at 67 "$fx/showcase.md"
 shot update-installing --dark --update-bar installing "$fx/showcase.md"
 shot update-installed --dark --update-bar installed
 shot update-installed-plain --light --update-bar installed-plain

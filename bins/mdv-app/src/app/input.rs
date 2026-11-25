@@ -306,7 +306,7 @@ impl App {
     pub(super) fn scroll_geom(&self, target: Scroller) -> Option<(Rect, f32, f32, f32)> {
         match target {
             Scroller::Page => {
-                let vr = page::viewport(&self.ws, self.areas.page);
+                let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
                 Some((
                     vr,
                     self.ws.total_height(),

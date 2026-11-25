@@ -26,7 +26,7 @@ missing was built. One commit per item, each with a test that fails with the fix
 | D7 `watch_motion_reduced` on a helper thread | already done (shared reads on its own thread; mdview calls it once at start and on the wake) |
 | X3 `Menu::draw_in_animated` (hover row) | done (`2c35084`) |
 | X3 `Palette::draw_presence` | done: the card fades and drops in on each opening (`motion::palette`, a serial an opening; closing instant), its presence in the overlay signature so its frames are drawn |
-| X3 `notice::draw_sliding` / `bar_height` | not yet |
+| X3 `notice::draw_sliding` / `bar_height` | done: each of the three notice bars slides in by its own presence (`motion::bar`), its height taken by `notice::bar_height`, and the page is laid out under what shows (`page::Bars`, `viewport_bars`) on every frame; a bar that goes is forgotten, so a later one slides in again |
 | X3 tree chevron `draw_disclosure_animated_with`, rows named by path | already done (`motion::folder(path)`, `motion::notes_fold(key)`) |
 | L10 `Form::draw_animated` / `set_high_contrast` | already done |
 | L1 `submenu::Cascade` in place of the hand-made submenus and dwell | not yet |

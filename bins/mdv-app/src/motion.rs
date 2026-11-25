@@ -53,6 +53,12 @@ pub fn tip(anim: &mut Animator) -> f32 {
     anim.presence("tip", true, TIP.enter, TIP.exit)
 }
 
+/// The presence of a notice bar as it slides in, `key` naming which one (update, crash, stale);
+/// a bar that goes is forgotten (`App::bar_t`), so a later one slides in again.
+pub fn bar(anim: &mut Animator, key: &str) -> f32 {
+    anim.presence(("bar", key), true, MENU.enter, MENU.exit)
+}
+
 /// The animator's group for the Files pane's values (the Notes pane is drawn in the same
 /// region): a frame that leaves the region undrawn keeps them (`keep_group`), and the region is
 /// drawn again while one of them moves.

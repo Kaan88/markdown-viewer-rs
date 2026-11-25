@@ -755,6 +755,92 @@ fn a_confirmation_pushed_onto_others_waits_until_they_have_lifted() {
 }
 
 #[test]
+fn a_notice_bar_slides_in_and_the_page_moves_down_under_it() {
+    let mut a = moving(&["showcase.md"]);
+    a.full = true;
+    a.compose();
+    let before = page::viewport_bars(&a.ws, a.areas.page, a.bars);
+    let before_pixels = a.screen.pixels.clone();
+    // A still run with the bar: the strip it takes is the page's until it is there.
+    let at_rest = {
+        let mut still = app(&["showcase.md"]);
+        still.ws.preview_update("available");
+        still.compose();
+        still
+    };
+    let width = a.screen.width as usize;
+    let scale = a.scale;
+    let (page, banner) = (a.areas.page, crate::ui::BANNER_H);
+    let mut spot = None;
+    for row in ((page.y * scale) as usize)..(((page.y + banner) * scale) as usize) {
+        for col in ((page.x * scale) as usize)..((page.right() * scale) as usize) {
+            let i = (row * width + col) * 4;
+            if at_rest.screen.pixels[i..i + 4] != before_pixels[i..i + 4] {
+                spot = Some((col as f32 / scale, row as f32 / scale));
+                break;
+            }
+        }
+        if spot.is_some() {
+            break;
+        }
+    }
+    let (x, y) = spot.expect("the bar draws something the page did not");
+    let page_pixel = pixel(&a, x, y);
+    a.ws.preview_update("available");
+    a.compose();
+    assert_eq!(
+        a.bars.update, 0.0,
+        "the bar's first frame is the start of its slide"
+    );
+    assert_eq!(
+        page::viewport_bars(&a.ws, a.areas.page, a.bars),
+        before,
+        "it takes no room yet"
+    );
+    assert_eq!(
+        pixel(&a, x, y),
+        page_pixel,
+        "and nothing of it is drawn yet"
+    );
+    assert!(a.anim_due.is_some(), "a frame is asked for");
+    step(&mut a, FRAME);
+    let mid = a.bars.update;
+    assert!(mid > 0.0 && mid < 1.0, "on its way: {mid}");
+    let vr = page::viewport_bars(&a.ws, a.areas.page, a.bars);
+    assert!(
+        vr.y > before.y && vr.y < before.y + banner,
+        "the page follows the bar: {} against {}",
+        vr.y,
+        before.y
+    );
+    assert_ne!(
+        pixel(&a, x, y),
+        page_pixel,
+        "part of the bar is drawn where the page was"
+    );
+    let mut frames = 1;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the slide ends");
+    }
+    assert_eq!(a.bars.update, 1.0);
+    assert_eq!(
+        page::viewport_bars(&a.ws, a.areas.page, a.bars),
+        page::viewport(&a.ws, a.areas.page),
+        "the bar is whole and the page sits under it"
+    );
+    // At rest it is what a still run draws with the bar there, pixel for pixel.
+    assert!(
+        a.screen.pixels == at_rest.screen.pixels,
+        "the bar at rest is the still one, pixel for pixel"
+    );
+    // And nothing is left moving.
+    step(&mut a, Duration::from_secs(2));
+    assert!(a.anim_due.is_none());
+}
+
+#[test]
 fn the_palette_fades_and_drops_in_as_it_opens_and_rests_as_a_still_one() {
     let mut a = moving(&["showcase.md"]);
     a.open_palette("");

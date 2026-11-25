@@ -1,0 +1,178 @@
+#[test]
+fn a_notice_bar_slides_in_and_the_page_moves_down_under_it() {
+    let mut a = moving(&["showcase.md"]);
+    a.full = true;
+    a.compose();
+    let before = page::viewport_bars(&a.ws, a.areas.page, a.bars);
+    eprintln!(
+        "before: update bar {:?}, bars {:?}, page {:?}",
+        a.ws.update_bar().is_some(),
+        a.bars,
+        a.areas.page
+    );
+    let before_pixels = a.screen.pixels.clone();
+    a.ws.preview_update("available");
+    a.compose();
+    assert_eq!(
+        a.bars.update, 0.0,
+        "the bar's first frame is the start of its slide"
+    );
+    assert_eq!(
+        page::viewport_bars(&a.ws, a.areas.page, a.bars),
+        before,
+        "it takes no room yet"
+    );
+    // A point in the strip the bar takes where the bar is not the page: the topmost pixel a
+    // still run with the bar draws differently there.
+    let at_rest = {
+        let mut still = app(&["showcase.md"]);
+        still.ws.preview_update("available");
+        still.compose();
+        still
+    };
+    let width = a.screen.width as usize;
+    let (scale, top) = (a.scale, a.areas.page.y);
+    let mut differing = 0;
+    for i in 0..before_pixels.len() {
+        let (px, py) = (i % width, i / width);
+        let y = py as f32 / scale;
+        if y >= top && y < top + crate::ui::BANNER_H && at_rest.screen.pixels[i] != before_pixels[i]
+        {
+            differing += 1;
+        }
+    }
+    let mut first_row = None;
+    for i in 0..before_pixels.len() {
+        if at_rest.screen.pixels[i] != before_pixels[i] {
+            first_row = Some(i / width);
+            break;
+        }
+    }
+    eprintln!(
+        "first differing row {first_row:?}; strip pixels before {:?} still {:?}",
+        &before_pixels[(90 * width)..(90 * width + 12)],
+        &at_rest.screen.pixels[(90 * width)..(90 * width + 12)]
+    );
+    eprintln!(
+        "at_rest bar {:?} bars {:?}; before px(300,101) {:?} still px(300,101) {:?}",
+        at_rest.ws.update_bar().map(|s| format!("{s:?}")),
+        at_rest.bars,
+        &before_pixels[(101 * width + 300 * 1)..(101 * width + 300 + 4)],
+        &at_rest.screen.pixels[(101 * width + 300)..(101 * width + 304)]
+    );
+    let mut nonblank = 0;
+    for row in 84..118usize {
+        for x in 250..1050usize {
+            let i = row * width + x;
+            if at_rest.screen.pixels[i..i + 3].iter().any(|b| *b != 46) {
+                nonblank += 1;
+            }
+        }
+    }
+    eprintln!("still non-46 pixels in the strip: {nonblank}");
+    eprintln!(
+        "sizes {:?}x{:?} vs {:?}x{:?}; pre px(300,101) {:?} after preview {:?}",
+        a.screen.width,
+        a.screen.height,
+        at_rest.screen.width,
+        at_rest.screen.height,
+        &before_pixels[(101 * width + 300)..(101 * width + 304)],
+        if a.screen.width as usize == width {
+            &a.screen.pixels[(101 * width + 300)..(101 * width + 304)]
+        } else {
+            &[][..]
+        }
+    );
+    let mut plain = app(&["showcase.md"]);
+    plain.compose();
+    let mut rows = Vec::new();
+    for row in 0..800usize {
+        let c = (250..1050usize)
+            .filter(|x| {
+                let i = row * width + x;
+                plain.screen.pixels[i] != at_rest.screen.pixels[i]
+            })
+            .count();
+        if c > 0 {
+            rows.push((row, c));
+        }
+    }
+    eprintln!(
+        "px(950,95): plain {:?} at_rest {:?}; px(300,101): plain {:?} at_rest {:?}",
+        &plain.screen.pixels[(95 * width + 950)..(95 * width + 954)],
+        &at_rest.screen.pixels[(95 * width + 950)..(95 * width + 954)],
+        &plain.screen.pixels[(101 * width + 300)..(101 * width + 304)],
+        &at_rest.screen.pixels[(101 * width + 300)..(101 * width + 304)]
+    );
+    eprintln!(
+        "plain vs at_rest differing {}; update go at_rest {:?} plain {:?}",
+        (0..plain.screen.pixels.len())
+            .filter(|i| plain.screen.pixels[*i] != at_rest.screen.pixels[*i])
+            .count(),
+        at_rest.hit_rect(Hit::UpdateGo),
+        plain.hit_rect(Hit::UpdateGo)
+    );
+    eprintln!(
+        "page y {} h {} scale {scale}; bar presence {}; differing {differing}; still bar {:?}; whole differing {}",
+        a.areas.page.y,
+        a.areas.page.h,
+        a.bars.update,
+        at_rest.ws.update_bar().is_some(),
+        (0..before_pixels.len()).filter(|i| at_rest.screen.pixels[*i] != before_pixels[*i]).count()
+    );
+    let mut spot = None;
+    for i in 0..before_pixels.len() {
+        let (px, py) = (i % width, i / width);
+        let y = py as f32 / scale;
+        if y >= top && y < top + crate::ui::BANNER_H && at_rest.screen.pixels[i] != before_pixels[i]
+        {
+            spot = Some((px as f32 / scale, y));
+            break;
+        }
+    }
+    let (x, y) = spot.expect("the bar draws something the page did not");
+    let page_pixel = pixel(&a, x, y);
+    let i = ((y * a.scale) as usize) * width + (x * a.scale) as usize;
+    assert_eq!(
+        &page_pixel[..],
+        &before_pixels[i..i + 4],
+        "and nothing of it is drawn yet"
+    );
+    assert!(a.anim_due.is_some(), "a frame is asked for");
+    step(&mut a, FRAME);
+    let mid = a.bars.update;
+    assert!(mid > 0.0 && mid < 1.0, "on its way: {mid}");
+    let vr = page::viewport_bars(&a.ws, a.areas.page, a.bars);
+    assert!(
+        vr.y > before.y && vr.y < before.y + crate::ui::BANNER_H,
+        "the page follows the bar: {} against {}",
+        vr.y,
+        before.y
+    );
+    assert_ne!(
+        pixel(&a, x, y),
+        page_pixel,
+        "part of the bar is drawn at a point the bar covers"
+    );
+    let mut frames = 1;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the slide ends");
+    }
+    assert_eq!(a.bars.update, 1.0);
+    assert_eq!(
+        page::viewport_bars(&a.ws, a.areas.page, a.bars),
+        page::viewport(&a.ws, a.areas.page),
+        "the bar is whole and the page sits under it"
+    );
+    // At rest it is what a still run draws with the bar there, pixel for pixel.
+    assert!(
+        a.screen.pixels == at_rest.screen.pixels,
+        "the bar at rest is the still one, pixel for pixel"
+    );
+    // And nothing is left moving.
+    step(&mut a, Duration::from_secs(2));
+    assert!(a.anim_due.is_none());
+}
+

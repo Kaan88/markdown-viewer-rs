@@ -221,7 +221,7 @@ impl App {
     /// The copy button was clicked: the code of the block under the pointer goes to the clipboard
     /// and the button shows a check mark for a moment.
     pub(super) fn copy_code_under_pointer(&mut self) {
-        let vr = page::viewport(&self.ws, self.areas.page);
+        let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
         let Some(spot) = crate::codebtn::spot(&mut self.ws, &self.ui, vr, self.scale) else {
             return;
         };
@@ -1522,7 +1522,7 @@ impl App {
 
     pub(super) fn autoscroll(&mut self) {
         let (x, y) = self.ui.mouse;
-        let vr = page::viewport(&self.ws, self.areas.page);
+        let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
         let beyond = if y < vr.y {
             y - vr.y
         } else if y >= vr.bottom() {
