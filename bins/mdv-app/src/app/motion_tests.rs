@@ -71,8 +71,8 @@ fn a_menu_that_opens_fades_in_and_then_leaves_no_timer() {
         assert!(frames < 30, "the fade ends");
     }
     assert_eq!(a.menu_t.0, 1.0);
-    // 167 ms at 16 ms a frame, and one frame more at most.
-    assert!(frames <= 12, "{frames} frames");
+    // 117 ms at 16 ms a frame, and one frame more at most.
+    assert!(frames <= 9, "{frames} frames");
     assert!(a.anim.ungrouped_deadline().is_none());
     // Each frame of the fade was drawn: the menu's middle is not what it was half way.
     assert_ne!(pixel(&a, x, y), mid, "the frames of the fade are drawn");

@@ -29,8 +29,9 @@ What the pin move did to `Cargo.lock`, plainly:
 
 - **What moves.** The main menu, the context menus and the Open recent submenu fade in as they
   open (`Menu::draw_in_presence`, 6 px drop; the submenu `draw_in_entering` from its side), by
-  `anim::document::MENU`. Closing is instant. `bins/mdv-app/src/motion.rs` is the one place the
-  timings are chosen (the shared presets as they are, to be tuned later).
+  `anim::document::MENU`'s curve over 117 ms: the owner tried 167 ms, asked for it "slightly
+  faster", and said of 117 "this is better" (2026-11-25). Closing is instant.
+  `bins/mdv-app/src/motion.rs` is the one place the timings are chosen.
 - **The loop.** One `Animator` on the `App`. `compose` begins and ends the animator's frame (the
   menus' presence is asked there on every frame a menu is open, so a frame that skips the
   overlays forgets nothing); its deadline is `anim_due`, a timer in `timers` like the others:
