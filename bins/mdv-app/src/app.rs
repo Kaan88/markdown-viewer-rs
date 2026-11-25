@@ -1117,9 +1117,12 @@ impl App {
         let settings_moving = self.ui.settings.is_some()
             && (self.anim.group_deadlines().iter()).any(|(g, _)| *g == settings);
         // A frame where only the dialog moves redraws the inside of its card alone (below).
-        // Everything of it that moves lies in the card: mdview's settings have no dropdown (every
-        // choice has three options or fewer), whose list could reach past it.
-        let settings_only = settings_moving && osig == self.overlay_sig && !self.full;
+        // Everything of it that moves lies in the card, unless a page has a dropdown, whose
+        // menu reaches past it: then a frame that leaves the dialog undrawn is not enough.
+        let settings_only = settings_moving
+            && osig == self.overlay_sig
+            && !self.full
+            && !(self.ui.settings.as_ref()).is_some_and(has_dropdown);
         let overlay_changed = osig != self.overlay_sig;
         self.overlay_sig = osig;
         let mut under: Vec<Rect> = bounds.clone();
@@ -1303,7 +1306,8 @@ impl App {
                 // hover fill fading) and every row a setting changed while the group was in
                 // flight (a switch's knob, a segment). The card is opaque there, so those parts,
                 // short of its rounded corners, are drawn again alone, over what is there; the
-                // rest is as it was.
+                // rest is as it was. A card with a dropdown is drawn whole instead (see
+                // `settings_only`).
                 let card = f.rect();
                 let corner = SETTINGS_CARD_CORNER;
                 let inner = Rect::new(card.x, card.y + corner, card.w, card.h - 2.0 * corner);
@@ -2412,6 +2416,22 @@ fn shot(mut app: App, path: &Path) -> i32 {
             1
         }
     }
+}
+
+/// Whether a page of `f` has a choice the shared form draws as a dropdown (more than three
+/// options, or `Item::dropdown`, which is not readable here). Its menu reaches out of the card,
+/// so a frame that redraws the card alone could leave it behind. mdview's pages have none, and
+/// the shared form does not say whether one is open: any such row keeps the whole window in the
+/// frame's business instead.
+fn has_dropdown(f: &mdshared_ui::settings::pages::Form) -> bool {
+    (f.pages().iter())
+        .flat_map(|p| p.items.iter())
+        .any(|it| {
+            matches!(
+                it.row(),
+                mdshared_ui::settings::Row::Choice { options, .. } if options.len() > 3
+            )
+        })
 }
 
 /// What two rectangles share (empty, zero wide or high, when nothing).

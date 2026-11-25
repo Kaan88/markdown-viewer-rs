@@ -1175,8 +1175,6 @@ fn two_settings_rows_changed_while_the_dialog_moves_are_drawn_as_a_whole_redraw_
     assert!(frames >= 3, "both slides ran: {frames}");
 }
 
-// ---- tooltips, from resting -----------------------------------------------------------------
-
 #[test]
 fn opening_settings_asks_the_system_for_contrast_and_applies_it_at_once() {
     let mut a = moving(&["showcase.md"]);
@@ -1201,6 +1199,8 @@ fn opening_settings_asks_the_system_for_contrast_and_applies_it_at_once() {
     a.read_motion();
     assert_eq!(a.contrast_reads, reads + 1);
 }
+
+// ---- tooltips, from resting -----------------------------------------------------------------
 
 /// The middle of the minimize button, which has a tip.
 fn minimize(a: &mut App) -> (f32, f32) {

@@ -268,7 +268,11 @@ impl Args {
                 "--menu-at" => out.menu_at = value(&a).and_then(|v| v.parse().ok()),
                 "--turn" => out.turn = value(&a),
                 "--toast" => out.toasts.extend(value(&a)),
-                "--motion-at" => out.motion_at = value(&a).and_then(|v| v.parse().ok()),
+                "--motion-at" => {
+                    out.motion_at = value(&a)
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .map(|ms| ms.min(10_000));
+                }
                 "--flip-setting" => out.flip_setting = value(&a).and_then(|v| v.parse().ok()),
                 "--hover" => out.hover = value(&a).and_then(|v| pair(&v, ',')),
                 "--menu" => {
@@ -374,6 +378,8 @@ mod tests {
         assert_eq!(parse("--flip-setting 5").flip_setting, Some(5));
         assert_eq!(parse("--flip-setting on").flip_setting, None);
         assert_eq!(a.menu_at, Some(21));
+        // A shot's motion waits at most ten seconds.
+        assert_eq!(parse("--motion-at 999999").motion_at, Some(10_000));
         let b = parse("--motion-at soon");
         assert_eq!(b.motion_at, None);
         assert!(b.toasts.is_empty() && b.turn.is_none());
