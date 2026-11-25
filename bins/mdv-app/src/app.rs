@@ -353,6 +353,10 @@ struct App {
     /// none). The decision is made whether or not a window is there to raise.
     #[cfg(test)]
     hand_overs_focused: u32,
+    /// The system's wish for less motion as a test gives it; `None` reads the platform's answer.
+    /// A test's frames must not depend on the machine's setting.
+    #[cfg(test)]
+    reduced: Option<bool>,
 }
 
 impl App {
@@ -468,6 +472,8 @@ impl App {
             contrast_reads: 0,
             #[cfg(test)]
             hand_overs_focused: 0,
+            #[cfg(test)]
+            reduced: None,
         }
     }
 
@@ -1123,7 +1129,9 @@ impl App {
             && osig == self.overlay_sig
             && !self.full
             && !(self.ui.settings.as_ref()).is_some_and(has_dropdown);
-        let overlay_changed = osig != self.overlay_sig;
+        // A dialog that moves on a card the clipped frame cannot redraw alone (a dropdown's page)
+        // is a change of the overlay on its own: draw it, or it would freeze after its first frame.
+        let overlay_changed = osig != self.overlay_sig || (settings_moving && !settings_only);
         self.overlay_sig = osig;
         let mut under: Vec<Rect> = bounds.clone();
         under.extend(self.overlay_bounds.iter().copied());
@@ -1500,7 +1508,13 @@ impl App {
     /// change of theme and when the watch says it changed.
     fn read_motion(&mut self) {
         if !self.still {
-            self.anim.set_system_reduced(platform::motion_reduced());
+            // A test gives its own wish (`App::reduced`), so its frames do not depend on the
+            // machine's "Animation effects" setting.
+            #[cfg(test)]
+            let reduced = self.reduced.unwrap_or_else(platform::motion_reduced);
+            #[cfg(not(test))]
+            let reduced = platform::motion_reduced();
+            self.anim.set_system_reduced(reduced);
         }
         // The contrast theme is the settings dialog's alone. With the dialog closed nothing asks
         // the system: on Linux the read opens a D-Bus connection and may wait half a second,
@@ -1853,7 +1867,7 @@ impl ApplicationHandler<Wake> for App {
             .with_decorations(false)
             .with_visible(false)
             .with_inner_size(LogicalSize::new(w.max(520) as f64, h.max(360) as f64))
-            .with_maximized(max || self.args.presence().maximize);
+            .with_maximized(self.args.maximized(max));
         // A test run: shown without the focus and kept under every other window.
         if self.args.behind {
             attributes = attributes
@@ -2415,17 +2429,25 @@ fn shot(mut app: App, path: &Path) -> i32 {
     }
 }
 
-/// Whether a page of `f` has a choice the shared form draws as a dropdown (more than three
-/// options, or `Item::dropdown`, which is not readable here). Its menu reaches out of the card,
-/// so a frame that redraws the card alone could leave it behind. mdview's pages have none, and
-/// the shared form does not say whether one is open: any such row keeps the whole window in the
-/// frame's business instead.
+/// Whether the page of `f` shown has a choice the shared form draws as a dropdown: more than
+/// three options, or a row `Item::dropdown()` forced to one whatever its count (its flag is
+/// private, so the laid-out control says: a segmented row has segment rects and a dropdown has
+/// none). Its menu reaches out of the card, so a frame that redraws the card alone could leave it
+/// behind; the shared form does not say whether one is open. Before the form's first layout
+/// nothing is segmented yet, so the answer is yes and the whole window is drawn: only slower.
 fn has_dropdown(f: &mdshared_ui::settings::pages::Form) -> bool {
-    (f.pages().iter()).flat_map(|p| p.items.iter()).any(|it| {
-        matches!(
-            it.row(),
-            mdshared_ui::settings::Row::Choice { options, .. } if options.len() > 3
-        )
+    let Some(page) = f.pages().get(f.page()) else {
+        return false;
+    };
+    (page.items.iter()).any(|it| match it.row() {
+        mdshared_ui::settings::Row::Choice { options, .. } => {
+            options.len() > 3
+                || it
+                    .row()
+                    .id()
+                    .is_none_or(|id| f.segment_rect(id, 0).w <= 0.0)
+        }
+        _ => false,
     })
 }
 
@@ -2542,6 +2564,73 @@ fn check_update() -> i32 {
     }
 }
 
+/// What the folder step of [`run`] decided: see [`admit`].
+enum Admission {
+    /// Another window took the files: this launch exits at once.
+    Handed,
+    /// The window runs, with the folder's lock when it could be taken (a folder that cannot be
+    /// written has none) and with its session, or without one.
+    Run {
+        lock: Option<std::fs::File>,
+        session: Option<PathBuf>,
+        note: Option<String>,
+    },
+}
+
+/// Claims the settings folder for `args` when the launch has a session, hands the files to a
+/// window already holding it only when [`Args::folder`] says it may, and takes the session away
+/// when the folder is busy. `claim` is `folder_lock::claim`, and a test gives its own so it can
+/// see what the decision was.
+fn admit(
+    args: &Args,
+    session: Option<PathBuf>,
+    claim: impl FnOnce(&Path, Box<dyn FnMut() -> bool>, Duration) -> mdshared_app::folder_lock::Claim,
+) -> Admission {
+    use mdshared_app::folder_lock;
+    let Some(settings) = session.clone().filter(|_| args.shot.is_none()) else {
+        return Admission::Run {
+            lock: None,
+            session,
+            note: None,
+        };
+    };
+    let folder = args.folder();
+    if folder.hand_over {
+        // Started by a restart: the window that started it is still closing; wait it out, or the
+        // hand-over below would go to it and leave no window.
+        mdshared_app::relaunch::wait_for_predecessor(std::env::args().skip(1), &settings);
+    }
+    let forward: Box<dyn FnMut() -> bool> = if folder.hand_over {
+        let requests = args.requests();
+        let files = args.files.clone();
+        let settings = settings.clone();
+        Box::new(move || {
+            if requests.is_empty() {
+                mdview_core::single::forward(&settings, &files)
+            } else {
+                (requests.iter()).all(|r| mdview_core::single::forward_request(&settings, r))
+            }
+        })
+    } else {
+        // Never hands over: a hand-over would raise the window that took it, and a `--behind`
+        // run must not bring any window forward.
+        Box::new(|| false)
+    };
+    match claim(&settings, forward, folder.wait) {
+        folder_lock::Claim::Own(lock) => Admission::Run {
+            lock,
+            session: Some(settings),
+            note: None,
+        },
+        folder_lock::Claim::Handed => Admission::Handed,
+        folder_lock::Claim::Busy => Admission::Run {
+            lock: None,
+            session: None,
+            note: Some(folder_lock::busy_note("mdview")),
+        },
+    }
+}
+
 pub fn run() -> i32 {
     let started = Instant::now();
     let args = Args::parse(std::env::args().skip(1));
@@ -2553,46 +2642,25 @@ pub fn run() -> i32 {
     }
     let explicit = std::env::var_os("MDVIEW_SETTINGS").map(PathBuf::from);
     // A shot never touches the user's session; it may use a scratch one named by MDVIEW_SETTINGS.
-    let mut session = match (args.no_session, args.shot.is_some()) {
+    let session = match (args.no_session, args.shot.is_some()) {
         (true, _) => None,
         (false, true) => explicit,
         (false, false) => explicit.or_else(mdview_core::session::default_settings_path),
     };
     // Held while the window runs: this launch has the settings folder
     // (mdshared_app::folder_lock, shared with mdedit).
-    let mut _folder_lock = None;
-    // Why this window runs without its session, shown once it is up.
-    let mut no_session_note: Option<String> = None;
-    // A `--behind` run is its own instance: handing its files to an mdview already running would
-    // raise that window, which a test run must never do.
-    if let Some(settings) = session
-        .clone()
-        .filter(|_| args.shot.is_none() && args.presence().hand_over)
-    {
-        // Started by a restart: the window that started it is still closing; wait it out, or the
-        // hand-over below would go to it and leave no window.
-        mdshared_app::relaunch::wait_for_predecessor(std::env::args().skip(1), &settings);
-        // A window is already open: hand it the files and quit, before any window work. A launch
-        // that asks for a line, a place or a follow hands each file over with that. One that is
-        // still starting holds the folder and is waited for, not run beside.
-        let requests = args.requests();
-        let forward = || {
-            if requests.is_empty() {
-                mdview_core::single::forward(&settings, &args.files)
-            } else {
-                (requests.iter()).all(|r| mdview_core::single::forward_request(&settings, r))
-            }
-        };
-        use mdshared_app::folder_lock::{self, Claim};
-        match folder_lock::claim(&settings, forward, folder_lock::WAIT) {
-            Claim::Own(lock) => _folder_lock = lock,
-            Claim::Handed => return 0,
-            Claim::Busy => {
-                session = None;
-                no_session_note = Some(folder_lock::busy_note("mdview"));
-            }
-        }
-    }
+    // A `--behind` run is its own instance: it claims the folder but never hands its files to an
+    // mdview already running (whose window would be raised), and a busy folder leaves it without
+    // a session, so it writes neither the port file nor the session (`Args::folder`, `admit`).
+    let admission = admit(&args, session, mdshared_app::folder_lock::claim);
+    let (mut session, _folder_lock, mut no_session_note) = match admission {
+        Admission::Handed => return 0,
+        Admission::Run {
+            lock,
+            session,
+            note,
+        } => (session, lock, note),
+    };
     // A live update is for a window that shows the file already: with none, there is nothing to do.
     if args.follow && args.shot.is_none() {
         return 0;

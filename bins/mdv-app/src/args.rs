@@ -152,6 +152,16 @@ pub struct Presence {
     pub focus: bool,
 }
 
+/// How a launch takes the settings folder, one window per folder
+/// (`mdshared_app::folder_lock`): see [`Args::folder`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Folder {
+    /// Hand this launch's files to a window already holding the folder.
+    pub hand_over: bool,
+    /// How long to wait for that window to start listening.
+    pub wait: std::time::Duration,
+}
+
 fn pair<T: std::str::FromStr>(s: &str, sep: char) -> Option<(T, T)> {
     let (a, b) = s.split_once(sep)?;
     Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
@@ -168,8 +178,34 @@ impl Args {
     pub fn presence(&self) -> Presence {
         Presence {
             hand_over: !self.behind,
-            maximize: self.maximize && !self.behind,
+            maximize: self.maximized(false),
             focus: !self.behind,
+        }
+    }
+
+    /// Whether the window starts maximized: the place the session kept, or `--maximize`, but
+    /// never under `--behind`. A maximized window is shown with `SW_MAXIMIZE`, which activates
+    /// it, and a `--behind` run must not come to the front.
+    pub fn maximized(&self, saved: bool) -> bool {
+        (saved || self.maximize) && !self.behind
+    }
+
+    /// How this launch takes the settings folder. A `--behind` run is its own instance: it
+    /// still claims the folder (so it cannot write the port file or the session under a window
+    /// that has them), but never hands its files over — which would raise that window — and so
+    /// waits for nobody. A folder another window holds leaves it without a session, as a busy
+    /// folder always does.
+    pub fn folder(&self) -> Folder {
+        if self.behind {
+            Folder {
+                hand_over: false,
+                wait: std::time::Duration::ZERO,
+            }
+        } else {
+            Folder {
+                hand_over: true,
+                wait: mdshared_app::folder_lock::WAIT,
+            }
         }
     }
 
@@ -367,6 +403,38 @@ mod tests {
         );
         // A plain launch asks for neither.
         assert!(!parse("a.md").presence().maximize);
+    }
+
+    #[test]
+    fn behind_never_starts_maximized_even_where_the_session_left_it() {
+        // The session's saved place would maximize the window, and showing it maximized activates
+        // it; under `--behind` the window stays as it is.
+        assert!(!parse("--behind a.md").maximized(true));
+        assert!(!parse("--behind --maximize a.md").maximized(true));
+        // Elsewhere either asks for it.
+        assert!(parse("a.md").maximized(true));
+        assert!(parse("--maximize a.md").maximized(false));
+        assert!(!parse("a.md").maximized(false));
+    }
+
+    #[test]
+    fn behind_claims_the_folder_but_never_hands_over_or_waits() {
+        // Its own instance: no hand-over, and no waiting for a window that would take one, but a
+        // folder claimed all the same, so a window that has the session is never written under.
+        assert_eq!(
+            parse("--behind a.md").folder(),
+            Folder {
+                hand_over: false,
+                wait: std::time::Duration::ZERO,
+            }
+        );
+        assert_eq!(
+            parse("a.md").folder(),
+            Folder {
+                hand_over: true,
+                wait: mdshared_app::folder_lock::WAIT,
+            }
+        );
     }
 
     #[test]

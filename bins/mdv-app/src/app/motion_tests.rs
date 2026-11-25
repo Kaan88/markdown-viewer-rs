@@ -15,6 +15,8 @@ fn moving(files: &[&str]) -> App {
     let mut a = app(files);
     a.still = false;
     a.frame_clock = Some(Instant::now());
+    // The machine's "Animation effects" setting must not decide what a test sees.
+    a.reduced = Some(false);
     a
 }
 
@@ -1176,6 +1178,104 @@ fn two_settings_rows_changed_while_the_dialog_moves_are_drawn_as_a_whole_redraw_
 }
 
 #[test]
+fn a_tests_motion_state_is_its_own_and_not_the_systems() {
+    let mut a = moving(&["showcase.md"]);
+    a.reduced = Some(true);
+    a.read_motion();
+    a.compose();
+    assert!(!a.anim.animates(), "the test's reduced motion is read");
+    a.reduced = Some(false);
+    a.read_motion();
+    a.compose();
+    assert!(a.anim.animates(), "and its wish for motion");
+}
+
+#[test]
+fn has_dropdown_counts_four_options_and_a_row_forced_to_one() {
+    use mdshared_ui::settings::Row;
+    use mdshared_ui::settings::pages::{Form, Item, Page};
+    let mut a = moving(&["showcase.md"]);
+    let cases: [(&str, Item, bool); 3] = [
+        (
+            "four options",
+            Item::new(Row::choice(
+                9002,
+                "Four",
+                &["One", "Two", "Three", "Four"],
+                0,
+            )),
+            true,
+        ),
+        (
+            "two options",
+            Item::new(Row::choice(9002, "Two", &["One", "Two"], 0)),
+            false,
+        ),
+        (
+            "forced",
+            Item::new(Row::choice(9002, "Two", &["One", "Two"], 0)).dropdown(),
+            true,
+        ),
+    ];
+    for (name, item, want) in cases {
+        a.ui.settings = Some(Form::new("Settings", vec![Page::new("Test", vec![item])]));
+        a.settings_changed.clear();
+        a.full = true;
+        a.compose();
+        let f = a.ui.settings.as_ref().unwrap();
+        assert_eq!(has_dropdown(f), want, "{name}");
+    }
+}
+
+#[test]
+fn a_dropdown_page_keeps_the_dialog_drawn_on_every_frame_of_a_slide() {
+    use mdshared_ui::settings::Row;
+    use mdshared_ui::settings::pages::{Form, Item, Page};
+    let mut a = moving(&["showcase.md"]);
+    a.ui.settings = Some(Form::new(
+        "Settings",
+        vec![Page::new(
+            "Test",
+            vec![
+                Item::new(Row::toggle(9001, "A switch", false)),
+                Item::new(Row::choice(
+                    9002,
+                    "Four",
+                    &["One", "Two", "Three", "Four"],
+                    0,
+                )),
+            ],
+        )],
+    ));
+    a.settings_changed.clear();
+    a.full = true;
+    a.compose();
+    settle(&mut a);
+    assert!(
+        has_dropdown(a.ui.settings.as_ref().unwrap()),
+        "it is a dropdown"
+    );
+    assert!(a.ui.settings.as_mut().unwrap().focus_row(9001));
+    a.key_named(KeyName::Space, None);
+    a.compose();
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        a.frame_clock = a.frame_clock.map(|t| t + FRAME);
+        a.compose();
+        let part = a.screen.pixels.clone();
+        a.full = true;
+        a.compose();
+        assert!(
+            part == a.screen.pixels,
+            "frame {frames}: the dialog is drawn"
+        );
+        frames += 1;
+        assert!(frames < 60);
+    }
+    assert!(frames >= 3, "the switch slid: {frames}");
+}
+
+#[test]
 fn opening_settings_asks_the_system_for_contrast_and_applies_it_at_once() {
     let mut a = moving(&["showcase.md"]);
     a.contrast = Some(true);
@@ -1185,6 +1285,10 @@ fn opening_settings_asks_the_system_for_contrast_and_applies_it_at_once() {
     assert_eq!(a.contrast_reads, 0, "a closed Settings asks nothing");
     settings_at(&mut a, s::TICK_BOXES);
     assert!(a.contrast_reads >= 1, "opening the dialog asks");
+    assert!(
+        a.anim.animates(),
+        "the test's motion does not depend on the system"
+    );
     settle(&mut a);
     // Under high contrast the page list's hover fill changes at once: no fade, no frame asked.
     let item = a.ui.settings.as_ref().unwrap().list_item_rect(0);

@@ -1246,6 +1246,57 @@ fn a_behind_window_is_not_focused_by_a_hand_over() {
     assert_eq!(a.hand_overs_focused, 1, "an ordinary hand-over focuses");
 }
 
+#[test]
+fn a_behind_launch_claims_the_folder_and_only_an_ordinary_one_hands_over() {
+    use mdshared_app::folder_lock::Claim;
+    use std::cell::Cell;
+    let dir = std::env::temp_dir().join(format!("mdview-admit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let settings = dir.join("settings.ini");
+    let mut args = Args {
+        behind: true,
+        ..Args::default()
+    };
+    let claims = Cell::new(0);
+    let out = admit(&args, Some(settings.clone()), |path, mut forward, wait| {
+        claims.set(claims.get() + 1);
+        assert_eq!(path, settings);
+        assert_eq!(wait, Duration::ZERO, "no window is waited for");
+        assert!(!forward(), "a --behind run never hands its files over");
+        Claim::Own(None)
+    });
+    assert_eq!(claims.get(), 1, "the folder is still claimed");
+    match out {
+        Admission::Run {
+            session,
+            note,
+            lock,
+        } => {
+            assert_eq!(session, Some(settings.clone()), "the session is kept");
+            assert!(note.is_none() && lock.is_none());
+        }
+        Admission::Handed => panic!("a --behind run handed over"),
+    }
+    // A folder another window holds: no session, so neither its port file nor it is written.
+    let out = admit(&args, Some(settings.clone()), |_, _, _| Claim::Busy);
+    match out {
+        Admission::Run {
+            session: None,
+            note: Some(_),
+            ..
+        } => {}
+        _ => panic!("a busy folder leaves the launch without its session"),
+    }
+    // An ordinary launch hands its files over when a window answers, waiting for one to listen.
+    args.behind = false;
+    let out = admit(&args, Some(settings.clone()), |_, _, wait| {
+        assert_eq!(wait, mdshared_app::folder_lock::WAIT);
+        Claim::Handed
+    });
+    assert!(matches!(out, Admission::Handed));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A scratch folder with one long document, and an app showing it.
 pub(super) fn live_app(name: &str) -> (App, PathBuf, PathBuf) {
     let dir = std::env::temp_dir().join(format!("mdview-live-{name}-{}", std::process::id()));

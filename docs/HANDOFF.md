@@ -109,9 +109,13 @@ list and **every row changed while the group has been in flight** (`settings_cha
 kept until the group settles and cleared when the dialog opens or closes). The list is what the
 first review fixed: with only the last changed row redrawn, a second switch turned while the
 first was still sliding was drawn once and its knob froze part way. A card with a dropdown is
-drawn whole instead: a choice of more than three options is one, its menu reaches past the card,
-and the shared form does not say whether one is open, so any page with such a row keeps the whole
-window in the frame's business (mdview's pages have none today).
+drawn whole instead: a choice of more than three options is one, and so is a row an application
+forced to a dropdown whatever its count (its flag is private to the shared form, so the laid-out
+control answers: a segmented row has segment rects, a dropdown none). Its menu reaches past the
+card, and the shared form does not say whether one is open. Such a dialog moving counts as an
+overlay change on its own (`overlay_changed ... || (settings_moving && !settings_only)`), or the
+frames after the first would draw nothing and the card would freeze — the second review found
+exactly that, as mdview's own pages have no dropdown and every test passed without it.
 
 The system's contrast theme is read only while the dialog is open: when it opens and, while it is
 open, on a focus gain, a theme change and a motion wake (`App::read_motion`). With it closed
@@ -130,14 +134,20 @@ is there at once. The test's time is given (`App::pointer_moved_at`), not slept.
 ### `--behind`: a test run's window
 
 `--behind` opens the window inactive (`with_active(false)`) and `AlwaysOnBottom`, and makes the
-launch skip the single-instance hand-over, so its files are never handed to an mdview already
-running (whose `handed_over` would unminimize and focus its window); it runs as its own instance.
-`--maximize` is ignored under it, and a hand-over that reaches it does not focus it. The level set
-when the window is made stands: setting Normal first to force `AlwaysOnBottom` again (winit skips
-a level that has not changed) would raise the window for a moment, so it is not done. What
-remains: showing a window can raise it once, so a `--behind` window may show above the others as
-it appears and is not sent down afterwards; nothing of mdview's raises it after that. The
-decision is `Args::presence` (`hand_over`, `maximize`, `focus`), a pure function with a test.
+launch never hand its files to an mdview already running (whose `handed_over` would unminimize and
+focus its window): `Args::folder` gives a forward that is never called and a wait of zero, but the
+launch still **claims the settings folder** (`folder_lock::claim`), so it cannot write
+`instance.port` or the session under a window that has them. A folder another window holds leaves
+it without a session through the usual busy path, so neither file is written. `--maximize` is
+ignored under it, and so is a maximized place in the session (`Args::maximized`): a maximized
+window is shown with `SW_MAXIMIZE`, which activates it. A hand-over that reaches it does not focus
+it. The level set when the window is made stands: setting Normal first to force `AlwaysOnBottom`
+again (winit skips a level that has not changed) would raise the window for a moment, so it is not
+done. What remains: showing a window can raise it once, so a `--behind` window may show above the
+others as it appears and is not sent down afterwards; nothing of mdview's raises it after that.
+The decisions are `Args::presence`, `Args::folder` (pure, with tests) and `admit` (the folder
+step of `run`, which a test drives with its own `claim`, so re-gating `--behind` there fails it).
+`--behind --no-session` has no session to claim and claims none.
 
 ### Decisions
 
@@ -214,7 +224,23 @@ goes at once on leaving. The review's tests, each with the revert it fails under
   given to `pointer_moved_at` ignored, `Instant::now` used instead);
 - `--motion-at` gives at most 10000 ms (the cap removed).
 
-Workspace: 757 passed, 6 ignored (`mdview`'s own tests: 316 passed, 1 ignored).
+After the second review, five fixes, each failing with its fix reverted:
+- a `--behind` launch **claims the folder** and never hands over or waits, and a busy folder
+  leaves it without a session (the `--behind` filter put back in `admit`, which is the folder
+  step of `run`: its `claim` is then never called — the case the earlier `presence` test could
+  not see); the folder decision itself is `Args::folder`'s test (`hand_over` made true again);
+- **a page with a dropdown keeps the dialog drawn on every frame of a slide** — a choice of four
+  options, or a row `Item::dropdown()` forces to one whatever its count (the
+  `settings_moving && !settings_only` arm of `overlay_changed` removed: the first frame after
+  the change drew nothing and the card froze; `has_dropdown`'s forced case: the forced
+  detection removed);
+- a `--behind` window does not start maximized even where the session left it so (`maximized`
+  without `!behind`: showing it maximized activates it);
+- a test's motion state is the test's, not the machine's (`read_motion` reading
+  `platform::motion_reduced` again: on a machine with animations on, the reduced assertion
+  fails).
+
+Workspace: 763 passed, 6 ignored (`mdview`'s own tests: 322 passed, 1 ignored).
 
 ### Shots
 
