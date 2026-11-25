@@ -1929,6 +1929,18 @@ fn style(w: &Window, dark: bool, corners: Corners) {
     }
 }
 
+/// Whether a saved window place still shows: its title row's first reachable point (60 px in,
+/// 16 px down) must be on one of `monitors`, given as (x, y, width, height) in physical screen
+/// px. A window saved on a monitor that is gone — unplugged, or rearranged so that its place is
+/// on no screen — is not reachable, and the window opens on a present one instead (winit's own
+/// default place, as a first start).
+fn position_reachable(x: i32, y: i32, monitors: &[(i32, i32, u32, u32)]) -> bool {
+    monitors.iter().any(|&(mx, my, mw, mh)| {
+        let (px, py) = (x + 60, y + 16);
+        px >= mx && px < mx + mw as i32 && py >= my && py < my + mh as i32
+    })
+}
+
 #[cfg(windows)]
 fn frame_report(w: &Window) -> String {
     hwnd(w).map(platform::frame_report).unwrap_or_default()
@@ -1956,15 +1968,14 @@ impl ApplicationHandler<Wake> for App {
         // Back where it was, if a screen still shows that place: the title row's left end has
         // to be on one, or the window could not be reached.
         if let Some((x, y)) = self.ws.window_position() {
-            let reachable = event_loop.available_monitors().any(|monitor| {
-                let (origin, size) = (monitor.position(), monitor.size());
-                let (px, py) = (x + 60, y + 16);
-                px >= origin.x
-                    && px < origin.x + size.width as i32
-                    && py >= origin.y
-                    && py < origin.y + size.height as i32
-            });
-            if reachable {
+            let monitors: Vec<(i32, i32, u32, u32)> = event_loop
+                .available_monitors()
+                .map(|m| {
+                    let (origin, size) = (m.position(), m.size());
+                    (origin.x, origin.y, size.width, size.height)
+                })
+                .collect();
+            if position_reachable(x, y, &monitors) {
                 attributes = attributes.with_position(PhysicalPosition::new(x, y));
             }
         }

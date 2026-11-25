@@ -284,6 +284,29 @@ fn focus_mode_hides_chrome_and_escape_leaves() {
 }
 
 #[test]
+fn a_window_saved_on_a_monitor_that_is_gone_opens_on_a_present_one() {
+    let one = [(0, 0, 1920, 1080)];
+    assert!(position_reachable(100, 100, &one), "on the only monitor");
+    assert!(
+        !position_reachable(2600, 200, &one),
+        "the second monitor it was saved on is gone"
+    );
+    assert!(
+        !position_reachable(-200, 50, &one),
+        "pushed off the left edge, the title row is on no screen"
+    );
+    // With both present, the same place is reachable again.
+    let two = [(0, 0, 1920, 1080), (1920, 0, 1920, 1080)];
+    assert!(position_reachable(2600, 200, &two));
+    // A monitor above the first: the window's title row there is on it.
+    let stacked = [(0, 0, 1920, 1080), (0, -1080, 1920, 1080)];
+    assert!(position_reachable(100, -1000, &stacked));
+    // The very corner: the title row's point counts as on the monitor it starts on.
+    assert!(position_reachable(-60, -16, &one));
+    assert!(!position_reachable(-60, -17, &one), "one pixel above it");
+}
+
+#[test]
 fn the_update_bar_pushes_the_page_down_and_closes() {
     let mut a = app(&["linked.md"]);
     let before = page::viewport(&a.ws, a.areas.page);

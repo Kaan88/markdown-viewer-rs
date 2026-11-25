@@ -30,7 +30,7 @@ missing was built. One commit per item, each with a test that fails with the fix
 | X3 tree chevron `draw_disclosure_animated_with`, rows named by path | already done (`motion::folder(path)`, `motion::notes_fold(key)`) |
 | L10 `Form::draw_animated` / `set_high_contrast` | already done |
 | L1 `submenu::Cascade` in place of the hand-made submenus and dwell | not yet |
-| W3 `window_state` restores onto a monitor that still exists | not yet |
+| W3 `window_state` restores onto a monitor that still exists | done as the behaviour asked for (mdview keeps its own physical place in the session, not a shared `WindowState`): the place is used only if the title row's left end is on a monitor that is there; the check is now `position_reachable`, with a test |
 
 **D4 is stopped on a shared defect.** In `draw_win_button_animated`, `draw_tab_animated` and
 `draw_new_tab_button_animated` (through `button_fill_animated`) the early-out is
