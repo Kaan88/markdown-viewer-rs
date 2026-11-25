@@ -55,8 +55,11 @@ toasts, a second pin move, the menu's preset, the docs.
     shared.
   - Never more than three are drawn, those leaving included (`motion::TOASTS_MAX`; the shared
     stack counts only those not leaving, so a fourth push could show four for 167 ms: the
-    window draws the newest three).
-  - A toast that would reach above the page (a short window) is left out; a lifting toast moves
+    window draws the newest three). A toast pushed out of the newest three vanishes at once
+    rather than playing its exit: left so on purpose after the second review, for the owner's
+    look.
+  - A toast that would reach above the page (a short window) is left out, except the bottom one
+    (no lift), so a window however short still shows its one status; a lifting toast moves
     by whole device pixels (`toast_y`), so its text keeps the grid it has at rest; the height
     used for the lift is `Bubble::toast`'s own `rect.h` (shared exports no constant for it).
   - Each leaves of itself at its time by `document::TOAST`'s exit (167 ms each way,
@@ -122,6 +125,8 @@ with the revert each fails under:
 - a window resized while a toast comes in shows it at rest in its new place (the presence out
   of the overlay signature);
 - toasts that would reach above the page in a 520x200 window are left out (the clamp removed);
+- a 520x120 window too short for a toast still draws its one status (the bottom toast's
+  exemption from the clamp removed);
 - a lift moves by whole device pixels at 1, 1.25, 1.5 and 2 (the rounding removed);
 - a moving shot moves with the setting off and reduced motion on (the forced policy removed);
 - the stacking test's 44 px lift fails with the lift's height taken as any other number than

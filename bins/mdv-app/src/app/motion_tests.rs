@@ -903,3 +903,20 @@ fn the_files_pane_hidden_mid_turn_leaves_no_timer() {
     assert!(a.anim.group_deadlines().is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_window_too_short_for_a_toast_still_shows_its_one_status() {
+    let mut a = app(&["showcase.md"]);
+    a.size = (520, 120);
+    a.compose();
+    a.ws.set_status("Zoom 110%");
+    a.compose();
+    let page = a.areas.page;
+    let mut p = Painter::new(&mut a.screen, &mut a.gfx, a.scale);
+    let rest = Bubble::toast(&mut p, "Zoom 110%", page).rect;
+    assert!(
+        rest.y < page.y + crate::motion::TOAST_GAP,
+        "too short: {rest:?} in {page:?}"
+    );
+    assert_eq!(a.overlay_bounds.len(), 1, "the bottom toast is drawn");
+}

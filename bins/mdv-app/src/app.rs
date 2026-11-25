@@ -963,11 +963,12 @@ impl App {
             }
             // The toasts, each lifted above the ones under it to a whole device pixel (so its
             // text stays on the grid), at its presence. One that would reach above the page
-            // (a short window) is left out.
+            // (a short window) is left out, except the bottom one: a window however short still
+            // shows its one status.
             for (_, text, t, lift) in &self.toast_frame {
                 let mut b = Bubble::toast(&mut p, text, page);
                 b.rect.y = toast_y(b.rect.y, *lift, self.scale);
-                if b.rect.y < page.y + crate::motion::TOAST_GAP {
+                if *lift > 0.0 && b.rect.y < page.y + crate::motion::TOAST_GAP {
                     continue;
                 }
                 bubbles.push((b, *t));
