@@ -916,12 +916,16 @@ impl App {
             self.place(rect, (request.path.clone(), request.doc.clone()));
         }
         let only_following = !requests.is_empty() && requests.iter().all(|r| r.follow);
-        if !only_following
-            && !self.args.behind
-            && let Some(w) = &self.window
-        {
-            w.set_minimized(false);
-            w.focus_window();
+        // A `--behind` window is never brought forward by a hand-over: no focus, no unminimize.
+        if !only_following && self.args.presence().focus {
+            #[cfg(test)]
+            {
+                self.hand_overs_focused += 1;
+            }
+            if let Some(w) = &self.window {
+                w.set_minimized(false);
+                w.focus_window();
+            }
         }
     }
 

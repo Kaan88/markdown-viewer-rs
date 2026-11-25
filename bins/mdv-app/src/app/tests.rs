@@ -1229,6 +1229,23 @@ fn a_hand_over_opens_at_a_line_and_a_follow_only_scrolls() {
     assert!((50..=60).contains(&top), "{top}");
 }
 
+#[test]
+fn a_behind_window_is_not_focused_by_a_hand_over() {
+    let mut a = app(&["showcase.md", "tables.md"]);
+    let showcase = fixture("showcase.md");
+    a.args.behind = true;
+    a.handed_over(vec![Request::new(&showcase)]);
+    assert_eq!(a.hand_overs_focused, 0, "a --behind run asks for no focus");
+    // It still opens what was handed over: only the focus is dropped.
+    assert_eq!(
+        a.ws.active_tab().map(|t| t.path().to_path_buf()),
+        Some(mdview_core::files::canonical_or_absolute(&showcase))
+    );
+    a.args.behind = false;
+    a.handed_over(vec![Request::new(&fixture("tables.md"))]);
+    assert_eq!(a.hand_overs_focused, 1, "an ordinary hand-over focuses");
+}
+
 /// A scratch folder with one long document, and an app showing it.
 pub(super) fn live_app(name: &str) -> (App, PathBuf, PathBuf) {
     let dir = std::env::temp_dir().join(format!("mdview-live-{name}-{}", std::process::id()));

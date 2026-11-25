@@ -349,6 +349,10 @@ struct App {
     /// asks for none).
     #[cfg(test)]
     contrast_reads: u32,
+    /// How many hand-overs asked to focus the window (tests see that a `--behind` run asks for
+    /// none). The decision is made whether or not a window is there to raise.
+    #[cfg(test)]
+    hand_overs_focused: u32,
 }
 
 impl App {
@@ -462,6 +466,8 @@ impl App {
             contrast: None,
             #[cfg(test)]
             contrast_reads: 0,
+            #[cfg(test)]
+            hand_overs_focused: 0,
         }
     }
 
@@ -1445,12 +1451,11 @@ impl App {
             stage(self.started, "first frame drawn and presented hidden");
             if let Some(w) = &self.window {
                 w.set_visible(true);
-                // Showing a window raises it, so a test run's window is sent under the others
-                // again (winit skips a level that has not changed, hence Normal first).
-                if self.args.behind {
-                    w.set_window_level(WindowLevel::Normal);
-                    w.set_window_level(WindowLevel::AlwaysOnBottom);
-                }
+                // Showing a window can raise it. A test run's window keeps the level it was
+                // made with (`AlwaysOnBottom`): setting Normal first, to force the level again
+                // (winit skips a level that has not changed), would raise it for a moment, so
+                // a `--behind` window may show above the others once and is not sent down
+                // afterwards. Nothing else of mdview's raises it.
             }
             stage(self.started, "window shown");
             // The first frame was presented to a hidden window, which shows nothing: send it
@@ -1839,7 +1844,7 @@ impl ApplicationHandler<Wake> for App {
             .with_decorations(false)
             .with_visible(false)
             .with_inner_size(LogicalSize::new(w.max(520) as f64, h.max(360) as f64))
-            .with_maximized(max || self.args.maximize);
+            .with_maximized(max || self.args.presence().maximize);
         // A test run: shown without the focus and kept under every other window.
         if self.args.behind {
             attributes = attributes
@@ -2535,7 +2540,12 @@ pub fn run() -> i32 {
     let mut _folder_lock = None;
     // Why this window runs without its session, shown once it is up.
     let mut no_session_note: Option<String> = None;
-    if let Some(settings) = session.clone().filter(|_| args.shot.is_none()) {
+    // A `--behind` run is its own instance: handing its files to an mdview already running would
+    // raise that window, which a test run must never do.
+    if let Some(settings) = session
+        .clone()
+        .filter(|_| args.shot.is_none() && args.presence().hand_over)
+    {
         // Started by a restart: the window that started it is still closing; wait it out, or the
         // hand-over below would go to it and leave no window.
         mdshared_app::relaunch::wait_for_predecessor(std::env::args().skip(1), &settings);

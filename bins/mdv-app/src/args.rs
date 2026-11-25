@@ -141,12 +141,38 @@ pub struct Args {
     pub from: Option<String>,
 }
 
+/// What a launch may do that could bring its window forward: see [`Args::presence`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Presence {
+    /// Hand this launch's files to an mdview already running (which raises its window).
+    pub hand_over: bool,
+    /// Start maximized, as `--maximize` asks.
+    pub maximize: bool,
+    /// Take the keyboard when a hand-over arrives.
+    pub focus: bool,
+}
+
 fn pair<T: std::str::FromStr>(s: &str, sep: char) -> Option<(T, T)> {
     let (a, b) = s.split_once(sep)?;
     Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
 }
 
 impl Args {
+    /// What this launch may do that could bring its window forward. A `--behind` run is a
+    /// test's, and its window must never come to the front: it does not hand its files to an
+    /// mdview already running (whose window would be raised and focused), it does not start
+    /// maximized even with `--maximize`, and a hand-over that reaches it does not focus it.
+    /// The level given when the window is made (`AlwaysOnBottom`) stands: setting Normal first
+    /// to force the level again would raise the window for a moment, so it is not done, and a
+    /// `--behind` window may show above the others once when it is shown.
+    pub fn presence(&self) -> Presence {
+        Presence {
+            hand_over: !self.behind,
+            maximize: self.maximize && !self.behind,
+            focus: !self.behind,
+        }
+    }
+
     /// What each file asks of a window that is already running, when the launch asked for more than
     /// opening it: see [`Request`]. Empty for an ordinary launch.
     pub fn requests(&self) -> Vec<Request> {
@@ -313,6 +339,30 @@ mod tests {
     fn behind_is_asked_for_by_its_flag_only() {
         assert!(parse("--no-session --behind a.md").behind);
         assert!(!parse("--no-session a.md").behind);
+    }
+
+    #[test]
+    fn behind_never_brings_a_window_forward() {
+        // No hand-over (a running mdview would raise its window), no maximize, no focus.
+        assert_eq!(
+            parse("--behind --maximize a.md").presence(),
+            Presence {
+                hand_over: false,
+                maximize: false,
+                focus: false,
+            }
+        );
+        // An ordinary launch hands over, starts maximized when asked, and takes the focus.
+        assert_eq!(
+            parse("--maximize a.md").presence(),
+            Presence {
+                hand_over: true,
+                maximize: true,
+                focus: true,
+            }
+        );
+        // A plain launch asks for neither.
+        assert!(!parse("a.md").presence().maximize);
     }
 
     #[test]
