@@ -1087,6 +1087,48 @@ fn with_animations_off_a_settings_switch_changes_at_once() {
     );
 }
 
+#[test]
+fn two_settings_rows_changed_while_the_dialog_moves_are_drawn_as_a_whole_redraw_would() {
+    let mut a = moving(&["showcase.md"]);
+    settings_at(&mut a, s::TICK_BOXES);
+    settle(&mut a);
+    // The first switch turned, and two frames into its slide the second one, so the first is
+    // still moving when the second change arrives.
+    a.key_named(KeyName::Space, None);
+    a.compose();
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    assert!(a.ui.settings.as_mut().unwrap().focus_row(s::PREVIEWS));
+    a.key_named(KeyName::Space, None);
+    a.compose();
+    let card = a.ui.settings.as_ref().unwrap().rect();
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        a.frame_clock = a.frame_clock.map(|t| t + FRAME);
+        let (damage, _) = a.compose();
+        let part = a.screen.pixels.clone();
+        let (x1, y1) = (
+            (card.right() * a.scale) as i32,
+            (card.bottom() * a.scale) as i32,
+        );
+        assert!(
+            damage
+                .iter()
+                .all(|d| d.0 >= (card.x * a.scale) as i32 && d.2 <= x1 + 1 && d.3 <= y1 + 1),
+            "frame {frames}: the card alone"
+        );
+        a.full = true;
+        a.compose();
+        assert!(
+            part == a.screen.pixels,
+            "frame {frames}: the rows of both changes are drawn"
+        );
+        frames += 1;
+        assert!(frames < 60);
+    }
+    assert!(frames >= 3, "both slides ran: {frames}");
+}
+
 // ---- tooltips, from resting -----------------------------------------------------------------
 
 /// The middle of the minimize button, which has a tip.

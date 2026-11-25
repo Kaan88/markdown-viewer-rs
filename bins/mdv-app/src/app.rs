@@ -329,8 +329,10 @@ struct App {
     menu_t: (f32, f32),
     /// How present the tooltip is this frame, 0 to 1 (0: none shows).
     tip_t: f32,
-    /// The setting the dialog changed last: its row is where a switch or a segment slides.
-    settings_changed: Option<u32>,
+    /// The settings the dialog changed while `motion::SETTINGS` was in flight: each one's row
+    /// is where a switch slides or a segment moves, and all of them are drawn again on the
+    /// frames of it. Cleared when the group settles and when the dialog opens or closes.
+    settings_changed: Vec<u32>,
     /// The system's wish for less motion is watched (from the first frame on).
     motion_watched: bool,
     /// The toasts on screen and leaving (`crate::motion::toasts`), the status line they were
@@ -445,7 +447,7 @@ impl App {
             menu_t: (1.0, 1.0),
             motion_watched: false,
             tip_t: 0.0,
-            settings_changed: None,
+            settings_changed: Vec::new(),
             toasts: crate::motion::toasts(),
             toast_seen: None,
             toast_frame: Vec::new(),
@@ -804,6 +806,13 @@ impl App {
         self.sync_toasts(now);
         let done = self.compose_frame();
         self.anim_due = self.anim.end_frame();
+        // The rows changed while the settings dialog was sliding are kept for its frames, so a
+        // change that lands a frame or two into a slide is drawn for as long as the first one
+        // moves. Once the group has settled, the next change starts a new list.
+        let settings = Id::new(crate::motion::SETTINGS);
+        if !(self.anim.group_deadlines().iter()).any(|(g, _)| *g == settings) {
+            self.settings_changed.clear();
+        }
         done
     }
 
@@ -1267,17 +1276,21 @@ impl App {
                 }
             } else if settings_only && let Some(f) = self.ui.settings.as_mut() {
                 // Only the dialog moves, and only where something of it can: the page list (a
-                // hover fill fading) and the row of the setting changed last (a switch's knob, a
-                // segment). The card is opaque there, so those parts, short of its rounded
-                // corners, are drawn again alone, over what is there; the rest is as it was.
+                // hover fill fading) and every row a setting changed while the group was in
+                // flight (a switch's knob, a segment). The card is opaque there, so those parts,
+                // short of its rounded corners, are drawn again alone, over what is there; the
+                // rest is as it was.
                 let card = f.rect();
                 let corner = SETTINGS_CARD_CORNER;
                 let inner = Rect::new(card.x, card.y + corner, card.w, card.h - 2.0 * corner);
                 let list = Rect::new(inner.x, inner.y, f.page_rect().x - inner.x, inner.h);
-                let row = (self.settings_changed.map(|id| f.row_rect(id))).map(|r| meet(r, inner));
+                let rows: Vec<Rect> = (self.settings_changed.iter())
+                    .map(|id| meet(f.row_rect(*id), inner))
+                    .filter(|r| r.w > 0.0 && r.h > 0.0)
+                    .collect();
                 let window = Rect::new(0.0, 0.0, w, h);
                 let id = crate::motion::SETTINGS;
-                for clip in std::iter::once(list).chain(row) {
+                for clip in std::iter::once(list).chain(rows) {
                     if clip.w <= 0.0 || clip.h <= 0.0 {
                         continue;
                     }
