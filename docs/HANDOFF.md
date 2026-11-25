@@ -26,11 +26,11 @@ missing was built. One commit per item, each with a test that fails with the fix
 | D7 `watch_motion_reduced` on a helper thread | already done: `App::watch_motion_with` starts the watch on a short-lived helper thread (on Windows it makes a hidden window and may wait 5 s for it); the wake only sends `Wake::Motion`, and the setting is read on the window thread after it |
 | X3 `Menu::draw_in_animated` (hover row) | done (`2c35084`) |
 | X3 `Palette::draw_presence` | done: the card fades and drops in on each opening (`motion::palette`, a serial an opening; closing instant), its presence in the overlay signature so its frames are drawn |
-| X3 `notice::draw_sliding` / `bar_height` | done: each of the three notice bars slides in by its own presence (`motion::bar`), its height taken by `notice::bar_height`, and the page is laid out under what shows (`page::Bars`, `viewport_bars`) on every frame; a bar that goes is forgotten, so a later one slides in again |
+| X3 `notice::draw_sliding` / `bar_height` | done: each of the three notice bars slides in by its own presence (`motion::bar`), its height taken by `notice::bar_height`, and the page is laid out under what shows (`page::Bars`, `viewport_bars`) on every frame; a bar that goes is forgotten, so a later one slides in again. A bar that is already there on the window's first frame is in place (`App::bar_t`), so the frame the window first shows never slides, and nothing jumps when the system's motion setting is read after it |
 | X3 tree chevron `draw_disclosure_animated_with`, rows named by path | already done (`motion::folder(path)`, `motion::notes_fold(key)`) |
 | L10 `Form::draw_animated` / `set_high_contrast` | already done |
 | L1 `submenu::Cascade` in place of the hand-made submenus and dwell | **not done this stage.** mdview's one hand-made submenu (the main menu's Open recent) is a `Menu` inside `Popup` with `dwell: Option<(usize, Instant)>`, `SUBMENU_DWELL` (300 ms) and its own key handling; moving it to `Cascade` means the popup body becoming a `Menu`/`Cascade` enum, its draw, hit tests, keys, clicks and about thirty tests — a rewrite, not a wiring, and it was left for its own session rather than half done |
-| W3 `window_state` restores onto a monitor that still exists | done as the behaviour asked for (mdview keeps its own physical place in the session, not a shared `WindowState`): the place is used only if the title row's left end is on a monitor that is there; the check is now `position_reachable`, with a test |
+| W3 `window_state` restores onto a monitor that still exists | the behaviour was already there (mdview keeps its own physical place in the session, not a shared `WindowState`): a place is used only if the title row's left end is on a monitor that is there. This stage only moved that check into the pure `position_reachable` and tested it — no change of behaviour |
 
 **D4 is stopped on a shared defect.** In `draw_win_button_animated`, `draw_tab_animated` and
 `draw_new_tab_button_animated` (through `button_fill_animated`) the early-out is
@@ -45,7 +45,8 @@ guard draws the rest look at `a = 0`). Until then the title row keeps its at-onc
 
 ### Tests, with the revert each fails under
 
-Five tests, one per item that changed something (the "already done" items needed none):
+Five tests, one per item that changed something (the "already done" items needed none); the
+review of the stage added a sixth, and its scale counterparts below.
 
 - **the palette's damage** (`the_palette_is_damaged_by_its_presence_bounds_not_a_hand_made_margin`):
   the presence bounds are among the damage and the hand-made `inset(-20)` is not — the old
@@ -57,14 +58,35 @@ Five tests, one per item that changed something (the "already done" items needed
 - **the palette's entrance** (`the_palette_fades_and_drops_in_as_it_opens_and_rests_as_a_still_one`):
   its first frame is 0 with no card drawn, it ends at 1 and at the still run's pixels — fails with
   `draw` for `draw_presence`, and with `palette_t` out of the overlay signature (`5bedbbc`);
-- **a notice bar's slide** (`a_notice_bar_slides_in_and_the_page_moves_down_under_it`): 0 on the
-  first frame with no room taken, part way one frame later with the viewport following, whole at
-  the still run's pixels — fails with `draw_page` given `Bars::FULL` (`79e530c`);
+- **a notice bar's slide** (`a_notice_bar_slides_in_and_the_page_moves_down_under_it`, and the
+  same at 1.25 in `…_at_scale_1_25_too`): 0 on the first frame with no room taken, part way one
+  frame later with the viewport following, whole at the still run's pixels — fails with
+  `draw_page` given `Bars::FULL` (`79e530c`); the menu hover has the same pair of tests.
+- **a bar that is there at launch is in place** (`a_bar_that_is_there_at_launch_is_in_place_on_the_first_frame`):
+  a crash report waiting when the window starts is at 1 on the first frame, no timer is left,
+  and the frame is the still run's pixel for pixel; a bar that arrives after the first frame
+  still starts its slide — fails with the `frames == 0` arm of `App::bar_t` removed (the bar
+  then slides in on frame 2, when `read_motion` has also run, and the page jumps 34 px).
+- **the palette closes at once** (`the_palette_closes_at_once`): after the entrance, closing
+  leaves no timer and the still run's pixels — fails with the presence asked with `shown: false`
+  when the palette is gone (an exit the window does not play).
 - **a saved place on a monitor that is gone** (`a_window_saved_on_a_monitor_that_is_gone_opens_on_a_present_one`):
   reachable on the only monitor, not on a place where the second one was, the corner cases —
   fails with `position_reachable` made to answer true (`445403a`).
 
-Workspace after the stage: 769 passed, 6 ignored (`mdview`'s own: 328 passed, 1 ignored).
+**Next: L1.** mdview's one hand-made submenu, the main menu's **Open recent**, is a `Menu` kept
+inside `Popup` with `dwell: Option<(usize, Instant)>`, `ui::SUBMENU_DWELL` (300 ms) and its own
+pointer, key and click handling, plus about thirty tests in `app/tests.rs`. Moving it to
+`submenu::Cascade` means: the popup body becomes a `Menu`/`Cascade` enum (the palette's body has
+no `Menu`), `Popup`'s draw, `hit`, keys and `timers` delegate to the cascade, the dwell and its
+constant go, the damage comes from `presence_bounds` (a cascade's submenu is its `menu(1)`'s
+rect), and the tests are kept one for one (the 300 ms is `Cascade::with_delay`). Read shared's
+`submenu.rs` at `535ad4c` first: `Cascade` has `menu`, `depth`, `pointer`, `key` returning
+`Outcome`, `rect`, `set_access_visible` and `with_look`.
+
+Workspace after the stage: 769 passed, 6 ignored (`mdview`'s own: 328 passed, 1 ignored). With
+the review's fixes (the launch rule, the scale pairs, the palette's close): 773 passed, 6 ignored
+(`mdview`'s own: 332 passed, 1 ignored).
 
 ### Shots
 
@@ -73,7 +95,9 @@ Workspace after the stage: 769 passed, 6 ignored (`mdview`'s own: 328 passed, 1 
 (`--palette "" --motion-at 41`: the card about half there, paler, its page showing through) and
 `update-rising-light` / `-dark` (`--update-bar available --motion-at 21`: about 12 of the bar's
 34 px, its label cut, the page under it). No other shot changed — the animated draws at rest are
-the plain ones pixel for pixel, as shared's tests say.
+the plain ones pixel for pixel, as shared's tests say. The review's launch rule changed the two
+`update-rising` shots, and only them (ten rows inside the bar): the window's first frame now has
+the bar in place, so the slide the shot shows starts where the shot restarts it.
 
 ### Numbers (release, this PC, 2026-11-26)
 

@@ -26,6 +26,15 @@ fn step(a: &mut App, by: Duration) {
     a.compose();
 }
 
+/// A display at `scale`, the window grown to the same logical size (1280x800).
+fn at_scale(a: &mut App, scale: f32) {
+    a.scale = scale;
+    a.size = (
+        (1280.0 * scale).round() as u32,
+        (800.0 * scale).round() as u32,
+    );
+}
+
 /// The colour of the pixel at logical (x, y).
 fn pixel(a: &App, x: f32, y: f32) -> [u8; 4] {
     let (x, y) = ((x * a.scale) as usize, (y * a.scale) as usize);
@@ -114,9 +123,10 @@ fn a_submenu_fades_in_beside_its_menu() {
     assert!(a.anim_due.is_none());
 }
 
-#[test]
-fn a_menu_rows_hover_fill_fades_in_and_the_overlays_are_drawn_for_it() {
+/// The menu hover test at `scale`, so a scaled display is covered too.
+fn menu_hover_fade_at(scale: f32) {
     let mut a = moving(&["showcase.md"]);
+    at_scale(&mut a, scale);
     a.open_popup(PopupKind::Main);
     a.compose();
     let mut frames = 0;
@@ -153,6 +163,7 @@ fn a_menu_rows_hover_fill_fades_in_and_the_overlays_are_drawn_for_it() {
     assert_ne!(end, mid, "the fill arrived");
     // At rest it is the menu a still run draws with the pointer on the row.
     let mut still = app(&["showcase.md"]);
+    at_scale(&mut still, scale);
     still.open_popup(PopupKind::Main);
     still.compose();
     still.pointer_moved(x, y);
@@ -161,6 +172,16 @@ fn a_menu_rows_hover_fill_fades_in_and_the_overlays_are_drawn_for_it() {
     }
     still.compose();
     assert_eq!(end, pixel(&still, x, y));
+}
+
+#[test]
+fn a_menu_rows_hover_fill_fades_in_and_the_overlays_are_drawn_for_it() {
+    menu_hover_fade_at(1.0);
+}
+
+#[test]
+fn a_menu_rows_hover_fill_fades_in_at_scale_1_25_too() {
+    menu_hover_fade_at(1.25);
 }
 
 #[test]
@@ -754,9 +775,11 @@ fn a_confirmation_pushed_onto_others_waits_until_they_have_lifted() {
     );
 }
 
-#[test]
-fn a_notice_bar_slides_in_and_the_page_moves_down_under_it() {
+/// The bar test at `scale`: the same checks, so 1.25 (a quarter more device pixels per logical
+/// one) is covered too.
+fn notice_bar_slide_at(scale: f32) {
     let mut a = moving(&["showcase.md"]);
+    at_scale(&mut a, scale);
     a.full = true;
     a.compose();
     let before = page::viewport_bars(&a.ws, a.areas.page, a.bars);
@@ -764,6 +787,7 @@ fn a_notice_bar_slides_in_and_the_page_moves_down_under_it() {
     // A still run with the bar: the strip it takes is the page's until it is there.
     let at_rest = {
         let mut still = app(&["showcase.md"]);
+        at_scale(&mut still, scale);
         still.ws.preview_update("available");
         still.compose();
         still
@@ -838,6 +862,73 @@ fn a_notice_bar_slides_in_and_the_page_moves_down_under_it() {
     // And nothing is left moving.
     step(&mut a, Duration::from_secs(2));
     assert!(a.anim_due.is_none());
+}
+
+#[test]
+fn a_notice_bar_slides_in_and_the_page_moves_down_under_it() {
+    notice_bar_slide_at(1.0);
+}
+
+#[test]
+fn a_notice_bar_slides_in_at_scale_1_25_too() {
+    notice_bar_slide_at(1.25);
+}
+
+#[test]
+fn a_bar_that_is_there_at_launch_is_in_place_on_the_first_frame() {
+    let dir = std::env::temp_dir().join(format!("mdview-bar-launch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("crash-00000000001.txt"),
+        "mdview closed because of an error.\n",
+    )
+    .unwrap();
+    let report = mdshared_app::crash::pending(&dir).expect("a pending report");
+    // A window that starts with the bar: the frame it shows must be a still one.
+    let mut still = app(&["linked.md"]);
+    still.ws.set_crash_report(Some(report.clone()));
+    still.full = true;
+    still.compose();
+    let mut a = moving(&["linked.md"]);
+    a.ws.set_crash_report(Some(report.clone()));
+    // This compose is its first frame.
+    a.frames = 0;
+    a.full = true;
+    a.compose();
+    assert_eq!(a.bars.crash, 1.0, "in place, not sliding");
+    assert!(a.anim_due.is_none(), "and nothing moves");
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "the first frame is the still run's, pixel for pixel"
+    );
+    // A bar that arrives after the window has shown once slides in.
+    a.ws.set_crash_report(None);
+    a.compose();
+    a.ws.set_crash_report(Some(report));
+    a.compose();
+    assert_eq!(a.bars.crash, 0.0, "a bar arriving later starts its slide");
+    assert!(a.anim_due.is_some(), "and asks for its frames");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_palette_closes_at_once() {
+    let mut a = moving(&["showcase.md"]);
+    a.open_palette("");
+    a.compose();
+    settle(&mut a);
+    assert_eq!(a.palette_t, 1.0);
+    let mut plain = app(&["showcase.md"]);
+    plain.full = true;
+    plain.compose();
+    a.ui.palette = None;
+    a.compose();
+    assert!(a.anim_due.is_none(), "closing plays nothing");
+    assert!(
+        a.screen.pixels == plain.screen.pixels,
+        "nothing of the palette is left, pixel for pixel"
+    );
 }
 
 #[test]

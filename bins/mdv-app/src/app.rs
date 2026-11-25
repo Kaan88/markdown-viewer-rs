@@ -333,6 +333,8 @@ struct App {
     palette_serial: u64,
     /// How high each notice bar shows this frame: the page is laid out under them.
     bars: page::Bars,
+    /// Frames composed so far: the first one has the bars the window starts with in place.
+    frames: u64,
     /// How present the tooltip is this frame, 0 to 1 (0: none shows).
     tip_t: f32,
     /// The settings the dialog changed while `motion::SETTINGS` was in flight: each one's row
@@ -469,6 +471,7 @@ impl App {
             palette_t: 1.0,
             palette_serial: 0,
             bars: page::Bars::FULL,
+            frames: 0,
             motion_watched: false,
             tip_t: 0.0,
             settings_changed: Vec::new(),
@@ -853,6 +856,7 @@ impl App {
         };
         self.sync_toasts(now);
         let done = self.compose_frame();
+        self.frames = self.frames.saturating_add(1);
         self.anim_due = self.anim.end_frame();
         // The rows changed while the settings dialog was sliding are kept for its frames, so a
         // change that lands a frame or two into a slide is drawn for as long as the first one
@@ -865,11 +869,17 @@ impl App {
     }
 
     /// How present notice bar `key` is, `shown` being whether the workspace has it. A bar that
-    /// goes is forgotten: the page is laid out without it at once, so nothing would draw its exit.
+    /// is there before the window's first frame is in place at once: the frame that shows the
+    /// window must not be a slide, and must not jump when the system's wish for less motion is
+    /// read after it. A bar that arrives later slides in. A bar that goes is forgotten, so a
+    /// later one slides in again.
     fn bar_t(&mut self, key: &str, shown: bool) -> f32 {
         if !shown {
             self.anim.forget(("bar", key));
             return 0.0;
+        }
+        if self.frames == 0 {
+            return 1.0;
         }
         crate::motion::bar(&mut self.anim, key)
     }
