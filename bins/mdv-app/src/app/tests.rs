@@ -1258,10 +1258,12 @@ fn a_behind_launch_claims_the_folder_and_only_an_ordinary_one_hands_over() {
     // which is what a `--behind` launch must never do.
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
-    std::fs::write(settings.with_file_name("instance.port"), port.to_string()).unwrap();
+    std::fs::write(mdview_core::single::port_file(&settings), port.to_string()).unwrap();
     #[cfg(windows)]
-    let _lock = {
+    let lock = {
         use std::os::windows::fs::OpenOptionsExt;
+        // shared's `single::lock_file` is private: the lock is the file the single-instance check
+        // opens with no sharing, beside the settings.
         std::fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -1272,13 +1274,18 @@ fn a_behind_launch_claims_the_folder_and_only_an_ordinary_one_hands_over() {
     };
     listener.set_nonblocking(true).unwrap();
     let server = std::thread::spawn(move || {
-        use std::io::Write;
+        use std::io::{BufRead, BufReader, Write};
         // Long enough for a forward that should not happen to arrive and be answered.
         let end = Instant::now() + Duration::from_millis(500);
         while Instant::now() < end {
             match listener.accept() {
-                Ok((mut s, _)) => {
-                    let _ = s.write_all(b"ok\n");
+                Ok((stream, _)) => {
+                    // Read the message up to its empty line before answering, as a listener does,
+                    // so the forward does not see a reset with bytes unread.
+                    let mut reader = BufReader::new(&stream);
+                    let lines = (&mut reader).lines().map_while(Result::ok);
+                    let _body: Vec<String> = lines.take_while(|l| !l.is_empty()).collect();
+                    let _ = (&stream).write_all(b"ok\n");
                     return;
                 }
                 Err(_) => std::thread::sleep(Duration::from_millis(5)),
@@ -1330,6 +1337,8 @@ fn a_behind_launch_claims_the_folder_and_only_an_ordinary_one_hands_over() {
         Claim::Handed
     });
     assert!(matches!(out, Admission::Handed));
+    #[cfg(windows)]
+    drop(lock);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

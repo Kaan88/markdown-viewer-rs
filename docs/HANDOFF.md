@@ -141,7 +141,9 @@ settings folder** (`folder_lock::claim`), so it cannot write the session under a
 it. A folder another window holds leaves it without a session through the usual busy path, so the
 session is not written. It does not listen for hand-overs either (`Args::listens`, gated in
 `run`): no `instance.port` is written, and a file the user opens never reaches a hidden test
-window. `--maximize` is ignored under it, and so is a maximized place in the session
+window. A `--behind` run on a real session therefore holds the folder for as long as it lives, so
+the user's own launch waits `folder_lock::WAIT` (10 s) and then opens without its session: test
+runs must always use a scratch `MDVIEW_SETTINGS`. `--maximize` is ignored under it, and so is a maximized place in the session
 (`Args::maximized`): a maximized window is shown with `SW_MAXIMIZE`, which activates it. A
 hand-over that reaches it does not focus it. The level set when the window is made stands: setting
 Normal first to force `AlwaysOnBottom` again (winit skips a level that has not changed) would
