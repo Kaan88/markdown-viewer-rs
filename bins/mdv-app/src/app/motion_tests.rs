@@ -260,3 +260,91 @@ fn a_menu_fading_over_frosted_chrome_lets_the_backdrop_through_less() {
     }
     assert!(between > 0, "the menu over the chrome is part way in");
 }
+
+#[test]
+fn a_covered_window_is_left_with_no_deadline_once_the_timer_fired() {
+    let mut a = moving(&["showcase.md"]);
+    a.open_popup(PopupKind::Main);
+    a.compose();
+    let due = a.anim_due.expect("the fade asks for a frame");
+    a.occluded = true;
+    a.wants_frame = false;
+    // The timer fires: one frame is asked for, and the deadline is gone.
+    a.timers(due);
+    assert!(a.wants_frame);
+    assert!(a.anim_due.is_none());
+    // A covered window draws nothing, so nothing sets it again: the loop goes back to waiting
+    // instead of coming back at a deadline long past.
+    let later = due + Duration::from_secs(1);
+    assert_eq!(a.timers(later), None, "no deadline keeps the loop turning");
+}
+
+#[test]
+fn a_change_of_the_systems_motion_setting_is_read_and_drawn() {
+    let mut a = moving(&["showcase.md"]);
+    // Taken as reduced before; the wake reads the system's answer again.
+    a.anim.set_system_reduced(!platform::motion_reduced());
+    a.wants_frame = false;
+    a.woken(Wake::Motion);
+    assert!(a.wants_frame, "a frame is asked for");
+    // The frame that follows sets the policy over the system's answer.
+    a.compose();
+    assert_eq!(a.anim.animates(), !platform::motion_reduced());
+}
+
+#[test]
+fn the_watch_on_the_systems_motion_starts_off_the_windows_thread() {
+    use std::sync::mpsc;
+    let mut a = moving(&["showcase.md"]);
+    let (tx, rx) = mpsc::channel();
+    a.proxy = Some(LoopProxy::Test(tx));
+    let (seen_tx, seen_rx) = mpsc::channel();
+    let (go_tx, go_rx) = mpsc::channel::<()>();
+    let started = Instant::now();
+    a.watch_motion_with(move |wake| {
+        let _ = seen_tx.send(std::thread::current().id());
+        // A watch that takes its time, as the hidden window's may (up to 5 s).
+        let _ = go_rx.recv_timeout(Duration::from_secs(5));
+        wake();
+    });
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "the window's thread did not wait for the watch"
+    );
+    let thread = seen_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the watch ran");
+    assert_ne!(thread, std::thread::current().id());
+    go_tx.send(()).unwrap();
+    assert!(matches!(
+        rx.recv_timeout(Duration::from_secs(5)),
+        Ok(Wake::Motion)
+    ));
+    // Once only.
+    a.watch_motion_with(|_| panic!("a second watch"));
+}
+
+#[test]
+fn the_appearance_page_fits_the_smallest_window_with_every_row() {
+    let mut a = app(&["showcase.md"]);
+    a.size = (520, 360);
+    a.compose();
+    // Every row, corners and (on Windows) the backdrop with their help lines included.
+    let appearance = s::PAGES.iter().position(|p| *p == s::APPEARANCE).unwrap();
+    a.ui.settings = Some(s::form(&a.ws, true, appearance));
+    a.compose();
+    let f = a.ui.settings.as_ref().unwrap();
+    let ids: Vec<u32> = f.pages()[appearance]
+        .items
+        .iter()
+        .filter_map(|it| it.row().id())
+        .collect();
+    assert_eq!(ids.last(), Some(&s::MOTION), "Animations is the last row");
+    assert!(ids.contains(&s::WINDOW_CORNERS));
+    let (row, card, page) = (f.row_rect(s::MOTION), f.rect(), f.page_rect());
+    assert!(row.h > 0.0, "the row is laid out");
+    assert!(
+        row.bottom() <= card.bottom() && row.bottom() <= page.bottom(),
+        "the last row {row:?} lies inside the card {card:?} and its page {page:?}"
+    );
+}

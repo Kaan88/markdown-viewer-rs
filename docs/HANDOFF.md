@@ -16,7 +16,16 @@ that last changed this file is the state it describes; check `git log --oneline 
 The shared crates are pinned at shared `main` `48eb3ce` (was `ef88814`), which carries the
 toolkit's motion (`mdshared_ui::anim`, shared `docs/ANIMATION.md`). The pin move alone changed
 nothing drawn: all 168 shots of `tests/shots.sh` byte-identical, the workspace tests passing.
-`Cargo.lock` gained `libloading` 0.9.1 (mdshared-fetch, off Windows only).
+
+What the pin move did to `Cargo.lock`, plainly:
+- `libloading` 0.9.1 is new, pinned (`=0.9.1`) by `mdshared-fetch`, which loads the system
+  libcurl with it on Linux and macOS. `libloading` 0.8.9 stays for what already used it, so
+  Linux and macOS builds now carry two copies of `libloading`. Not linked on Windows.
+- `mdshared-text` now depends on `zune-jpeg`. The crate was already in the tree through
+  `crates/render`, so nothing new is downloaded, but new code of it is linked into the Windows
+  exe, likely part of the exe's growth (`mdview.exe` 9,547,264 bytes on `main`, 9,651,712 on
+  this branch: +104,448, the motion work included).
+- **The owner accepted both (2026-11-25), in their word: "accept".**
 
 - **What moves.** The main menu, the context menus and the Open recent submenu fade in as they
   open (`Menu::draw_in_presence`, 6 px drop; the submenu `draw_in_entering` from its side), by
@@ -36,8 +45,11 @@ nothing drawn: all 168 shots of `tests/shots.sh` byte-identical, the workspace t
 - **Nothing moves** in a `--shot`, a `--scroll-steps` run and the tests (`App::still`), when the
   new "Animations" setting is off, or when the system asks for less motion
   (`platform::motion_reduced`, read after the first frame, on focus and on a theme change;
-  `watch_motion_reduced` started after the first frame, `Wake::Motion`).
-- **`--menu-at <ms>`** (shot only): with `--menu`, the menu that long into its fade.
+  `watch_motion_reduced` started after the first frame on a short-lived helper thread, since
+  on Windows it waits up to 5 s for its hidden window; it wakes the window with `Wake::Motion`).
+- **`--menu-at <ms>`** (shot only): with `--menu`, the menu that long into its fade, drawn in
+  16 ms frames as a window draws them (one step over the animator's 50 ms would be cut short);
+  a number past the end of the fade shows the menu at rest.
 
 ### Decisions
 
@@ -63,7 +75,11 @@ another's place fades in from the start; closing half way leaves nothing on scre
 holds `presence_bounds`; the setting off, reduced motion and a still run draw the menu at rest on
 its first frame; the setting is on by default and apart from the images'; a menu fading over
 frosted chrome is part way in. `session.rs`: `motion` is on unless turned off and apart from
-`animations`. Workspace: 713 passed, 6 ignored.
+`animations`. After Fable's review: a covered window is left with no deadline once the timer
+fired; `Wake::Motion` reads the system again and asks for a frame; the watch starts off the
+window's thread (a watch that takes 5 s does not hold it); the Appearance page at 520x360 with
+every row (corners and the backdrop with their help lines) has the Animations row inside the
+card. Workspace: 717 passed, 6 ignored.
 
 ### Shots
 
@@ -81,7 +97,18 @@ menu opened and closed by posted clicks at 3 s. Medians: first frame A 107.9 ms,
 memory at 3 s A 25.08 MiB, B 25.17 MiB; CPU from 3 s to 6 s after the close A 0 (one run 15.6),
 B 0 in all seven, and no frame drawn then. The fade is 11 frames over about 170 ms, each 3.3 to
 5.6 ms of compose (the page under the menu is drawn again each frame). `mdview.exe` 9,547,264
-(main) to 9,646,080 bytes. Not run: Linux, macOS; a frosted window by eye; the owner's look.
+(main) to 9,646,080 bytes (9,651,712 after the review's fixes; three more runs then: first
+frame 89 to 132 ms, 25 MiB, no CPU and no frame from 3 s to 6 s after the close). Not run: Linux, macOS; a frosted window by eye; the owner's look.
+
+### Not verified, for the owner's look (from Fable's review, left as they are)
+
+- **Two fades over frosted chrome at once.** A submenu fading in over its menu while the menu
+  itself still fades, over frosted chrome: the second fade mixes over pixels the first already
+  wrote with their own alpha, which `crossfade_keyed` says nothing should be drawn over. How it
+  looks there has not been seen; it lasts at most one fade (about 170 ms).
+- **A menu's first frame is empty.** A menu opens at presence 0, so the frame drawn at the click
+  shows nothing of it and it appears from the next frame (16 ms later). Starting a step in would
+  show it at once; left for the owner to judge by eye.
 
 ## Release 1.1.0 (2026-11-24, released)
 

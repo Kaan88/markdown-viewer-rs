@@ -693,13 +693,7 @@ mod window_state_tests {
     #[test]
     fn motion_is_on_unless_turned_off_and_apart_from_the_images() {
         assert!(Session::default().motion);
-        assert!(
-            Session::parse(
-                "zoom=100
-"
-            )
-            .motion
-        );
+        assert!(Session::parse("zoom=100\n").motion);
         assert!(!Session::default().serialize().contains("motion="));
         let s = Session {
             motion: false,

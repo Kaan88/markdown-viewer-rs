@@ -1294,6 +1294,17 @@ impl App {
     }
 
     fn watch_motion(&mut self) {
+        self.watch_motion_with(platform::watch_motion_reduced);
+    }
+
+    /// Starts `watch` with a wake that sends `Wake::Motion`, on a short-lived helper thread:
+    /// on Windows the watch makes a hidden window on a thread of its own and waits up to 5 s
+    /// for it, which must never be the window's own thread. A thread that cannot be started
+    /// leaves the window unwatched; it still reads the setting on focus and theme changes.
+    fn watch_motion_with(
+        &mut self,
+        watch: impl FnOnce(Box<dyn Fn() + Send + Sync>) + Send + 'static,
+    ) {
         if self.still || self.motion_watched {
             return;
         }
@@ -1301,9 +1312,12 @@ impl App {
             return;
         };
         self.motion_watched = true;
-        platform::watch_motion_reduced(move || {
+        let wake: Box<dyn Fn() + Send + Sync> = Box::new(move || {
             let _ = proxy.send_event(Wake::Motion);
         });
+        let _ = std::thread::Builder::new()
+            .name("mdview-motion-watch".into())
+            .spawn(move || watch(wake));
     }
 
     /// Copies the damaged rows to the window and presents them. Returns the copy time.
@@ -1784,7 +1798,9 @@ impl ApplicationHandler<Wake> for App {
                     self.redraw();
                 }
                 if focused {
-                    // The one place the system's "animation effects" setting is read again.
+                    // The system's "animation effects" setting, read again: for the images here,
+                    // and for the window's motion (as also after the first frame, on a theme
+                    // change and when the watch wakes the window).
                     self.ws.set_system_animations(platform::shows_animations());
                     self.read_motion();
                 }
@@ -2011,7 +2027,16 @@ fn shot(mut app: App, path: &Path) -> i32 {
         let start = Instant::now();
         app.frame_clock = Some(start);
         app.compose();
-        app.frame_clock = Some(start + Duration::from_millis(ms));
+        // In frames of 16 ms, as a window draws them: one step longer than the animator's 50 ms
+        // would be taken for a stall and cut short. It stops once nothing moves, so no number
+        // of milliseconds, however large, makes a long loop or overflows the clock.
+        let end = Duration::from_millis(ms);
+        let mut at = Duration::ZERO;
+        while at < end && app.anim_due.is_some() {
+            at = (at + Duration::from_millis(16)).min(end);
+            app.frame_clock = Some(start.checked_add(at).unwrap_or(start));
+            app.compose();
+        }
     }
     match app.args.dialog {
         Some(ShotDialog::About) => app.open_dialog(DialogKind::About),
