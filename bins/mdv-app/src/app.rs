@@ -2716,7 +2716,9 @@ pub fn run() -> i32 {
     mdshared_ui::open_documents::on_open(move |paths| {
         let _ = p.send_event(Wake::Open(paths));
     });
-    if let Some(settings) = &app.session {
+    if app.args.listens()
+        && let Some(settings) = &app.session
+    {
         let p = proxy.clone();
         app.incoming = mdview_core::single::listen_requests_waking(settings, move || {
             let _ = p.send_event(Wake::Instance);

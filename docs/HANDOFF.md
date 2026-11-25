@@ -135,19 +135,23 @@ is there at once. The test's time is given (`App::pointer_moved_at`), not slept.
 
 `--behind` opens the window inactive (`with_active(false)`) and `AlwaysOnBottom`, and makes the
 launch never hand its files to an mdview already running (whose `handed_over` would unminimize and
-focus its window): `Args::folder` gives a forward that is never called and a wait of zero, but the
-launch still **claims the settings folder** (`folder_lock::claim`), so it cannot write
-`instance.port` or the session under a window that has them. A folder another window holds leaves
-it without a session through the usual busy path, so neither file is written. `--maximize` is
-ignored under it, and so is a maximized place in the session (`Args::maximized`): a maximized
-window is shown with `SW_MAXIMIZE`, which activates it. A hand-over that reaches it does not focus
-it. The level set when the window is made stands: setting Normal first to force `AlwaysOnBottom`
-again (winit skips a level that has not changed) would raise the window for a moment, so it is not
-done. What remains: showing a window can raise it once, so a `--behind` window may show above the
-others as it appears and is not sent down afterwards; nothing of mdview's raises it after that.
-The decisions are `Args::presence`, `Args::folder` (pure, with tests) and `admit` (the folder
-step of `run`, which a test drives with its own `claim`, so re-gating `--behind` there fails it).
-`--behind --no-session` has no session to claim and claims none.
+focus its window): `Args::folder` gives `hand_over: false` and a wait of zero — `admit` builds the
+forward and `claim` does call it, but it always returns false — and the launch still **claims the
+settings folder** (`folder_lock::claim`), so it cannot write the session under a window that has
+it. A folder another window holds leaves it without a session through the usual busy path, so the
+session is not written. It does not listen for hand-overs either (`Args::listens`, gated in
+`run`): no `instance.port` is written, and a file the user opens never reaches a hidden test
+window. `--maximize` is ignored under it, and so is a maximized place in the session
+(`Args::maximized`): a maximized window is shown with `SW_MAXIMIZE`, which activates it. A
+hand-over that reaches it does not focus it. The level set when the window is made stands: setting
+Normal first to force `AlwaysOnBottom` again (winit skips a level that has not changed) would
+raise the window for a moment, so it is not done. What remains: showing a window can raise it
+once, so a `--behind` window may show above the others as it appears and is not sent down
+afterwards; nothing of mdview's raises it after that. The decisions are `Args::presence`,
+`Args::folder`, `Args::listens` and `Args::maximized` (pure, with tests) and `admit` (the folder
+step of `run`, which a test drives with its own `claim` and a live listener that would take a
+hand-over, so re-gating `--behind` there fails it). `--behind --no-session` has no session to
+claim and claims none.
 
 ### Decisions
 
@@ -239,8 +243,13 @@ After the second review, five fixes, each failing with its fix reverted:
 - a test's motion state is the test's, not the machine's (`read_motion` reading
   `platform::motion_reduced` again: on a machine with animations on, the reduced assertion
   fails).
+- a change of the system's motion setting is read for both values, from the test's own wish (the
+  test back on `platform::motion_reduced`: on a machine with animations off, the first value
+  fails);
+- a `--behind` launch does not listen for hand-overs (the `Args::listens` gate made true: no
+  port, so a user's file could reach the hidden window).
 
-Workspace: 763 passed, 6 ignored (`mdview`'s own tests: 322 passed, 1 ignored).
+Workspace: 764 passed, 6 ignored (`mdview`'s own tests: 323 passed, 1 ignored).
 
 ### Shots
 

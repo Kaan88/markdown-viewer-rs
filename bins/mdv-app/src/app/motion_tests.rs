@@ -283,15 +283,18 @@ fn a_covered_window_is_left_with_no_deadline_once_the_timer_fired() {
 
 #[test]
 fn a_change_of_the_systems_motion_setting_is_read_and_drawn() {
-    let mut a = moving(&["showcase.md"]);
-    // Taken as reduced before; the wake reads the system's answer again.
-    a.anim.set_system_reduced(!platform::motion_reduced());
-    a.wants_frame = false;
-    a.woken(Wake::Motion);
-    assert!(a.wants_frame, "a frame is asked for");
-    // The frame that follows sets the policy over the system's answer.
-    a.compose();
-    assert_eq!(a.anim.animates(), !platform::motion_reduced());
+    for x in [false, true] {
+        let mut a = moving(&["showcase.md"]);
+        // Taken as the other way round before; the wake reads the test's answer again.
+        a.reduced = Some(x);
+        a.anim.set_system_reduced(!x);
+        a.wants_frame = false;
+        a.woken(Wake::Motion);
+        assert!(a.wants_frame, "a frame is asked for");
+        // The frame that follows sets the policy over the system's answer.
+        a.compose();
+        assert_eq!(a.anim.animates(), !x, "the system's wish is read: {x}");
+    }
 }
 
 #[test]

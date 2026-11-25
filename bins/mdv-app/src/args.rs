@@ -209,6 +209,12 @@ impl Args {
         }
     }
 
+    /// Whether this launch listens for hand-overs, and so writes `instance.port`. A `--behind`
+    /// run does not: a file the user opens must never reach a hidden test window.
+    pub fn listens(&self) -> bool {
+        !self.behind
+    }
+
     /// What each file asks of a window that is already running, when the launch asked for more than
     /// opening it: see [`Request`]. Empty for an ordinary launch.
     pub fn requests(&self) -> Vec<Request> {
@@ -435,6 +441,14 @@ mod tests {
                 wait: mdshared_app::folder_lock::WAIT,
             }
         );
+    }
+
+    #[test]
+    fn behind_does_not_listen_for_hand_overs() {
+        // Nothing listens and no port is written: a file the user opens must never reach a
+        // hidden test window.
+        assert!(!parse("--behind a.md").listens());
+        assert!(parse("a.md").listens());
     }
 
     #[test]

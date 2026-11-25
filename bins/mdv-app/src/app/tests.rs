@@ -1253,6 +1253,38 @@ fn a_behind_launch_claims_the_folder_and_only_an_ordinary_one_hands_over() {
     let dir = std::env::temp_dir().join(format!("mdview-admit-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let settings = dir.join("settings.ini");
+    // A window that would take a hand-over: a live listener on the port beside the settings, and
+    // the lock the single-instance check looks for. A forward that ran would therefore succeed,
+    // which is what a `--behind` launch must never do.
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::fs::write(settings.with_file_name("instance.port"), port.to_string()).unwrap();
+    #[cfg(windows)]
+    let _lock = {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .open(settings.with_file_name("instance.lock"))
+            .unwrap()
+    };
+    listener.set_nonblocking(true).unwrap();
+    let server = std::thread::spawn(move || {
+        use std::io::Write;
+        // Long enough for a forward that should not happen to arrive and be answered.
+        let end = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < end {
+            match listener.accept() {
+                Ok((mut s, _)) => {
+                    let _ = s.write_all(b"ok\n");
+                    return;
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
+    });
     let mut args = Args {
         behind: true,
         ..Args::default()
@@ -1262,7 +1294,10 @@ fn a_behind_launch_claims_the_folder_and_only_an_ordinary_one_hands_over() {
         claims.set(claims.get() + 1);
         assert_eq!(path, settings);
         assert_eq!(wait, Duration::ZERO, "no window is waited for");
-        assert!(!forward(), "a --behind run never hands its files over");
+        assert!(
+            !forward(),
+            "a --behind run never hands its files over, though a window would answer"
+        );
         Claim::Own(None)
     });
     assert_eq!(claims.get(), 1, "the folder is still claimed");
@@ -1277,6 +1312,7 @@ fn a_behind_launch_claims_the_folder_and_only_an_ordinary_one_hands_over() {
         }
         Admission::Handed => panic!("a --behind run handed over"),
     }
+    server.join().unwrap();
     // A folder another window holds: no session, so neither its port file nor it is written.
     let out = admit(&args, Some(settings.clone()), |_, _, _| Claim::Busy);
     match out {
