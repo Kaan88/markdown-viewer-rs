@@ -294,6 +294,7 @@ impl App {
             Form::Redraw => self.modal_changed(),
             Form::Closed => self.close_settings(),
             Form::Changed { id, value } => {
+                self.settings_changed = Some(id);
                 self.apply_setting(id, value);
                 // The one switch with a row under it: the form keeps every other value itself.
                 if id == setting::SKIP_BRIEF {

@@ -1153,3 +1153,69 @@ fn a_tip_fades_in_as_it_shows_and_with_animations_off_is_there_at_once() {
         }
     }
 }
+
+#[test]
+fn a_frame_where_only_the_settings_move_redraws_the_card_alone_as_a_whole_redraw_would() {
+    for (scale, size) in [(1.0_f32, (1280, 800)), (1.5, (1920, 1200))] {
+        let mut a = moving(&["showcase.md"]);
+        a.scale = scale;
+        a.size = size;
+        settings_at(&mut a, s::TICK_BOXES);
+        settle(&mut a);
+        a.key_named(KeyName::Space, None);
+        a.compose();
+        let card = a.ui.settings.as_ref().unwrap().rect();
+        let mut clipped = 0;
+        while a.anim_due.is_some() {
+            a.frame_clock = a.frame_clock.map(|t| t + FRAME);
+            let (damage, _) = a.compose();
+            let part = a.screen.pixels.clone();
+            let (x1, y1) = (
+                (card.right() * scale) as i32,
+                (card.bottom() * scale) as i32,
+            );
+            if damage
+                .iter()
+                .all(|d| d.0 >= (card.x * scale) as i32 && d.2 <= x1 + 1 && d.3 <= y1 + 1)
+            {
+                clipped += 1;
+            }
+            // The same frame drawn whole.
+            a.full = true;
+            a.compose();
+            assert!(
+                part == a.screen.pixels,
+                "at {scale}: the card alone is the whole frame"
+            );
+        }
+        assert!(
+            clipped >= 3,
+            "at {scale}: frames of the card alone: {clipped}"
+        );
+    }
+}
+
+#[test]
+fn a_page_lists_hover_fades_in_frames_of_the_list_alone_as_a_whole_redraw_would() {
+    let mut a = moving(&["showcase.md"]);
+    settings_at(&mut a, s::TICK_BOXES);
+    settle(&mut a);
+    let item = a.ui.settings.as_ref().unwrap().list_item_rect(0);
+    a.pointer_moved(item.cx(), item.cy());
+    a.compose();
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        a.frame_clock = a.frame_clock.map(|t| t + FRAME);
+        a.compose();
+        let part = a.screen.pixels.clone();
+        a.full = true;
+        a.compose();
+        assert!(
+            part == a.screen.pixels,
+            "frame {frames}: the list alone is the whole frame"
+        );
+        frames += 1;
+        assert!(frames < 60);
+    }
+    assert!(frames >= 2, "the hover fill fades in: {frames} frames");
+}

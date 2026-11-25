@@ -78,6 +78,10 @@ const EDITOR: &str = "mdedit";
 /// How long a closing window waits for the editor to be told of the tabs it asked for: the
 /// process ends after it, and its listener with it.
 const EDITOR_CLOSE_WAIT: Duration = Duration::from_millis(500);
+/// More than the settings card's corner radius (the shared `pages::RADIUS`, 10, not exported):
+/// a frame that redraws the card alone keeps clear of its corners, which blend with the window
+/// under them.
+const SETTINGS_CARD_CORNER: f32 = 12.0;
 const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
 /// While a tab shows the editor's text: how often to ask whether the editor still answers.
@@ -325,6 +329,8 @@ struct App {
     menu_t: (f32, f32),
     /// How present the tooltip is this frame, 0 to 1 (0: none shows).
     tip_t: f32,
+    /// The setting the dialog changed last: its row is where a switch or a segment slides.
+    settings_changed: Option<u32>,
     /// The system's wish for less motion is watched (from the first frame on).
     motion_watched: bool,
     /// The toasts on screen and leaving (`crate::motion::toasts`), the status line they were
@@ -439,6 +445,7 @@ impl App {
             menu_t: (1.0, 1.0),
             motion_watched: false,
             tip_t: 0.0,
+            settings_changed: None,
             toasts: crate::motion::toasts(),
             toast_seen: None,
             toast_frame: Vec::new(),
@@ -1076,7 +1083,11 @@ impl App {
         let settings = Id::new(crate::motion::SETTINGS);
         let settings_moving = self.ui.settings.is_some()
             && (self.anim.group_deadlines().iter()).any(|(g, _)| *g == settings);
-        let overlay_changed = osig != self.overlay_sig || settings_moving;
+        // A frame where only the dialog moves redraws the inside of its card alone (below).
+        // Everything of it that moves lies in the card: mdview's settings have no dropdown (every
+        // choice has three options or fewer), whose list could reach past it.
+        let settings_only = settings_moving && osig == self.overlay_sig && !self.full;
+        let overlay_changed = osig != self.overlay_sig;
         self.overlay_sig = osig;
         let mut under: Vec<Rect> = bounds.clone();
         under.extend(self.overlay_bounds.iter().copied());
@@ -1253,6 +1264,30 @@ impl App {
                 // The diagram view covers everything, so it is drawn after them all.
                 if let Some(z) = self.ui.zoom.as_ref() {
                     crate::zoom::draw(&mut c, z, window);
+                }
+            } else if settings_only && let Some(f) = self.ui.settings.as_mut() {
+                // Only the dialog moves, and only where something of it can: the page list (a
+                // hover fill fading) and the row of the setting changed last (a switch's knob, a
+                // segment). The card is opaque there, so those parts, short of its rounded
+                // corners, are drawn again alone, over what is there; the rest is as it was.
+                let card = f.rect();
+                let corner = SETTINGS_CARD_CORNER;
+                let inner = Rect::new(card.x, card.y + corner, card.w, card.h - 2.0 * corner);
+                let list = Rect::new(inner.x, inner.y, f.page_rect().x - inner.x, inner.h);
+                let row = (self.settings_changed.map(|id| f.row_rect(id))).map(|r| meet(r, inner));
+                let window = Rect::new(0.0, 0.0, w, h);
+                let id = crate::motion::SETTINGS;
+                for clip in std::iter::once(list).chain(row) {
+                    if clip.w <= 0.0 || clip.h <= 0.0 {
+                        continue;
+                    }
+                    damage.push(p.dev_rect(clip));
+                    let old = p.clip(clip);
+                    self.anim.group(id);
+                    f.draw_animated(&mut p, &pal, window, self.ui.caret_on, &mut self.anim, id);
+                    self.anim.ungroup();
+                    p.restore(old);
+                    settings_drawn = true;
                 }
             }
         }
@@ -2327,6 +2362,13 @@ fn shot(mut app: App, path: &Path) -> i32 {
             1
         }
     }
+}
+
+/// What two rectangles share (empty, zero wide or high, when nothing).
+fn meet(a: Rect, b: Rect) -> Rect {
+    let (x, y) = (a.x.max(b.x), a.y.max(b.y));
+    let (r, bottom) = (a.right().min(b.right()), a.bottom().min(b.bottom()));
+    Rect::new(x, y, (r - x).max(0.0), (bottom - y).max(0.0))
 }
 
 /// Where a toast whose place at rest is `rest` stands `lift` logical px above it: moved by a
