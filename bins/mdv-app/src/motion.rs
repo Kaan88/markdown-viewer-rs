@@ -51,6 +51,11 @@ pub fn tip(anim: &mut Animator) -> f32 {
 /// drawn again while one of them moves.
 pub const FILES: &str = "files";
 
+/// The animator's group for the open menus' hover fills (a row, of the menu or its submenu): a
+/// frame that leaves the menus undrawn keeps them, and the overlays are drawn again while one of
+/// them moves.
+pub const MENUS: &str = "menus";
+
 /// The animator's group, and the name, of the settings dialog's values (`Form::draw_animated`:
 /// a switch's knob and a chosen segment slide, the page list's hover fills and the open
 /// dropdown's row fade, by the shared form's own presets): drawn again while one of them moves,

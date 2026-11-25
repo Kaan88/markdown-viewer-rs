@@ -1131,7 +1131,11 @@ impl App {
             && !(self.ui.settings.as_ref()).is_some_and(has_dropdown);
         // A dialog that moves on a card the clipped frame cannot redraw alone (a dropdown's page)
         // is a change of the overlay on its own: draw it, or it would freeze after its first frame.
-        let overlay_changed = osig != self.overlay_sig || (settings_moving && !settings_only);
+        // A menu's row hover fading is the same: the overlays are drawn on each frame of it.
+        let menus = Id::new(crate::motion::MENUS);
+        let menus_moving = (self.anim.group_deadlines().iter()).any(|(g, _)| *g == menus);
+        let overlay_changed =
+            osig != self.overlay_sig || (settings_moving && !settings_only) || menus_moving;
         self.overlay_sig = osig;
         let mut under: Vec<Rect> = bounds.clone();
         under.extend(self.overlay_bounds.iter().copied());
@@ -1191,6 +1195,7 @@ impl App {
         // The page rows a draw of an animation's next frame is limited to.
         let mut partial: Option<(u32, u32)> = None;
         let mut files_drawn = false;
+        let mut menus_drawn = false;
         let mut settings_drawn = false;
         {
             let mut p = Painter::new(&mut self.screen, &mut self.gfx, self.scale);
@@ -1274,13 +1279,37 @@ impl App {
                 }
                 if let Some(popup) = self.ui.popup.as_mut() {
                     let room = menu_room(self.areas.title, w, h);
-                    // At rest (1) each is `draw_in`, pixel for pixel.
+                    // At rest (1) each is `draw_in`, pixel for pixel; the hover fill of a row
+                    // fades in on the row the pointer or the keys reach (`draw_in_animated`).
                     let (t, ts) = self.menu_t;
-                    popup.menu.draw_in_presence(c.p, &pal, room, t);
+                    let serial = popup.serial;
+                    let sub_serial = popup.sub_serial;
+                    self.anim.group(crate::motion::MENUS);
+                    popup
+                        .menu
+                        .draw_entering_with(c.p, room, t, Entrance::Drop, |p, m| {
+                            m.draw_in_animated(
+                                p,
+                                &pal,
+                                room,
+                                &mut self.anim,
+                                ("menu-hover", serial),
+                            );
+                        });
                     if let Some(s) = popup.sub.as_mut() {
                         let leftward = s.rect().x < popup.menu.rect().x;
-                        s.draw_in_entering(c.p, &pal, room, ts, Entrance::Side { leftward });
+                        s.draw_entering_with(c.p, room, ts, Entrance::Side { leftward }, |p, m| {
+                            m.draw_in_animated(
+                                p,
+                                &pal,
+                                room,
+                                &mut self.anim,
+                                ("submenu-hover", sub_serial),
+                            );
+                        });
                     }
+                    self.anim.ungroup();
+                    menus_drawn = true;
                 }
                 for (b, t) in &bubbles {
                     if *t >= 1.0 {
@@ -1344,6 +1373,10 @@ impl App {
         // where it was drawn, instead of being taken for new (and shown at rest).
         if !files_drawn {
             self.anim.keep_group(crate::motion::FILES);
+        }
+        // So does a hover fill fading in an open menu.
+        if !menus_drawn {
+            self.anim.keep_group(crate::motion::MENUS);
         }
         // So does the settings dialog on a frame that leaves it as it was.
         if self.ui.settings.is_some() && !settings_drawn {

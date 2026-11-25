@@ -115,6 +115,55 @@ fn a_submenu_fades_in_beside_its_menu() {
 }
 
 #[test]
+fn a_menu_rows_hover_fill_fades_in_and_the_overlays_are_drawn_for_it() {
+    let mut a = moving(&["showcase.md"]);
+    a.open_popup(PopupKind::Main);
+    a.compose();
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 40, "the menu's fade ends");
+    }
+    let row = a.ui.popup.as_ref().unwrap().menu.row_rect(1);
+    let (x, y) = (row.x + 6.0, row.cy());
+    let rest = pixel(&a, x, y);
+    a.pointer_moved(x, y);
+    if let Some(p) = a.ui.popup.as_mut() {
+        p.menu.pointer(x, y);
+    }
+    assert_eq!(a.ui.popup.as_ref().unwrap().menu.hover, Some(1));
+    a.compose();
+    assert_eq!(
+        pixel(&a, x, y),
+        rest,
+        "the hover's first frame is still the row at rest"
+    );
+    assert!(a.anim_due.is_some(), "the fade asks for a frame");
+    step(&mut a, FRAME);
+    let mid = pixel(&a, x, y);
+    assert_ne!(mid, rest, "the second frame is part way");
+    let mut frames = 1;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the fade ends");
+    }
+    let end = pixel(&a, x, y);
+    assert_ne!(end, mid, "the fill arrived");
+    // At rest it is the menu a still run draws with the pointer on the row.
+    let mut still = app(&["showcase.md"]);
+    still.open_popup(PopupKind::Main);
+    still.compose();
+    still.pointer_moved(x, y);
+    if let Some(p) = still.ui.popup.as_mut() {
+        p.menu.pointer(x, y);
+    }
+    still.compose();
+    assert_eq!(end, pixel(&still, x, y));
+}
+
+#[test]
 fn a_menu_opened_again_fades_in_again_and_closing_is_instant() {
     let mut a = moving(&["showcase.md"]);
     let mut fresh = app(&["showcase.md"]);

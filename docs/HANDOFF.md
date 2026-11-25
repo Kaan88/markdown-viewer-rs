@@ -11,6 +11,40 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Shared's close-out list (2026-11-26, branch `f/motion2`, pin `535ad4c`)
+
+Shared's list of what both apps should wire, checked item by item in mdview, then what was
+missing was built. One commit per item, each with a test that fails with the fix reverted.
+
+| Item | State |
+|---|---|
+| Popup damage: `presence_bounds()`, no hand-made margin | done (`7eda58d`): the palette was the last `rect.inset(-20)`; menus, the submenu and bubbles already used the shared bounds, and a dialog dims the whole window so its damage stays the window |
+| D1 groups: `group`/`ungroup`, `keep_group`, damage from `group_deadlines` | Files and Settings were done; the menus' hover fills were added (`motion::MENUS`) |
+| D3 `Painter::set_frost_key` | already done (`app.rs`, before the frame is drawn) |
+| D4 `chrome::draw_*_animated` in the title row | **blocked on shared** — see below |
+| D6 `Tooltip::hover_at` from rest | already done |
+| D7 `watch_motion_reduced` on a helper thread | already done (shared reads on its own thread; mdview calls it once at start and on the wake) |
+| X3 `Menu::draw_in_animated` (hover row) | done (`b7b6c0e`) |
+| X3 `Palette::draw_presence` | not yet |
+| X3 `notice::draw_sliding` / `bar_height` | not yet |
+| X3 tree chevron `draw_disclosure_animated_with`, rows named by path | already done (`motion::folder(path)`, `motion::notes_fold(key)`) |
+| L10 `Form::draw_animated` / `set_high_contrast` | already done |
+| L1 `submenu::Cascade` in place of the hand-made submenus and dwell | not yet |
+| W3 `window_state` restores onto a monitor that still exists | not yet |
+
+**D4 is stopped on a shared defect.** In `draw_win_button_animated`, `draw_tab_animated` and
+`draw_new_tab_button_animated` (through `button_fill_animated`) the early-out is
+`... || t >= 1.0 || t <= 0.0`, and its plain call is given `hovered || t >= 1.0`. On the first
+frame of a hover the toggle is still 0 with the pointer on the control, so the plain path draws
+the **fully hovered** look; the next frame draws the partial fade at 19 %: a one-frame flash
+before every fade-in, and the mirror of it (0 → 80 %) on every fade-out. Measured through
+mdview's caption button: frame 0 the danger fill, frame 1 `t = 0.19`. To ask shared: decide the
+plain look by `t > 0.0` rather than by `hovered` (`lit = t > 0.0` at `t <= 0` and `t >= 1`), in
+those three and in `button_fill_animated`; `Menu::draw_in_animated` is already right (its `a > 0.0`
+guard draws the rest look at `a = 0`). Until then the title row keeps its at-once hovers.
+
+---
+
 ## Motion, milestone 2: chevrons turn, toasts rise and stack, the dialog moves (2026-11-25, branch `f/motion2`, not merged)
 
 Built on `main` `01f67b2` (milestone 1 merged). The branch's commits: the chevron, the toasts,
