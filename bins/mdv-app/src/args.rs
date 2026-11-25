@@ -95,6 +95,11 @@ pub struct Args {
     pub zoom_diagram: Option<usize>,
     /// `--menu-at <ms>`: with `--menu`, the menu as it is this long into its fade-in, for a shot.
     pub menu_at: Option<u64>,
+    /// `--turn <name>`: with `--files`, opens (or closes) the folder of that name at the top of
+    /// the Files tree, for a shot; with `--motion-at`, as its chevron turns.
+    pub turn: Option<String>,
+    /// `--motion-at <ms>`: what a shot's `--turn` sets moving, that long into its motion.
+    pub motion_at: Option<u64>,
     /// `--zoom-level F`: with `--zoom-diagram`, its drawing size in device px per raster px (1.0,
     /// the default, is twice the page's size at any scale).
     pub zoom_level: Option<f32>,
@@ -224,6 +229,8 @@ impl Args {
                 "--scroll-steps" => out.scroll_steps = value(&a).and_then(|v| v.parse().ok()),
                 "--copied" => out.copied = true,
                 "--menu-at" => out.menu_at = value(&a).and_then(|v| v.parse().ok()),
+                "--turn" => out.turn = value(&a),
+                "--motion-at" => out.motion_at = value(&a).and_then(|v| v.parse().ok()),
                 "--hover" => out.hover = value(&a).and_then(|v| pair(&v, ',')),
                 "--menu" => {
                     out.menu = match value(&a).as_deref() {

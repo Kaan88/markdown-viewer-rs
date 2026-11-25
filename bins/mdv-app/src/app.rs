@@ -29,7 +29,7 @@ use crate::ui::{
 use crate::updater;
 use crate::workspace::{Click, LinkOutcome, ThemeChoice, Workspace};
 use mdshared_app::sister::Request;
-use mdshared_ui::anim::Animator;
+use mdshared_ui::anim::{Animator, Id};
 use mdshared_ui::corners::Corners;
 use mdshared_ui::menu::Entrance;
 use mdview_core::commands::CommandId as C;
@@ -862,6 +862,12 @@ impl App {
         if self.ws.take_dirty() || std::mem::take(&mut self.page_again) {
             dirty[Region::Page.index()] = true;
         }
+        // A chevron turning in the Files pane: the pane is drawn on each frame of the turn,
+        // whenever the frame comes (one a little before the deadline included).
+        let files = Id::new(crate::motion::FILES);
+        if self.anim.group_deadlines().iter().any(|(g, _)| *g == files) {
+            dirty[Region::Files.index()] = true;
+        }
         for r in REGIONS {
             if self.areas.region(r).is_none() {
                 dirty[r.index()] = false;
@@ -1029,6 +1035,7 @@ impl App {
         let mut damage = Vec::new();
         // The page rows a draw of an animation's next frame is limited to.
         let mut partial: Option<(u32, u32)> = None;
+        let mut files_drawn = false;
         {
             let mut p = Painter::new(&mut self.screen, &mut self.gfx, self.scale);
             // A menu fading in over frosted chrome lets the backdrop through less and less.
@@ -1062,7 +1069,12 @@ impl App {
                         chrome::draw_title(&mut c, &self.ws, &self.ui, rect, maximized)
                     }
                     Region::Bar => chrome::draw_bar(&mut c, &self.ws, &mut self.ui, rect),
-                    Region::Files => panes::draw_files(&mut c, &self.ws, &mut self.ui, rect),
+                    Region::Files => {
+                        self.anim.group(crate::motion::FILES);
+                        panes::draw_files(&mut c, &mut self.anim, &self.ws, &mut self.ui, rect);
+                        self.anim.ungroup();
+                        files_drawn = true;
+                    }
                     Region::Outline => panes::draw_outline(&mut c, &self.ws, &mut self.ui, rect),
                     Region::Page => {
                         times.paint = page::draw_page(&mut c, &mut self.ws, &self.ui, rect)
@@ -1134,6 +1146,11 @@ impl App {
                     crate::zoom::draw(&mut c, z, window);
                 }
             }
+        }
+        // A pane left undrawn keeps its chevrons: a folder clicked on a later frame turns from
+        // where it was drawn, instead of being taken for new (and shown at rest).
+        if !files_drawn {
+            self.anim.keep_group(crate::motion::FILES);
         }
         // A partial draw trusted that only those rows of the page changed. If the page's frame
         // says otherwise (something else moved in between), the page is drawn whole next.
@@ -2023,20 +2040,8 @@ fn shot(mut app: App, path: &Path) -> i32 {
     if let Some(ms) = app.args.menu_at
         && app.ui.popup.is_some()
     {
-        app.still = false;
-        let start = Instant::now();
-        app.frame_clock = Some(start);
-        app.compose();
-        // In frames of 16 ms, as a window draws them: one step longer than the animator's 50 ms
-        // would be taken for a stall and cut short. It stops once nothing moves, so no number
-        // of milliseconds, however large, makes a long loop or overflows the clock.
-        let end = Duration::from_millis(ms);
-        let mut at = Duration::ZERO;
-        while at < end && app.anim_due.is_some() {
-            at = (at + Duration::from_millis(16)).min(end);
-            app.frame_clock = Some(start.checked_add(at).unwrap_or(start));
-            app.compose();
-        }
+        let start = start_moving(&mut app);
+        frames_until(&mut app, start, ms);
     }
     match app.args.dialog {
         Some(ShotDialog::About) => app.open_dialog(DialogKind::About),
@@ -2123,6 +2128,20 @@ fn shot(mut app: App, path: &Path) -> i32 {
             }
         }
     }
+    // What a shot sets moving: what is on screen now is at rest, then the change comes and
+    // the frames of its motion run up to `--motion-at` (without it the change is at rest).
+    let moving = app.args.motion_at.map(|ms| (start_moving(&mut app), ms));
+    if let Some(name) = app.args.turn.clone() {
+        match (app.ui.tree.rows().iter()).position(|r| r.is_dir && r.depth == 0 && r.name == name) {
+            Some(i) => {
+                app.ui.tree.toggle(i);
+            }
+            None => eprintln!("mdview: no folder {name} in the Files pane"),
+        }
+    }
+    if let Some((start, ms)) = moving {
+        frames_until(&mut app, start, ms);
+    }
     app.full = true;
     app.compose();
     // `--frame`: the window as the client-drawn margin puts it on screen.
@@ -2135,6 +2154,38 @@ fn shot(mut app: App, path: &Path) -> i32 {
         Err(e) => {
             eprintln!("mdview: could not write {}: {e}", path.display());
             1
+        }
+    }
+}
+
+/// A shot from here on moves, as a window does, on a clock set by hand: the frame drawn now is
+/// the start. Returns the start.
+fn start_moving(app: &mut App) -> Instant {
+    app.still = false;
+    let start = Instant::now();
+    app.frame_clock = Some(start);
+    app.compose();
+    start
+}
+
+/// Draws a moving shot's frames up to `ms` after `start`, in frames of 16 ms, as a window draws
+/// them: one step longer than the animator's 50 ms would be taken for a stall and cut short. It
+/// stops once nothing moves, so no number of milliseconds, however large, makes a long loop or
+/// overflows the clock.
+fn frames_until(app: &mut App, start: Instant, ms: u64) {
+    let end = Duration::from_millis(ms);
+    let mut at = Duration::ZERO;
+    loop {
+        // The frame that starts the motion asks for the next one; the change made since the
+        // last frame is drawn first.
+        if at > Duration::ZERO && app.anim_due.is_none() {
+            break;
+        }
+        at = (at + Duration::from_millis(16)).min(end);
+        app.frame_clock = Some(start.checked_add(at).unwrap_or(start));
+        app.compose();
+        if at >= end {
+            break;
         }
     }
 }

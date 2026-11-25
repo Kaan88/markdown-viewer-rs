@@ -134,6 +134,11 @@ shot folder-search-none-light --light --files --folder "$fx" --folder-search "zz
 # Panes, find, focus mode, tabs.
 shot files-pane --light --files --folder "$fx" "$fx/showcase.md"
 shot files-pane-dark --dark --files --folder "$fx/wiki" "$fx/linked.md"
+# A folder's chevron turning as it opens, 67 ms into the turn (about a third of the way round),
+# and the folder open at rest.
+shot files-turning-light --light --files --folder "$fx" --turn wiki --motion-at 67 "$fx/showcase.md"
+shot files-turning-dark --dark --files --folder "$fx" --turn wiki --motion-at 67 "$fx/showcase.md"
+shot files-turned-light --light --files --folder "$fx" --turn wiki "$fx/showcase.md"
 shot outline-pane --light --outline "$fx/showcase.md"
 shot outline-pane-dark --dark --outline "$fx/everything.md"
 shot outline-focus --light --outline --outline-focus 3 "$fx/showcase.md"

@@ -4,10 +4,13 @@
 //! slightly faster", 2026-11-25): 117 ms instead of 167.
 //!
 //! Menus, context menus and the Open recent submenu fade in as they open; closing is instant
-//! (owner, 2026-11-25). Nothing moves in a `--shot`, a `--scroll-steps` run or a test, nor when
+//! (owner, 2026-11-25). A folder's chevron in the Files pane (and a group's or a section's in the
+//! Notes pane) turns as it opens or closes, by the shared `glyph::DISCLOSURE_MOTION` (167 ms).
+//! Nothing moves in a `--shot`, a `--scroll-steps` run or a test, nor when
 //! the "Animations" setting is off, nor when the system asks for less motion.
 
-use mdshared_ui::anim::{Animator, Motion, Policy, document, fluent};
+use mdshared_ui::anim::{Animator, Id, Motion, Policy, document, fluent};
+use std::path::Path;
 use std::time::Duration;
 
 /// How long a menu takes to come in: seven frames at 60 Hz.
@@ -29,6 +32,22 @@ pub fn menu(anim: &mut Animator, serial: u64) -> f32 {
 /// The presence of the submenu opened beside the menu `serial`, `sub` naming this opening of it.
 pub fn submenu(anim: &mut Animator, serial: u64, sub: u64) -> f32 {
     anim.presence(("submenu", serial, sub), true, MENU.enter, MENU.exit)
+}
+
+/// The animator's group for the Files pane's values (the Notes pane is drawn in the same
+/// region): a frame that leaves the region undrawn keeps them (`keep_group`), and the region is
+/// drawn again while one of them moves.
+pub const FILES: &str = "files";
+
+/// The name of the chevron of the folder at `path` in the Files tree: by its path, so a row that
+/// moves up or down the list (a folder above it opened) keeps its turn.
+pub fn folder(path: &Path) -> Id {
+    Id::new(("folder", path))
+}
+
+/// The name of the chevron of the Notes pane's group or section `key`.
+pub fn notes_fold(key: &str) -> Id {
+    Id::new(("notes-fold", key))
 }
 
 /// What the animator may do: `still` is a run that must not depend on time (a shot, the

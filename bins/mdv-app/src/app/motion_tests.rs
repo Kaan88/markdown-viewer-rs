@@ -348,3 +348,190 @@ fn the_appearance_page_fits_the_smallest_window_with_every_row() {
         "the last row {row:?} lies inside the card {card:?} and its page {page:?}"
     );
 }
+
+// ---- the Files pane's chevrons ---------------------------------------------------------------
+
+/// A folder of two folders, each with a file, and a file: `a/`, `b/`, `c.md`.
+fn folder_tree(name: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("mdview-turn-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    for sub in ["a", "b"] {
+        std::fs::create_dir_all(d.join(sub)).unwrap();
+        std::fs::write(d.join(sub).join("x.md"), "# x\n").unwrap();
+    }
+    std::fs::write(d.join("c.md"), "# c\n").unwrap();
+    d
+}
+
+fn tree_row(a: &App, name: &str) -> usize {
+    a.ui.tree
+        .rows()
+        .iter()
+        .position(|r| r.name == name)
+        .unwrap_or_else(|| panic!("no row {name}"))
+}
+
+/// The pixels of the chevron of tree row `i`, where the Files pane draws it.
+fn chevron(a: &App, i: usize) -> Vec<u8> {
+    let row = a.hit_rect(Hit::FilesRow(i)).expect("the row is on screen");
+    let files = a.areas.region(Region::Files).expect("the Files pane");
+    let depth = a.ui.tree.rows()[i].depth as f32;
+    let cx = files.x + 14.0 + (depth + 1.0) * 14.0 - 8.0;
+    crop(a, Rect::new(cx - 7.0, row.cy() - 7.0, 14.0, 14.0))
+}
+
+fn crop(a: &App, r: Rect) -> Vec<u8> {
+    let w = a.screen.width as usize;
+    let (x0, y0) = ((r.x * a.scale) as usize, (r.y * a.scale) as usize);
+    let (x1, y1) = (
+        (r.right() * a.scale) as usize,
+        (r.bottom() * a.scale) as usize,
+    );
+    let mut out = Vec::new();
+    for y in y0..y1 {
+        out.extend_from_slice(&a.screen.pixels[(y * w + x0) * 4..(y * w + x1) * 4]);
+    }
+    out
+}
+
+/// An app showing `dir` in the Files pane, moving or still.
+fn with_tree(dir: &Path, moving_app: bool) -> App {
+    let mut a = if moving_app {
+        moving(&["showcase.md"])
+    } else {
+        app(&["showcase.md"])
+    };
+    a.ui.tree.set_root(Some(dir.to_path_buf()));
+    a.compose();
+    a
+}
+
+#[test]
+fn a_folder_that_opens_turns_its_chevron_and_then_leaves_no_timer() {
+    let dir = folder_tree("opens");
+    let mut a = with_tree(&dir, true);
+    let b = tree_row(&a, "b");
+    let closed = chevron(&a, b);
+    // Frames that leave the pane undrawn: its chevrons are kept, not forgotten.
+    for _ in 0..3 {
+        step(&mut a, FRAME);
+    }
+    assert!(a.anim_due.is_none(), "nothing moves at rest");
+    a.ui.tree.toggle(b);
+    step(&mut a, FRAME);
+    assert!(a.anim_due.is_some(), "the turn asks for a frame");
+    assert!(chevron(&a, b) == closed, "the turn starts where it was");
+    step(&mut a, FRAME);
+    let mid = chevron(&a, b);
+    assert!(
+        mid != closed,
+        "on its way: drawn on a frame nothing else changed"
+    );
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the turn ends");
+    }
+    // At rest: the open chevron a still run draws, and no timer is left.
+    let mut still = with_tree(&dir, false);
+    still.ui.tree.toggle(tree_row(&still, "b"));
+    still.compose();
+    let open = chevron(&still, b);
+    assert!(mid != open);
+    assert!(chevron(&a, b) == open, "at rest, open");
+    assert!(a.anim.group_deadlines().is_empty());
+    step(&mut a, Duration::from_secs(1));
+    assert!(a.anim_due.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_chevron_is_named_by_its_folder_and_keeps_turning_when_its_row_moves() {
+    let dir = folder_tree("moves");
+    let mut a = with_tree(&dir, true);
+    let b = tree_row(&a, "b");
+    a.ui.tree.toggle(b);
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    // The folder above opens: "b" is now a row further down, still part of the way round.
+    a.ui.tree.toggle(tree_row(&a, "a"));
+    step(&mut a, FRAME);
+    let b = tree_row(&a, "b");
+    let mut still = with_tree(&dir, false);
+    still.ui.tree.toggle(tree_row(&still, "b"));
+    still.ui.tree.toggle(tree_row(&still, "a"));
+    still.compose();
+    assert_eq!(tree_row(&still, "b"), b);
+    assert!(
+        chevron(&a, b) != chevron(&still, b),
+        "the moved row's chevron is still turning, not taken for new"
+    );
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+    }
+    assert!(chevron(&a, b) == chevron(&still, b), "at rest, open");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn with_animations_off_or_a_still_run_a_folder_opens_at_once() {
+    let dir = folder_tree("still");
+    let mut still = with_tree(&dir, false);
+    let b = tree_row(&still, "b");
+    still.ui.tree.toggle(b);
+    still.compose();
+    assert!(still.anim_due.is_none());
+    let open = chevron(&still, b);
+    let mut off = with_tree(&dir, true);
+    off.apply_setting(s::MOTION, Value::Bool(false));
+    let mut reduced = with_tree(&dir, true);
+    reduced.anim.set_system_reduced(true);
+    for (name, a) in [("setting off", &mut off), ("reduced motion", &mut reduced)] {
+        a.compose();
+        a.ui.tree.toggle(b);
+        step(a, FRAME);
+        assert!(a.anim_due.is_none(), "{name}: no frame is asked for");
+        assert!(chevron(a, b) == open, "{name}: open at once");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_group_of_the_notes_pane_turns_its_chevron_as_it_folds() {
+    let root = std::env::temp_dir().join(format!("mdview-turn-notes-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("Personal")).unwrap();
+    std::fs::write(root.join("Personal/Budget.md"), "# Budget\n").unwrap();
+    std::fs::write(
+        root.join("Personal.md"),
+        "# Personal\n\n## Money\n\n- [Budget](<Personal/Budget.md>)\n",
+    )
+    .unwrap();
+    let mut a = moving(&["showcase.md"]);
+    a.ui.notes = crate::notes::Notes::new(Some(root.clone()));
+    a.ws.set_library_offered(true);
+    a.pane_face(1);
+    a.compose();
+    let i = (a.ui.notes.rows.iter())
+        .position(|r| r.label == "Personal")
+        .expect("the group's row");
+    let row = a.hit_rect(Hit::NotesRow(i)).expect("on screen");
+    let files = a.areas.region(Region::Files).unwrap();
+    let cx = files.x + 14.0 + (a.ui.notes.rows[i].depth as f32 + 1.0) * 14.0 - 8.0;
+    let at = Rect::new(cx - 7.0, row.cy() - 7.0, 14.0, 14.0);
+    let open = crop(&a, at);
+    step(&mut a, FRAME);
+    a.notes_row(i);
+    step(&mut a, FRAME);
+    assert!(a.anim_due.is_some(), "the fold turns the chevron");
+    step(&mut a, FRAME);
+    let mid = crop(&a, at);
+    assert!(mid != open, "on its way");
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+    }
+    let folded = crop(&a, at);
+    assert!(mid != folded && open != folded, "folded at rest");
+    let _ = std::fs::remove_dir_all(&root);
+}
