@@ -874,7 +874,15 @@ impl App {
     /// Shows `text` until `until`: under the others when `stack`, in their place otherwise.
     fn show_toast(&mut self, text: &str, until: Instant, stack: bool) {
         if stack {
-            self.toasts.show(text.to_string(), Some(until));
+            let key = self.toasts.show(text.to_string(), Some(until));
+            // The shared stack makes a new toast wait for the ones above to lift. Under
+            // `Policy::Never` (a shot, a test, Animations off, reduced motion) that wait would
+            // hold it back 167 ms with nothing moving: bringing it back drops the wait, so it
+            // is there at once as every other still frame is. (Shared keeps a delay under
+            // reduced motion on purpose, so this is the window's correction.)
+            if !self.anim.animates() {
+                self.toasts.revive(key, Some(until));
+            }
             return;
         }
         let key = self.toasts.replace_newest(text.to_string(), Some(until));

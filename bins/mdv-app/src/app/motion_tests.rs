@@ -655,6 +655,52 @@ fn a_second_toast_stacks_under_the_first_which_moves_up() {
 }
 
 #[test]
+fn under_no_motion_two_confirmations_are_both_there_on_the_next_frame() {
+    // A shot, a test, Animations off or reduced motion: nothing moves, so the shared stack's
+    // wait for the lift must not hold the new toast back either.
+    let mut a = app(&["showcase.md"]);
+    a.ws.confirm("First");
+    a.compose();
+    a.ws.confirm("Second");
+    a.compose();
+    let shown = toasts(&a);
+    assert_eq!(shown.len(), 2, "{shown:?}");
+    assert!(
+        shown.iter().all(|(_, t, _)| *t == 1.0),
+        "both are fully shown: {shown:?}"
+    );
+    assert_eq!((shown[0].2, shown[1].2), (0.0, 44.0), "the first lifted");
+}
+
+#[test]
+fn a_confirmation_pushed_onto_others_waits_until_they_have_lifted() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.confirm("First");
+    a.compose();
+    settle(&mut a);
+    a.ws.confirm("Second");
+    a.compose();
+    // 144 ms: less than the lift's 167 ms. The first is on its way up; the second is not there.
+    for i in 0..9 {
+        step(&mut a, FRAME);
+        let now = toasts(&a);
+        assert_eq!(now.len(), 2, "frame {i}: {now:?}");
+        assert_eq!(now[0].0, "Second");
+        assert_eq!(now[0].1, 0.0, "frame {i}: it waits for the lift");
+        assert!(
+            now[1].2 > 0.0 && now[1].2 < 44.0,
+            "frame {i}: the first is lifting: {}",
+            now[1].2
+        );
+    }
+    settle(&mut a);
+    assert_eq!(
+        toasts(&a),
+        [("Second".into(), 1.0, 0.0), ("First".into(), 1.0, 44.0)]
+    );
+}
+
+#[test]
 fn the_redraw_covers_everything_a_toast_touches_as_it_rises() {
     let mut a = moving(&["showcase.md"]);
     a.ws.set_status("Hello");

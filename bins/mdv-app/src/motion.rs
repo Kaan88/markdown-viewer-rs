@@ -83,12 +83,17 @@ pub const TOASTS: &str = "toasts";
 
 /// The toasts' stack, entering and leaving by [`TOAST`]; at most [`TOASTS_MAX`] are there at
 /// once, those leaving included (a fourth sends the oldest away, and drops at once one already
-/// leaving).
+/// leaving). A confirmation pushed onto others waits until they have lifted out of its way
+/// (`with_wait_for_lift`, the owner's "New waits for the lift", 2026-11-25), so the one above
+/// never covers it on the way in; onto an empty stack it enters at once. Under `Policy::Never`
+/// the shared delay is kept even though nothing moves, so `App::show_toast` revives the new one
+/// to drop the wait.
 pub fn toasts() -> Stack<String> {
     Stack::new()
         .with_motion(TOAST.enter, TOAST.exit)
         .with_max(TOASTS_MAX)
         .with_max_drawn(TOASTS_MAX)
+        .with_wait_for_lift()
 }
 
 /// What the animator may do: `still` is a run that must not depend on time (a shot, the
