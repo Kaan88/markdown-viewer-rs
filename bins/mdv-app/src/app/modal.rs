@@ -89,7 +89,9 @@ impl App {
         self.ui.dialog = None;
         self.ui.palette = None;
         let page = self.ui.settings_page;
-        self.ui.settings = Some(setting::form(&self.ws, self.corners_offered(), page));
+        let mut f = setting::form(&self.ws, self.corners_offered(), page);
+        f.set_high_contrast(self.high_contrast());
+        self.ui.settings = Some(f);
         self.modal_changed();
     }
 

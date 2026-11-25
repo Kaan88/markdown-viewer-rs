@@ -92,6 +92,12 @@ shot dialog-settings-640 --light --size 640x800 --dialog settings "$fx/showcase.
 # The Window backdrop row (offered on Windows) with a choice made. A shot has no window, so
 # there is no backdrop to show: the chrome is the flat colours.
 shot dialog-settings-backdrop --dark --backdrop mica --dialog settings "$fx/showcase.md"
+# A switch of the settings dialog (Reading, "Tick task boxes without asking") turned with Space:
+# 67 ms into its slide, the knob part way and its fill coming in; and at rest once turned.
+for theme in light dark; do
+    shot "settings-switch-sliding-$theme" --"$theme" --dialog settings --flip-setting 5 --motion-at 67 "$fx/showcase.md"
+done
+shot settings-switch-turned-light --light --dialog settings --flip-setting 5 "$fx/showcase.md"
 # The Appearance page with "Animations" turned off, from a scratch settings file, at the
 # smallest size in both themes.
 still="$(mktemp -d)"

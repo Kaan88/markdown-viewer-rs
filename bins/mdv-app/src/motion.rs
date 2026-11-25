@@ -39,6 +39,12 @@ pub const DISCLOSURE: Motion = fluent::MOVE;
 /// drawn again while one of them moves.
 pub const FILES: &str = "files";
 
+/// The animator's group, and the name, of the settings dialog's values (`Form::draw_animated`:
+/// a switch's knob and a chosen segment slide, the page list's hover fills and the open
+/// dropdown's row fade, by the shared form's own presets): drawn again while one of them moves,
+/// kept on a frame that leaves the dialog undrawn.
+pub const SETTINGS: &str = "settings";
+
 /// The name of the chevron of the folder at `path` in the Files tree: by its path, so a row that
 /// moves up or down the list (a folder above it opened) keeps its turn.
 pub fn folder(path: &Path) -> Id {

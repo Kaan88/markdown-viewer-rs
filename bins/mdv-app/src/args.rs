@@ -101,9 +101,12 @@ pub struct Args {
     /// `--toast <text>`, said once or more: the status messages a shot shows as toasts, the
     /// last one coming in with `--motion-at`, the others already at rest above it.
     pub toasts: Vec<String>,
-    /// `--motion-at <ms>`: what a shot's `--turn` or last `--toast` sets moving, that long into
-    /// its motion.
+    /// `--motion-at <ms>`: what a shot's `--turn`, last `--toast` or `--flip-setting` sets
+    /// moving, that long into its motion.
     pub motion_at: Option<u64>,
+    /// `--flip-setting <id>`: with `--dialog settings`, the row of that id (`settings.rs`)
+    /// focused and turned with Space, for a shot; with `--motion-at`, as its switch slides.
+    pub flip_setting: Option<u32>,
     /// `--zoom-level F`: with `--zoom-diagram`, its drawing size in device px per raster px (1.0,
     /// the default, is twice the page's size at any scale).
     pub zoom_level: Option<f32>,
@@ -236,6 +239,7 @@ impl Args {
                 "--turn" => out.turn = value(&a),
                 "--toast" => out.toasts.extend(value(&a)),
                 "--motion-at" => out.motion_at = value(&a).and_then(|v| v.parse().ok()),
+                "--flip-setting" => out.flip_setting = value(&a).and_then(|v| v.parse().ok()),
                 "--hover" => out.hover = value(&a).and_then(|v| pair(&v, ',')),
                 "--menu" => {
                     out.menu = match value(&a).as_deref() {
@@ -307,6 +311,8 @@ mod tests {
         assert_eq!(a.turn.as_deref(), Some("wiki"));
         assert_eq!(a.toasts, ["Copied", "Linked"]);
         assert_eq!(a.motion_at, Some(67));
+        assert_eq!(parse("--flip-setting 5").flip_setting, Some(5));
+        assert_eq!(parse("--flip-setting on").flip_setting, None);
         assert_eq!(a.menu_at, Some(21));
         let b = parse("--motion-at soon");
         assert_eq!(b.motion_at, None);

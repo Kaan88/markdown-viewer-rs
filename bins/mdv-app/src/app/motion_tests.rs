@@ -1023,3 +1023,66 @@ fn a_replacing_status_takes_the_place_of_the_confirmations_showing() {
     assert_eq!(shown[0].1, 1.0, "in the newest one's place");
     assert_eq!(shown[0].2, 0.0);
 }
+
+// ---- the settings dialog in motion ----------------------------------------------------------
+
+/// Opens the settings dialog with the row `row` focused.
+fn settings_at(a: &mut App, row: u32) {
+    a.command(C::Settings);
+    a.compose();
+    assert!(a.ui.settings.as_mut().unwrap().focus_row(row));
+    // Its page drawn (as a click on it in the list would), so its rows are seen at rest.
+    a.full = true;
+    a.compose();
+}
+
+#[test]
+fn a_switch_in_the_settings_dialog_slides_then_rests_as_a_still_run_draws_it() {
+    let mut a = moving(&["showcase.md"]);
+    settings_at(&mut a, s::TICK_BOXES);
+    settle(&mut a);
+    let off = a.screen.pixels.clone();
+    a.key_named(KeyName::Space, None);
+    a.compose();
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    assert!(a.anim_due.is_some(), "the knob is on its way");
+    let mid = a.screen.pixels.clone();
+    settle(&mut a);
+    let on = a.screen.pixels.clone();
+    assert!(mid != off && mid != on, "drawn part way");
+    assert!(a.anim_due.is_none(), "no timer left");
+    let mut b = app(&["showcase.md"]);
+    settings_at(&mut b, s::TICK_BOXES);
+    b.key_named(KeyName::Space, None);
+    b.full = true;
+    b.compose();
+    a.full = true;
+    a.compose();
+    assert!(
+        a.screen.pixels == b.screen.pixels,
+        "at rest, what a still run draws"
+    );
+}
+
+#[test]
+fn with_animations_off_a_settings_switch_changes_at_once() {
+    let mut a = moving(&["showcase.md"]);
+    a.apply_setting(s::MOTION, Value::Bool(false));
+    settings_at(&mut a, s::TICK_BOXES);
+    a.key_named(KeyName::Space, None);
+    a.compose();
+    assert!(a.anim_due.is_none(), "nothing moves");
+    let mut b = app(&["showcase.md"]);
+    b.apply_setting(s::MOTION, Value::Bool(false));
+    settings_at(&mut b, s::TICK_BOXES);
+    b.key_named(KeyName::Space, None);
+    b.full = true;
+    b.compose();
+    a.full = true;
+    a.compose();
+    assert!(
+        a.screen.pixels == b.screen.pixels,
+        "the switch is on at once"
+    );
+}

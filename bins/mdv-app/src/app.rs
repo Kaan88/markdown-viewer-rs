@@ -1060,7 +1060,12 @@ impl App {
                 .is_some()
                 .then_some((self.ui.hover, self.ui.pressed)),
         ));
-        let overlay_changed = osig != self.overlay_sig;
+        // The settings dialog moving (a switch, a segment, a hover fill): drawn on each frame of
+        // it, whenever the frame comes.
+        let settings = Id::new(crate::motion::SETTINGS);
+        let settings_moving = self.ui.settings.is_some()
+            && (self.anim.group_deadlines().iter()).any(|(g, _)| *g == settings);
+        let overlay_changed = osig != self.overlay_sig || settings_moving;
         self.overlay_sig = osig;
         let mut under: Vec<Rect> = bounds.clone();
         under.extend(self.overlay_bounds.iter().copied());
@@ -1120,6 +1125,7 @@ impl App {
         // The page rows a draw of an animation's next frame is limited to.
         let mut partial: Option<(u32, u32)> = None;
         let mut files_drawn = false;
+        let mut settings_drawn = false;
         {
             let mut p = Painter::new(&mut self.screen, &mut self.gfx, self.scale);
             // A menu fading in over frosted chrome lets the backdrop through less and less.
@@ -1227,7 +1233,11 @@ impl App {
                         .draw(c.p, &pal, window, crate::ui::TITLE_H, self.ui.caret_on);
                 }
                 if let Some(f) = self.ui.settings.as_mut() {
-                    f.draw(c.p, &pal, window, self.ui.caret_on);
+                    let id = crate::motion::SETTINGS;
+                    self.anim.group(id);
+                    f.draw_animated(c.p, &pal, window, self.ui.caret_on, &mut self.anim, id);
+                    self.anim.ungroup();
+                    settings_drawn = true;
                 }
                 // The diagram view covers everything, so it is drawn after them all.
                 if let Some(z) = self.ui.zoom.as_ref() {
@@ -1239,6 +1249,10 @@ impl App {
         // where it was drawn, instead of being taken for new (and shown at rest).
         if !files_drawn {
             self.anim.keep_group(crate::motion::FILES);
+        }
+        // So does the settings dialog on a frame that leaves it as it was.
+        if self.ui.settings.is_some() && !settings_drawn {
+            self.anim.keep_group(crate::motion::SETTINGS);
         }
         // A partial draw trusted that only those rows of the page changed. If the page's frame
         // says otherwise (something else moved in between), the page is drawn whole next.
@@ -1396,6 +1410,18 @@ impl App {
         if !self.still {
             self.anim.set_system_reduced(platform::motion_reduced());
         }
+        let on = self.high_contrast();
+        if let Some(f) = self.ui.settings.as_mut()
+            && f.set_high_contrast(on)
+        {
+            self.modal_changed();
+        }
+    }
+
+    /// Whether the system's contrast theme is on (never for a still run: a shot or a test
+    /// draws the same everywhere). The settings dialog's highlights then change at once.
+    pub(crate) fn high_contrast(&self) -> bool {
+        !self.still && platform::system_high_contrast()
     }
 
     fn watch_motion(&mut self) {
@@ -2228,9 +2254,23 @@ fn shot(mut app: App, path: &Path) -> i32 {
         app.ws.confirm(text);
         app.compose();
     }
+    // The row to turn is focused first, its page drawn at rest.
+    let flip = app.args.flip_setting;
+    if let Some(id) = flip {
+        let focused = (app.ui.settings.as_mut()).is_some_and(|f| f.focus_row(id));
+        if !focused {
+            eprintln!("mdview: no setting {id} to turn in the settings dialog");
+            return 2;
+        }
+        app.full = true;
+        app.compose();
+    }
     let moving = app.args.motion_at.map(|ms| (start_moving(&mut app), ms));
     if let Some(text) = last_toast {
         app.ws.confirm(text);
+    }
+    if flip.is_some() {
+        app.key_named(KeyName::Space, None);
     }
     if let Some(name) = app.args.turn.clone() {
         match (app.ui.tree.rows().iter()).position(|r| r.is_dir && r.depth == 0 && r.name == name) {
