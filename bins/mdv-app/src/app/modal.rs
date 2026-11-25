@@ -36,6 +36,7 @@ impl App {
         // Its notes are resolved once per read, here, not as the reader types (audit 4, E5).
         self.ui.notes.resolve_notes();
         self.ui.palette = Some(PaletteState::open(&self.ws, Some(&self.ui.notes), query));
+        self.palette_serial += 1;
         self.caret_reset();
         self.modal_changed();
     }
@@ -60,6 +61,7 @@ impl App {
         self.ui.dialog = None;
         self.drop_settings();
         self.ui.palette = Some(PaletteState::open_folder(root, &query, wake));
+        self.palette_serial += 1;
         self.caret_reset();
         self.modal_changed();
     }

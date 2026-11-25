@@ -30,6 +30,13 @@ pub fn submenu(anim: &mut Animator, serial: u64, sub: u64) -> f32 {
     anim.presence(("submenu", serial, sub), true, MENU.enter, MENU.exit)
 }
 
+/// The presence of the palette, `serial` naming this opening of it: the card fades in and drops
+/// into place (`Palette::draw_presence`), and a palette opened again fades in again. Closing is
+/// instant, so its exit is not used.
+pub fn palette(anim: &mut Animator, serial: u64) -> f32 {
+    anim.presence(("palette", serial), true, MENU.enter, MENU.exit)
+}
+
 /// A chevron's turn in the Files and Notes panes: the shared `glyph::DISCLOSURE_MOTION` as it
 /// is (`fluent::MOVE`, 167 ms), chosen here so every timing of the window is in this file.
 pub const DISCLOSURE: Motion = fluent::MOVE;

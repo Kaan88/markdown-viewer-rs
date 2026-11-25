@@ -327,6 +327,10 @@ struct App {
     frame_clock: Option<Instant>,
     /// How present the open menu and its submenu are this frame, 0 to 1.
     menu_t: (f32, f32),
+    /// How present the palette is this frame, 0 to 1 (it closes at once, so there is no 0
+    /// while it is open), and this opening of it: a palette opened again fades in again.
+    palette_t: f32,
+    palette_serial: u64,
     /// How present the tooltip is this frame, 0 to 1 (0: none shows).
     tip_t: f32,
     /// The settings the dialog changed while `motion::SETTINGS` was in flight: each one's row
@@ -460,6 +464,8 @@ impl App {
             still: args_still,
             frame_clock: None,
             menu_t: (1.0, 1.0),
+            palette_t: 1.0,
+            palette_serial: 0,
             motion_watched: false,
             tip_t: 0.0,
             settings_changed: Vec::new(),
@@ -825,6 +831,11 @@ impl App {
             ),
             None => (1.0, 1.0),
         };
+        // The palette's entrance, asked for on every frame it is open for the same reason.
+        self.palette_t = match self.ui.palette.is_some() {
+            true => crate::motion::palette(&mut self.anim, self.palette_serial),
+            false => 0.0,
+        };
         self.sync_toasts(now);
         let done = self.compose_frame();
         self.anim_due = self.anim.end_frame();
@@ -1107,6 +1118,8 @@ impl App {
             self.ui.modal().then_some((
                 self.ui.overlay_tick,
                 self.ui.palette.is_some().then_some(self.ui.caret_on),
+                // A palette coming in is drawn anew on each frame of it.
+                self.palette_t.to_bits(),
             )),
             self.ui
                 .zoom
@@ -1324,8 +1337,16 @@ impl App {
                 // Last, over everything.
                 let window = Rect::new(0.0, 0.0, w, h);
                 if let Some(p) = self.ui.palette.as_mut() {
-                    p.palette
-                        .draw(c.p, &pal, window, crate::ui::TITLE_H, self.ui.caret_on);
+                    let caret_on = self.ui.caret_on;
+                    let t = self.palette_t;
+                    let t = self.palette_t;
+                    if t >= 1.0 {
+                        p.palette
+                            .draw(c.p, &pal, window, crate::ui::TITLE_H, caret_on);
+                    } else {
+                        p.palette
+                            .draw_presence(c.p, &pal, window, crate::ui::TITLE_H, caret_on, t);
+                    }
                 }
                 if let Some(f) = self.ui.settings.as_mut() {
                     let id = crate::motion::SETTINGS;
@@ -2350,6 +2371,13 @@ fn shot(mut app: App, path: &Path) -> i32 {
             p.poll_folder();
         }
     }
+    // A palette part of the way into its own entrance: the clock must start before its first
+    // frame, since a still frame would put it in place at once.
+    let early = if app.ui.palette.is_some() {
+        app.args.motion_at.map(|ms| (start_moving(&mut app), ms))
+    } else {
+        None
+    };
     // The diagram zoom view, at the size and place the arguments ask for.
     if let Some(n) = app.args.zoom_diagram {
         if !app.open_zoom_nth(n) {
@@ -2422,7 +2450,7 @@ fn shot(mut app: App, path: &Path) -> i32 {
         app.full = true;
         app.compose();
     }
-    let moving = app.args.motion_at.map(|ms| (start_moving(&mut app), ms));
+    let moving = early.or_else(|| app.args.motion_at.map(|ms| (start_moving(&mut app), ms)));
     if let Some(text) = last_toast {
         app.ws.confirm(text);
     }

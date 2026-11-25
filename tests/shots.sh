@@ -138,6 +138,10 @@ rm -rf "$brief"
 # The command palette: tabs and recent files, commands by prefix, headings by prefix.
 shot palette-empty-light --light --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
 shot palette-empty-dark --dark --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
+# 41 ms into its fade-in (about half there, a few px below its place); --motion-at starts the
+# clock before its first frame, which a still run would draw in place at once.
+shot palette-rising-light --light --palette "" --motion-at 41 "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
+shot palette-rising-dark --dark --palette "" --motion-at 41 "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
 shot palette-commands-light --light --palette ">zoom" "$fx/showcase.md"
 shot palette-commands-dark --dark --palette ">zoom" "$fx/showcase.md"
 shot palette-history-light --light --palette ">back" "$fx/showcase.md"

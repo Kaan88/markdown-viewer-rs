@@ -755,6 +755,43 @@ fn a_confirmation_pushed_onto_others_waits_until_they_have_lifted() {
 }
 
 #[test]
+fn the_palette_fades_and_drops_in_as_it_opens_and_rests_as_a_still_one() {
+    let mut a = moving(&["showcase.md"]);
+    a.open_palette("");
+    a.compose();
+    assert_eq!(a.palette_t, 0.0, "its first frame is the start of the fade");
+    let card = a.ui.palette.as_ref().unwrap().palette.rect();
+    let (x, y) = (card.cx(), card.y + 20.0);
+    let first = pixel(&a, x, y);
+    assert!(a.anim_due.is_some(), "a frame is asked for");
+    let mut still = app(&["showcase.md"]);
+    still.open_palette("");
+    still.compose();
+    assert_ne!(
+        first,
+        pixel(&still, x, y),
+        "the first frame has not the card in place yet"
+    );
+    let mut frames = 1;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the fade ends");
+    }
+    assert_eq!(a.palette_t, 1.0);
+    assert_eq!(
+        pixel(&a, x, y),
+        pixel(&still, x, y),
+        "the card's place, pixel for pixel"
+    );
+    // The rest of the window too, and nothing left moving.
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "the palette at rest is the still one, pixel for pixel"
+    );
+}
+
+#[test]
 fn the_palette_is_damaged_by_its_presence_bounds_not_a_hand_made_margin() {
     let mut a = app(&["showcase.md"]);
     a.open_palette("");

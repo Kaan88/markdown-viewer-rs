@@ -6,6 +6,8 @@ mdview next: menus fade in as they open, folders' arrows turn, toasts rise in an
 
 - **A menu row's hover fills in.** The row the pointer or the keys reach fills in quickly instead of at once, and fades out as they leave it; with animations off or the system asking for less motion it is at once.
 
+- **The command palette fades in.** It fades and drops into place as it opens, quickly; it closes at once.
+
 - **A folder's arrow turns.** In the Files pane, and for a group or a section of the Notes pane, the arrow beside a folder turns down as it opens and back as it closes.
 
 - **Toasts rise in, and confirmations stack.** A message rises and fades in at the bottom of the page, and fades and sinks away when its time is up. A message still takes the place of the one showing (a zoom step, an export and its result), but a confirmation such as "Copied" or "Link address copied" comes in under the ones showing, which move up first so that nothing covers it; at most three show at once.
