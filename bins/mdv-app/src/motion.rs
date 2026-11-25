@@ -5,14 +5,14 @@
 //!
 //! Menus, context menus and the Open recent submenu fade in as they open; closing is instant
 //! (owner, 2026-11-25). A folder's chevron in the Files pane (and a group's or a section's in the
-//! Notes pane) turns as it opens or closes, by the shared `glyph::DISCLOSURE_MOTION` (167 ms).
+//! Notes pane) turns as it opens or closes, by [`DISCLOSURE`] (the shared `glyph::DISCLOSURE_MOTION`, 167 ms).
 //! A toast rises and fades in, fades and sinks out as it leaves of itself, and a second one
 //! stacks under the first (the shared `anim::Stack`), by `document::TOAST`.
 //! Nothing moves in a `--shot`, a `--scroll-steps` run or a test, nor when
 //! the "Animations" setting is off, nor when the system asks for less motion.
 
 use mdshared_ui::anim::stack::Stack;
-use mdshared_ui::anim::{Animator, Id, Policy, document};
+use mdshared_ui::anim::{Animator, Id, Motion, Policy, document, fluent};
 use std::path::Path;
 
 /// A menu's entrance: the shared preset (117 ms, decelerating). Its exit is not used: a
@@ -29,6 +29,10 @@ pub fn menu(anim: &mut Animator, serial: u64) -> f32 {
 pub fn submenu(anim: &mut Animator, serial: u64, sub: u64) -> f32 {
     anim.presence(("submenu", serial, sub), true, MENU.enter, MENU.exit)
 }
+
+/// A chevron's turn in the Files and Notes panes: the shared `glyph::DISCLOSURE_MOTION` as it
+/// is (`fluent::MOVE`, 167 ms), chosen here so every timing of the window is in this file.
+pub const DISCLOSURE: Motion = fluent::MOVE;
 
 /// The animator's group for the Files pane's values (the Notes pane is drawn in the same
 /// region): a frame that leaves the region undrawn keeps them (`keep_group`), and the region is

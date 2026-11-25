@@ -451,7 +451,18 @@ pub fn draw(c: &mut Ctx, anim: &mut Animator, ws: &Workspace, ui: &mut Ui, r: Re
             Kind::Group | Kind::Section => {
                 let open = !ui.notes.is_folded(&row.key);
                 let id = crate::motion::notes_fold(&row.key);
-                glyph::draw_disclosure_animated(c.p, anim, id, ix - 8.0, cy, 8.0, open, pal.faint);
+                let motion = crate::motion::DISCLOSURE;
+                glyph::draw_disclosure_animated_with(
+                    c.p,
+                    anim,
+                    id,
+                    ix - 8.0,
+                    cy,
+                    8.0,
+                    open,
+                    pal.faint,
+                    motion,
+                );
                 if row.kind == Kind::Group {
                     c.p.icon(glyph::BOOKMARK, 13.0, ix + 9.0, cy, pal.folder);
                     (Face::Semibold, pal.text)

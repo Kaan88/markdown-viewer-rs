@@ -116,7 +116,7 @@ pub fn draw_files(c: &mut Ctx, anim: &mut Animator, ws: &Workspace, ui: &mut Ui,
         let cy = rr.cy();
         if row.is_dir {
             // Turns as the folder opens or closes; at rest the right or down chevron.
-            glyph::draw_disclosure_animated(
+            glyph::draw_disclosure_animated_with(
                 c.p,
                 anim,
                 crate::motion::folder(&row.path),
@@ -125,6 +125,7 @@ pub fn draw_files(c: &mut Ctx, anim: &mut Animator, ws: &Workspace, ui: &mut Ui,
                 8.0,
                 row.expanded,
                 pal.faint,
+                crate::motion::DISCLOSURE,
             );
             c.p.icon(
                 if row.expanded {
