@@ -59,6 +59,10 @@ shot menu-tab --dark --menu tab "$fx/showcase.md" "$fx/tables.md"
 shot menu-tab-light --light --menu tab "$fx/showcase.md" "$fx/tables.md"
 shot menu-page --light --menu page "$fx/showcase.md"
 shot menu-find --light --find the --menu find "$fx/showcase.md"
+# The main menu 21 ms into its fade-in, about half there and 3 px above its place (the only
+# shots that move: --menu-at runs the motion on a clock set by hand).
+shot menu-main-fading-light --light --menu main --menu-at 21 "$fx/showcase.md"
+shot menu-main-fading-dark --dark --menu main --menu-at 21 "$fx/showcase.md"
 
 # Every dialog.
 shot dialog-about-dark --dark --dialog about "$fx/showcase.md"
@@ -75,6 +79,15 @@ shot dialog-settings-640 --light --size 640x800 --dialog settings "$fx/showcase.
 # The Window backdrop row (offered on Windows) with a choice made. A shot has no window, so
 # there is no backdrop to show: the chrome is the flat colours.
 shot dialog-settings-backdrop --dark --backdrop mica --dialog settings "$fx/showcase.md"
+# The Appearance page with "Animations" turned off, from a scratch settings file, at the
+# smallest size in both themes.
+still="$(mktemp -d)"
+printf '[mdview]
+motion=0
+' >"$still/settings.ini"
+for theme in light dark; do
+    MDVIEW_SETTINGS="$still/settings.ini" "$exe" --scale 1.0 --shot "$out/settings-appearance-motion-off-min-$theme.png"         --"$theme" --size 520x360 --dialog settings --settings-section appearance "$fx/showcase.md"
+done
 # Settings, every page at the default size and the smallest, in both themes. "tabs-on" is the
 # Tabs page with the brief-tab rule on (its seconds enabled), read from a scratch settings file
 # (a shot reads one named by MDVIEW_SETTINGS and never the user's); "tabs" is the rule off.

@@ -108,6 +108,9 @@ pub struct Session {
     pub library_ok: bool,
     /// Play animated GIF and WebP images. On by default; off shows their first frame.
     pub animations: bool,
+    /// The "Animations" setting: menus fade in as they open (the window's own motion, not the
+    /// images' playback, which is `animations`). On by default; off, every motion is instant.
+    pub motion: bool,
     /// The window's corner radius in logical px: 8 (the default), 4 or 0 (square). The shell
     /// turns it into `mdshared_ui::corners::Corners`; this crate keeps the number.
     pub corners: u8,
@@ -191,6 +194,7 @@ impl Default for Session {
             edit_tasks: false,
             library_ok: false,
             animations: true,
+            motion: true,
             corners: CORNERS_DEFAULT,
             previews: true,
             backdrop: Backdrop::Off,
@@ -247,6 +251,7 @@ impl Session {
                 "edit_tasks" => s.edit_tasks = value.trim() == "1",
                 "library_ok" => s.library_ok = value.trim() == "1",
                 "animations" => s.animations = value.trim() != "0",
+                "motion" => s.motion = value.trim() != "0",
                 "corners" => {
                     s.corners = clean_corners(value.trim().parse().unwrap_or(CORNERS_DEFAULT))
                 }
@@ -321,6 +326,10 @@ impl Session {
             line("library_ok", "1");
         }
         line("animations", if self.animations { "1" } else { "0" });
+        // Only when turned off, so a session that never chose is the file it always was.
+        if !self.motion {
+            line("motion", "0");
+        }
         // Only when not the default, so a session that never chose is the file it always was.
         if self.corners != CORNERS_DEFAULT {
             line("corners", &self.corners.to_string());
@@ -679,6 +688,31 @@ mod window_state_tests {
             );
         }
         assert_eq!(Session::parse("zoom=100\n").corners, 8);
+    }
+
+    #[test]
+    fn motion_is_on_unless_turned_off_and_apart_from_the_images() {
+        assert!(Session::default().motion);
+        assert!(
+            Session::parse(
+                "zoom=100
+"
+            )
+            .motion
+        );
+        assert!(!Session::default().serialize().contains("motion="));
+        let s = Session {
+            motion: false,
+            ..Default::default()
+        };
+        let back = Session::parse(&s.serialize());
+        assert!(!back.motion);
+        assert!(back.animations, "the images' setting is not the motion's");
+        let s = Session {
+            animations: false,
+            ..Default::default()
+        };
+        assert!(Session::parse(&s.serialize()).motion);
     }
 
     #[test]

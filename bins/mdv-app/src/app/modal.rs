@@ -366,6 +366,7 @@ impl App {
             (setting::REMOTE_IMAGES, Value::Bool(on)) => self.ws.set_remote_always(on),
             (setting::TICK_BOXES, Value::Bool(on)) => self.ws.set_edit_always(on),
             (setting::ANIMATIONS, Value::Bool(on)) => self.ws.set_animations(on),
+            (setting::MOTION, Value::Bool(on)) => self.ws.set_motion(on),
             (setting::START_ON_PINNED, Value::Bool(on)) => self.ws.set_start_on_pinned(on),
             (setting::OFFER_STALE, Value::Bool(on)) => self.ws.set_offer_stale(on),
             (setting::SKIP_BRIEF, Value::Bool(on)) => {

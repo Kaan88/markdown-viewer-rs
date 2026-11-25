@@ -1791,6 +1791,20 @@ impl Workspace {
         self.persist();
     }
 
+    /// The "Animations" setting: whether the window's own motion plays (menus fading in).
+    /// Apart from [`animations`](Self::animations), which is the images' playback.
+    pub fn motion(&self) -> bool {
+        self.session.motion
+    }
+
+    pub fn set_motion(&mut self, on: bool) {
+        if self.session.motion == on {
+            return;
+        }
+        self.session.motion = on;
+        self.persist();
+    }
+
     /// The window's corner radius, logical px (0, 4 or 8).
     pub fn corners(&self) -> u8 {
         self.session.corners

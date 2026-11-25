@@ -29,7 +29,9 @@ use crate::ui::{
 use crate::updater;
 use crate::workspace::{Click, LinkOutcome, ThemeChoice, Workspace};
 use mdshared_app::sister::Request;
+use mdshared_ui::anim::Animator;
 use mdshared_ui::corners::Corners;
+use mdshared_ui::menu::Entrance;
 use mdview_core::commands::CommandId as C;
 use mdview_core::watch::FileWatcher;
 use mdview_render::Bitmap;
@@ -60,6 +62,8 @@ mod library;
 #[cfg(test)]
 mod library_tests;
 mod modal;
+#[cfg(test)]
+mod motion_tests;
 mod slides;
 #[cfg(test)]
 mod tests;
@@ -117,6 +121,8 @@ pub enum Wake {
     FolderSearch,
     /// The animation thread has a frame ready.
     Animation,
+    /// The system's wish for less motion changed (`platform::watch_motion_reduced`).
+    Motion,
     /// A helper thread has read a file for a hover card.
     Preview,
     /// An updater thread has an answer.
@@ -306,6 +312,18 @@ struct App {
     trace: bool,
     /// Ctrl+wheel and trackpad deltas below one notch, kept until they add up.
     wheel_rest: f32,
+    /// The window's own motion (`crate::motion`): what is on its way, and when the next frame
+    /// of it is due. `None` once nothing moves, so an idle window keeps no timer.
+    anim: Animator,
+    anim_due: Option<Instant>,
+    /// A run that must not depend on time (a shot, the scroll steps, a test): nothing moves.
+    still: bool,
+    /// The frames' time when it is not the real one: a test's, or a shot of a menu mid-fade.
+    frame_clock: Option<Instant>,
+    /// How present the open menu and its submenu are this frame, 0 to 1.
+    menu_t: (f32, f32),
+    /// The system's wish for less motion is watched (from the first frame on).
+    motion_watched: bool,
 }
 
 impl App {
@@ -328,6 +346,7 @@ impl App {
     ) -> App {
         let system_dark = platform::system_is_dark();
         let trace = std::env::var_os("MDVIEW_TRACE").is_some();
+        let args_still = args.shot.is_some() || args.scroll_steps.is_some() || cfg!(test);
         let mut ui = Ui::new();
         // A shot has no loop to wait in, so it looks for the library now; a window looks on a
         // helper thread once it runs (`look_for_library`), so neither mdedit's settings file nor
@@ -403,6 +422,12 @@ impl App {
             step_times: Vec::new(),
             trace,
             wheel_rest: 0.0,
+            anim: Animator::new(),
+            anim_due: None,
+            still: args_still,
+            frame_clock: None,
+            menu_t: (1.0, 1.0),
+            motion_watched: false,
         }
     }
 
@@ -734,8 +759,31 @@ impl App {
         )
     }
 
-    /// Composes one frame into `screen` and returns the device-px rows changed.
+    /// Composes one frame into `screen` and returns the device-px rows changed. The frame is
+    /// one frame of the animator: every value of it is asked between its `begin_frame` and
+    /// `end_frame`, and the deadline that gives is the timer `timers` waits for.
     fn compose(&mut self) -> (Vec<(i32, i32, i32, i32)>, FrameTimes) {
+        let now = self.frame_clock.unwrap_or_else(Instant::now);
+        (self.anim).set_policy(crate::motion::policy(self.still, self.ws.motion()));
+        self.anim.begin_frame(now);
+        // The open menus are asked for on every frame they are open, whatever else the frame
+        // draws, so none is forgotten and taken for new on a frame that skips the overlays.
+        self.menu_t = match self.ui.popup.as_ref() {
+            Some(p) => (
+                crate::motion::menu(&mut self.anim, p.serial),
+                match p.sub {
+                    Some(_) => crate::motion::submenu(&mut self.anim, p.serial, p.sub_serial),
+                    None => 1.0,
+                },
+            ),
+            None => (1.0, 1.0),
+        };
+        let done = self.compose_frame();
+        self.anim_due = self.anim.end_frame();
+        done
+    }
+
+    fn compose_frame(&mut self) -> (Vec<(i32, i32, i32, i32)>, FrameTimes) {
         self.crash_context();
         let mut times = FrameTimes::default();
         let t0 = Instant::now();
@@ -850,9 +898,10 @@ impl App {
         let mut bounds: Vec<Rect> = bubbles.iter().map(Bubble::bounds).collect();
         bounds.extend(card.iter().map(crate::preview::Layout::bounds));
         if let Some(popup) = &self.ui.popup {
-            bounds.push(popup.menu.rect().inset(-20.0));
+            // Everything a menu touches as it fades in, its shadow and its drop included.
+            bounds.push(popup.menu.presence_bounds());
             if let Some(s) = &popup.sub {
-                bounds.push(s.rect().inset(-20.0));
+                bounds.push(s.presence_bounds());
             }
         }
         if self.ui.dialog.is_some() || self.ui.settings.is_some() {
@@ -890,6 +939,8 @@ impl App {
                     p.sub
                         .as_ref()
                         .map(|s| (s.hover, s.items.len(), s.scroll().to_bits())),
+                    // A menu fading in is drawn anew on each frame of it.
+                    (self.menu_t.0.to_bits(), self.menu_t.1.to_bits()),
                 )
             }),
             self.ui.dialog.as_ref().map(|d| {
@@ -980,6 +1031,8 @@ impl App {
         let mut partial: Option<(u32, u32)> = None;
         {
             let mut p = Painter::new(&mut self.screen, &mut self.gfx, self.scale);
+            // A menu fading in over frosted chrome lets the backdrop through less and less.
+            p.set_frost_key(self.frost.key().copied());
             for r in REGIONS {
                 let band = page_band.filter(|_| r.index() == Region::Page.index());
                 if !dirty[r.index()] && band.is_none() {
@@ -1053,9 +1106,12 @@ impl App {
                 }
                 if let Some(popup) = self.ui.popup.as_mut() {
                     let room = menu_room(self.areas.title, w, h);
-                    popup.menu.draw_in(c.p, &pal, room);
+                    // At rest (1) each is `draw_in`, pixel for pixel.
+                    let (t, ts) = self.menu_t;
+                    popup.menu.draw_in_presence(c.p, &pal, room, t);
                     if let Some(s) = popup.sub.as_mut() {
-                        s.draw_in(c.p, &pal, room);
+                        let leftward = s.rect().x < popup.menu.rect().x;
+                        s.draw_in_entering(c.p, &pal, room, ts, Entrance::Side { leftward });
                     }
                 }
                 for b in &bubbles {
@@ -1222,7 +1278,32 @@ impl App {
             {
                 eprintln!("mdview: {}", frame_report(w));
             }
+            // After the first frame, never before it: the system's wish for less motion, and
+            // the watch for its changes (a helper thread on Linux, a hidden window on Windows).
+            self.read_motion();
+            self.watch_motion();
         }
+    }
+
+    /// Reads the system's wish for less motion again: after the first frame, on focus, on a
+    /// change of theme and when the watch says it changed.
+    fn read_motion(&mut self) {
+        if !self.still {
+            self.anim.set_system_reduced(platform::motion_reduced());
+        }
+    }
+
+    fn watch_motion(&mut self) {
+        if self.still || self.motion_watched {
+            return;
+        }
+        let Some(proxy) = self.proxy.clone() else {
+            return;
+        };
+        self.motion_watched = true;
+        platform::watch_motion_reduced(move || {
+            let _ = proxy.send_event(Wake::Motion);
+        });
     }
 
     /// Copies the damaged rows to the window and presents them. Returns the copy time.
@@ -1683,6 +1764,7 @@ impl ApplicationHandler<Wake> for App {
                 self.redraw();
             }
             WindowEvent::ThemeChanged(t) => {
+                self.read_motion();
                 self.system_dark = t == WinTheme::Dark;
                 self.ws.set_system_dark(self.system_dark);
                 self.full = true;
@@ -1704,6 +1786,7 @@ impl ApplicationHandler<Wake> for App {
                 if focused {
                     // The one place the system's "animation effects" setting is read again.
                     self.ws.set_system_animations(platform::shows_animations());
+                    self.read_motion();
                 }
                 if focused && self.ui.tree.refresh() {
                     self.redraw();
@@ -1919,6 +2002,16 @@ fn shot(mut app: App, path: &Path) -> i32 {
             }
         }
         None => {}
+    }
+    // A menu part of the way into its fade-in: its first frame, then the frames' time moved on.
+    if let Some(ms) = app.args.menu_at
+        && app.ui.popup.is_some()
+    {
+        app.still = false;
+        let start = Instant::now();
+        app.frame_clock = Some(start);
+        app.compose();
+        app.frame_clock = Some(start + Duration::from_millis(ms));
     }
     match app.args.dialog {
         Some(ShotDialog::About) => app.open_dialog(DialogKind::About),
