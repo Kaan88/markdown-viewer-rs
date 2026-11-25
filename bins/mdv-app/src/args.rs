@@ -98,7 +98,11 @@ pub struct Args {
     /// `--turn <name>`: with `--files`, opens (or closes) the folder of that name at the top of
     /// the Files tree, for a shot; with `--motion-at`, as its chevron turns.
     pub turn: Option<String>,
-    /// `--motion-at <ms>`: what a shot's `--turn` sets moving, that long into its motion.
+    /// `--toast <text>`, said once or more: the status messages a shot shows as toasts, the
+    /// last one coming in with `--motion-at`, the others already at rest above it.
+    pub toasts: Vec<String>,
+    /// `--motion-at <ms>`: what a shot's `--turn` or last `--toast` sets moving, that long into
+    /// its motion.
     pub motion_at: Option<u64>,
     /// `--zoom-level F`: with `--zoom-diagram`, its drawing size in device px per raster px (1.0,
     /// the default, is twice the page's size at any scale).
@@ -230,6 +234,7 @@ impl Args {
                 "--copied" => out.copied = true,
                 "--menu-at" => out.menu_at = value(&a).and_then(|v| v.parse().ok()),
                 "--turn" => out.turn = value(&a),
+                "--toast" => out.toasts.extend(value(&a)),
                 "--motion-at" => out.motion_at = value(&a).and_then(|v| v.parse().ok()),
                 "--hover" => out.hover = value(&a).and_then(|v| pair(&v, ',')),
                 "--menu" => {

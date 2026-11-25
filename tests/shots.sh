@@ -64,6 +64,16 @@ shot menu-find --light --find the --menu find "$fx/showcase.md"
 shot menu-main-fading-light --light --menu main --menu-at 21 "$fx/showcase.md"
 shot menu-main-fading-dark --dark --menu main --menu-at 21 "$fx/showcase.md"
 
+# Toasts: one at rest; one 50 ms into its entrance (part way in, below its place); a second
+# one 67 ms in under the first, which is on its way up.
+shot toast-light --light --toast "Copied" "$fx/showcase.md"
+shot toast-dark --dark --toast "Copied" "$fx/showcase.md"
+shot toast-rising-light --light --toast "Copied" --motion-at 50 "$fx/showcase.md"
+shot toast-rising-dark --dark --toast "Copied" --motion-at 50 "$fx/showcase.md"
+shot toasts-stacking-light --light --toast "Copied" --toast "Link copied" --motion-at 67 "$fx/showcase.md"
+shot toasts-stacking-dark --dark --toast "Copied" --toast "Link copied" --motion-at 67 "$fx/showcase.md"
+shot toasts-stacked-light --light --toast "Copied" --toast "Link copied" "$fx/showcase.md"
+
 # Every dialog.
 shot dialog-about-dark --dark --dialog about "$fx/showcase.md"
 shot dialog-about-light --light --dialog about "$fx/showcase.md"

@@ -6,9 +6,12 @@
 //! Menus, context menus and the Open recent submenu fade in as they open; closing is instant
 //! (owner, 2026-11-25). A folder's chevron in the Files pane (and a group's or a section's in the
 //! Notes pane) turns as it opens or closes, by the shared `glyph::DISCLOSURE_MOTION` (167 ms).
+//! A toast rises and fades in, fades and sinks out as it leaves of itself, and a second one
+//! stacks under the first (the shared `anim::Stack`), by `document::TOAST`.
 //! Nothing moves in a `--shot`, a `--scroll-steps` run or a test, nor when
 //! the "Animations" setting is off, nor when the system asks for less motion.
 
+use mdshared_ui::anim::stack::Stack;
 use mdshared_ui::anim::{Animator, Id, Motion, Policy, document, fluent};
 use std::path::Path;
 use std::time::Duration;
@@ -48,6 +51,22 @@ pub fn folder(path: &Path) -> Id {
 /// The name of the chevron of the Notes pane's group or section `key`.
 pub fn notes_fold(key: &str) -> Id {
     Id::new(("notes-fold", key))
+}
+
+/// A toast's entrance and exit: the shared preset as it is (167 ms each). A toast leaves of
+/// itself when its time is up; it is not closed by the reader.
+pub const TOAST: document::Pair = document::TOAST;
+
+/// The height of a toast (`Bubble::toast`'s) and the gap between two stacked ones.
+pub const TOAST_H: f32 = 36.0;
+pub const TOAST_GAP: f32 = 8.0;
+
+/// The animator's name for the stack of toasts.
+pub const TOASTS: &str = "toasts";
+
+/// The toasts' stack, entering and leaving by [`TOAST`]; at most three show at once.
+pub fn toasts() -> Stack<String> {
+    Stack::new().with_motion(TOAST.enter, TOAST.exit)
 }
 
 /// What the animator may do: `still` is a run that must not depend on time (a shot, the

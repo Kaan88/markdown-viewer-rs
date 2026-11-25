@@ -535,3 +535,164 @@ fn a_group_of_the_notes_pane_turns_its_chevron_as_it_folds() {
     assert!(mid != folded && open != folded, "folded at rest");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+// ---- toasts ------------------------------------------------------------------------------------
+
+/// Composes frames 16 ms apart until nothing moves.
+fn settle(a: &mut App) -> usize {
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        step(a, FRAME);
+        frames += 1;
+        assert!(frames < 60, "the motion ends");
+    }
+    frames
+}
+
+/// This frame's toasts: text, presence and lift, the bottom one first.
+fn toasts(a: &App) -> Vec<(String, f32, f32)> {
+    (a.toast_frame.iter())
+        .map(|(_, text, t, lift)| (text.clone(), *t, *lift))
+        .collect()
+}
+
+#[test]
+fn a_toast_rises_in_stays_then_leaves_of_itself_with_no_timer_left() {
+    let mut fresh = app(&["showcase.md"]);
+    fresh.full = true;
+    fresh.compose();
+    let mut still = app(&["showcase.md"]);
+    still.ws.set_status("Hello");
+    still.compose();
+    let mut a = moving(&["showcase.md"]);
+    a.ws.set_status("Hello");
+    a.compose();
+    assert_eq!(toasts(&a), [("Hello".into(), 0.0, 0.0)], "it starts gone");
+    assert!(a.anim_due.is_some(), "the entrance asks for frames");
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    let t = toasts(&a)[0].1;
+    assert!(t > 0.0 && t < 1.0, "on its way in: {t}");
+    let mid = a.screen.pixels.clone();
+    assert!(settle(&mut a) <= 12);
+    assert_eq!(toasts(&a), [("Hello".into(), 1.0, 0.0)]);
+    assert!(
+        mid != a.screen.pixels,
+        "each frame of the entrance is drawn"
+    );
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "at rest it is the toast a still run draws"
+    );
+    // Its time to leave is the timer the loop waits for; nothing else is.
+    let until = a.ws.status_expires().unwrap();
+    assert_eq!(a.toast_until, Some(until));
+    assert!(a.anim_due.is_none());
+    a.wants_frame = false;
+    a.timers(until);
+    assert!(a.wants_frame && a.toast_until.is_none());
+    a.frame_clock = Some(until);
+    a.compose();
+    assert!(a.anim_due.is_some(), "it leaves by an exit");
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    let t = toasts(&a)[0].1;
+    assert!(t > 0.0 && t < 1.0, "on its way out: {t}");
+    settle(&mut a);
+    assert!(a.toasts.is_empty() && a.toast_frame.is_empty());
+    assert!(
+        a.anim_due.is_none() && a.toast_until.is_none(),
+        "no timer is left"
+    );
+    assert!(
+        a.screen.pixels == fresh.screen.pixels,
+        "nothing of it is left on screen"
+    );
+    assert_eq!(a.timers(until + Duration::from_secs(5)), None);
+}
+
+#[test]
+fn a_second_toast_stacks_under_the_first_which_moves_up() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.set_status("First");
+    a.compose();
+    settle(&mut a);
+    a.ws.set_status("Second");
+    a.compose();
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    let now = toasts(&a);
+    assert_eq!(now.len(), 2);
+    assert_eq!(
+        (now[0].0.as_str(), now[0].2),
+        ("Second", 0.0),
+        "the new one at the bottom"
+    );
+    assert!(now[0].1 < 1.0, "coming in");
+    let lifting = now[1].2;
+    assert!(
+        lifting > 0.0 && lifting < 44.0,
+        "the first on its way up: {lifting}"
+    );
+    settle(&mut a);
+    assert_eq!(
+        toasts(&a),
+        [("Second".into(), 1.0, 0.0), ("First".into(), 1.0, 44.0)]
+    );
+    // The same message said again keeps its toast, for longer: no third one.
+    let before = a.toast_until;
+    a.ws.set_status("Second");
+    a.compose();
+    assert_eq!(toasts(&a).len(), 2);
+    assert!(a.toasts.current().count() == 2);
+    assert_eq!(a.toast_until, before, "the first still leaves first");
+    // A status cleared sends them all away.
+    a.ws.clear_status();
+    a.compose();
+    settle(&mut a);
+    assert!(a.toasts.is_empty());
+    assert!(a.anim_due.is_none() && a.toast_until.is_none());
+}
+
+#[test]
+fn the_redraw_covers_everything_a_toast_touches_as_it_rises() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.set_status("Hello");
+    a.compose();
+    step(&mut a, FRAME);
+    let page = a.areas.page;
+    let b = {
+        let mut p = Painter::new(&mut a.screen, &mut a.gfx, a.scale);
+        Bubble::toast(&mut p, "Hello", page)
+    };
+    assert!(a.overlay_bounds.contains(&b.presence_bounds()));
+    assert!(
+        b.presence_bounds().bottom() > b.bounds().bottom(),
+        "the rise is held"
+    );
+}
+
+#[test]
+fn with_animations_off_reduced_motion_or_a_still_run_a_toast_comes_and_goes_at_once() {
+    let mut still = app(&["showcase.md"]);
+    still.ws.set_status("Hello");
+    still.compose();
+    assert_eq!(toasts(&still), [("Hello".into(), 1.0, 0.0)]);
+    assert!(still.anim_due.is_none());
+    let mut off = moving(&["showcase.md"]);
+    off.apply_setting(s::MOTION, Value::Bool(false));
+    let mut reduced = moving(&["showcase.md"]);
+    reduced.anim.set_system_reduced(true);
+    for (name, a) in [("setting off", &mut off), ("reduced motion", &mut reduced)] {
+        a.ws.set_status("Hello");
+        a.compose();
+        assert_eq!(toasts(a), [("Hello".into(), 1.0, 0.0)], "{name}");
+        assert!(a.anim_due.is_none(), "{name}: no frame is asked for");
+        assert!(a.screen.pixels == still.screen.pixels, "{name}: at rest");
+        // Its time up: gone on that frame.
+        a.frame_clock = a.ws.status_expires();
+        a.compose();
+        assert!(a.toasts.is_empty(), "{name}: gone at once");
+        assert!(a.anim_due.is_none(), "{name}");
+    }
+}

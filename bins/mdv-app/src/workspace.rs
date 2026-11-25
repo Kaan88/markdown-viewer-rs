@@ -3871,14 +3871,15 @@ impl Workspace {
 
     // ---- status ------------------------------------------------------------------------------
 
-    /// The status text while it is fresh (`strings::TRANSIENT_MS` after it was set).
+    /// The status text while it is fresh (`strings::TRANSIENT_MS` after it was set). The window
+    /// shows it as toasts (`App::sync_toasts`, from the status line); the tests read it here.
+    #[allow(dead_code)] // Workspace API the shell does not call.
     pub fn status(&self, now: Instant) -> Option<&str> {
         let status = self.status.as_ref()?;
         (now.saturating_duration_since(status.at) < transient()).then_some(status.text.as_str())
     }
 
     /// The status line as set, fresh or not.
-    #[allow(dead_code)] // Workspace API the shell does not call yet.
     pub fn status_line(&self) -> Option<&StatusLine> {
         self.status.as_ref()
     }

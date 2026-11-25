@@ -324,6 +324,11 @@ struct App {
     menu_t: (f32, f32),
     /// The system's wish for less motion is watched (from the first frame on).
     motion_watched: bool,
+    /// The toasts on screen and leaving (`crate::motion::toasts`), the status line they were
+    /// last brought up to date with, and this frame's: each one's key, text, presence and lift.
+    toasts: mdshared_ui::anim::stack::Stack<String>,
+    toast_seen: Option<(String, Instant)>,
+    toast_frame: Vec<(u64, String, f32, f32)>,
 }
 
 impl App {
@@ -428,6 +433,9 @@ impl App {
             frame_clock: None,
             menu_t: (1.0, 1.0),
             motion_watched: false,
+            toasts: crate::motion::toasts(),
+            toast_seen: None,
+            toast_frame: Vec::new(),
         }
     }
 
@@ -778,9 +786,43 @@ impl App {
             ),
             None => (1.0, 1.0),
         };
+        self.sync_toasts(now);
         let done = self.compose_frame();
         self.anim_due = self.anim.end_frame();
         done
+    }
+
+    /// Brings the toasts up to date with the status line at `now`, the frame's time, and asks
+    /// for this frame of them. A new message comes in under the ones still showing; the same
+    /// message said again keeps its toast for longer; a status cleared sends them all away.
+    /// Each leaves of itself when its time is up. Asked on every frame, whatever it draws, so
+    /// none is forgotten and taken for new.
+    fn sync_toasts(&mut self, now: Instant) {
+        let line = (self.ws.status_line()).map(|s| (s.text.clone(), s.at));
+        if line != self.toast_seen {
+            match (&line, self.ws.status_expires()) {
+                (Some((text, _)), Some(until)) if until > now => {
+                    let newest = self.toasts.current().last().map(|(k, t)| (k, t == text));
+                    match newest {
+                        Some((key, true)) => self.toasts.keep(key, Some(until)),
+                        _ => _ = self.toasts.push(text.clone(), Some(until)),
+                    }
+                }
+                (None, _) => self.toasts.hide_all(),
+                _ => {}
+            }
+            self.toast_seen = line;
+        }
+        self.toasts.tick(now);
+        self.toast_frame.clear();
+        if self.toasts.is_empty() {
+            return;
+        }
+        let (h, gap) = (crate::motion::TOAST_H, crate::motion::TOAST_GAP);
+        let shown = (self.toasts).frame(&mut self.anim, crate::motion::TOASTS, |_| h, gap);
+        self.toast_frame = (shown.into_iter())
+            .map(|s| (s.key, s.item.clone(), s.t, s.lift))
+            .collect();
     }
 
     fn compose_frame(&mut self) -> (Vec<(i32, i32, i32, i32)>, FrameTimes) {
@@ -876,20 +918,22 @@ impl App {
         }
 
         // Overlays: lay them out, then redraw every region under them if they or those changed.
-        let now = Instant::now();
         let pal = self.pal;
         let mut bubbles = Vec::new();
         {
             let mut p = Painter::new(&mut self.screen, &mut self.gfx, self.scale);
             let page = self.areas.page;
             if let Some(text) = &self.ui.link_hint {
-                bubbles.push(Bubble::hint(&mut p, text, page));
+                bubbles.push((Bubble::hint(&mut p, text, page), 1.0));
             }
-            if let Some(text) = self.ws.status(now) {
-                bubbles.push(Bubble::toast(&mut p, text, page));
+            // The toasts, each lifted above the ones under it, at its presence.
+            for (_, text, t, lift) in &self.toast_frame {
+                let mut b = Bubble::toast(&mut p, text, page);
+                b.rect.y -= lift;
+                bubbles.push((b, *t));
             }
             if let Some(tip) = self.ui.tip.as_ref().filter(|t| t.shown) {
-                bubbles.push(Bubble::tip(&mut p, &tip.text, tip.anchor, w, h));
+                bubbles.push((Bubble::tip(&mut p, &tip.text, tip.anchor, w, h), 1.0));
             }
             if let Some(popup) = self.ui.popup.as_mut() {
                 let room = menu_room(self.areas.title, w, h);
@@ -899,9 +943,15 @@ impl App {
                 }
             }
         }
-        self.toast_until = self.ws.status(now).and(self.ws.status_expires());
+        self.toast_until = self.toasts.deadline();
         let card = self.card_layout(w, h);
-        let mut bounds: Vec<Rect> = bubbles.iter().map(Bubble::bounds).collect();
+        // A toast touches more as it rises and sinks than at rest.
+        let mut bounds: Vec<Rect> = (bubbles.iter())
+            .map(|(b, _)| match b.kind {
+                mdshared_ui::overlay::Kind::Toast => b.presence_bounds(),
+                _ => b.bounds(),
+            })
+            .collect();
         bounds.extend(card.iter().map(crate::preview::Layout::bounds));
         if let Some(popup) = &self.ui.popup {
             // Everything a menu touches as it fades in, its shadow and its drop included.
@@ -926,12 +976,14 @@ impl App {
         let osig = sig((
             bubbles
                 .iter()
-                .map(|b| {
+                .map(|(b, t)| {
                     (
                         b.kind,
                         b.text.as_str(),
                         b.rect.x.to_bits(),
                         b.rect.y.to_bits(),
+                        // A toast coming or going is drawn anew on each frame of it.
+                        t.to_bits(),
                     )
                 })
                 .collect::<Vec<_>>(),
@@ -1126,8 +1178,12 @@ impl App {
                         s.draw_in_entering(c.p, &pal, room, ts, Entrance::Side { leftward });
                     }
                 }
-                for b in &bubbles {
-                    b.draw(c.p, &pal);
+                for (b, t) in &bubbles {
+                    if *t >= 1.0 {
+                        b.draw(c.p, &pal);
+                    } else {
+                        b.draw_presence(c.p, &pal, *t);
+                    }
                 }
                 if let Some(l) = &card {
                     crate::preview::draw(l, c.p, &pal);
@@ -2130,7 +2186,19 @@ fn shot(mut app: App, path: &Path) -> i32 {
     }
     // What a shot sets moving: what is on screen now is at rest, then the change comes and
     // the frames of its motion run up to `--motion-at` (without it the change is at rest).
+    let toasts = app.args.toasts.clone();
+    let (last_toast, earlier) = match toasts.split_last() {
+        Some((last, earlier)) => (Some(last), earlier),
+        None => (None, &[][..]),
+    };
+    for text in earlier {
+        app.ws.set_status(text);
+        app.compose();
+    }
     let moving = app.args.motion_at.map(|ms| (start_moving(&mut app), ms));
+    if let Some(text) = last_toast {
+        app.ws.set_status(text);
+    }
     if let Some(name) = app.args.turn.clone() {
         match (app.ui.tree.rows().iter()).position(|r| r.is_dir && r.depth == 0 && r.name == name) {
             Some(i) => {
