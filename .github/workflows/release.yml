@@ -272,8 +272,13 @@ jobs:
         run: |
           $all = 'target/release-files-all'
           $v = $env:VERSION
+          # The full release notes (the text the GitHub release carries), for Hub's notes page: a
+          # Markdown file of at most 64 KiB, named in hub.txt by notes.file.
+          $notesFile = "mdview-$v-release-notes.md"
+          Copy-Item notes/release-notes.md "$all/$notesFile"
+          if ((Get-Item "$all/$notesFile").Length -gt 65536) { throw "$notesFile is over 64 KiB" }
           tools/write-hub-txt.ps1 -App mdview -Repo markdown-viewer-rs -Version $v `
-            -Notes (Get-Content notes/notes-line.txt -Raw) `
+            -Notes (Get-Content notes/notes-line.txt -Raw) -NotesFile $notesFile `
             -Kind files -Exe mdview.exe -Uninstall '{B7E2F4A9-3D1C-4C58-A6E0-91D5C8F27B34}_is1' `
             -Wait mdview-engine.exe `
             -Files @(
@@ -293,7 +298,7 @@ jobs:
             "mdview-$VERSION-linux-x86_64.AppImage" "mdview-$VERSION-linux-x86_64.tar.gz" \
             "mdview_${VERSION}_amd64.deb" "mdview-$VERSION-1.x86_64.rpm" PKGBUILD \
             mdview.exe mdview-engine.exe "mdview-$VERSION-windows-x86_64.zip" \
-            "mdview-setup-$VERSION.exe" "mdview-update.txt" "hub.txt" \
+            "mdview-setup-$VERSION.exe" "mdview-update.txt" "hub.txt" "mdview-$VERSION-release-notes.md" \
             "mdview-$VERSION-macos-aarch64.zip" "mdview-$VERSION-macos-x86_64.zip" "mdview-update-macos.txt" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "mdview $VERSION" \
             --notes-file "$GITHUB_WORKSPACE/notes/release-notes.md" --latest
