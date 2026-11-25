@@ -23,13 +23,13 @@ missing was built. One commit per item, each with a test that fails with the fix
 | D3 `Painter::set_frost_key` | already done (`app.rs`, before the frame is drawn) |
 | D4 `chrome::draw_*_animated` in the title row | **blocked on shared** — see below |
 | D6 `Tooltip::hover_at` from rest | already done |
-| D7 `watch_motion_reduced` on a helper thread | already done (shared reads on its own thread; mdview calls it once at start and on the wake) |
+| D7 `watch_motion_reduced` on a helper thread | already done: `App::watch_motion_with` starts the watch on a short-lived helper thread (on Windows it makes a hidden window and may wait 5 s for it); the wake only sends `Wake::Motion`, and the setting is read on the window thread after it |
 | X3 `Menu::draw_in_animated` (hover row) | done (`2c35084`) |
 | X3 `Palette::draw_presence` | done: the card fades and drops in on each opening (`motion::palette`, a serial an opening; closing instant), its presence in the overlay signature so its frames are drawn |
 | X3 `notice::draw_sliding` / `bar_height` | done: each of the three notice bars slides in by its own presence (`motion::bar`), its height taken by `notice::bar_height`, and the page is laid out under what shows (`page::Bars`, `viewport_bars`) on every frame; a bar that goes is forgotten, so a later one slides in again |
 | X3 tree chevron `draw_disclosure_animated_with`, rows named by path | already done (`motion::folder(path)`, `motion::notes_fold(key)`) |
 | L10 `Form::draw_animated` / `set_high_contrast` | already done |
-| L1 `submenu::Cascade` in place of the hand-made submenus and dwell | not yet |
+| L1 `submenu::Cascade` in place of the hand-made submenus and dwell | **not done this stage.** mdview's one hand-made submenu (the main menu's Open recent) is a `Menu` inside `Popup` with `dwell: Option<(usize, Instant)>`, `SUBMENU_DWELL` (300 ms) and its own key handling; moving it to `Cascade` means the popup body becoming a `Menu`/`Cascade` enum, its draw, hit tests, keys, clicks and about thirty tests — a rewrite, not a wiring, and it was left for its own session rather than half done |
 | W3 `window_state` restores onto a monitor that still exists | done as the behaviour asked for (mdview keeps its own physical place in the session, not a shared `WindowState`): the place is used only if the title row's left end is on a monitor that is there; the check is now `position_reachable`, with a test |
 
 **D4 is stopped on a shared defect.** In `draw_win_button_animated`, `draw_tab_animated` and
@@ -42,6 +42,57 @@ mdview's caption button: frame 0 the danger fill, frame 1 `t = 0.19`. To ask sha
 plain look by `t > 0.0` rather than by `hovered` (`lit = t > 0.0` at `t <= 0` and `t >= 1`), in
 those three and in `button_fill_animated`; `Menu::draw_in_animated` is already right (its `a > 0.0`
 guard draws the rest look at `a = 0`). Until then the title row keeps its at-once hovers.
+
+### Tests, with the revert each fails under
+
+Five tests, one per item that changed something (the "already done" items needed none):
+
+- **the palette's damage** (`the_palette_is_damaged_by_its_presence_bounds_not_a_hand_made_margin`):
+  the presence bounds are among the damage and the hand-made `inset(-20)` is not — the old
+  margin pushed back (`7eda58d`);
+- **a menu row's hover fade** (`a_menu_rows_hover_fill_fades_in_and_the_overlays_are_drawn_for_it`):
+  the row is at rest on the first frame, part way on the second, the still run's at the end, and
+  no timer is left — two reverts, each fails it: `draw_in` for `draw_in_animated`, and the
+  `menus_moving` arm of `overlay_changed` removed (`2c35084`);
+- **the palette's entrance** (`the_palette_fades_and_drops_in_as_it_opens_and_rests_as_a_still_one`):
+  its first frame is 0 with no card drawn, it ends at 1 and at the still run's pixels — fails with
+  `draw` for `draw_presence`, and with `palette_t` out of the overlay signature (`5bedbbc`);
+- **a notice bar's slide** (`a_notice_bar_slides_in_and_the_page_moves_down_under_it`): 0 on the
+  first frame with no room taken, part way one frame later with the viewport following, whole at
+  the still run's pixels — fails with `draw_page` given `Bars::FULL` (`79e530c`);
+- **a saved place on a monitor that is gone** (`a_window_saved_on_a_monitor_that_is_gone_opens_on_a_present_one`):
+  reachable on the only monitor, not on a place where the second one was, the corner cases —
+  fails with `position_reachable` made to answer true (`445403a`).
+
+Workspace after the stage: 769 passed, 6 ignored (`mdview`'s own: 328 passed, 1 ignored).
+
+### Shots
+
+`tests/shots.sh` into `target/shots/stage6`: 193 shots. Against `final5` (189) every one of the
+189 is byte-identical and four are new, looked at: `palette-rising-light` / `-dark`
+(`--palette "" --motion-at 41`: the card about half there, paler, its page showing through) and
+`update-rising-light` / `-dark` (`--update-bar available --motion-at 21`: about 12 of the bar's
+34 px, its label cut, the page under it). No other shot changed — the animated draws at rest are
+the plain ones pixel for pixel, as shared's tests say.
+
+### Numbers (release, this PC, 2026-11-26)
+
+The scroll-frame path changed (the page's viewport and each notice bar), so it was measured;
+the other item commits only add work while something moves. Before = `f8ce783`, after =
+`445403a`. Both binaries in one folder with the same copy of `showcase.md` and fresh settings,
+`--behind --no-session`, alternating: 300 scroll frames, own work, medians 0.85–0.96 ms before
+(paint 0.43–0.47, p90 1.21–1.40, max ≤ 2.5) and 0.93–0.96 ms after (paint 0.46, p90 1.37–1.38,
+max ≤ 2.5): parity within the noise. Idle CPU from 3 s to 6 s: 0, 0.016 and 0 s before, 0, 0 and
+0 s after; memory about 41–42 MiB both. First frame 148.7 ms before, 179.6 ms after (one run
+each, and 141.5 ms in an earlier after run: the launch varies more than this).
+
+**An anomaly, not explained.** Runs of the same after binary with the settings file under
+`target/scratch` inside the repo made some scroll frames paint at 10–60 ms (mean paint 1.0–1.3 ms,
+max 25–68 ms); the before build in the same repo root was fast, and the after binary in a temp
+folder was fast too, with the repo's own fixture. The commit was ruled out by building each of
+the stage's commits in one worktree: `2c35084`, `5bedbbc`, `79e530c` and `445403a` are all the
+before build's 0.4 ms paint there. What was not found is why that one combination was slow; no
+number above is taken from those runs.
 
 ---
 
