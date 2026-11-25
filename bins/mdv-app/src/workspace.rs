@@ -233,6 +233,9 @@ pub struct OutlineEntry<'a> {
 pub struct StatusLine {
     pub text: String,
     pub at: Instant,
+    /// Shown under the toasts still showing ([`Workspace::confirm`]) instead of in their place
+    /// ([`Workspace::set_status`]).
+    pub stack: bool,
 }
 
 /// Something to bring into view once the tab has a layout.
@@ -3889,8 +3892,19 @@ impl Workspace {
         self.status.as_ref().map(|s| s.at + transient())
     }
 
+    /// A message that takes the place of the toasts showing: a step (a zoom, a width), a
+    /// progress and its result, a refusal.
     pub fn set_status(&mut self, text: &str) {
         self.message(text);
+    }
+
+    /// A one-shot confirmation of its own ("Copied", "Link address copied"): it stacks under
+    /// the toasts still showing instead of taking their place.
+    pub fn confirm(&mut self, text: &str) {
+        self.message(text);
+        if let Some(s) = self.status.as_mut() {
+            s.stack = true;
+        }
     }
 
     pub fn clear_status(&mut self) {
@@ -3911,6 +3925,7 @@ impl Workspace {
         self.status = (!text.is_empty()).then(|| StatusLine {
             text: text.to_string(),
             at: Instant::now(),
+            stack: false,
         });
         self.dirty = true;
     }

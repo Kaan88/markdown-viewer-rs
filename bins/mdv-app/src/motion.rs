@@ -50,23 +50,32 @@ pub fn notes_fold(key: &str) -> Id {
 /// itself when its time is up; it is not closed by the reader.
 pub const TOAST: document::Pair = document::TOAST;
 
-/// The height of a toast (`Bubble::toast`'s) and the gap between two stacked ones.
-pub const TOAST_H: f32 = 36.0;
+/// The gap between two stacked toasts.
 pub const TOAST_GAP: f32 = 8.0;
+
+/// The most toasts on screen at once, those leaving included.
+pub const TOASTS_MAX: usize = 3;
 
 /// The animator's name for the stack of toasts.
 pub const TOASTS: &str = "toasts";
 
-/// The toasts' stack, entering and leaving by [`TOAST`]; at most three show at once.
+/// The toasts' stack, entering and leaving by [`TOAST`]; at most [`TOASTS_MAX`] are there at
+/// once (the stack counts the ones not leaving; the window draws no more than that in all).
 pub fn toasts() -> Stack<String> {
-    Stack::new().with_motion(TOAST.enter, TOAST.exit)
+    Stack::new()
+        .with_motion(TOAST.enter, TOAST.exit)
+        .with_max(TOASTS_MAX)
 }
 
 /// What the animator may do: `still` is a run that must not depend on time (a shot, the
 /// scroll steps, a test), `setting` the reader's "Animations" switch. The system's wish for less
 /// motion is the animator's own (`set_system_reduced`) and wins under `Policy::System`.
-pub fn policy(still: bool, setting: bool) -> Policy {
-    if still || !setting {
+/// `forced` is a shot of something part way through its motion (`--menu-at`, `--motion-at`):
+/// it moves whatever the setting and the system say, so the picture is the same everywhere.
+pub fn policy(still: bool, setting: bool, forced: bool) -> Policy {
+    if forced {
+        Policy::Always
+    } else if still || !setting {
         Policy::Never
     } else {
         Policy::System

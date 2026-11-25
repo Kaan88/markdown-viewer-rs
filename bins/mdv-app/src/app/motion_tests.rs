@@ -614,10 +614,10 @@ fn a_toast_rises_in_stays_then_leaves_of_itself_with_no_timer_left() {
 #[test]
 fn a_second_toast_stacks_under_the_first_which_moves_up() {
     let mut a = moving(&["showcase.md"]);
-    a.ws.set_status("First");
+    a.ws.confirm("First");
     a.compose();
     settle(&mut a);
-    a.ws.set_status("Second");
+    a.ws.confirm("Second");
     a.compose();
     step(&mut a, FRAME);
     step(&mut a, FRAME);
@@ -641,7 +641,7 @@ fn a_second_toast_stacks_under_the_first_which_moves_up() {
     );
     // The same message said again keeps its toast, for longer: no third one.
     let before = a.toast_until;
-    a.ws.set_status("Second");
+    a.ws.confirm("Second");
     a.compose();
     assert_eq!(toasts(&a).len(), 2);
     assert!(a.toasts.current().count() == 2);
@@ -695,4 +695,211 @@ fn with_animations_off_reduced_motion_or_a_still_run_a_toast_comes_and_goes_at_o
         assert!(a.toasts.is_empty(), "{name}: gone at once");
         assert!(a.anim_due.is_none(), "{name}");
     }
+}
+
+#[test]
+fn zoom_steps_replace_the_toast_instead_of_stacking() {
+    let mut a = moving(&["showcase.md"]);
+    for _ in 0..3 {
+        a.ws.zoom_in();
+        a.compose();
+        step(&mut a, FRAME);
+    }
+    let shown = toasts(&a);
+    assert_eq!(shown.len(), 1, "one toast: {shown:?}");
+    assert_eq!(shown[0].0, format!("Zoom {}%", a.ws.zoom()));
+    assert_eq!(shown[0].2, 0.0, "nothing lifts");
+    settle(&mut a);
+    assert_eq!(toasts(&a).len(), 1);
+}
+
+#[test]
+fn an_exports_progress_then_its_result_leave_one_toast() {
+    let mut a = moving(&["showcase.md"]);
+    a.export_progress(super::export::Progress::Working);
+    a.compose();
+    settle(&mut a);
+    a.export_progress(super::export::Progress::Saved(PathBuf::from("x.html")));
+    a.compose();
+    let shown = toasts(&a);
+    assert_eq!(
+        shown,
+        [("Exported to x.html".into(), 0.0, 0.0)],
+        "the progress went at once"
+    );
+    settle(&mut a);
+    assert_eq!(toasts(&a), [("Exported to x.html".into(), 1.0, 0.0)]);
+}
+
+#[test]
+fn never_more_than_three_toasts_show_those_leaving_included() {
+    let mut a = moving(&["showcase.md"]);
+    for text in ["One", "Two", "Three", "Four"] {
+        a.ws.confirm(text);
+        a.compose();
+        step(&mut a, FRAME);
+        assert!(a.toast_frame.len() <= 3, "{:?}", toasts(&a));
+    }
+    // "One" was sent away by the fourth and is leaving: it is not drawn as a fourth.
+    let names: Vec<String> = toasts(&a).into_iter().map(|t| t.0).collect();
+    assert_eq!(names, ["Four", "Three", "Two"]);
+    settle(&mut a);
+    assert_eq!(a.toasts.current().count(), 3);
+    assert_eq!(a.toast_frame.len(), 3);
+}
+
+#[test]
+fn the_same_confirmation_keeps_its_toast_wherever_it_is_in_the_stack() {
+    let mut a = moving(&["showcase.md"]);
+    for text in ["Copied", "Link address copied"] {
+        a.ws.confirm(text);
+        a.compose();
+    }
+    settle(&mut a);
+    a.ws.confirm("Copied");
+    a.compose();
+    settle(&mut a);
+    let names: Vec<String> = toasts(&a).into_iter().map(|t| t.0).collect();
+    assert_eq!(names, ["Link address copied", "Copied"], "no second Copied");
+}
+
+#[test]
+fn a_status_already_past_its_time_shows_no_toast() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.set_status("Long ago");
+    // The first frame after it comes after its time (a window covered all along).
+    a.frame_clock = a.ws.status_expires().map(|u| u + Duration::from_millis(1));
+    a.compose();
+    assert!(a.toasts.is_empty() && a.toast_frame.is_empty());
+    assert!(a.anim_due.is_none() && a.toast_until.is_none());
+}
+
+#[test]
+fn a_toast_leaves_while_a_menu_or_a_dialog_is_open() {
+    for dialog in [false, true] {
+        let mut a = moving(&["showcase.md"]);
+        a.ws.set_status("Hello");
+        a.compose();
+        settle(&mut a);
+        if dialog {
+            a.open_dialog(DialogKind::About);
+        } else {
+            a.open_popup(PopupKind::Main);
+        }
+        a.compose();
+        settle(&mut a);
+        a.frame_clock = a.ws.status_expires();
+        a.compose();
+        assert!(a.anim_due.is_some(), "it leaves by its exit");
+        settle(&mut a);
+        assert!(a.toasts.is_empty(), "gone");
+        assert!(a.anim_due.is_none(), "no timer left");
+        // What is on screen is the menu or the dialog alone.
+        let mut b = app(&["showcase.md"]);
+        if dialog {
+            b.open_dialog(DialogKind::About);
+        } else {
+            b.open_popup(PopupKind::Main);
+        }
+        b.full = true;
+        b.compose();
+        a.full = true;
+        a.compose();
+        assert!(
+            a.screen.pixels == b.screen.pixels,
+            "dialog {dialog}: nothing of it left"
+        );
+    }
+}
+
+#[test]
+fn a_window_resized_while_a_toast_comes_in_shows_it_in_its_new_place() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.set_status("Hello");
+    a.compose();
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    a.size = (900, 600);
+    settle(&mut a);
+    let mut still = app(&["showcase.md"]);
+    still.size = (900, 600);
+    still.ws.set_status("Hello");
+    still.compose();
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "at rest in the new window"
+    );
+}
+
+#[test]
+fn toasts_that_would_reach_above_the_page_are_left_out() {
+    let mut a = app(&["showcase.md"]);
+    a.size = (520, 200);
+    a.compose();
+    for text in ["One", "Two", "Three"] {
+        a.ws.confirm(text);
+        a.compose();
+    }
+    assert_eq!(a.toast_frame.len(), 3);
+    let page = a.areas.page;
+    let drawn: Vec<Rect> = (a.overlay_bounds.iter().copied())
+        .filter(|b| b.y < page.bottom())
+        .collect();
+    assert!(
+        drawn.len() < 3,
+        "fewer than three fit: {drawn:?} in {page:?}"
+    );
+    for b in &drawn {
+        assert!(b.y + 16.0 >= page.y, "{b:?} lies in the page {page:?}");
+    }
+}
+
+#[test]
+fn a_lifting_toast_is_drawn_at_a_whole_device_pixel() {
+    for scale in [1.0_f32, 1.25, 1.5, 2.0] {
+        for lift in [0.3_f32, 13.37, 29.9, 44.0] {
+            let moved = (701.0 - super::toast_y(701.0, lift, scale)) * scale;
+            assert!(
+                (moved - moved.round()).abs() < 1e-3,
+                "{lift} at {scale}: {moved}"
+            );
+            assert!((moved / scale - lift).abs() <= 0.5 / scale + 1e-3);
+        }
+    }
+}
+
+#[test]
+fn moving_shots_move_whatever_the_setting_says() {
+    let mut a = app(&["showcase.md"]);
+    a.apply_setting(s::MOTION, Value::Bool(false));
+    a.anim.set_system_reduced(true);
+    a.open_popup(PopupKind::Main);
+    let start = super::start_moving(&mut a);
+    super::frames_until(&mut a, start, 21);
+    let t = a.menu_t.0;
+    assert!(t > 0.0 && t < 1.0, "half way: {t}");
+}
+
+#[test]
+fn the_files_pane_hidden_mid_turn_leaves_no_timer() {
+    let dir = folder_tree("hidden");
+    let mut a = with_tree(&dir, true);
+    a.ui.tree.toggle(tree_row(&a, "b"));
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    assert!(a.anim_due.is_some());
+    a.ui.panes.files = false;
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(
+            frames < 30,
+            "the hidden pane's turn stops asking for frames"
+        );
+    }
+    step(&mut a, Duration::from_secs(1));
+    assert!(a.anim_due.is_none());
+    assert!(a.anim.group_deadlines().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
 }

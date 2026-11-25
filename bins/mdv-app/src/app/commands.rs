@@ -169,12 +169,12 @@ impl App {
                     .strip_prefix(crate::workspace::WIKI_SCHEME)
                     .unwrap_or(&dest);
                 if platform::set_clipboard_text(dest) {
-                    self.ws.set_status("Link address copied");
+                    self.ws.confirm("Link address copied");
                 }
             }
             Act::CopySource(kind, text) => {
                 if platform::set_clipboard_text(&text) {
-                    self.ws.set_status(match kind {
+                    self.ws.confirm(match kind {
                         SourceKind::Formula => "Formula source copied",
                         SourceKind::Diagram => "Diagram source copied",
                     });
@@ -237,7 +237,7 @@ impl App {
         match self.ws.code_in_reach() {
             Some(text) => {
                 if crate::codebtn::to_clipboard(&text) {
-                    self.ws.set_status("Code copied");
+                    self.ws.confirm("Code copied");
                 }
             }
             None => self.ws.set_status("No code block in view"),
@@ -252,7 +252,7 @@ impl App {
                 .is_some_and(|html| platform::set_clipboard_html(&html, &text))
                 || platform::set_clipboard_text(&text))
         {
-            self.ws.set_status("Copied");
+            self.ws.confirm("Copied");
         }
     }
 
@@ -261,7 +261,7 @@ impl App {
         match self.ws.selected_markdown() {
             Ok(text) => {
                 if crate::codebtn::to_clipboard(&text) {
-                    self.ws.set_status("Copied");
+                    self.ws.confirm("Copied");
                 }
             }
             Err(message) => self.ws.set_status(message),
@@ -315,7 +315,7 @@ impl App {
             }
             C::CopyFilePath => {
                 if platform::set_clipboard_text(&path.display().to_string()) {
-                    self.ws.set_status("File path copied");
+                    self.ws.confirm("File path copied");
                 }
             }
             C::ShowInFileManager => {

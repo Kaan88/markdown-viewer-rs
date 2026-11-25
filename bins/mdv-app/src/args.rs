@@ -302,6 +302,18 @@ mod tests {
     }
 
     #[test]
+    fn motion_shot_flags() {
+        let a = parse("--turn wiki --toast Copied --toast Linked --motion-at 67 --menu-at 21");
+        assert_eq!(a.turn.as_deref(), Some("wiki"));
+        assert_eq!(a.toasts, ["Copied", "Linked"]);
+        assert_eq!(a.motion_at, Some(67));
+        assert_eq!(a.menu_at, Some(21));
+        let b = parse("--motion-at soon");
+        assert_eq!(b.motion_at, None);
+        assert!(b.toasts.is_empty() && b.turn.is_none());
+    }
+
+    #[test]
     fn shot_flags() {
         let a = parse(
             "--shot x.png --size 700x500 --scale 1.5 --hover 10,20 --menu recent --dialog about --scroll 300 --no-files",

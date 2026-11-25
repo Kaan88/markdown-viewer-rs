@@ -327,8 +327,13 @@ struct App {
     /// The toasts on screen and leaving (`crate::motion::toasts`), the status line they were
     /// last brought up to date with, and this frame's: each one's key, text, presence and lift.
     toasts: mdshared_ui::anim::stack::Stack<String>,
-    toast_seen: Option<(String, Instant)>,
+    toast_seen: Option<(String, Instant, bool)>,
     toast_frame: Vec<(u64, String, f32, f32)>,
+    /// Which stack the toasts are: a message that takes the others' place starts a new one, so
+    /// the old go at once and the new enters as new.
+    toast_gen: u64,
+    /// A shot part way through a motion: it moves whatever the setting and the system say.
+    forced_motion: bool,
 }
 
 impl App {
@@ -436,6 +441,8 @@ impl App {
             toasts: crate::motion::toasts(),
             toast_seen: None,
             toast_frame: Vec::new(),
+            toast_gen: 0,
+            forced_motion: false,
         }
     }
 
@@ -772,7 +779,8 @@ impl App {
     /// `end_frame`, and the deadline that gives is the timer `timers` waits for.
     fn compose(&mut self) -> (Vec<(i32, i32, i32, i32)>, FrameTimes) {
         let now = self.frame_clock.unwrap_or_else(Instant::now);
-        (self.anim).set_policy(crate::motion::policy(self.still, self.ws.motion()));
+        let policy = crate::motion::policy(self.still, self.ws.motion(), self.forced_motion);
+        self.anim.set_policy(policy);
         self.anim.begin_frame(now);
         // The open menus are asked for on every frame they are open, whatever else the frame
         // draws, so none is forgotten and taken for new on a frame that skips the overlays.
@@ -793,36 +801,63 @@ impl App {
     }
 
     /// Brings the toasts up to date with the status line at `now`, the frame's time, and asks
-    /// for this frame of them. A new message comes in under the ones still showing; the same
-    /// message said again keeps its toast for longer; a status cleared sends them all away.
-    /// Each leaves of itself when its time is up. Asked on every frame, whatever it draws, so
-    /// none is forgotten and taken for new.
+    /// for this frame of them. Asked on every frame, whatever it draws, so none is forgotten and
+    /// taken for new. Each leaves of itself when its time is up; a status cleared sends them
+    /// all away.
+    ///
+    /// A message set by `set_status` takes the place of the toasts showing: they go at once,
+    /// with no exit and no lift, and it comes in as a new toast (a zoom step, a width, a
+    /// progress and its result). One set by `confirm`, a one-shot confirmation, comes in under
+    /// them. Either way the same text still showing keeps its toast for longer instead.
     fn sync_toasts(&mut self, now: Instant) {
-        let line = (self.ws.status_line()).map(|s| (s.text.clone(), s.at));
+        self.toasts.tick(now);
+        let line = (self.ws.status_line()).map(|s| (s.text.clone(), s.at, s.stack));
         if line != self.toast_seen {
             match (&line, self.ws.status_expires()) {
-                (Some((text, _)), Some(until)) if until > now => {
-                    let newest = self.toasts.current().last().map(|(k, t)| (k, t == text));
-                    match newest {
-                        Some((key, true)) => self.toasts.keep(key, Some(until)),
-                        _ => _ = self.toasts.push(text.clone(), Some(until)),
-                    }
+                // A message already past its time (set long before this frame) is not shown.
+                (Some((text, _, stack)), Some(until)) if until > now => {
+                    self.show_toast(text, until, *stack)
                 }
                 (None, _) => self.toasts.hide_all(),
                 _ => {}
             }
             self.toast_seen = line;
         }
-        self.toasts.tick(now);
         self.toast_frame.clear();
         if self.toasts.is_empty() {
             return;
         }
-        let (h, gap) = (crate::motion::TOAST_H, crate::motion::TOAST_GAP);
-        let shown = (self.toasts).frame(&mut self.anim, crate::motion::TOASTS, |_| h, gap);
+        // The height of a toast as `Bubble::toast` makes it (the same for every text).
+        let h = {
+            let mut p = Painter::new(&mut self.screen, &mut self.gfx, self.scale);
+            Bubble::toast(&mut p, "", self.areas.page).rect.h
+        };
+        let gap = crate::motion::TOAST_GAP;
+        let id = (crate::motion::TOASTS, self.toast_gen);
+        let shown = (self.toasts).frame(&mut self.anim, id, |_| h, gap);
+        // The newest first; never more than the most, those leaving included.
         self.toast_frame = (shown.into_iter())
+            .take(crate::motion::TOASTS_MAX)
             .map(|s| (s.key, s.item.clone(), s.t, s.lift))
             .collect();
+    }
+
+    /// Shows `text` until `until`: under the others when `stack`, in their place otherwise.
+    fn show_toast(&mut self, text: &str, until: Instant, stack: bool) {
+        let same = (self.toasts.current()).find(|(_, t)| *t == text);
+        let same = same.map(|(k, _)| k);
+        let alone = self.toasts.current().count() == 1;
+        match same {
+            Some(key) if stack || alone => self.toasts.keep(key, Some(until)),
+            _ if stack => _ = self.toasts.push(text.to_string(), Some(until)),
+            _ => {
+                // In their place: a stack of its own, under a new name in the animator, so
+                // the old toasts are not drawn again and the new one enters from nothing.
+                self.toasts = crate::motion::toasts();
+                self.toast_gen += 1;
+                self.toasts.push(text.to_string(), Some(until));
+            }
+        }
     }
 
     fn compose_frame(&mut self) -> (Vec<(i32, i32, i32, i32)>, FrameTimes) {
@@ -926,10 +961,15 @@ impl App {
             if let Some(text) = &self.ui.link_hint {
                 bubbles.push((Bubble::hint(&mut p, text, page), 1.0));
             }
-            // The toasts, each lifted above the ones under it, at its presence.
+            // The toasts, each lifted above the ones under it to a whole device pixel (so its
+            // text stays on the grid), at its presence. One that would reach above the page
+            // (a short window) is left out.
             for (_, text, t, lift) in &self.toast_frame {
                 let mut b = Bubble::toast(&mut p, text, page);
-                b.rect.y -= lift;
+                b.rect.y = toast_y(b.rect.y, *lift, self.scale);
+                if b.rect.y < page.y + crate::motion::TOAST_GAP {
+                    continue;
+                }
                 bubbles.push((b, *t));
             }
             if let Some(tip) = self.ui.tip.as_ref().filter(|t| t.shown) {
@@ -2191,20 +2231,24 @@ fn shot(mut app: App, path: &Path) -> i32 {
         Some((last, earlier)) => (Some(last), earlier),
         None => (None, &[][..]),
     };
+    // Confirmations, so that they stack.
     for text in earlier {
-        app.ws.set_status(text);
+        app.ws.confirm(text);
         app.compose();
     }
     let moving = app.args.motion_at.map(|ms| (start_moving(&mut app), ms));
     if let Some(text) = last_toast {
-        app.ws.set_status(text);
+        app.ws.confirm(text);
     }
     if let Some(name) = app.args.turn.clone() {
         match (app.ui.tree.rows().iter()).position(|r| r.is_dir && r.depth == 0 && r.name == name) {
             Some(i) => {
                 app.ui.tree.toggle(i);
             }
-            None => eprintln!("mdview: no folder {name} in the Files pane"),
+            None => {
+                eprintln!("mdview: no folder {name} in the Files pane");
+                return 2;
+            }
         }
     }
     if let Some((start, ms)) = moving {
@@ -2226,10 +2270,17 @@ fn shot(mut app: App, path: &Path) -> i32 {
     }
 }
 
+/// Where a toast whose place at rest is `rest` stands `lift` logical px above it: moved by a
+/// whole number of device pixels at `scale`, so its text stays on the grid it has at rest.
+fn toast_y(rest: f32, lift: f32, scale: f32) -> f32 {
+    rest - (lift * scale).round() / scale
+}
+
 /// A shot from here on moves, as a window does, on a clock set by hand: the frame drawn now is
 /// the start. Returns the start.
 fn start_moving(app: &mut App) -> Instant {
     app.still = false;
+    app.forced_motion = true;
     let start = Instant::now();
     app.frame_clock = Some(start);
     app.compose();
@@ -2251,7 +2302,21 @@ fn frames_until(app: &mut App, start: Instant, ms: u64) {
         }
         at = (at + Duration::from_millis(16)).min(end);
         app.frame_clock = Some(start.checked_add(at).unwrap_or(start));
-        app.compose();
+        let (damage, times) = app.compose();
+        // `MDVIEW_TRACE`: what each frame of the motion costs, as a window's trace says it
+        // (without the copy to the window and its present, which a shot does not make).
+        if app.trace {
+            let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+            eprintln!(
+                "mdview: motion frame at {} ms: layout {:.2} paint {:.2} compose {:.2} ms, {} rows in {} rects",
+                at.as_millis(),
+                ms(times.layout),
+                ms(times.paint),
+                ms(times.compose),
+                times.rows,
+                damage.len()
+            );
+        }
         if at >= end {
             break;
         }

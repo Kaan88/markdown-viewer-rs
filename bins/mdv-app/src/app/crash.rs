@@ -60,7 +60,7 @@ impl App {
             Hit::CrashCopy => {
                 let text = std::fs::read_to_string(&seen).unwrap_or_default();
                 if !text.is_empty() && platform::set_clipboard_text(&text) {
-                    self.ws.set_status(strings::CRASH_REPORT_COPIED);
+                    self.ws.confirm(strings::CRASH_REPORT_COPIED);
                 }
             }
             _ => {}

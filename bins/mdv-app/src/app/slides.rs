@@ -253,7 +253,7 @@ impl App {
                     || platform::set_clipboard_text(&text)
             })
         {
-            self.ws.set_status("Copied");
+            self.ws.confirm("Copied");
         }
     }
 

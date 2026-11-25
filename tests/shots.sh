@@ -73,6 +73,9 @@ shot toast-rising-dark --dark --toast "Copied" --motion-at 50 "$fx/showcase.md"
 shot toasts-stacking-light --light --toast "Copied" --toast "Link copied" --motion-at 67 "$fx/showcase.md"
 shot toasts-stacking-dark --dark --toast "Copied" --toast "Link copied" --motion-at 67 "$fx/showcase.md"
 shot toasts-stacked-light --light --toast "Copied" --toast "Link copied" "$fx/showcase.md"
+# Three toasts in a short window: the one that would reach above the page is left out.
+shot toasts-short-light --light --size 520x220 --toast "Copied" --toast "Link copied" --toast "Code copied" "$fx/showcase.md"
+shot toasts-short-dark --dark --size 520x220 --toast "Copied" --toast "Link copied" --toast "Code copied" "$fx/showcase.md"
 
 # Every dialog.
 shot dialog-about-dark --dark --dialog about "$fx/showcase.md"
