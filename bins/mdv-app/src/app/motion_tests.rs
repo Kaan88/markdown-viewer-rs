@@ -1848,6 +1848,69 @@ fn the_settings_dialog_fades_in_when_it_opens() {
 }
 
 #[test]
+fn settings_entrance_copies_only_the_card_and_matches_the_old_blend() {
+    for dark in [false, true] {
+        for scale in [1.0, 1.25, 1.5] {
+            let mut a = moving(&["showcase.md"]);
+            at_scale(&mut a, scale);
+            a.ws.set_theme_choice(if dark {
+                ThemeChoice::Dark
+            } else {
+                ThemeChoice::Light
+            });
+            // Settle the starting palette before opening Settings.
+            a.still = true;
+            a.compose();
+            a.still = false;
+            let paper = a.screen.clone();
+            let (w, h) = a.logical();
+            let window = Rect::new(0.0, 0.0, w, h);
+            let pal = a.pal;
+            let mut form = s::form(&a.ws, a.corners_offered(), 0);
+            form.set_high_contrast(a.high_contrast());
+            let mut gfx = Gfx::new();
+
+            a.open_settings();
+            a.compose();
+            assert!(a.screen.pixels == paper.pixels);
+            assert_eq!(a.settings_snapshot_pixels, 0, "no copy at t=0");
+            for tick in 1..=8 {
+                step(&mut a, FRAME);
+                let t = a.settings_t;
+                let mut reference = paper.clone();
+                let mut p = Painter::new(&mut reference, &mut gfx, scale);
+                let whole = p.snapshot(window);
+                form.draw(&mut p, &pal, window, a.ui.caret_on);
+                p.fade(&whole, t);
+
+                let area = a.settings_snapshot_pixels;
+                if t < 1.0 {
+                    let bounds = mdshared_ui::overlay::dialog_bounds(form.rect());
+                    let (x0, y0, x1, y1) = p.dev_rect(bounds);
+                    assert_eq!(area, ((x1 - x0) * (y1 - y0)) as usize);
+                    assert!(area * 2 < (paper.width * paper.height) as usize);
+                } else {
+                    assert_eq!(area, 0, "no copy at rest");
+                }
+                let max_error = a
+                    .screen
+                    .pixels
+                    .iter()
+                    .zip(&reference.pixels)
+                    .map(|(&actual, &expected)| actual.abs_diff(expected))
+                    .max()
+                    .unwrap();
+                assert!(
+                    max_error <= u8::from(t < 1.0),
+                    "dark={dark}, scale={scale}, tick={tick}, t={t}, max error={max_error}"
+                );
+            }
+            assert_eq!(a.settings_t, 1.0);
+        }
+    }
+}
+
+#[test]
 fn the_settings_dialog_closes_at_once_mid_fade() {
     let mut a = moving(&["showcase.md"]);
     a.compose();

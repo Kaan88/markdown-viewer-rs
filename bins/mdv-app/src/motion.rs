@@ -53,8 +53,13 @@ pub fn palette(anim: &mut Animator, serial: u64) -> f32 {
 /// fade in as one thing, by the menus' 117 ms (`MENU.enter`) rather than the shared
 /// `document::DIALOG`'s 250 ms, which is slower than the menu it was opened from (the owner's
 /// "quick and quiet"). Closing is instant, so its exit is not used.
-pub fn settings(anim: &mut Animator, serial: u64) -> f32 {
-    anim.presence(("settings-in", serial), true, MENU.enter, MENU.exit)
+pub fn settings(anim: &mut Animator, serial: u64, dropdown_open: bool) -> f32 {
+    let key = ("settings-in", serial);
+    if dropdown_open {
+        // A dropdown can extend outside the card snapshot; finish the entrance before drawing it.
+        anim.set(key, 1.0_f32);
+    }
+    anim.presence(key, true, MENU.enter, MENU.exit)
 }
 
 /// A light/dark change: the window crossfades from the frame drawn before it, 170 ms, linear —

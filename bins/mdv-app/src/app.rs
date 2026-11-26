@@ -330,6 +330,8 @@ struct App {
     /// How present the Settings dialog is this frame, 0 to 1 (it closes at once, so there is no
     /// 0 while it is open), and this opening of it: opened again it fades in again.
     settings_t: f32,
+    #[cfg(test)]
+    settings_snapshot_pixels: usize,
     settings_serial: u64,
     /// The frame the window showed before a light/dark change, blended back over each frame of
     /// the change: the whole window, `4 * w * h` bytes, held only while it fades.
@@ -477,6 +479,8 @@ impl App {
             palette_t: 1.0,
             palette_serial: 0,
             settings_t: 1.0,
+            #[cfg(test)]
+            settings_snapshot_pixels: 0,
             settings_serial: 0,
             theme_fade: None,
             theme_serial: 0,
@@ -899,10 +903,13 @@ impl App {
         };
         // The Settings dialog's entrance, asked for on every frame it is open: the dim and the
         // card fade in as one thing, and closing is instant.
-        self.settings_t = match self.ui.settings.is_some() {
-            true => crate::motion::settings(&mut self.anim, self.settings_serial),
-            false => 1.0,
-        };
+        self.settings_t = self.ui.settings.as_ref().map_or(1.0, |f| {
+            crate::motion::settings(
+                &mut self.anim,
+                self.settings_serial,
+                f.menu_rect().is_some(),
+            )
+        });
         // The notice bars' entrance, asked every frame: a bar that goes is forgotten instead of
         // playing out, since nothing draws it any more.
         let (update, crash, stale) = (
@@ -1431,16 +1438,32 @@ impl App {
                     }
                 }
                 if let Some(f) = self.ui.settings.as_mut() {
-                    // Opening: the dim and the card are drawn over the window as it was and
-                    // faded in as one thing, so nothing of the frame before shows between them.
                     let t = self.settings_t;
-                    let under = (t < 1.0).then(|| c.p.snapshot(window));
-                    let id = crate::motion::SETTINGS;
-                    self.anim.group(id);
-                    f.draw_animated(c.p, &pal, window, self.ui.caret_on, &mut self.anim, id);
-                    self.anim.ungroup();
-                    if let Some(under) = &under {
-                        c.p.fade(under, t);
+                    #[cfg(test)]
+                    {
+                        self.settings_snapshot_pixels = 0;
+                    }
+                    if t <= 0.0 {
+                        // Input still needs the card's geometry on its invisible first frame.
+                        f.layout(c.p, window);
+                    } else {
+                        let bounds = (t < 1.0)
+                            .then(|| mdshared_ui::overlay::dialog_bounds(f.layout(c.p, window)));
+                        let id = crate::motion::SETTINGS;
+                        let mut draw = |p: &mut Painter<'_>| {
+                            self.anim.group(id);
+                            f.draw_animated(p, &pal, window, self.ui.caret_on, &mut self.anim, id);
+                            self.anim.ungroup();
+                        };
+                        if let Some(bounds) = bounds {
+                            let _pixels = fade_settings(c.p, &pal, bounds, t, draw);
+                            #[cfg(test)]
+                            {
+                                self.settings_snapshot_pixels = _pixels;
+                            }
+                        } else {
+                            draw(c.p);
+                        }
                     }
                     settings_drawn = true;
                 }
@@ -2102,6 +2125,51 @@ impl DrawnOverlays {
 
 fn overlaps(a: Rect, b: Rect) -> bool {
     a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
+}
+
+/// Fade the combined dim and card without copying the whole window. Clip the form to the
+/// card's paint bounds, including its shadow; blend the untouched surroundings in place.
+fn fade_settings(
+    p: &mut Painter<'_>,
+    pal: &Palette,
+    bounds: Rect,
+    t: f32,
+    draw: impl FnOnce(&mut Painter<'_>),
+) -> usize {
+    let under = p.snapshot(bounds);
+    let saved_clip = p.clip(bounds);
+    draw(p);
+    p.restore(saved_clip);
+    p.fade(&under, t);
+    let (x0, y0, x1, y1) = under.rect();
+    // Outside the shadow the only change is black at alpha a. Reducing that dim by the
+    // ratio (1-a*t)/(1-a) would require undoing the rounded full dim. Instead, start with
+    // the unchanged pixel and compute the same blend, including both of shared's roundings.
+    // Match overlay::draw_backdrop, Painter::span and Snapshot's 8-bit mix at the shared pin.
+    let remaining = 256 - if pal.dark { 115 } else { 71 };
+    let t = (t * 256.0).round() as u32;
+    let dim: [u8; 256] = std::array::from_fn(|v| {
+        let v = v as u32;
+        let fully_dimmed = (v * remaining) >> 8;
+        ((v * (256 - t) + fully_dimmed * t + 128) >> 8) as u8
+    });
+    let stride = p.bmp.width as usize * 4;
+    let dim_row = |bytes: &mut [u8]| {
+        for px in bytes.as_chunks_mut::<4>().0 {
+            for ch in &mut px[..3] {
+                *ch = dim[*ch as usize];
+            }
+        }
+    };
+    for (y, row) in p.bmp.pixels.chunks_exact_mut(stride).enumerate() {
+        if (y0 as usize..y1 as usize).contains(&y) {
+            dim_row(&mut row[..x0 as usize * 4]);
+            dim_row(&mut row[x1 as usize * 4..]);
+        } else {
+            dim_row(row);
+        }
+    }
+    (x1 - x0) as usize * (y1 - y0) as usize
 }
 
 #[cfg(windows)]
