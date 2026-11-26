@@ -2491,7 +2491,10 @@ fn shot(mut app: App, path: &Path) -> i32 {
     if flip.is_some() {
         app.key_named(KeyName::Space, None);
     }
-    if moving.is_some() {
+    // The tip under `--hover` shows now (with `--motion-at`, as the motion starts). A shot of a
+    // title-row hover is no tip: a window shows none after a few ms on the button, and one ticked
+    // into view would be a half-faded bubble no window has.
+    if app.args.hover.is_some() && moving.is_some() {
         app.ui.tips.tick(Instant::now() + Duration::from_secs(3600));
     }
     if let Some(name) = app.args.turn.clone() {
