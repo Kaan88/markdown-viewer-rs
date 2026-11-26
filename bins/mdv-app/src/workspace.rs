@@ -568,6 +568,8 @@ pub struct Workspace {
     session_path: Option<PathBuf>,
     choice: ThemeChoice,
     system_dark: bool,
+    /// A one-pass paint of the old theme, without changing the persisted choice.
+    pub(crate) paint_theme: Option<(ThemeChoice, bool)>,
     zoom: u16,
     viewport: Option<Viewport>,
     find: Find,
@@ -636,6 +638,7 @@ impl Workspace {
             recents: saved.recent.clone(),
             choice: saved.theme,
             system_dark: false,
+            paint_theme: None,
             zoom: session::clamp_zoom(saved.zoom),
             session: saved,
             session_path,
@@ -2060,7 +2063,7 @@ impl Workspace {
     // ---- theme and zoom ----------------------------------------------------------------------
 
     pub fn theme_choice(&self) -> ThemeChoice {
-        self.choice
+        self.paint_theme.map_or(self.choice, |(choice, _)| choice)
     }
 
     /// Sets System/Light/Dark and saves. The page is laid out again at the next paint.
@@ -2126,7 +2129,11 @@ impl Workspace {
 
     /// The theme in use, from the choice and the last [`set_system_dark`](Self::set_system_dark).
     pub fn theme(&self) -> Theme {
-        self.resolve_theme(self.system_dark)
+        match self.paint_theme {
+            Some((_, true)) => DARK.with_fonts(&self.session.page_font, &self.session.code_font),
+            Some((_, false)) => LIGHT.with_fonts(&self.session.page_font, &self.session.code_font),
+            None => self.resolve_theme(self.system_dark),
+        }
     }
 
     /// Zoom in percent, 60..=250.

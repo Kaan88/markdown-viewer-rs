@@ -1999,40 +1999,149 @@ fn with_motion_off_the_settings_dialog_is_whole_at_once() {
 }
 
 #[test]
-fn choosing_a_theme_in_the_palette_closes_it_without_a_ghost() {
-    let mut a = moving(&[]);
-    a.open_palette(">theme: light");
-    a.compose();
-    for _ in 0..8 {
-        step(&mut a, FRAME);
-    }
-    let with_palette = a.screen.pixels.clone();
-    a.key_named(KeyName::Enter, None);
-    assert!(a.ui.palette.is_none());
-    assert_eq!(a.ws.theme_choice(), ThemeChoice::Light);
-    a.compose();
-
-    let mut light = app(&[]);
+fn choosing_dark_from_a_menu_or_palette_starts_a_fade_without_the_overlay() {
+    let mut light = app(&["linked.md"]);
     light.ws.set_theme_choice(ThemeChoice::Light);
     light.compose();
+    let dark = app(&["linked.md"]);
+    let (x, y) = (640.0, 700.0);
+    let ends = [pixel(&light, x, y), pixel(&dark, x, y)];
+
+    for from in ["menu", "palette"] {
+        for motion in [true, false] {
+            let mut a = moving(&["linked.md"]);
+            a.still = true;
+            a.ws.set_theme_choice(ThemeChoice::Light);
+            a.compose();
+            a.still = !motion;
+            if from == "menu" {
+                // The Windows ⋯ menu has no theme row. Exercise the common popup command
+                // dispatch with a Dark item rather than adding a new UI entry.
+                let mut menu = crate::menu::Menu::new(
+                    vec![crate::menu::Item::new(Act::Cmd(C::ThemeDark), "Dark")],
+                    48.0,
+                    90.0,
+                    false,
+                );
+                menu.hover = Some(0);
+                a.ui.popup = Some(Popup::new(PopupKind::Page, menu));
+            } else {
+                a.open_palette(">theme: dark");
+            }
+            a.compose();
+            for _ in 0..8 {
+                step(&mut a, FRAME);
+            }
+            assert!(a.screen.pixels != light.screen.pixels, "{from} was drawn");
+            a.key_named(KeyName::Enter, None);
+            assert!(a.ui.popup.is_none() && a.ui.palette.is_none());
+            assert_eq!(a.ws.theme_choice(), ThemeChoice::Dark);
+            a.compose();
+            assert_eq!(a.theme_fade.is_some(), motion, "{from}, motion={motion}");
+            let first = if motion { &light } else { &dark };
+            assert!(a.screen.pixels == first.screen.pixels, "no ghost of {from}");
+            if motion {
+                for _ in 0..5 {
+                    step(&mut a, FRAME);
+                }
+                assert!(!ends.contains(&pixel(&a, x, y)), "mid-fade from {from}");
+                settle(&mut a);
+                assert!(a.theme_fade.is_none());
+                assert!(a.screen.pixels == dark.screen.pixels);
+            }
+        }
+    }
+}
+
+#[test]
+fn zoom_closes_before_the_theme_fade_captures_the_old_page() {
+    let mut a = moving(&["linked.md"]);
+    a.compose();
+    let dark = a.screen.pixels.clone();
+    a.show_zoom(Rc::new(mdview_render::DecodedImage {
+        width: 16,
+        height: 16,
+        baseline: 16,
+        rgba: vec![255; 16 * 16 * 4],
+    }));
+    a.compose();
+    assert!(a.ui.zoom.is_some());
+    assert!(a.screen.pixels != dark);
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.ui.zoom.is_none());
+    assert!(a.theme_fade.is_some());
     assert!(
-        a.theme_fade.is_none(),
-        "the old frame still had the palette"
+        a.screen.pixels == dark,
+        "the snapshot excludes the zoom view"
     );
-    assert!(!a.anim.animating());
-    assert!(a.screen.pixels != with_palette);
-    assert!(a.screen.pixels == light.screen.pixels);
+}
+
+#[test]
+fn opening_a_dropdown_during_the_settings_entrance_finishes_the_entrance() {
+    let mut a = moving(&[]);
+    dropdown_settings(&mut a);
+    a.compose();
+    step(&mut a, FRAME);
+    assert!(a.settings_t > 0.0 && a.settings_t < 1.0);
+
+    open_settings_dropdown(&mut a);
+    a.compose();
+    assert_eq!(
+        a.settings_t, 1.0,
+        "the menu is not clipped to the fading card"
+    );
+    assert_eq!(a.settings_snapshot_pixels, 0);
+    let pixels = a.screen.pixels.clone();
+    a.still = true;
+    a.full = true;
+    a.compose();
+    assert!(a.screen.pixels == pixels, "the open menu is drawn at rest");
+}
+
+fn dropdown_settings(a: &mut App) {
+    use mdshared_ui::settings::Row;
+    use mdshared_ui::settings::pages::{Item, Page};
+    a.open_settings();
+    a.ui.settings.as_mut().unwrap().set_pages(vec![Page::new(
+        "Test",
+        vec![Item::new(Row::choice(
+            9002,
+            "Four",
+            &["One", "Two", "Three", "Four"],
+            0,
+        ))],
+    )]);
+}
+
+fn open_settings_dropdown(a: &mut App) {
+    assert!(a.ui.settings.as_mut().unwrap().focus_row(9002));
+    a.key_named(KeyName::Space, None);
+    assert!(a.ui.settings.as_ref().unwrap().menu_rect().is_some());
 }
 
 #[test]
 fn closing_an_overlay_mid_theme_fade_immediately_removes_it() {
-    for what in ["menu", "palette", "dialog", "settings", "tip"] {
-        let mut a = moving(&[]);
+    for what in [
+        "menu", "submenu", "palette", "dialog", "settings", "dropdown", "tip", "preview", "hint",
+        "toast",
+    ] {
+        let mut a = moving(&["linked.md"]);
         match what {
             "menu" => a.open_popup(PopupKind::Main),
+            "submenu" => {
+                a.open_popup(PopupKind::Main);
+                a.open_popup(PopupKind::Recent);
+                assert!(!a.ui.popup.as_ref().unwrap().submenu_path().is_empty());
+            }
             "palette" => a.open_palette(""),
             "dialog" => a.open_dialog(DialogKind::About),
             "settings" => a.open_settings(),
+            "dropdown" => {
+                dropdown_settings(&mut a);
+                a.compose();
+                open_settings_dropdown(&mut a);
+            }
             "tip" => {
                 let r = a.hit_rect(Hit::WinClose).unwrap();
                 let now = Instant::now();
@@ -2046,27 +2155,55 @@ fn closing_an_overlay_mid_theme_fade_immediately_removes_it() {
                 );
                 assert!(a.ui.tips.tick(now + Duration::from_secs(1)));
             }
+            "preview" => {
+                a.ui.card = Some(crate::preview::Card {
+                    target: crate::preview::Target::Heading(0),
+                    at: (500.0, 300.0),
+                    due: Instant::now(),
+                    loading: false,
+                    content: Some(mdview_core::preview::Preview {
+                        title: "Preview".into(),
+                        body: "A heading".into(),
+                    }),
+                    shown: true,
+                });
+            }
+            "hint" => a.ui.link_hint = Some("Link hint".into()),
+            "toast" => a.ws.confirm("Copied"),
             _ => unreachable!(),
         }
         a.compose();
-        for _ in 0..8 {
+        for _ in 0..12 {
             step(&mut a, FRAME);
         }
         a.ws.set_theme_choice(ThemeChoice::Light);
         a.compose();
         step(&mut a, FRAME);
         assert!(a.theme_fade.is_some(), "{what} was in the theme fade");
-        if what == "tip" {
-            a.pointer_moved(640.0, 700.0);
-        } else {
-            a.key_named(KeyName::Escape, None);
+        match what {
+            "tip" => a.pointer_moved(640.0, 700.0),
+            "preview" => a.ui.card = None,
+            "hint" => a.ui.link_hint = None,
+            "toast" => {
+                let id = a.toast_frame[0].0;
+                a.toasts.remove(id);
+                a.ws.clear_status();
+            }
+            _ => a.key_named(KeyName::Escape, None),
         }
         a.compose();
         assert!(a.theme_fade.is_none(), "{what} must not fade out");
-        let mut light = app(&[]);
-        light.ws.set_theme_choice(ThemeChoice::Light);
-        light.compose();
-        assert!(a.screen.pixels == light.screen.pixels, "no ghost of {what}");
+        match what {
+            "submenu" => assert!(a.ui.popup.as_ref().unwrap().submenu_path().is_empty()),
+            "dropdown" => assert!(a.ui.settings.as_ref().unwrap().menu_rect().is_none()),
+            _ => (),
+        }
+        if !matches!(what, "submenu" | "dropdown") {
+            let mut light = app(&["linked.md"]);
+            light.ws.set_theme_choice(ThemeChoice::Light);
+            light.compose();
+            assert!(a.screen.pixels == light.screen.pixels, "no ghost of {what}");
+        }
     }
 }
 

@@ -226,9 +226,19 @@ colour is neither palette; the end is the window a run that started light draws,
 frame is freed; motion off and reduced motion keep nothing and equal the still run; a resize
 mid-fade ends it with no timer and the new palette alone. A minimizing resize releases the
 snapshot before another frame is composed, and restoring the original size does not replay it.
-When an overlay seen in the previous frame closes or is replaced, `sync_theme` skips capture
-and drops any in-flight snapshot before painting. This keeps a palette that just ran a theme
-command, or a menu, dialog or tooltip closed during a fade, from reappearing.
+Choosing a new theme from the command palette dismisses the palette immediately and still
+crossfades the unobstructed window. The same applies to a popup command that dismisses its
+menu. If an overlay closes after a fade has started, it disappears immediately and the window
+finishes at the new palette without replaying the overlay. With motion off, the new palette
+appears immediately as before.
+
+The headless regressions use the real command palette and a Dark item on the normal popup
+dispatch path (the Windows `⋯` menu itself has no theme row). They compare the first frame
+against the unobstructed old palette, check a pixel between the palettes, and compare the
+settled frame against the new palette. Separate checks cover zoom dismissal before capture,
+submenu and Settings dropdown dismissal while their parents stay open, and the disappearance
+of a preview, link hint or toast mid-fade. Opening a dropdown during the Settings entrance
+finishes the entrance before it draws the dropdown.
 
 **Shots.** `dialog-settings-opening-light` and `-dark` show the dim and card entering together.
 `theme-fading-{dark,light}` and `theme-fading-settings-{dark,light}` capture the theme fade
@@ -284,6 +294,11 @@ already exceeds the budget. These are viewer-process measurements from
 
 ### Decisions taken without the owner
 
+- If a dismissal would contaminate the source of a new theme fade, compose once more in the
+  old palette without the closed overlay, then capture that clean frame. The extra compose is
+  only on such a flip; there is still just one theme snapshot. If an overlay closes mid-fade
+  without another flip, discard the snapshot and snap to the new palette rather than trying
+  to reconstruct the blend from a bitmap that already contains the overlay.
 - Cap the theme snapshot at 2560 × 1600 device pixels (15.625 MiB). Above that area the theme
   snaps; do not downscale. A 3840 × 2160 snapshot alone is about 31.6 MiB, beyond the 30 MiB
   private-memory budget. The cap limits the snapshot only, not total process memory.

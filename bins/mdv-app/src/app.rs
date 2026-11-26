@@ -260,6 +260,7 @@ struct App {
     overlay_sig: u64,
     overlay_bounds: Vec<Rect>,
     drawn_overlays: DrawnOverlays,
+    drawn_theme_choice: ThemeChoice,
     /// Redraw everything next frame (size, scale or theme changed).
     full: bool,
     /// Something happened that may change what is shown.
@@ -443,6 +444,7 @@ impl App {
             overlay_sig: 0,
             overlay_bounds: Vec::new(),
             drawn_overlays: DrawnOverlays::default(),
+            drawn_theme_choice: ThemeChoice::System,
             full: true,
             wants_frame: true,
             requested: false,
@@ -635,7 +637,6 @@ impl App {
             let (w, h) = (self.screen.width, self.screen.height);
             if self.anim.animates()
                 && self.frames > 0
-                && !closed
                 && !self.presenting()
                 && self.frost.key().is_none()
                 && !self.screen.pixels.is_empty()
@@ -643,6 +644,14 @@ impl App {
                 // Four bytes per pixel; keep the snapshot to at most 15.625 MiB.
                 && u64::from(w) * u64::from(h) <= 2560 * 1600
             {
+                if closed {
+                    // Repaint without the dismissed overlay in the old palette, including the
+                    // document and theme label. This pass is never presented on its own.
+                    self.ws.paint_theme = Some((self.drawn_theme_choice, self.pal.dark));
+                    self.full = true;
+                    self.paint_frame();
+                    self.ws.paint_theme = None;
+                }
                 self.theme_fade = Some(mdshared_ui::anim::Snapshot::take(
                     &self.screen,
                     0,
@@ -1014,8 +1023,7 @@ impl App {
 
     fn compose_frame(&mut self) -> (Vec<(i32, i32, i32, i32)>, FrameTimes) {
         self.crash_context();
-        let mut times = FrameTimes::default();
-        let t0 = Instant::now();
+        let start = Instant::now();
         // Text the editor sent since the last frame: one parse, of the newest.
         self.ws.apply_live();
         // A diagram view belongs to its tab, revision and palette. Dismiss it before
@@ -1030,6 +1038,16 @@ impl App {
             self.close_zoom();
         }
         self.sync_theme();
+        self.sync_frost();
+        let setup = start.elapsed();
+        let (damage, mut times) = self.paint_frame();
+        times.layout += setup;
+        (damage, times)
+    }
+
+    fn paint_frame(&mut self) -> (Vec<(i32, i32, i32, i32)>, FrameTimes) {
+        let mut times = FrameTimes::default();
+        let t0 = Instant::now();
         let (pw, ph) = (self.size.0.max(1), self.size.1.max(1));
         if self.screen.width != pw || self.screen.height != ph {
             self.screen = Bitmap::new(pw, ph);
@@ -1039,12 +1057,12 @@ impl App {
         if self.theme_fade.is_some() {
             self.full = true;
         }
-        self.sync_frost();
         // A presentation is the whole frame.
         if self.ui.present.is_some()
             && let Some(done) = self.compose_present()
         {
             self.drawn_overlays = DrawnOverlays::default();
+            self.drawn_theme_choice = self.ws.theme_choice();
             return done;
         }
         let (w, h) = self.logical();
@@ -1533,6 +1551,7 @@ impl App {
         // Painting may have settled a jump; that is already on screen.
         self.ws.take_dirty();
         self.drawn_overlays = DrawnOverlays::of(self);
+        self.drawn_theme_choice = self.ws.theme_choice();
         self.theme_frame();
         self.full = false;
         times.compose = t1.elapsed().saturating_sub(times.paint);
