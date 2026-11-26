@@ -7,9 +7,9 @@
 #   tests/shots.sh target/shots/final     # after it
 #   for f in target/shots/base/*.png; do cmp "$f" target/shots/final/$(basename "$f"); done
 #
-# Needs a release build (cargo build --release -p mdview). Every shot uses --no-session, so the
-# user's session is neither read nor written, and none loads remote images, so none needs the
-# network.
+# Needs a release build of mdview and its sibling mdview-engine. Normal shots use --no-session;
+# six settings shots read deliberately seeded scratch profiles. Set MDVIEW_SHOTS_NO_SESSION=1
+# to skip those six when every launch must use --no-session. No shot needs the network.
 
 set -euo pipefail
 
@@ -21,12 +21,20 @@ exe="${MDVIEW_EXE:-target/release/mdview.exe}"
 fx="fixtures"
 mkdir -p "$out"
 
+# Even --no-session checks for pending crash reports on startup; keep the Windows app-data
+# lookup in scratch space as well. Use a Windows path when passing it to the executable.
+if command -v cygpath >/dev/null; then
+    appdata="$(mktemp -d)"
+    trap 'rm -rf "$appdata"' EXIT
+    export LOCALAPPDATA="$(cygpath -w "$appdata")"
+fi
+
 shot() {
     local name="$1"
     shift
     # The scale is pinned, so the system's display scale cannot change the pictures; a shot
     # that asks for its own --scale comes later on the line and wins.
-    "$exe" --no-session --scale 1.0 --shot "$out/$name.png" "$@"
+    "$exe" --behind --no-session --scale 1.0 --shot "$out/$name.png" "$@"
 }
 
 # Both themes.
@@ -118,8 +126,10 @@ printf '[mdview]
 motion=0
 ' >"$still/settings.ini"
 for theme in light dark; do
-    MDVIEW_SETTINGS="$still/settings.ini" "$exe" --scale 1.0 --shot "$out/settings-appearance-motion-off-min-$theme.png"         --"$theme" --size 520x360 --dialog settings --settings-section appearance "$fx/showcase.md"
+    if [ "${MDVIEW_SHOTS_NO_SESSION:-0}" = 1 ]; then continue; fi
+    MDVIEW_SETTINGS="$still/settings.ini" "$exe" --behind --scale 1.0 --shot "$out/settings-appearance-motion-off-min-$theme.png"         --"$theme" --size 520x360 --dialog settings --settings-section appearance "$fx/showcase.md"
 done
+rm -rf "$still"
 # Settings, every page at the default size and the smallest, in both themes. "tabs-on" is the
 # Tabs page with the brief-tab rule on (its seconds enabled), read from a scratch settings file
 # (a shot reads one named by MDVIEW_SETTINGS and never the user's); "tabs" is the rule off.
@@ -137,7 +147,8 @@ for page in appearance reading tabs updates tabs-on; do
             fi
             args=(--"$theme" --size "$dims" --dialog settings --settings-section "$section" "$fx/showcase.md")
             if [ "$page" = tabs-on ]; then
-                MDVIEW_SETTINGS="$brief/settings.ini" "$exe" --scale 1.0 --shot "$out/settings-$page$suffix.png" "${args[@]}"
+                if [ "${MDVIEW_SHOTS_NO_SESSION:-0}" = 1 ]; then continue; fi
+                MDVIEW_SETTINGS="$brief/settings.ini" "$exe" --behind --scale 1.0 --shot "$out/settings-$page$suffix.png" "${args[@]}"
             else
                 shot "settings-$page$suffix" "${args[@]}"
             fi
