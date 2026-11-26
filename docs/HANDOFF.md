@@ -11,6 +11,157 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Release 1.2.0 (2026-11-27)
+
+Prepared on `f/renderer` for the coordinator to merge and tag after CI. This
+release adds interface motion with a setting to turn it off, better text
+hinting, the shared renderer at `7fd559f` with security and resource-limit
+fixes, and private engine placement in Linux packages. See
+[the 1.2.0 release notes](release-notes/1.2.0.md).
+
+The owner deferred the hosted Mac self-update test because macOS is not a
+primary target. The scratch-folder fix and the test stay in `mac-look`, but
+that step alone is allowed to fail. Neither `ci` nor `release` runs it.
+Not verified for 1.2.0: running the Windows installer, installing or trying
+the Linux and macOS packages by hand, or a successful hosted Mac update.
+
+## Shared renderer (2026-11-26, `f/renderer`)
+
+**Text rendering (owner, 2026-11-27).** The toolkit's vertical-only hinting changes glyph edges in
+190 of 195 shots and in the 8 goldens. The owner approved it: "text rendering is great on other
+apps, mark it fine."
+
+All toolkit dependencies resolve at `7fd559f`. The five local crates under `crates/`
+(`core`, `render`, `engine`, `engine-proto`, `preview`) have been removed. The viewer
+and bench alias the shared Markdown crates; preview still enables `server` and speaks
+`MDVPREVIEW7`. Viewer-owned commands, files/session, reading positions, preview text,
+slides, status and platform glue now live in `bins/mdv-app`. Their tests stay here;
+the toolkit owns the other parser, renderer, engine and preview suites. The approved
+`regex-syntax` patch downgrade (`0.8.12` → `0.8.11`) matches the toolkit's exact pin.
+
+`cargo build --release --locked -p mdview -p mdshared-md-engine --bins` builds both
+executables from this lockfile, in the same release directory. The installer, portable
+zip, Linux packages and macOS bundle still put them next to one another. In production
+there is no parent-directory search: the renderer looks beside the running executable
+or takes an explicit absolute `MDV_ENGINE`. During Cargo's build phase, the local
+dev dependency `tests/engine-fixture` stages the toolkit binary from the viewer lockfile
+in its private `OUT_DIR`. The test support uses only that compile-time path; it neither
+runs Cargo nor consults `MDV_ENGINE` or the profile's executable directory. To see build
+stderr or the missing artifact's path, set `MDVIEW_TEST_ENGINE_VERBOSE=1`.
+`a_diagram_click_opens_the_zoom_view_with_the_pages_own_raster`,
+`a_click_on_a_diagram_opens_it_and_its_raster_is_there`, and
+`a_right_click_on_a_formula_or_diagram_offers_its_source` no longer assume a
+`target/release` ancestor will be searched. Their raster and hit assertions are
+unchanged. Golden blessing also probes a known Mermaid raster before it writes anything.
+
+**Astra follow-up.** The deb, rpm, tarball, Arch package and AppImage put the real
+executables in `lib/mdview/`. `bin/mdview` is a relative link and there is no
+public engine. Linux `current_exe()` resolves `/proc/self/exe` to the real viewer,
+so production still finds its sibling. Tarball uninstall preserves unrelated
+`bin/mdview-engine` files. Release CI requires a real diagram zoom shot through the
+installed link with no override, and checks that removing the private engine makes the
+same shot fail before a PNG is written. The mac look workflow stages mdedit's helper
+using mdedit's own renderer-branch recipe and pin, not mdview's.
+`mac-look.yml` now uses mdedit's `main` again for the 1.2.0 release.
+The write-permission release job runs `mdv-bench --test release_manifest`, sharing
+mdview's production updater descriptor but not depending on its test engine fixture.
+
+On Windows, Rust 1.99.1 passed fmt, release Clippy and the release workspace suite
+with `MDV_ENGINE` unset: 428 passed, none failed, 1 ignored. The staged raster
+passed with an inherited decoy engine, a stale profile executable and an invalid
+`CARGO`. Removing the staged artifact failed without a fallback and did not print
+its path unless requested. The old golden test failed with the override decoy,
+and the bless regression failed when its raster gate was removed.
+All 195 `--no-session` Windows shots were byte-identical to the migration shots
+even with inherited settings and engine overrides deliberately supplied.
+Shell dry runs checked tarball and Arch staging and the unrelated-engine sentinel;
+the old tarball uninstaller removed that sentinel. A missing diagram exited 2 without
+a PNG in the new viewer; the old viewer exited 0 and wrote one. Native Linux and macOS,
+hosted CI, and real Linux package builds were not exercised for this follow-up.
+
+**Astra re-review (after `32bf36f`).** The macOS harnesses give each run a private
+home, separate viewer/editor settings and separate sister instance paths. Normal
+LaunchServices launches use `open --env`; the scratch installed and updated bundles
+also carry those values in `LSEnvironment` because the toolkit restarts with its
+own `/usr/bin/open`. The Command+E script stages both bundles side by side in scratch;
+the editor's direct launch inherits the viewer's scratch environment. The scripts verify the
+live launch environment without dumping it and refuse to reuse a running test bundle.
+The TLS update check
+is restricted to ephemeral GitHub runners and removes its temporary certificate.
+The shot script chooses by host, and a Unix/WSL shell rejects Windows executables
+before launch instead of risking the real Windows app-data directory.
+
+On Linux, Edit in mdedit checks the shared prefix's `lib/mdedit/mdedit` and then
+`bin/mdedit` (explicit overrides still win), before using normal sister discovery.
+It reuses the toolkit's `find_in` candidate validation; engine discovery is unchanged.
+The engine fixture gives nested Cargo a private build directory as well as a private
+target directory and emits manifest-relative input watches. The golden regression
+now calls the actual compare/bless path and verifies a failed probe leaves a scratch
+baseline byte for byte unchanged.
+
+Windows Rust 1.99.1: format, release Clippy and workspace tests passed with
+`MDV_ENGINE` unset (429 passed, 1 ignored). All 195 sessionless shots remained
+byte-identical. Scratch mutations rejected the old editor lookup, unguarded
+golden writes, unisolated Mac launch arguments and restart plist, WSL's old
+viewer selection, and both old Cargo build-script behaviors. Native Mac
+LaunchServices, Linux editor launch, WSL interop and hosted CI were not run here.
+
+**Astra third review (after `3429250`).** The Mac open and sister harnesses
+verify the scratch executable, PID, window ownership and exact document title
+before UI input. Edit posts directly to that PID, and application-menu and Quit
+actions use only that PID's accessibility objects. Finder hand-off must show
+`tables.md` in the original window, and the subsequent Finder launch must show
+`math.md`. Process logging reports only the scratch PID and count. The update
+harness requires `RUNNER_ENVIRONMENT=github-hosted` and validates the temporary
+certificate fingerprint before changing trust, so cleanup also runs after a
+failed add. Shell syntax and mock checks passed; the native macOS SDK, event
+delivery, accessibility actions and keychain behavior still need hosted CI.
+
+**Mac harness follow-up (after `3d986f0`).** Scratch launches and restarted test
+bundles set `MDVIEW_TEST_SKIP_NATIVE_RECENTS=1`; it suppresses only the native
+recent-document call on new and reopened files. Normal opens and mdview's own
+recents are unchanged. The sister test now waits for `showcase.md` in the
+verified scratch editor's window, rather than accepting a process alone.
+
+Test files that left with the local crates (paths below are relative to `crates/`):
+
+- `core/tests/`: `core_tests.rs`, `fuzz.rs`, `regressions.rs`, `spec.rs`, and
+  `common/{mod,normalize,visible,writer}.rs`. The app-specific cases and fixture
+  checks from `regressions.rs` are in `bins/mdv-app/tests/viewer_regressions.rs`.
+  Shared unit tests left with `core/src/{emoji,find,frontmatter,rich,tasks}.rs`;
+  those in `place.rs`, `preview.rs`, `session.rs` and `slides.rs` moved into mdview.
+- `render/tests/`: `export.rs`, `floats.rs`, `gap.rs`, `golden.rs`, `incremental.rs`,
+  `lazy.rs`, `relayout.rs`, `render.rs`. The golden cases also stay here under
+  `bins/mdv-app/tests/golden.rs` to cover mdview's own fixtures. Shared unit tests
+  left with `render/src/{anim,engine,export,image,theme}.rs` and
+  `render/src/layout/{animate,table}.rs`.
+- `engine/tests/watchdog.rs`, and the inline cases in `engine/src/lib.rs`,
+  `engine-proto/src/lib.rs` and `preview/src/{server,wire}.rs`.
+
+The toolkit suites can be checked in a scratch source copy at `7fd559f`: build
+`mdshared-md-engine --bin mdview-engine`, point `MDV_ENGINE` at it, then run
+`cargo test --release --locked -p mdshared-md-core -p mdshared-md-render -p mdshared-md-engine -p mdshared-md-engine-proto -p mdshared-md-preview --features mdshared-md-preview/server`.
+Do not bless or edit files in the shared checkout from this worktree.
+
+The renderer now refuses network image paths before probing them, prevents SVG local
+file reads, bounds WebP and preview sizes, avoids blocking on Unix FIFOs and bounds
+inline-math and export work. Vertical-only font hinting changed 190 of the 195
+headless shots and all eight Windows fixture goldens (four Showcase, two Tables,
+two Floats); see the [full shot comparison](measurements/2026-11-26-renderer-shots.md).
+On Windows with Rust 1.99.1, fmt and release Clippy passed. The old viewer workspace
+had 805 passing tests and 6 ignored; the new workspace has 425 passing and 1 ignored.
+The original migration rerun also passed with `MDV_ENGINE` unset and no prebuilt
+engine in the test profile; the test-time fallback used then was superseded above.
+The five toolkit suites passed separately in a scratch source copy: 405 passing and
+5 ignored. The updater test is unchanged and passed. Local release sizes in bytes:
+`mdview.exe` 9,741,312 → 9,976,832; `mdview-engine.exe` 26,115,072 → 26,113,536.
+Inno Setup compiled a scratch installer from the built pair, and the Windows
+portable ZIP contained both binaries. The installer was not run, the static-CRT
+build was not exercised, and no native UI interaction, hosted CI, or Linux/macOS
+packaging or execution was performed here.
+
+---
+
 ## Shared's close-out list (2026-11-26, branch `f/motion2`, pin `535ad4c`)
 
 Shared's list of what both apps should wire, checked item by item in mdview, then what was
@@ -1614,16 +1765,14 @@ Windows 11 VM, and before 2026-11-10 a Debian VM (section 12).
 
 ## 2. Repository
 
-`Kaan88/markdown-viewer-rs`, private, branch `main` tracking `origin/main`. There is no CI: run the
-tests yourself before a push. Commit and push as phases complete or when asked.
+`Kaan88/markdown-viewer-rs`, branch `main` tracking `origin/main`. Run tests locally before
+pushing; see [CI and releases](CI.md) for the hosted checks. Commit and push as phases
+complete or when asked.
 
 | Path | What it is |
 |---|---|
-| `crates/core` | Parser (pulldown-cmark), HTML allow-list mapping, autolink, slugs, document model, find, command table, session, recents, limits, tab labels; re-exports of the shared file watching, single instance and update logic |
-| `crates/render` | Headless renderer: parley layout, swash raster, image store, patchable `PageLayout`, scroll frames, hit testing, selection, syntect highlighting, the engine client |
-| `crates/engine` | Library and the `mdview-engine` binary: SVG (resvg 0.47), TeX math (RaTeX 0.1.15), Mermaid (merman 0.9.3) |
-| `crates/engine-proto` | Job and reply wire format between the renderer and the engine process |
-| `bins/mdv-app` | The new shell, binary `mdview` |
+| `markdown-shared-rs` (git dependency) | Markdown parser, renderer, engine and wire format, preview server, toolkit UI and helpers |
+| `bins/mdv-app` | The shell, binary `mdview`, and viewer-specific policy and tests |
 | `bins/mdv-bench` | Headless render to PNG, timings, golden generation |
 | `packaging/windows` | `mdview.iss` + `build-installer.ps1` |
 | `fixtures/` | Test documents; `everything.md` exercises every feature (section 5) |
@@ -1634,8 +1783,8 @@ tests yourself before a push. Commit and push as phases complete or when asked.
 **The editor.** `Kaan88/markdown-editor-rs` (`mdedit`) has its own `docs/HANDOFF.md`, written 2026-11-13, which
 also covers the shared crates and what was left unchecked in this repository after the move.
 
-**Shared crates (2026-11-12).** Code the editor also needs now lives in
-`Kaan88/markdown-shared-rs`, pinned by `rev` in `crates/core`, `crates/render` and `bins/mdv-app`:
+**First shared-crate move (historical, 2026-11-12).** Code the editor also needs moved to
+`Kaan88/markdown-shared-rs`; the current pin and paths are at the top of this file. That move covered
 `mdshared-text` (`Bitmap`, `TextEngine`, `shared_fonts`), `mdshared-highlight` (syntect),
 `mdshared-ui` (`gfx`, `theme`, `menu`, `textfield`, `tree`, the key parser, `platform`, and the
 generic parts of `chrome`, `panes` and `overlays`) and `mdshared-app` (path helpers, file reading,
@@ -1666,8 +1815,8 @@ denied:
 ```powershell
 cd C:\Users\kaank\Desktop\mv
 $env:TEMP = "$PWD\target\tmp"; $env:TMP = $env:TEMP
-cargo build --release --workspace          # includes mdview.exe and mdview-engine.exe
-cargo test --release --workspace           # 2026-11-13: 332 passed, 0 failed, 6 ignored
+cargo build --release --locked -p mdview -p mdshared-md-engine --bins
+cargo test --release --workspace
 cargo fmt --all --check
 ```
 
@@ -1677,9 +1826,9 @@ with `-- --include-ignored` when touching the engine client or the watchdog.
 **Launch built `.exe` files from Git Bash, not PowerShell.** PowerShell reports an unsigned-binary
 error for them on this PC.
 
-The renderer and shells find `mdview-engine` through `MDV_ENGINE`, beside the current executable,
-or in a `target/release` above it. Build the workspace (or set `MDV_ENGINE`) before opening a
-document with SVG, math or Mermaid.
+The renderer finds `mdview-engine` beside the current executable or at the absolute path named
+by `MDV_ENGINE`. Build the app and kit engine together before opening SVG, math or Mermaid.
+Unset `MDV_ENGINE` for a smoke test of sibling discovery.
 
 **The new shell** (`target/release/mdview.exe`):
 
@@ -1706,10 +1855,14 @@ target/release/mdview.exe --no-session --shot out.png --dark --size 1280x800 --m
 target/release/mdview.exe --no-session --shot out.png --light --load-remote fixtures/remote.md
 ```
 
-The no-pixel-change check is `tests/shots.sh <folder>` (55 `--shot` states: both themes, every
-`--menu` and `--dialog`, the empty state, panes, find, focus mode, page widths, scales, hovers).
-Run it into one folder before a change and into another after, then `cmp` every PNG; also run
-the workspace tests (they include the goldens) and `cargo fmt --check`.
+In Git Bash, run `tests/shots.sh <folder>` before and after a change, then compare the PNGs.
+Point `MDVIEW_EXE` at the just-built viewer (with the toolkit engine next to it), and
+`MDVIEW_SETTINGS` at a scratch file. `MDVIEW_SHOTS_NO_SESSION=1` makes every launch
+`--behind --no-session`, omitting only the six shots that load seeded scratch settings.
+The harness clears inherited settings and engine overrides, then puts the app-data
+lookup in scratch space on all OSes (`LOCALAPPDATA` on Windows, `HOME` and the XDG roots
+on Unix). Settings are supplied only for the seeded cases. `mac-open.sh` also passes an
+isolated home and settings path directly to LaunchServices.
 
 `MDVIEW_STARTUP_TRACE=1` prints the first-frame and page-refined times with image decode and
 engine job counts; `MDVIEW_TRACE=1` prints per-frame timings (layout, paint, compose, copy,
@@ -1727,14 +1880,14 @@ mdv-bench.exe --input spikes/parser/data/generated_1mib.md --out target/tmp/b.pn
 `--viewport <height>` reports what a window pays: first layout, first frame, refinement, scrolling.
 `--resize <width>`, `--zoom <factor>`, `--details` and `--error` add phases.
 
-**Goldens.** `crates/render/tests/golden.rs` compares the four `tests/golden/showcase-{light,dark}@{1.0,1.5}.png`
+**Goldens.** `bins/mdv-app/tests/golden.rs` compares the four `tests/golden/showcase-{light,dark}@{1.0,1.5}.png`
 and, for `fixtures/tables.md`, `tables-light@1.0.png` and `tables-dark@1.5.png`,
 and two renders of `fixtures/floats.md` (`floats-light@1.0.png`, `floats-dark@1.5.png`)
 on Windows only (system fonts). After an intended visual change, re-bless them and look at the
 difference before committing:
 
 ```powershell
-$env:MDV_BLESS = 1; cargo test --release -p mdview-render --test golden; Remove-Item Env:MDV_BLESS
+$env:MDV_BLESS = 1; cargo test --release -p mdview --test golden; Remove-Item Env:MDV_BLESS
 ```
 
 A failing compare writes `target/golden-actual-<fixture>-<name>.png`. The engine must be built, or SVG, math

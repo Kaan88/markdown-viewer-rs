@@ -2,8 +2,8 @@
 //! through the same pointer and key handlers the event loop calls.
 
 use super::*;
-use mdview_core::commands::CommandId;
-use mdview_core::session::PageWidth;
+use mdview::commands::CommandId;
+use mdview::session::PageWidth;
 
 pub(super) fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -101,7 +101,7 @@ fn toolbar_toggles_panes_and_the_layout_follows() {
 
 #[test]
 fn the_page_width_button_steps_through_the_widths() {
-    use mdview_core::session::PageWidth;
+    use mdview::session::PageWidth;
     let mut a = app(&["linked.md"]);
     assert_eq!(a.ws.page_width(), PageWidth::Narrow);
     click(&mut a, Hit::Bar(BarItem::PageWidth));
@@ -1403,7 +1403,7 @@ fn edit_in_mdedit_starts_the_editor_at_the_top_line() {
 fn a_hand_over_opens_at_a_line_and_a_follow_only_scrolls() {
     let mut a = app(&["showcase.md", "tables.md"]);
     let (showcase, tables) = (fixture("showcase.md"), fixture("tables.md"));
-    let canonical = mdview_core::files::canonical_or_absolute;
+    let canonical = mdview::files::canonical_or_absolute;
     let at = |a: &App| a.ws.active_tab().unwrap().path().to_path_buf();
     assert_eq!(at(&a), canonical(&tables));
     // An opening switches to the file and shows the line.
@@ -1448,7 +1448,7 @@ fn a_behind_window_is_not_focused_by_a_hand_over() {
     // It still opens what was handed over: only the focus is dropped.
     assert_eq!(
         a.ws.active_tab().map(|t| t.path().to_path_buf()),
-        Some(mdview_core::files::canonical_or_absolute(&showcase))
+        Some(mdview::files::canonical_or_absolute(&showcase))
     );
     a.args.behind = false;
     a.handed_over(vec![Request::new(fixture("tables.md"))]);
@@ -1467,7 +1467,7 @@ fn a_behind_launch_claims_the_folder_and_only_an_ordinary_one_hands_over() {
     // which is what a `--behind` launch must never do.
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
-    std::fs::write(mdview_core::single::port_file(&settings), port.to_string()).unwrap();
+    std::fs::write(mdview::single::port_file(&settings), port.to_string()).unwrap();
     #[cfg(windows)]
     let lock = {
         use std::os::windows::fs::OpenOptionsExt;
@@ -2413,7 +2413,7 @@ impl Folder {
         std::fs::write(dir.join("a.md"), "# Alpha\n\nplain\n\nthe Needle here\n").unwrap();
         std::fs::write(dir.join("sub/b.md"), "# Beta\n\nneedle one\n\nneedle two\n").unwrap();
         std::fs::write(dir.join("notes.txt"), "needle in a text file\n").unwrap();
-        Folder(mdview_core::files::canonical_or_absolute(&dir))
+        Folder(mdview::files::canonical_or_absolute(&dir))
     }
 }
 
@@ -3094,7 +3094,7 @@ fn copy_as_markdown_is_a_palette_command_that_waits_for_a_selection() {
     a.open_palette(">copy as");
     a.compose();
     assert!(listed(&a).contains(&Target::Cmd(CommandId::CopyMarkdown)));
-    let cmd = mdview_core::commands::command(CommandId::CopyMarkdown);
+    let cmd = mdview::commands::command(CommandId::CopyMarkdown);
     assert!(cmd.shortcuts.is_empty(), "no default key");
     // Without a selection the command only says so; nothing is copied.
     crate::codebtn::COPIED.with(|c| c.borrow_mut().take());
@@ -4141,7 +4141,7 @@ fn the_editor_is_sent_closed_for_its_tab_when_it_closes() {
     a.tell_editor_closed();
     let r = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     // The path may arrive spelled another way; the editor makes it canonical as it does any.
-    let canonical = mdview_core::files::canonical_or_absolute;
+    let canonical = mdview::files::canonical_or_absolute;
     assert!(r.closed && r.follow && canonical(&r.path) == canonical(&showcase));
     assert_eq!(r.from.as_deref(), Some("mdview"));
     a.tell_editor_closed();
@@ -4169,7 +4169,7 @@ fn closing_the_window_tells_the_editor_of_every_tab_it_asked_for() {
     // the window having waited for it.
     a.closing();
     let r = rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
-    let canonical = mdview_core::files::canonical_or_absolute;
+    let canonical = mdview::files::canonical_or_absolute;
     assert!(r.closed && r.follow && canonical(&r.path) == canonical(&showcase));
     // Nothing about tables.md, which it did not ask for, and nothing more however the window
     // ends after.
@@ -4358,24 +4358,23 @@ fn a_pinch_over_the_zoom_view_zooms_the_diagram_not_the_page() {
     assert!(a.ws.zoom() > page, "without the view the page zooms");
 }
 
-fn engine_available() -> bool {
-    let name = if cfg!(windows) {
-        "mdview-engine.exe"
-    } else {
-        "mdview-engine"
-    };
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/release")
-        .join(name)
-        .is_file()
+#[test]
+fn a_shot_requiring_a_missing_diagram_does_not_write_a_png() {
+    let mut a = app(&["tables.md"]);
+    a.args.scale = Some(1.0);
+    a.args.zoom_diagram = Some(1);
+    let dir = std::env::temp_dir().join(format!("mdview-missing-diagram-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("shot.png");
+    let status = shot(a, &path);
+    let wrote = path.exists();
+    std::fs::remove_dir_all(dir).unwrap();
+    assert_eq!(status, 2);
+    assert!(!wrote);
 }
 
 #[test]
 fn a_diagram_click_opens_the_zoom_view_with_the_pages_own_raster() {
-    if !engine_available() {
-        eprintln!("skipping: no mdview-engine in target/release");
-        return;
-    }
     let mut a = app(&["diagrams.md"]);
     let source = a.ws.diagram_source(0).expect("a diagram on the page");
     let raster = a.ws.diagram_raster(&source).expect("the diagram is drawn");

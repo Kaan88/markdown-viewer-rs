@@ -41,7 +41,9 @@ command -v gtk-update-icon-cache >/dev/null 2>&1 && [ -f /usr/share/icons/hicolo
 %license /usr/share/licenses/mdview/LICENSE
 %doc /usr/share/doc/mdview/README.md
 /usr/bin/mdview
-/usr/bin/mdview-engine
+%dir /usr/lib/mdview
+/usr/lib/mdview/mdview
+/usr/lib/mdview/mdview-engine
 /usr/share/applications/mdview.desktop
 /usr/share/icons/hicolor/256x256/apps/mdview.png
 

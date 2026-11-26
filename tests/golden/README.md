@@ -42,8 +42,8 @@ second one active, with the Qt status bar and the WinUI title carrying `2 of 4`.
 
 Math and Mermaid changed the showcase: the page is now 4071 px at 100% (taller formula lines and
 diagram images instead of code boxes) and the Mathematics and Diagrams sections show rendered output,
-so the four `showcase-*` images were regenerated. The engine must be built (or `MDV_ENGINE` set) when
-regenerating, because SVG, math and Mermaid go through it. Syntax highlighting changed only the Rust
+so the four `showcase-*` images were regenerated. SVG, math and Mermaid go through the
+engine. Syntax highlighting changed only the Rust
 block's glyph colours, so the page height stayed 4071 px. Dark images use Mermaid's dark palette with
 contrast overrides, gantt section labels clear the task bars and date ticks no longer collide, and
 mindmap labels match their node size.
@@ -53,7 +53,7 @@ inline, a missing file's placeholder, and the SVG badge that the engine now draw
 `shell-winui-images.png` and `shell-qt-images.png` show the same file in both shells, with the badge
 drawn both ways.
 
-**Pixel test.** The four `showcase-*.png` images are a baseline: `crates/render/tests/golden.rs`
+**Pixel test.** The four `showcase-*.png` images are a baseline: `bins/mdv-app/tests/golden.rs`
 renders the showcase at the same four settings and fails when more than 64 pixels differ by more than
 24 in any channel, writing the actual image to `target/golden-actual-<fixture>-<name>.png`.
 `tables-light@1.0.png` and `tables-dark@1.5.png` are the same for `fixtures/tables.md` (table
@@ -66,15 +66,16 @@ Limits:
 
 - They use this host's system fonts (Segoe UI, Consolas), so the comparison runs on Windows only;
   elsewhere it passes with a note. Bundled fonts would make it portable; that is still open.
-- Only the four showcase renders are compared. The `shell-*` captures and `images-light.png` are
+- The showcase, tables and floats renders are compared. The `shell-*` captures and `images-light.png` are
   evidence that the shells run, not a baseline.
 - Fenced code is coloured from syntect's bundled syntaxes and two themes; unknown languages, inline
   code and blocks over 256 KiB stay plain.
 - The window captures include the 31 px title bar, which follows Windows; compare the client area.
 
-After an intended visual change, regenerate the baseline with
-`MDV_BLESS=1 cargo test --release -p mdview-render --test golden`, look at the new images, and commit
-them only once they are approved.
+After an intended visual change, regenerate with
+`MDV_BLESS=1 cargo test --release -p mdview --test golden`, look at the new images, and commit
+them only once they are approved. Cargo stages the pinned toolkit engine before running tests.
+Blessing refuses to write any golden unless a known Mermaid diagram produces a raster.
 
 To regenerate:
 

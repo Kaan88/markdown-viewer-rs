@@ -12,8 +12,8 @@
 #   mdview/cargo         cargo registry and git checkouts
 #   mdview/target-linux  cargo's target directory
 #   runtime-x86_64-<tag> the AppImage runtime appimagetool embeds (downloaded once, hash checked)
-# The engine (mdview-engine) sits beside mdview in usr/bin; mdview finds it as a sibling of its own
-# executable, which inside the AppImage is the file under the mount point.
+# The real executables sit together in usr/lib/mdview; usr/bin/mdview is a relative link.
+# mdview finds its sibling inside the AppImage's mount point.
 # Needs on the host: docker, appimagetool, mksquashfs (used by appimagetool), curl, sha256sum.
 set -euo pipefail
 
@@ -41,7 +41,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
     -v "$cache/$app/target-linux:/cache/target" \
     -e CARGO_HOME=/cache/cargo -e CARGO_TARGET_DIR=/cache/target -e CARGO_TERM_COLOR=never \
     -w /src "$image" \
-    bash -c 'PATH=/opt/cargo/bin:$PATH cargo build --release --locked -p mdview -p mdview-engine'
+    bash -c 'PATH=/opt/cargo/bin:$PATH cargo build --release --locked -p mdview -p mdshared-md-engine --bins'
 bins=(mdview mdview-engine)
 for b in "${bins[@]}"; do
     [ -x "$cache/$app/target-linux/release/$b" ] || { echo "build left no $b" >&2; exit 1; }
@@ -63,10 +63,11 @@ for b in "${bins[@]}"; do
 done
 appdir="$dist/AppDir"
 rm -rf "$appdir"
-mkdir -p "$appdir/usr/bin"
+mkdir -p "$appdir/usr/bin" "$appdir/usr/lib/$app"
 for b in "${bins[@]}"; do
-    install -m 755 "$cache/$app/target-linux/release/$b" "$appdir/usr/bin/$b"
+    install -m 755 "$cache/$app/target-linux/release/$b" "$appdir/usr/lib/$app/$b"
 done
+ln -s "../lib/$app/$app" "$appdir/usr/bin/$app"
 install -m 644 assets/mdview.png "$appdir/$app.png"
 install -m 644 assets/mdview.png "$appdir/.DirIcon"
 install -m 644 packaging/linux/$app.desktop "$appdir/$app.desktop"

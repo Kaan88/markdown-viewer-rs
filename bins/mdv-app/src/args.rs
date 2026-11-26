@@ -3,7 +3,7 @@
 
 use mdshared_app::sister::{Rect, Request};
 use mdshared_ui::corners::Corners;
-use mdview_core::session::PageWidth;
+use mdview::session::PageWidth;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

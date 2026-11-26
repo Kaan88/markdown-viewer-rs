@@ -176,11 +176,18 @@ fn menu_hover_fade_at(scale: f32) {
 
 #[test]
 fn the_title_rows_hover_shows_at_once_with_motion_off() {
+    title_hover_at_once(Hit::NewTab);
+    // macOS owns its caption buttons; mdview never paints their hover.
+    if !mdshared_ui::chrome::NATIVE_FRAME {
+        title_hover_at_once(Hit::WinClose);
+    }
+}
+
+fn title_hover_at_once(hit: Hit) {
     let mut a = app(&["showcase.md"]);
     a.full = true;
     a.compose();
-    let r = a.hit_rect(Hit::WinClose).expect("the Close button");
-    let (x, y) = (r.cx(), r.cy());
+    let (x, y) = title_hover_sample(&a, hit);
     let rest = pixel(&a, x, y);
     a.pointer_moved(x, y);
     a.compose();
@@ -193,11 +200,23 @@ fn the_title_rows_hover_shows_at_once_with_motion_off() {
 
 #[test]
 fn the_title_rows_hover_fades_in_from_the_resting_look() {
+    title_hover_fade(Hit::NewTab);
+    if !mdshared_ui::chrome::NATIVE_FRAME {
+        title_hover_fade(Hit::WinClose);
+    }
+}
+
+fn title_hover_sample(a: &App, hit: Hit) -> (f32, f32) {
+    let r = a.hit_rect(hit).expect("the title-row button");
+    // Sample the fill away from the new-tab plus, whose opaque pixels do not fade.
+    (r.cx(), r.cy() + if hit == Hit::NewTab { 9.0 } else { 0.0 })
+}
+
+fn title_hover_fade(hit: Hit) {
     let mut a = moving(&["showcase.md"]);
     a.full = true;
     a.compose();
-    let r = a.hit_rect(Hit::WinClose).expect("the Close button");
-    let (x, y) = (r.cx(), r.cy());
+    let (x, y) = title_hover_sample(&a, hit);
     let rest = pixel(&a, x, y);
     a.pointer_moved(x, y);
     a.compose();
@@ -1652,17 +1671,17 @@ fn opening_settings_asks_the_system_for_contrast_and_applies_it_at_once() {
 
 // ---- tooltips, from resting -----------------------------------------------------------------
 
-/// The middle of the minimize button, which has a tip.
-fn minimize(a: &mut App) -> (f32, f32) {
+/// A title-row control with a tip, including on macOS with native caption buttons.
+fn new_tab_tip_target(a: &mut App) -> (f32, f32) {
     a.compose();
-    let r = a.hit_rect(Hit::WinMin).expect("the minimize button");
+    let r = a.hit_rect(Hit::NewTab).expect("the new tab button");
     (r.cx(), r.cy())
 }
 
 #[test]
 fn a_move_on_the_same_control_starts_the_tips_wait_again() {
     let mut a = app(&["showcase.md"]);
-    let (x, y) = minimize(&mut a);
+    let (x, y) = new_tab_tip_target(&mut a);
     let t0 = Instant::now();
     a.pointer_moved_at(x, y, t0);
     let first = a.ui.tips.deadline().expect("it waits");
@@ -1682,13 +1701,22 @@ fn a_move_on_the_same_control_starts_the_tips_wait_again() {
 #[test]
 fn resting_the_delay_shows_the_tip_and_leaving_hides_it() {
     let mut a = app(&["showcase.md"]);
-    let (x, y) = minimize(&mut a);
+    let (x, y) = new_tab_tip_target(&mut a);
     a.pointer_moved(x, y);
     let due = a.ui.tips.deadline().expect("it waits");
     a.timers(due - Duration::from_millis(1));
     assert!(a.ui.tips.shown().is_none(), "not before the delay");
     a.timers(due);
-    assert_eq!(a.ui.tips.shown().map(|t| t.text.as_str()), Some("Minimize"));
+    let shortcut = crate::keys::hint(mdview::commands::CommandId::OpenFiles);
+    let expected = if shortcut.is_empty() {
+        "Open files".to_string()
+    } else {
+        format!("Open files ({shortcut})")
+    };
+    assert_eq!(
+        a.ui.tips.shown().map(|t| t.text.as_str()),
+        Some(expected.as_str())
+    );
     a.compose();
     assert_eq!(a.tip_t, 1.0);
     let page = a.areas.page;
@@ -1703,7 +1731,7 @@ fn a_tip_fades_in_as_it_shows_and_with_animations_off_is_there_at_once() {
     for animations in [true, false] {
         let mut a = moving(&["showcase.md"]);
         a.apply_setting(s::MOTION, Value::Bool(animations));
-        let (x, y) = minimize(&mut a);
+        let (x, y) = new_tab_tip_target(&mut a);
         a.pointer_moved(x, y);
         let due = a.ui.tips.deadline().expect("it waits");
         a.timers(due);
@@ -2143,13 +2171,13 @@ fn closing_an_overlay_mid_theme_fade_immediately_removes_it() {
                 open_settings_dropdown(&mut a);
             }
             "tip" => {
-                let r = a.hit_rect(Hit::WinClose).unwrap();
+                let r = a.hit_rect(Hit::NewTab).expect("the new tab button");
                 let now = Instant::now();
                 a.ui.tips.hover(
                     now,
                     Some(mdshared_ui::tooltip::Over {
-                        key: Hit::WinClose,
-                        text: "Close".into(),
+                        key: Hit::NewTab,
+                        text: "Open files".into(),
                         anchor: r,
                     }),
                 );
@@ -2161,7 +2189,7 @@ fn closing_an_overlay_mid_theme_fade_immediately_removes_it() {
                     at: (500.0, 300.0),
                     due: Instant::now(),
                     loading: false,
-                    content: Some(mdview_core::preview::Preview {
+                    content: Some(mdview::preview::Preview {
                         title: "Preview".into(),
                         body: "A heading".into(),
                     }),

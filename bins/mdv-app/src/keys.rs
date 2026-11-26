@@ -5,7 +5,7 @@
 use mdshared_ui::keys::MAC;
 pub use mdshared_ui::keys::{KeyName, Mods, key_name, parse};
 use mdshared_ui::keys::{for_platform, label};
-use mdview_core::commands::{COMMANDS, CommandId, Shortcut, StandardKey};
+use mdview::commands::{COMMANDS, CommandId, Shortcut, StandardKey};
 
 /// The shortcut strings of a table entry on this platform (`keys::for_platform`: on a Mac the
 /// keys the system keeps move); platform-standard keys spelled the way the Keyboard shortcuts
@@ -24,7 +24,7 @@ pub fn shortcut_strings(shortcuts: &[Shortcut]) -> impl Iterator<Item = &'static
 /// The first shortcut of a command, for menu hints and tooltips, printed the platform's way
 /// ("⌘O" on a Mac).
 pub fn hint(id: CommandId) -> &'static str {
-    let c = mdview_core::commands::command(id);
+    let c = mdview::commands::command(id);
     label(shortcut_strings(c.shortcuts).next().unwrap_or(""))
 }
 
@@ -41,7 +41,7 @@ pub fn command_for(key: &KeyName, mods: Mods) -> Option<CommandId> {
 /// The Keyboard shortcuts dialog's lines: core's `shortcut_help`, with each shortcut as this
 /// platform has it and prints it.
 pub fn shortcut_help() -> Vec<(String, &'static str)> {
-    use mdview_core::commands::Menu;
+    use mdview::commands::Menu;
     COMMANDS
         .iter()
         .filter(|c| !c.shortcuts.is_empty() && c.menu != Menu::TabContext)
@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn the_dialog_lists_what_core_lists_off_the_mac() {
         if !MAC {
-            assert_eq!(shortcut_help(), mdview_core::commands::shortcut_help());
+            assert_eq!(shortcut_help(), mdview::commands::shortcut_help());
         }
     }
 

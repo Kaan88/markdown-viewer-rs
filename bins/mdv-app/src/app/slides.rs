@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::present::{Overview, Release, Show};
-use mdview_core::commands::strings;
+use mdview::commands::strings;
 use winit::window::Fullscreen;
 
 /// What a composed frame gives back: the damaged rectangles and what the frame cost.

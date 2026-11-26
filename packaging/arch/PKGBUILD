@@ -9,7 +9,7 @@
 #
 # The package does not update itself; pacman (or the AUR helper) does.
 pkgname=mdview-bin
-pkgver=1.0.3
+pkgver=1.2.0
 pkgrel=1
 pkgdesc="A light, fast Markdown viewer (prebuilt binary)"
 arch=('x86_64')
@@ -25,8 +25,12 @@ sha256sums=('SKIP')
 
 package() {
     cd "$srcdir/mdview-$pkgver-linux-x86_64"
-    install -Dm755 bin/mdview "$pkgdir/usr/bin/mdview"
-    install -Dm755 bin/mdview-engine "$pkgdir/usr/bin/mdview-engine"
+    local executables=lib/mdview
+    [[ -d "$executables" ]] || executables=bin  # Older released tarballs.
+    install -Dm755 "$executables/mdview" "$pkgdir/usr/lib/mdview/mdview"
+    install -Dm755 "$executables/mdview-engine" "$pkgdir/usr/lib/mdview/mdview-engine"
+    install -d "$pkgdir/usr/bin"
+    ln -s ../lib/mdview/mdview "$pkgdir/usr/bin/mdview"
     install -Dm644 share/applications/mdview.desktop "$pkgdir/usr/share/applications/mdview.desktop"
     install -Dm644 share/icons/hicolor/256x256/apps/mdview.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/mdview.png"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

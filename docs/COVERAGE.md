@@ -117,11 +117,11 @@ Numbers 398, 426, 434-436, 473-477 (nested strong), 614 (escape in autolink) and
 
 ## Mermaid families
 
-merman 0.9.3 has 34 diagram families as cargo features. `crates/engine` enables every one that renders
-cleanly without ELK (EPL-2.0) or the Cytoscape layout; `cargo tree -p mdview-engine` shows neither
-crate. "Cleanly" means: every label visible and inside its shape, no overlapping or clipped text,
+merman 0.9.3 has 34 diagram families as cargo features. The toolkit's `mdshared-md-engine` enables
+every one that renders cleanly without ELK (EPL-2.0) or the Cytoscape layout;
+`cargo tree -p mdshared-md-engine` shows neither crate. "Cleanly" means: every label visible and inside its shape, no overlapping or clipped text,
 readable in both themes, no panic, well under 300 ms. Samples of the 23 added families are in
-`fixtures/diagrams-more.md` and are rendered by a test in `crates/engine/src/lib.rs`. Times are the
+`fixtures/diagrams-more.md`; the render test now lives in the toolkit's `mdshared-md-engine`. Times are the
 renderer's whole layout pass for a page holding one diagram (engine process already warm), light
 theme, on this Windows host.
 

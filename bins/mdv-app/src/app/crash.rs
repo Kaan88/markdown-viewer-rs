@@ -3,7 +3,7 @@
 
 use super::*;
 use mdshared_app::crash;
-use mdview_core::commands::strings;
+use mdview::commands::strings;
 
 /// The folder of mdview's crash reports, under its data folder.
 pub fn crash_dir() -> Option<PathBuf> {

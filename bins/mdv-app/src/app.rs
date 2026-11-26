@@ -31,8 +31,8 @@ use crate::workspace::{Click, LinkOutcome, ThemeChoice, Workspace};
 use mdshared_app::sister::Request;
 use mdshared_ui::anim::{Animator, Id};
 use mdshared_ui::corners::Corners;
-use mdview_core::commands::CommandId as C;
-use mdview_core::watch::FileWatcher;
+use mdview::commands::CommandId as C;
+use mdview::watch::FileWatcher;
 use mdview_render::Bitmap;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroU32;
@@ -543,7 +543,7 @@ impl App {
         self.ui.panes.outline_w = width(outline_w, self.ui.panes.outline_w);
         if let Some(folder) = &a.folder {
             self.ws
-                .set_folder(Some(mdview_core::files::canonical_or_absolute(folder)));
+                .set_folder(Some(mdview::files::canonical_or_absolute(folder)));
         }
         self.ui
             .tree
@@ -2710,7 +2710,8 @@ fn shot(mut app: App, path: &Path) -> i32 {
     // The diagram zoom view, at the size and place the arguments ask for.
     if let Some(n) = app.args.zoom_diagram {
         if !app.open_zoom_nth(n) {
-            eprintln!("mdview: no diagram {n}");
+            eprintln!("mdview: could not render diagram {n}");
+            return 2;
         }
         let area = app.zoom_area();
         if let Some(view) = app.ui.zoom.as_mut() {
@@ -3031,9 +3032,9 @@ fn admit(
         let settings = settings.clone();
         Box::new(move || {
             if requests.is_empty() {
-                mdview_core::single::forward(&settings, &files)
+                mdview::single::forward(&settings, &files)
             } else {
-                (requests.iter()).all(|r| mdview_core::single::forward_request(&settings, r))
+                (requests.iter()).all(|r| mdview::single::forward_request(&settings, r))
             }
         })
     } else {
@@ -3070,7 +3071,7 @@ pub fn run() -> i32 {
     let session = match (args.no_session, args.shot.is_some()) {
         (true, _) => None,
         (false, true) => explicit,
-        (false, false) => explicit.or_else(mdview_core::session::default_settings_path),
+        (false, false) => explicit.or_else(mdview::session::default_settings_path),
     };
     // Held while the window runs: this launch has the settings folder
     // (mdshared_app::folder_lock, shared with mdedit).
@@ -3094,15 +3095,15 @@ pub fn run() -> i32 {
     // A session that cannot be read is left as it is: the window runs without it.
     let saved = match session
         .as_deref()
-        .map(mdview_core::session::Session::read_patiently)
+        .map(mdview::session::Session::read_patiently)
     {
         Some(Err(e)) => {
             session = None;
             no_session_note = Some(mdshared_app::folder_lock::unreadable_note(&e));
-            mdview_core::session::Session::default()
+            mdview::session::Session::default()
         }
         Some(Ok(s)) => s,
-        None => mdview_core::session::Session::default(),
+        None => mdview::session::Session::default(),
     };
     let mut ws = Workspace::from_session(saved, session.clone());
     if let Some(note) = &no_session_note {
@@ -3145,7 +3146,7 @@ pub fn run() -> i32 {
         && let Some(settings) = &app.session
     {
         let p = proxy.clone();
-        app.incoming = mdview_core::single::listen_requests_waking(settings, move || {
+        app.incoming = mdview::single::listen_requests_waking(settings, move || {
             let _ = p.send_event(Wake::Instance);
         });
     }

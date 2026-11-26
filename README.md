@@ -152,6 +152,8 @@ The Windows installed copy, the bare exes and the portable zip's exes update the
 folder must be writable), and so does the AppImage. The deb, rpm, tar.gz and Arch installs do not;
 the app says only the AppImage can update itself. They install a desktop file, so the taskbar icon
 and "Open with" work without the AppImage's first-run registration.
+Linux packages keep the two executables together in `lib/mdview/` and expose only the
+`bin/mdview` link.
 
 The AppImage is built in an Ubuntu 20.04 container, so it needs glibc 2.31 or later. It needs the
 system's libc, fontconfig, freetype and the X11/xcb libraries, and loads libcurl and the Wayland
@@ -167,11 +169,11 @@ You need Rust (1.99 was used) and, on Windows, the MSVC build tools; on Linux a 
 fontconfig, freetype and X11/xcb development packages.
 
 ```powershell
-cargo build --release --workspace
+cargo build --release --locked -p mdview -p mdshared-md-engine --bins
 cargo test --release --workspace
 ```
 
-This gives `target\release\mdview.exe` and `target\release\mdview-engine.exe`; keep them together
+This gives `target\release\mdview.exe` and the pinned toolkit's `target\release\mdview-engine.exe`; keep them together
 (on Linux `target/release/mdview` and `target/release/mdview-engine`). Releases are cut by
 pushing a tag `v<version>`: GitHub Actions builds and publishes the files above. See `docs/CI.md`;
 `docs/UPDATE.md` has the local scripts for a dry run.
@@ -213,10 +215,8 @@ The full list is in the app under "Keyboard shortcuts".
 
 | Path | What it is |
 |---|---|
-| `crates/core` | Parser, document model, find, session, file watching |
-| `crates/render` | The headless renderer: layout, text, images, hit testing |
-| `crates/engine` | The helper process: SVG, TeX math, Mermaid |
-| `bins/mdv-app` | The application, binary `mdview` |
+| `markdown-shared-rs` (git dependency) | Markdown parser, renderer, preview server and engine |
+| `bins/mdv-app` | The application, binary `mdview`, and its viewer-specific logic |
 | `bins/mdv-bench` | Headless renders, timings and golden images |
 | `docs/` | The plan, the current state, and the coverage list |
 

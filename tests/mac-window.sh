@@ -11,7 +11,9 @@ target="${2:?app}"
 shift 2
 mkdir -p "$out"
 source "$(dirname "$0")/mac-launch.sh"
-launch "$target" "$@"
+trap mac_profile_cleanup EXIT
+mac_profile_init || exit 1
+launch "$target" "$@" || exit 1
 wid="$(window_id)"
 echo "window id: ${wid:-none}"
 sleep 2

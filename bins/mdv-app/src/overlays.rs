@@ -16,7 +16,7 @@ use mdshared_ui::overlay::{
     draw_dialog_card, draw_keycaps,
 };
 use mdshared_ui::submenu::{Cascade, Node};
-use mdview_core::commands::{CommandId as C, strings};
+use mdview::commands::{CommandId as C, strings};
 use mdview_render::SourceKind;
 
 // ---- menus -----------------------------------------------------------------------------------
@@ -243,10 +243,7 @@ pub fn tab_menu(ws: &Workspace, index: usize, library: bool, x: f32, y: f32) -> 
             .enabled(has_file),
         Item::new(
             Act::TabCmd(C::ShowInFileManager, index),
-            mark(
-                mdview_core::commands::command(C::ShowInFileManager).label,
-                'f',
-            ),
+            mark(mdview::commands::command(C::ShowInFileManager).label, 'f'),
         )
         .icon(glyph::FOLDER_OPEN)
         .enabled(has_file),
@@ -254,14 +251,14 @@ pub fn tab_menu(ws: &Workspace, index: usize, library: bool, x: f32, y: f32) -> 
         // would no longer fit the default window without scrolling.
         Item::new(
             Act::TabCmd(C::ExportHtml, index),
-            mark(mdview_core::commands::command(C::ExportHtml).label, 'e'),
+            mark(mdview::commands::command(C::ExportHtml).label, 'e'),
         )
         .icon(glyph::DOWNLOAD)
         .enabled(exportable)
         .sep(),
         Item::new(
             Act::TabCmd(C::Print, index),
-            mark(mdview_core::commands::command(C::Print).label, 'r'),
+            mark(mdview::commands::command(C::Print).label, 'r'),
         )
         .icon(glyph::OPEN_WITH)
         .enabled(exportable),
@@ -270,7 +267,7 @@ pub fn tab_menu(ws: &Workspace, index: usize, library: bool, x: f32, y: f32) -> 
         items.push(
             Item::new(
                 Act::TabCmd(C::LibraryAdd, index),
-                mark(mdview_core::commands::command(C::LibraryAdd).label, 'l'),
+                mark(mdview::commands::command(C::LibraryAdd).label, 'l'),
             )
             .icon(glyph::BOOKMARK)
             .enabled(has_file && exportable)

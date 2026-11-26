@@ -160,8 +160,9 @@ finds and exits, with no window.
 
 Updating in place works only inside an AppImage (2026-11-14, shared `84de734`). `installed_files`
 returns the canonical `$APPIMAGE` when it is a file in a writable folder, with no engine: the
-engine is inside the AppImage (`usr/bin/mdview-engine` beside `usr/bin/mdview`, which
-`engine_path()` finds from `current_exe()`), so a Linux release lists no `engine.*` keys and the
+engine is inside the AppImage beside the real viewer in `usr/lib/mdview/`. `usr/bin/mdview` is a
+relative link and Linux `current_exe()` resolves the executable through `/proc/self/exe`.
+A Linux release lists no `engine.*` keys and the
 update replaces the one AppImage (`<name>.new` staged with mode 0755, the old one aside as
 `.old`). A plain binary or a cargo build updates nothing. The transport is the system libcurl,
 loaded at run time; `mdview --check-update` reached GitHub from the 0.2.3 build on Linux ("nothing
@@ -205,9 +206,9 @@ entry without any: the engine is inside the AppImage.
 ### What is built how
 
 - **AppImage.** `packaging/linux/Dockerfile` (Ubuntu 20.04, glibc 2.31, rustup stable) builds
-  `cargo build --release --locked -p mdview -p mdview-engine` from the repository mounted
+  `cargo build --release --locked -p mdview -p mdshared-md-engine --bins` from the repository mounted
   read-only. The script checks that `objdump -T` needs no glibc symbol newer than 2.31 (0.2.3:
-  2.30), assembles `AppDir` (`usr/bin/mdview` and `usr/bin/mdview-engine`, `mdview.desktop`,
+  2.30), assembles `AppDir` (the executables in `usr/lib/mdview/`, the `usr/bin/mdview` link, `mdview.desktop`,
   `mdview.png`, `.DirIcon`, `AppRun` a symlink to `usr/bin/mdview`) and runs the host's
   `appimagetool` with a pinned runtime (`--runtime-file`; the script fetches that runtime once with
   `curl` and checks its SHA-256, so `appimagetool` never downloads one). Squashfs compression is
@@ -223,7 +224,7 @@ entry without any: the engine is inside the AppImage.
   libcurl, wayland and the like loaded at run time if they are there.
 - **Windows exes.** `packaging/windows-cross/Dockerfile` (Ubuntu 24.04, rustup stable with the
   `x86_64-pc-windows-msvc` target, `cargo-xwin` 0.23.1, clang, lld, llvm) runs
-  `cargo xwin build --release --locked --target x86_64-pc-windows-msvc -p mdview -p mdview-engine`
+  `cargo xwin build --release --locked --target x86_64-pc-windows-msvc -p mdview -p mdshared-md-engine --bins`
   with `RUSTFLAGS='-C target-feature=+crt-static'`, as the PowerShell script does. `build.rs` uses
   `rc.exe` when it finds one and otherwise `llvm-rc` (`MD_LLVM_RC`, else PATH), so the icon is
   embedded (the script sets `MD_LLVM_RC=/usr/bin/llvm-rc`).

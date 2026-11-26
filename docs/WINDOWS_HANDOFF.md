@@ -15,7 +15,7 @@ background: `docs/HANDOFF.md` (sections 7, 17, 21, 22, 24).
 ```powershell
 cd <repo>
 cargo test --release --no-fail-fast --workspace   # needs spikes\parser\data (the spec suites read it)
-cargo build --release --workspace                 # also builds target\release\mdview-engine.exe
+cargo build --release --locked -p mdview -p mdshared-md-engine --bins  # current shell + sibling engine
 cargo build --release -p mdview-winui
 cargo fmt --all --check
 ```

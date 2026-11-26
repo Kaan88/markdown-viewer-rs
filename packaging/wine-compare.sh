@@ -29,10 +29,11 @@ run_set() { # name exe
     rm -rf "$scratch" "$root/target/wine-compare/$name"
     mkdir -p "$scratch/tests"
     cp -r fixtures "$scratch/"
-    cp tests/shots.sh "$scratch/tests/"
+    cp tests/{shots,scratch-profile}.sh "$scratch/tests/"
+    cp -r tests/notes-library "$scratch/tests/"
     # shots.sh runs $MDVIEW_EXE directly: a one-line shim runs the real exe (and so finds the engine
     # beside it) in Wine.
-    printf '#!/bin/sh\nexec wine "%s" "$@"\n' "$exe" > "$scratch/mdview-wine"
+    printf '#!/bin/sh\nLOCALAPPDATA=$(winepath -w "$XDG_DATA_HOME") || exit 2\nexport LOCALAPPDATA\nexec wine "%s" "$@"\n' "$exe" > "$scratch/mdview-wine"
     chmod +x "$scratch/mdview-wine"
     MDVIEW_EXE="$scratch/mdview-wine" bash "$scratch/tests/shots.sh" "$root/target/wine-compare/$name" >/dev/null 2>"$root/target/wine-compare/$name.log"
 }

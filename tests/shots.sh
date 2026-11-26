@@ -7,26 +7,50 @@
 #   tests/shots.sh target/shots/final     # after it
 #   for f in target/shots/base/*.png; do cmp "$f" target/shots/final/$(basename "$f"); done
 #
-# Needs a release build (cargo build --release -p mdview). Every shot uses --no-session, so the
-# user's session is neither read nor written, and none loads remote images, so none needs the
-# network.
+# Needs a release build of mdview and its sibling mdview-engine. Normal shots use --no-session;
+# six settings shots read deliberately seeded scratch profiles. Set MDVIEW_SHOTS_NO_SESSION=1
+# to skip those six when every launch must use --no-session. No shot needs the network.
 
 set -euo pipefail
 
 out="${1:?usage: tests/shots.sh <output-dir>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
-exe="${MDVIEW_EXE:-target/release/mdview.exe}"
-[ -x "$exe" ] || exe="target/release/mdview"
+source "$root/tests/scratch-profile.sh"
+nl="$root/target/shots-notes"
+if [[ -e "$nl" || -L "$nl" ]]; then
+    echo "shots: $nl already exists; remove it after confirming no shot run is active" >&2
+    exit 2
+fi
+if windows_host; then
+    exe="${MDVIEW_EXE:-target/release/mdview.exe}"
+else
+    exe="${MDVIEW_EXE:-target/release/mdview}"
+fi
+[ -x "$exe" ] || { echo "shots: no executable for this host (set MDVIEW_EXE)" >&2; exit 2; }
+if ! windows_host; then
+    magic="$(head -c 2 "$exe")" || { echo "shots: cannot inspect viewer executable" >&2; exit 2; }
+    if [[ "$exe" = *.[eE][xX][eE] || "$magic" = MZ ]]; then
+        echo "shots: refusing to launch a Windows viewer without Windows profile isolation" >&2
+        exit 2
+    fi
+fi
 fx="fixtures"
 mkdir -p "$out"
+
+# Even --no-session checks for pending crash reports. Never inherit a viewer or editor profile
+# or an engine override; these shots exercise the engine shipped beside the viewer.
+profile="$(mktemp -d)"
+notes_scratch=
+trap 'rm -rf "$profile"; if [ -n "$notes_scratch" ]; then rm -rf "$notes_scratch"; fi' EXIT
+scratch_profile "$profile"
 
 shot() {
     local name="$1"
     shift
     # The scale is pinned, so the system's display scale cannot change the pictures; a shot
     # that asks for its own --scale comes later on the line and wins.
-    "$exe" --no-session --scale 1.0 --shot "$out/$name.png" "$@"
+    "$exe" --behind --no-session --scale 1.0 --shot "$out/$name.png" "$@"
 }
 
 # Both themes.
@@ -113,17 +137,21 @@ done
 shot settings-switch-turned-light --light --dialog settings --flip-setting 5 "$fx/showcase.md"
 # The Appearance page with "Animations" turned off, from a scratch settings file, at the
 # smallest size in both themes.
-still="$(mktemp -d)"
+still="$profile/still"
+mkdir -p "$still"
 printf '[mdview]
 motion=0
 ' >"$still/settings.ini"
 for theme in light dark; do
-    MDVIEW_SETTINGS="$still/settings.ini" "$exe" --scale 1.0 --shot "$out/settings-appearance-motion-off-min-$theme.png"         --"$theme" --size 520x360 --dialog settings --settings-section appearance "$fx/showcase.md"
+    if [ "${MDVIEW_SHOTS_NO_SESSION:-0}" = 1 ]; then continue; fi
+    MDVIEW_SETTINGS="$still/settings.ini" "$exe" --behind --scale 1.0 --shot "$out/settings-appearance-motion-off-min-$theme.png"         --"$theme" --size 520x360 --dialog settings --settings-section appearance "$fx/showcase.md"
 done
+rm -rf "$still"
 # Settings, every page at the default size and the smallest, in both themes. "tabs-on" is the
 # Tabs page with the brief-tab rule on (its seconds enabled), read from a scratch settings file
 # (a shot reads one named by MDVIEW_SETTINGS and never the user's); "tabs" is the rule off.
-brief="$(mktemp -d)"
+brief="$profile/brief"
+mkdir -p "$brief"
 printf '[mdview]\nskip_brief=1\n' >"$brief/settings.ini"
 for page in appearance reading tabs updates tabs-on; do
     section="${page%-on}"
@@ -137,7 +165,8 @@ for page in appearance reading tabs updates tabs-on; do
             fi
             args=(--"$theme" --size "$dims" --dialog settings --settings-section "$section" "$fx/showcase.md")
             if [ "$page" = tabs-on ]; then
-                MDVIEW_SETTINGS="$brief/settings.ini" "$exe" --scale 1.0 --shot "$out/settings-$page$suffix.png" "${args[@]}"
+                if [ "${MDVIEW_SHOTS_NO_SESSION:-0}" = 1 ]; then continue; fi
+                MDVIEW_SETTINGS="$brief/settings.ini" "$exe" --behind --scale 1.0 --shot "$out/settings-$page$suffix.png" "${args[@]}"
             else
                 shot "settings-$page$suffix" "${args[@]}"
             fi
@@ -311,8 +340,11 @@ shot render-more-abbr-card --light --size 640x640 --hover 89,254 "$fx/render-mor
 # of mdedit's settings and libraries (MDEDIT_SETTINGS names a settings file of mdedit's; a shot
 # never reads the owner's). `notes-library` is the fixture; `one` lacks Work.md, `empty` has no
 # library file, `nowhere` names a folder that is not there.
-nl="$root/target/shots-notes"
-rm -rf "$nl"
+# The library-add dialog displays the path. Keep it stable between comparisons, but
+# never reuse or remove a directory already present when this run reaches the notes.
+mkdir -p "$root/target"
+mkdir "$nl"
+notes_scratch="$nl"
 abs() { (cd "$1" && (pwd -W 2>/dev/null || pwd)); }
 mkdir -p "$nl/full" "$nl/one" "$nl/empty" "$nl/small"
 cp -r "tests/notes-library/." "$nl/full/"
@@ -344,6 +376,4 @@ for theme in light dark; do
     MDEDIT_SETTINGS="$full" shot "menu-page-library-$theme" --"$theme" --menu page "$fx/showcase.md"
     MDEDIT_SETTINGS="$full" shot "palette-notes-$theme" --"$theme" --palette "" "$fx/showcase.md"
 done
-rm -rf "$nl"
-
 ls "$out" | wc -l

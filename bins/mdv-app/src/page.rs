@@ -9,7 +9,7 @@ use crate::updater::{self, Stage};
 use crate::workspace::Workspace;
 use mdshared_ui::notice::{self, CrashBarState, OfferBarState, UpdateBarState};
 use mdshared_ui::stale;
-use mdview_core::commands::strings;
+use mdview::commands::strings;
 use std::time::{Duration, Instant};
 
 /// The page viewport inside the region: below the banner when the file is missing, and below

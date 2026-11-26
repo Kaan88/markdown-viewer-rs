@@ -9,16 +9,21 @@ default `GITHUB_TOKEN`.
 Runs on a push to `main`, on every pull request, and by hand (`workflow_dispatch`). A newer run of
 the same branch cancels the older one. Permissions: `contents: read`.
 
-Two jobs, `linux` (ubuntu-latest) and `windows` (windows-latest, the MSVC toolchain, natively):
+The checks run on Linux, native Windows with MSVC, and both macOS architectures:
 
 1. `cargo fmt --all --check`
 2. `cargo clippy --release --workspace --all-targets -- -D warnings`
-3. `cargo test --release --workspace`
-4. The headless screenshot suite as a smoke test: `cargo build --release -p mdview -p mdview-engine`,
-   `bash tests/shots.sh target/shots`, then `tests/shots-check.sh target/shots`, which fails when
+3. `cargo build --release --locked -p mdview -p mdshared-md-engine --bins` builds the viewer and
+   the toolkit's `mdview-engine` side by side from one lockfile.
+4. `cargo test --release --workspace`. Cargo stages the lockfile's toolkit engine through
+   `tests/engine-fixture`; test processes use the embedded artifact path, not `MDV_ENGINE`.
+5. The headless screenshot suite as a smoke test: check isolation with
+   `bash tests/shots-isolation-check.sh`, run `bash tests/shots.sh target/shots`, then
+   `tests/shots-check.sh target/shots`, which fails when
    any shot named in `shots.sh` is missing, empty or not a PNG. There is no pixel comparison:
-   the runners' fonts differ from the development machines'. The PNGs are uploaded as the
-   artifacts `shots-linux` and `shots-windows` (14 days).
+   the runners' fonts differ from the development machines'. Shots clear `MDV_ENGINE`
+   and use the sibling binary from step 3. The PNGs are uploaded as the
+   artifacts `shots-linux`, `shots-windows` and `shots-macos-*`.
 
 The Rust toolchain is pinned in the workflows (`RUST_TOOLCHAIN`, 1.99.1) with
 `dtolnay/rust-toolchain`; there is no `rust-toolchain.toml`, so a local build keeps using
@@ -34,10 +39,10 @@ of `Cargo.toml`, before anything is built.
 | Job | Runs on | Does |
 | --- | --- | --- |
 | `windows` | windows-latest | Installs Inno Setup (`choco install innosetup`), runs `packaging\windows\build-installer.ps1` (native build of `mdview.exe` and `mdview-engine.exe` with the static C runtime, the Inno Setup installer), then `packaging\windows\build-zip.ps1` (the portable zip). |
-| `linux` | ubuntu-latest | `packaging/linux/build-packages.sh`: builds the binary in the Ubuntu 20.04 image of `packaging/linux/Dockerfile` (glibc 2.31, the script refuses a binary that needs a newer one), then the AppImage, tar.gz, deb, rpm and the PKGBUILD from that one binary. Smoke test: the tar.gz is unpacked, installed into a temporary prefix, run headless, uninstalled. |
+| `linux` | ubuntu-latest | `packaging/linux/build-packages.sh` builds the AppImage, tar.gz, deb, rpm and PKGBUILD from the same glibc 2.31 build. `tests/linux-tarball-smoke.sh` installs into a temporary prefix, requires a diagram raster through `bin/mdview` with no engine override, then verifies removal of the link and both `lib/mdview/` binaries while preserving an unrelated public engine. |
 | `macos` | macos-15, macos-15-intel | Builds `mdview.app` with `packaging/macos/make-bundle.sh` (ad-hoc signature, checked with `codesign --verify`) and zips it as `mdview-<version>-macos-aarch64.zip` and `-x86_64.zip`. |
 | `attach` | ubuntu-latest | Only for a manual run with `attach_macos_to: v<version>` (then `windows`, `linux` and `publish` are skipped): adds the two macOS zips and `mdview-update-macos.txt` to that existing release, and the macOS paragraph to its text. |
-| `publish` | ubuntu-latest | Needs `windows`, `linux` and `macos`. Also writes `mdview-update-macos.txt` (`packaging/macos/write-manifest.sh`) and adds the macOS paragraph (`packaging/macos/release-notes.md`) to the release text. Writes `mdview-update.txt` with both platforms (`packaging/write-manifest.sh`: the Windows entry names the native exes the `windows` job built and carries the engine keys, the Linux entry the AppImage), checks every hash against its file, writes `hub.txt` for Hub (`tools/write-hub-txt.ps1`, a copy of the script in the Hub repository; it fails the job on anything Hub's parser would refuse) and the notes file it names with `-NotesFile` (`mdview-<version>-release-notes.md`, a copy of `notes/release-notes.md`, the release text; the step fails over 64 KiB), runs the repo's manifest test (`cargo test --release -p mdview the_release_scripts_write_a_manifest_this_build_reads`) against the assembled `target/release-files-all/`, and, only for a tag or `publish: true`, runs `gh release create v<version>` at the tagged commit with all assets, marked latest. This is the only job with `contents: write`. |
+| `publish` | ubuntu-latest | Needs `windows`, `linux` and `macos`. Also writes `mdview-update-macos.txt` (`packaging/macos/write-manifest.sh`) and adds the macOS paragraph (`packaging/macos/release-notes.md`) to the release text. Writes `mdview-update.txt` with both platforms (`packaging/write-manifest.sh`: the Windows entry names the native exes the `windows` job built and carries the engine keys, the Linux entry the AppImage), checks every hash against its file, writes `hub.txt` for Hub (`tools/write-hub-txt.ps1`, a copy of the script in the Hub repository; it fails the job on anything Hub's parser would refuse) and the notes file it names with `-NotesFile` (`mdview-<version>-release-notes.md`, a copy of `notes/release-notes.md`, the release text; the step fails over 64 KiB), runs the repo's manifest test (`cargo test --release --locked -p mdv-bench --test release_manifest`) against the assembled `target/release-files-all/`, and, only for a tag or `publish: true`, runs `gh release create v<version>` at the tagged commit with all assets, marked latest. This is the only job with `contents: write`. |
 
 The release text is `docs/release-notes/<version>.md` when that file exists (its first non-empty
 line is also the manifest's one-line note, which the update bar shows), else a default line.

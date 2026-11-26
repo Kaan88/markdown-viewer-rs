@@ -10,12 +10,16 @@ name = "mdview"
 path = "src/main.rs"
 
 [dependencies]
-mdview-core = { path = "../../crates/core" }
-mdview-render = { path = "../../crates/render" }
-mdview-preview = { path = "../../crates/preview", features = ["server"] }
-mdshared-fetch = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "1588e0f7ef579d82fc4c0e43da5d8788afc08fac" }
-mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "1588e0f7ef579d82fc4c0e43da5d8788afc08fac" }
-mdshared-ui = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "1588e0f7ef579d82fc4c0e43da5d8788afc08fac", features = ["client-margin"] }
+mdview-core = { package = "mdshared-md-core", git = "https://github.com/Kaan88/markdown-shared-rs", rev = "7fd559f" }
+mdview-render = { package = "mdshared-md-render", git = "https://github.com/Kaan88/markdown-shared-rs", rev = "7fd559f" }
+mdview-preview = { package = "mdshared-md-preview", git = "https://github.com/Kaan88/markdown-shared-rs", rev = "7fd559f", features = ["server"] }
+# Lets Cargo select the toolkit's mdview-engine binary from this locked dependency graph.
+# The viewer does not link the engine library; the renderer launches the sibling binary.
+mdview-engine = { package = "mdshared-md-engine", git = "https://github.com/Kaan88/markdown-shared-rs", rev = "7fd559f" }
+mdshared-fetch = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "7fd559f" }
+mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "7fd559f" }
+mdshared-ui = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "7fd559f", features = ["client-margin"] }
+pulldown-cmark = { version = "=0.13.6", default-features = false }
 parley = "=0.12.0"
 # Views softbuffer's u32 pixels as bytes, so presenting is a row memcpy.
 bytemuck = "1.25"
@@ -43,4 +47,5 @@ winit = { version = "=0.30.13", default-features = false, features = ["rwh_06", 
 softbuffer = { version = "=0.4.8", default-features = false, features = ["x11", "wayland", "wayland-dlopen"] }
 
 [dev-dependencies]
+mdview-engine-fixture = { path = "../../tests/engine-fixture" }
 png = "0.18"

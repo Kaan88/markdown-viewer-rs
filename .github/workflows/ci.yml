@@ -44,12 +44,16 @@ jobs:
         with:
           key: linux
       - run: cargo fmt --all --check
+      - run: bash tests/engine-fixture-check.sh
       - run: cargo clippy --release --workspace --all-targets -- -D warnings
+      - name: Build viewer and pinned toolkit engine
+        run: |
+          cargo build --release --locked -p mdview -p mdshared-md-engine --bins
       - run: cargo test --release --workspace --no-fail-fast
       - name: Screenshot suite (smoke test)
         if: ${{ !cancelled() }}
         run: |
-          cargo build --release -p mdview -p mdview-engine
+          bash tests/shots-isolation-check.sh
           bash tests/shots.sh target/shots
           bash tests/shots-check.sh target/shots
       - uses: actions/upload-artifact@v7
@@ -75,12 +79,16 @@ jobs:
           key: windows
       - run: cargo fmt --all --check
       - run: cargo clippy --release --workspace --all-targets -- -D warnings
+      - name: Build viewer and pinned toolkit engine
+        shell: bash
+        run: |
+          cargo build --release --locked -p mdview -p mdshared-md-engine --bins
       - run: cargo test --release --workspace --no-fail-fast
       - name: Screenshot suite (smoke test)
         if: ${{ !cancelled() }}
         shell: bash
         run: |
-          cargo build --release -p mdview -p mdview-engine
+          bash tests/shots-isolation-check.sh
           bash tests/shots.sh target/shots
           bash tests/shots-check.sh target/shots
       - uses: actions/upload-artifact@v7
@@ -113,11 +121,14 @@ jobs:
           key: macos-${{ matrix.arch }}
       - run: cargo fmt --all --check
       - run: cargo clippy --release --workspace --all-targets -- -D warnings
+      - name: Build viewer and pinned toolkit engine
+        run: |
+          cargo build --release --locked -p mdview -p mdshared-md-engine --bins
       - run: cargo test --release --workspace --no-fail-fast
       - name: Screenshot suite (smoke test)
         if: ${{ !cancelled() }}
         run: |
-          cargo build --release -p mdview -p mdview-engine
+          bash tests/shots-isolation-check.sh
           bash tests/shots.sh target/shots
           bash tests/shots-check.sh target/shots
       - uses: actions/upload-artifact@v7

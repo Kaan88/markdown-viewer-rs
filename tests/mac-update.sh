@@ -5,21 +5,45 @@
 # buttons do), and the new copy must be in place, the old one set aside, and the new one started.
 #
 #   tests/mac-update.sh <out-dir> <app-bundle>
+# Each run leaves its logs and test bundles in a fresh run.* child of out-dir.
 set -euo pipefail
+if [ "${GITHUB_ACTIONS:-}" != true ] || [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ]; then
+    echo "FAIL this test requires a GitHub-hosted macOS runner"
+    exit 1
+fi
 out="$1"
 src="$2"
 name="$(basename "$src" .app)"
 upper="$(echo "$name" | tr '[:lower:]' '[:upper:]')"
-rm -rf "$out"
-mkdir -p "$out/apps" "$out/new" "$out/srv"
+mkdir -p "$out"
 out="$(cd "$out" && pwd)"
+# The workflow caches target/, so out-dir can contain an earlier run.
+out="$(mktemp -d "$out/run.XXXXXXXX")"
+echo "Update test work folder: $out"
+mkdir "$out/apps" "$out/new" "$out/srv"
 port=8443
 fail() { echo "FAIL $*"; exit 1; }
+source "$(dirname "$0")/mac-profile.sh"
+cleanup() {
+    [ -z "${pid:-}" ] || kill "$pid" 2>/dev/null || true
+    [ -z "${server:-}" ] || kill "$server" 2>/dev/null || true
+    if [ -n "${cert_hash:-}" ]; then
+        sudo security delete-certificate -Z "$cert_hash" /Library/Keychains/System.keychain ||
+            echo "could not remove the temporary test certificate" >&2
+    fi
+    mac_profile_cleanup
+}
+trap cleanup EXIT
+mac_profile_init
 
 # The installed copy, in a folder this user can write (as /Applications is), and the newer copy:
 # the same program with a marker, signed again (a changed bundle must be).
 ditto "$src" "$out/apps/$name.app"
 ditto "$src" "$out/new/$name.app"
+bundle_id="io.github.kaan88.$name.update-test.$$"
+mac_profile_bundle "$out/apps/$name.app" "$bundle_id"
+mac_profile_bundle "$out/new/$name.app" "$bundle_id"
+codesign --force --sign - "$out/apps/$name.app"
 echo "the update" > "$out/new/$name.app/Contents/Resources/update-marker"
 codesign --force --sign - "$out/new/$name.app"
 (cd "$out/new" && ditto -c -k --keepParent "$name.app" "$out/srv/$name-new.zip")
@@ -35,13 +59,22 @@ $key.sha256: $sha
 EOF
 
 # A certificate for localhost the system trusts, and a server.
-openssl=openssl
-for p in /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl; do
-    [ -x "$p" ] && openssl="$p" && break
-done
+openssl="$(command -v openssl)"
+if [ "$openssl" = /usr/bin/openssl ]; then
+    for p in /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl; do
+        [ -x "$p" ] && openssl="$p" && break
+    done
+fi
 "$openssl" req -x509 -newkey rsa:2048 -nodes -days 2 -keyout "$out/key.pem" -out "$out/cert.pem" \
     -subj /CN=localhost -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
     -addext "extendedKeyUsage=serverAuth" -addext "basicConstraints=critical,CA:true" 2>/dev/null
+fingerprint="$("$openssl" x509 -in "$out/cert.pem" -noout -fingerprint -sha1)"
+cert_hash="${fingerprint##*=}"
+cert_hash="${cert_hash//:/}"
+if ! [[ "$cert_hash" =~ ^[[:xdigit:]]{40}$ ]]; then
+    cert_hash=
+    fail "could not determine the temporary certificate fingerprint"
+fi
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$out/cert.pem"
 cat > "$out/serve.py" <<'PY'
 import http.server, ssl, sys
@@ -57,7 +90,6 @@ srv.serve_forever()
 PY
 python3 "$out/serve.py" "$out/srv" "$out/cert.pem" "$out/key.pem" "$port" > "$out/server.log" 2>&1 &
 server=$!
-trap 'kill $server 2>/dev/null || true' EXIT
 for _ in $(seq 1 40); do curl -s -o /dev/null "https://localhost:$port/update.txt" && break; sleep 0.25; done
 curl -sS "https://localhost:$port/update.txt" > /dev/null || fail "the system does not trust the test server"
 
@@ -85,6 +117,7 @@ for _ in $(seq 1 60); do
     sleep 0.25
 done
 [ -n "$pid" ] || fail "the new version was not started"
+mac_profile_check_process "$pid" || fail "the restarted viewer is not isolated"
 echo "PASS the new version started ($(ps -o args= -p "$pid"))"
 sleep 3
 kill "$pid" 2>/dev/null || true

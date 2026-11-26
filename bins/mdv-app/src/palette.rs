@@ -17,7 +17,7 @@ use crate::platform;
 use crate::workspace::Workspace;
 use mdshared_ui::glyph;
 use mdshared_ui::palette::{Entry, Palette};
-use mdview_core::commands::{COMMANDS, CommandId as C, Menu};
+use mdview::commands::{COMMANDS, CommandId as C, Menu};
 use std::collections::HashSet;
 use std::path::PathBuf;
 

@@ -5,7 +5,7 @@ use super::tests::app;
 use super::*;
 use crate::notes::Notes;
 use mdshared_app::library::tree::Kind;
-use mdview_core::commands::CommandId;
+use mdview::commands::CommandId;
 
 fn scratch(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("mdview-lib-{name}-{}", std::process::id()));

@@ -24,17 +24,18 @@ for b in "${bins[@]}"; do
 done
 
 # Installs the files every package carries under DEST, laid out as a /usr (or ~/.local) tree:
-# bin/, share/applications/, share/icons/hicolor/256x256/apps/. With a second argument "strip" the
+# bin/ (launcher link only), lib/mdview/, and share/. With a second argument "strip" the
 # binaries are stripped of their symbol table (deb and rpm; the AppImage and tarball keep the
 # binary as built).
 stage_tree() {
     local dest="$1" strip="${2:-}"
-    install -d -m 755 "$dest/bin" "$dest/share/applications" "$dest/share/icons/hicolor/256x256/apps"
+    install -d -m 755 "$dest/bin" "$dest/lib/$app" "$dest/share/applications" "$dest/share/icons/hicolor/256x256/apps"
     for b in "${bins[@]}"; do
-        install -m 755 "$BIN_DIR/$b" "$dest/bin/$b"
+        install -m 755 "$BIN_DIR/$b" "$dest/lib/$app/$b"
         # The release binary keeps a small symbol table; distribution packages carry none.
-        [ "$strip" != strip ] || strip --strip-unneeded "$dest/bin/$b"
+        [ "$strip" != strip ] || strip --strip-unneeded "$dest/lib/$app/$b"
     done
+    ln -s "../lib/$app/$app" "$dest/bin/$app"
     install -m 644 "$root/packaging/linux/$app.desktop" "$dest/share/applications/$app.desktop"
     install -m 644 "$root/assets/$app.png" "$dest/share/icons/hicolor/256x256/apps/$app.png"
 }

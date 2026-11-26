@@ -58,7 +58,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
     -e MD_LLVM_RC=/usr/bin/llvm-rc -e CARGO_TERM_COLOR=never \
     -e RUSTFLAGS='-C target-feature=+crt-static' \
     -w /src "$image" \
-    bash -c 'PATH=/opt/cargo/bin:$PATH cargo xwin build --release --locked --target x86_64-pc-windows-msvc -p mdview -p mdview-engine'
+    bash -c 'PATH=/opt/cargo/bin:$PATH cargo xwin build --release --locked --target x86_64-pc-windows-msvc -p mdview -p mdshared-md-engine --bins'
 out="$cache/$app/target-win/x86_64-pc-windows-msvc/release"
 for f in mdview.exe mdview-engine.exe; do
     [ -f "$out/$f" ] || { echo "build left no $out/$f" >&2; exit 1; }
