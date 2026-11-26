@@ -172,9 +172,15 @@ opening (`App::settings_serial`, bumped only when Settings was closed), using `d
 117 ms enter — the menus' duration — rather than shared's
 `document::DIALOG` (250 ms): the dialog is opened from a menu and should not arrive slower than
 the menu did (the owner's "quick and quiet"). The dim and the card are drawn over the window as
-it was and given one opacity (`Painter::snapshot` of the window, the form drawn, `Painter::fade`),
-so nothing of the page shows between the dim and the card and both come in together. Closing is
-instant: no exit is played, the presence is simply not asked for, and the name is forgotten.
+it was and given one opacity, so they come in together. The entrance now snapshots only the
+card and shadow (`overlay::dialog_bounds`), clips the form to those bounds, then fades the
+copy. Outside those bounds it dims the original pixels in place. This is equivalent to
+rescaling the fully dimmed pixels by `(1 − a·t) / (1 − a)` before rounding, but starting with
+the original pixels lets it reproduce the old two integer rounding steps and keep alpha
+unchanged. At 0 it lays out without copying or painting; at 1 it draws as before without
+copying. An opened dropdown ends the entrance so the card clip cannot cut it off. Closing
+is instant, with no exit. At 1280 × 800 and 100%, the blended frame copies 372,096 pixels
+(1.42 MiB), down from 1,024,000 pixels (3.91 MiB).
 `settings_t` is in the overlay signature, so every frame of the fade is drawn whole; the dialog's
 bounds are the whole window anyway. An entrance shot (`--dialog settings --motion-at 67`) skips
 the usual at-rest draw, so the first frame on the shot clock is the window under the dialog.
@@ -220,6 +226,9 @@ colour is neither palette; the end is the window a run that started light draws,
 frame is freed; motion off and reduced motion keep nothing and equal the still run; a resize
 mid-fade ends it with no timer and the new palette alone. A minimizing resize releases the
 snapshot before another frame is composed, and restoring the original size does not replay it.
+When an overlay seen in the previous frame closes or is replaced, `sync_theme` skips capture
+and drops any in-flight snapshot before painting. This keeps a palette that just ran a theme
+command, or a menu, dialog or tooltip closed during a fade, from reappearing.
 
 **Shots.** `dialog-settings-opening-light` and `-dark` show the dim and card entering together.
 `theme-fading-{dark,light}` and `theme-fading-settings-{dark,light}` capture the theme fade
@@ -243,11 +252,34 @@ their fixes reverted, then passed after restoration. Of the 195 `--no-session` s
 Both were inspected and show System selected. Six legacy scratch-profile shots were not
 rerun because they need a session to read the scratch preferences.
 
+**Overlay and entrance follow-up.** The palette ghost and mid-fade close regressions failed
+before the fix. The Settings regression compares the old whole-window blend in both themes
+at 100%, 125% and 150%, and fails if the snapshot returns to full-window size. All 195
+`--no-session` shots are byte-identical to the previous review; both Settings entrance shots
+were inspected again. The six scratch-session shots were not rerun. Windows fmt and release
+Clippy passed; the full release suite with the CI-pinned Rust 1.99.1 passed 809 tests including
+the normally ignored cases. The default Cargo 1.100 run hit the unchanged updater test's
+assumption that the test executable lives in `target/release/deps`, not `build/.../out`.
+
+**Settings peak memory (Windows, headless).** At 1280 × 800 logical, the largest sampled OS
+peak private commit over three release runs (Rust 1.99.1) of `fixtures/showcase.md` in dark mode
+(`--dialog settings --motion-at 117`, including PNG encoding):
+
+| Scale | Device px | Old entrance | Bounded entrance | Page alone, after | Theme fade, after |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 100% | 1280 × 800 | 22.77 MiB | 22.33 MiB | 21.75 MiB | 22.73 MiB |
+| 125% | 1600 × 1000 | 28.98 MiB | 28.00 MiB | 28.02 MiB | 29.43 MiB |
+| 150% | 1920 × 1200 | 36.95 MiB | 35.58 MiB | 35.35 MiB | 36.81 MiB |
+
+The Settings entrance is under 30 MiB in this run at 100% and 125%. At 150% the page alone
+already exceeds the budget. These are viewer-process measurements from
+`GetProcessMemoryInfo` (`PeakPagefileUsage`), not a native-window memory measurement.
+
 ### Decisions taken without the owner
 
 - Cap the theme snapshot at 2560 × 1600 device pixels (15.625 MiB). Above that area the theme
   snaps; do not downscale. A 3840 × 2160 snapshot alone is about 31.6 MiB, beyond the 30 MiB
-  private-memory budget.
+  private-memory budget. The cap limits the snapshot only, not total process memory.
 - With frosted chrome active, the theme snaps with no fade. The shared blend accepts only one
   frost key, but light and dark use different keys. Enabling frost also ends an in-flight fade.
 
@@ -256,10 +288,9 @@ rerun because they need a session to read the scratch preferences.
 - The frosted theme change is tested headless with a compositor stand-in, not on a real
   backdrop. An OS `ThemeChanged`, native minimize/fullscreen/maximize, 144 Hz, macOS
   (including its app-menu dispatch), and Linux were not exercised.
-- The Settings entrance still takes a whole-window snapshot on every blended frame. Reducing
-  that allocation needs a shared-crate change.
-- No peak private memory has been measured against the 30 MiB budget. The cap limits just the
-  theme snapshot, not the total process.
+- The theme fade's full-window copy may push total private memory over 30 MiB for its
+  170 ms lifetime even below the cap. Whether to accept this needs the owner's word; the
+  owner has not given it yet.
 
 ### L1: the main menu's Open recent is a `submenu::Cascade` (2026-11-26)
 
