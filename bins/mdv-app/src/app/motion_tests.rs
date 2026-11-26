@@ -1966,13 +1966,18 @@ fn a_light_and_dark_change_crossfades_from_the_frame_before() {
     light.compose();
     let (x, y) = (640.0, 700.0);
     let settled = pixel(&light, x, y);
-    a.frame_clock = a.frame_clock.map(|t| t + Duration::from_millis(85));
+    let old = pixel(&a, x, y);
+    let tick = Duration::from_millis(17);
+    for _ in 0..4 {
+        step(&mut a, tick);
+    }
+    a.frame_clock = a.frame_clock.map(|t| t + tick);
     let (damage, _) = a.compose();
     every_row(&a, &damage);
     let mid = pixel(&a, x, y);
-    assert!(mid != settled, "on its way at 85 ms of 170");
+    assert!(mid != old && mid != settled, "between palettes at 85 ms");
     assert!(a.theme_fade.is_some());
-    let mut frames = 2;
+    let mut frames = 6;
     while a.anim_due.is_some() {
         step(&mut a, FRAME);
         frames += 1;
@@ -2017,7 +2022,7 @@ fn a_resize_mid_fade_ends_the_light_and_dark_change() {
     step(&mut a, FRAME);
     assert!(a.theme_fade.is_some(), "still fading");
     // Another window size: the kept frame is of the old one and cannot be blended.
-    a.size = (1000, 700);
+    a.resized(PhysicalSize::new(1000, 700));
     a.compose();
     assert!(a.theme_fade.is_none(), "the change ended");
     assert!(a.anim_due.is_none(), "and asks for no frame");
@@ -2028,5 +2033,197 @@ fn a_resize_mid_fade_ends_the_light_and_dark_change() {
     assert!(
         a.screen.pixels == light.screen.pixels,
         "the new palette alone"
+    );
+}
+
+#[test]
+fn a_same_size_resize_notification_does_not_end_the_fade() {
+    let mut a = moving(&[]);
+    a.compose();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.theme_fade.is_some());
+    a.resized(PhysicalSize::new(a.size.0, a.size.1));
+    step(&mut a, FRAME);
+    assert!(a.theme_fade.is_some(), "same size, same fade");
+    assert!(a.anim_due.is_some());
+}
+
+#[test]
+fn a_theme_flip_on_a_resize_does_not_blend_the_newly_allocated_bitmap() {
+    let mut a = moving(&[]);
+    a.resized(PhysicalSize::new(1000, 700));
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.pal == theme::LIGHT);
+    assert_eq!(a.theme_serial, 0, "no snapshot taken");
+    assert!(a.theme_fade.is_none());
+    assert!(a.anim_due.is_none());
+}
+
+#[test]
+fn a_theme_flip_during_a_presentation_has_no_fade_on_escape() {
+    let mut a = moving(&["slides.md"]);
+    a.present_begin();
+    a.compose();
+    assert!(a.presenting());
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    step(&mut a, FRAME);
+    assert!(a.pal == theme::LIGHT);
+    assert_eq!(a.theme_serial, 0, "no snapshot taken");
+    assert!(a.theme_fade.is_none(), "no snapshot held during the slide");
+
+    // No Resized event, as when the window was already fullscreen.
+    a.key_named(KeyName::Escape, None);
+    a.compose();
+    let mut light = app(&["slides.md"]);
+    light.ws.set_theme_choice(ThemeChoice::Light);
+    light.compose();
+    assert!(!a.presenting());
+    assert!(a.theme_fade.is_none());
+    assert!(a.anim_due.is_none());
+    assert!(
+        a.screen.pixels == light.screen.pixels,
+        "light on the first frame"
+    );
+}
+
+#[test]
+fn entering_a_presentation_releases_an_existing_theme_snapshot() {
+    let mut a = moving(&["slides.md"]);
+    a.compose();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.theme_fade.is_some());
+    a.present_begin();
+    assert!(a.presenting());
+    assert!(
+        a.theme_fade.is_none(),
+        "release it before the first slide frame"
+    );
+}
+
+#[test]
+fn the_theme_snapshot_is_capped_by_device_pixel_area() {
+    for (w, h, fades) in [(2560, 1600, true), (2561, 1600, false), (3840, 2160, false)] {
+        let mut a = moving(&[]);
+        a.size = (w, h);
+        a.compose();
+        let old = pixel(&a, 40.0, 40.0);
+        a.ws.set_theme_choice(ThemeChoice::Light);
+        a.compose();
+        assert_eq!(a.theme_fade.is_some(), fades, "{w}x{h}");
+        assert_eq!(a.anim_due.is_some(), fades, "{w}x{h}");
+        if fades {
+            assert_eq!(pixel(&a, 40.0, 40.0), old, "starts at the old palette");
+        } else {
+            a.still = true;
+            let first = a.screen.pixels.clone();
+            a.full = true;
+            a.compose();
+            assert!(
+                a.screen.pixels == first,
+                "the new palette on its first frame"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_light_system_first_frame_never_starts_a_theme_fade() {
+    let mut a = App::new(
+        Args {
+            no_session: true,
+            ..Args::default()
+        },
+        Workspace::new(None),
+        None,
+    );
+    a.system_dark = true;
+    a.setup();
+    // The first theme notification can arrive before paint; an allocated bitmap is not a
+    // painted frame.
+    a.size = (640, 400);
+    a.scale = 1.0;
+    a.screen = Bitmap::new(640, 400);
+    a.ws.set_system_dark(false);
+    a.still = false;
+    a.reduced = Some(false);
+    a.frame_clock = Some(Instant::now());
+    assert_eq!(a.frames, 0);
+    a.compose();
+    assert!(a.pal == theme::LIGHT);
+    assert_eq!(a.theme_serial, 0);
+    assert!(a.theme_fade.is_none());
+    assert!(a.anim_due.is_none());
+    let first = a.screen.pixels.clone();
+    a.full = true;
+    step(&mut a, FRAME);
+    assert!(a.screen.pixels == first, "the first frame is already light");
+}
+
+#[test]
+fn a_second_theme_flip_starts_from_the_partly_blended_frame() {
+    let mut a = moving(&[]);
+    a.compose();
+    let dark = a.screen.pixels.clone();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    step(&mut a, FRAME);
+    let mid = a.screen.pixels.clone();
+    assert!(mid != dark);
+    let serial = a.theme_serial;
+    a.ws.set_theme_choice(ThemeChoice::Dark);
+    a.compose();
+    assert_ne!(a.theme_serial, serial);
+    assert!(a.screen.pixels == mid, "no jump back to either endpoint");
+    step(&mut a, FRAME);
+    assert!(a.screen.pixels != mid, "the reverse fade is moving");
+    for _ in 0..11 {
+        step(&mut a, FRAME);
+    }
+    assert!(a.theme_fade.is_none());
+    assert!(a.anim_due.is_none());
+    assert!(a.screen.pixels == dark);
+}
+
+#[test]
+fn a_theme_flip_crossfades_an_already_open_settings_dialog() {
+    let mut a = moving(&["showcase.md"]);
+    // Like a system theme change: the form's Theme choice stays on System.
+    a.ws.set_theme_choice(ThemeChoice::System);
+    a.ws.set_system_dark(true);
+    a.open_settings();
+    a.compose();
+    for _ in 0..8 {
+        step(&mut a, FRAME);
+    }
+    assert_eq!(a.settings_t, 1.0);
+    let dark = a.screen.pixels.clone();
+    let (x, y) = CARD_MIDDLE;
+    let old_card = pixel(&a, x, y);
+    a.ws.set_system_dark(false);
+    a.compose();
+    assert_eq!(a.settings_t, 1.0, "the entrance does not restart");
+    assert!(a.screen.pixels == dark, "the old dialog is in the blend");
+    for _ in 0..5 {
+        step(&mut a, FRAME);
+    }
+    let mid_card = pixel(&a, x, y);
+    for _ in 0..6 {
+        step(&mut a, FRAME);
+    }
+    assert!(mid_card != old_card && mid_card != pixel(&a, x, y));
+    assert!(a.ui.settings.is_some());
+    assert!(a.theme_fade.is_none());
+    assert!(a.anim_due.is_none());
+    let mut still = app(&["showcase.md"]);
+    still.ws.set_theme_choice(ThemeChoice::System);
+    still.ws.set_system_dark(false);
+    still.open_settings();
+    still.compose();
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "the settled light dialog"
     );
 }

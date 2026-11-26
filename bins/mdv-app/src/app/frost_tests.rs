@@ -86,6 +86,53 @@ fn the_chrome_is_marked_and_the_page_is_not() {
 }
 
 #[test]
+fn a_theme_flip_draws_the_new_frosted_chrome_at_once() {
+    let mut app = frosted_app();
+    app.still = false;
+    app.forced_motion = true;
+    app.compose();
+    assert_eq!(census(&app), (0, 0, 0));
+    let old_key = mdshared_ui::frost::key_colour(&app.pal);
+
+    app.ws.set_theme_choice(ThemeChoice::Light);
+    app.sync_theme();
+    assert_ne!(mdshared_ui::frost::key_colour(&app.pal), old_key);
+    assert!(app.theme_fade.is_none(), "no snapshot of the old key");
+    assert_eq!(app.theme_serial, 0);
+    app.frost.sync(Backdrop::Mica, true, &app.pal, &mut Yes);
+    app.compose();
+    assert_eq!(census(&app), (0, 0, 0));
+    assert!(app.anim_due.is_none());
+    let first = app.screen.pixels.clone();
+    app.full = true;
+    app.compose();
+    assert!(
+        app.screen.pixels == first,
+        "new key and palette on frame one"
+    );
+}
+
+#[test]
+fn enabling_frost_mid_theme_fade_releases_the_snapshot() {
+    let mut app = app(&["showcase.md"]);
+    app.still = false;
+    app.forced_motion = true;
+    app.compose();
+    app.ws.set_theme_choice(ThemeChoice::Light);
+    app.compose();
+    assert!(app.theme_fade.is_some());
+
+    // Apply the backdrop with the headless compositor stand-in.
+    app.focused = true;
+    app.ws.set_backdrop(Backdrop::Mica);
+    assert!(app.frost.sync(Backdrop::Mica, true, &app.pal, &mut Yes));
+    app.compose();
+    assert!(app.theme_fade.is_none());
+    assert!(app.anim_due.is_none());
+    assert_eq!(census(&app), (0, 0, 0));
+}
+
+#[test]
 fn a_menu_over_the_chrome_is_opaque_and_its_shadow_is_not() {
     let mut app = frosted_app();
     app.compose();

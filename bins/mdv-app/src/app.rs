@@ -41,7 +41,7 @@ use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalPosition};
+use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{
     ElementState, KeyEvent, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
 };
@@ -616,13 +616,27 @@ impl App {
         let pal = if dark { theme::DARK } else { theme::LIGHT };
         if pal != self.pal {
             // A light/dark change crossfades from the frame the window shows now — still the old
-            // palette's, since every frame draws into this one bitmap. The whole window is kept,
-            // `4 * w * h` bytes, only while it fades. Not with motion off, nor on a window with
-            // no frame yet (its screen holds nothing to blend from).
+            // palette's, since every frame draws into this one bitmap. Release any earlier
+            // snapshot before copying it. Slides don't blend; neither does frosted chrome,
+            // whose mark would be decoded against a different palette's key.
             self.theme_fade = None;
-            if self.anim.animates() && self.frames > 0 && !self.screen.pixels.is_empty() {
-                let (w, h) = (self.screen.width as i32, self.screen.height as i32);
-                self.theme_fade = Some(mdshared_ui::anim::Snapshot::take(&self.screen, 0, 0, w, h));
+            let (w, h) = (self.screen.width, self.screen.height);
+            if self.anim.animates()
+                && self.frames > 0
+                && !self.presenting()
+                && self.frost.key().is_none()
+                && !self.screen.pixels.is_empty()
+                && (w, h) == (self.size.0.max(1), self.size.1.max(1))
+                // Four bytes per pixel; keep the snapshot to at most 15.625 MiB.
+                && u64::from(w) * u64::from(h) <= 2560 * 1600
+            {
+                self.theme_fade = Some(mdshared_ui::anim::Snapshot::take(
+                    &self.screen,
+                    0,
+                    0,
+                    w as i32,
+                    h as i32,
+                ));
                 self.theme_serial += 1;
             }
             self.pal = pal;
@@ -635,23 +649,22 @@ impl App {
     }
 
     /// Blends the frame the window showed before a light/dark change back over this one for the
-    /// length of the fade, over chrome frosted as it is (`crossfade_keyed`, so a pixel that was
-    /// chrome still is). The snapshot is dropped the frame the blend ends, and when the window's
-    /// size changed under it.
+    /// length of the fade. Drop the snapshot when the fade ends, the window changes size or
+    /// frost comes on.
     fn theme_frame(&mut self) {
         let Some(under) = self.theme_fade.take() else {
             return;
         };
-        // A frame of another size than the kept one ends the change here, without asking for
-        // its progress: an asked name is a value in flight, and this change is over.
-        if !under.fits(&self.screen) {
+        // Don't ask for progress when there is nothing more to blend: an asked name is a value
+        // in flight. Frost may have just come on in sync_frost, after sync_theme saw it off.
+        if !under.fits(&self.screen) || self.frost.key().is_some() {
             return;
         }
         let t = crate::motion::theme(&mut self.anim, self.theme_serial);
         if t >= 1.0 {
             return;
         }
-        under.crossfade_keyed(&mut self.screen, t, self.frost.key());
+        under.crossfade(&mut self.screen, t);
         self.theme_fade = Some(under);
     }
 
@@ -987,12 +1000,12 @@ impl App {
         self.crash_context();
         let mut times = FrameTimes::default();
         let t0 = Instant::now();
+        self.sync_theme();
         let (pw, ph) = (self.size.0.max(1), self.size.1.max(1));
         if self.screen.width != pw || self.screen.height != ph {
             self.screen = Bitmap::new(pw, ph);
             self.full = true;
         }
-        self.sync_theme();
         // A light/dark change changes every pixel: each frame of it is drawn whole.
         if self.theme_fade.is_some() {
             self.full = true;
@@ -1937,6 +1950,31 @@ impl App {
         (w.max(1), h.max(1))
     }
 
+    fn resized(&mut self, size: PhysicalSize<u32>) {
+        if let Some(w) = &self.window {
+            let max = w.is_maximized();
+            if max != self.maximized && self.trace {
+                eprintln!("mdview: maximized {max}: {}", {
+                    #[cfg(windows)]
+                    {
+                        frame_report(w)
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        String::new()
+                    }
+                });
+            }
+            self.maximized = max;
+            self.update_shadow(None);
+        }
+        // The window reports the surface; the app lives in the content inside the margin
+        // (the margin in force was just re-read by `update_shadow`).
+        self.size = self.content_size(size.width, size.height);
+        self.size_save_due = Some(Instant::now() + SIZE_SAVE_DELAY);
+        self.redraw();
+    }
+
     fn set_cursor(&mut self, c: CursorIcon) {
         if c != self.cursor {
             self.cursor = c;
@@ -2145,33 +2183,7 @@ impl ApplicationHandler<Wake> for App {
                     self.ws.set_window_position(position.x, position.y);
                 }
             }
-            WindowEvent::Resized(size) => {
-                // A light/dark change is of this window's frame; another size ends it here rather
-                // than at the blend, which would find the snapshot of another size.
-                self.theme_fade = None;
-                if let Some(w) = &self.window {
-                    let max = w.is_maximized();
-                    if max != self.maximized && self.trace {
-                        eprintln!("mdview: maximized {max}: {}", {
-                            #[cfg(windows)]
-                            {
-                                frame_report(w)
-                            }
-                            #[cfg(not(windows))]
-                            {
-                                String::new()
-                            }
-                        });
-                    }
-                    self.maximized = max;
-                    self.update_shadow(None);
-                }
-                // The window reports the surface; the app lives in the content inside the margin
-                // (the margin in force was just re-read by `update_shadow`).
-                self.size = self.content_size(size.width, size.height);
-                self.size_save_due = Some(Instant::now() + SIZE_SAVE_DELAY);
-                self.redraw();
-            }
+            WindowEvent::Resized(size) => self.resized(size),
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.scale = scale_factor as f32;
                 self.update_shadow(None);

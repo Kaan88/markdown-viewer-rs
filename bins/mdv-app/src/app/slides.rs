@@ -54,6 +54,7 @@ impl App {
         self.ui.find_focused = false;
         self.ui.drag = None;
         self.ui.link_hint = None;
+        self.theme_fade = None;
         self.ui.present = Some(show);
         self.present_window();
         self.redraw();
