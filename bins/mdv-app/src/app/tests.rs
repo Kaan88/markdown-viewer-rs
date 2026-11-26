@@ -295,15 +295,37 @@ fn a_window_saved_on_a_monitor_that_is_gone_opens_on_a_present_one() {
         !position_reachable(-200, 50, &one),
         "pushed off the left edge, the title row is on no screen"
     );
-    // With both present, the same place is reachable again.
+    // With both present, the same place is kept; with the second gone, the primary's own place.
     let two = [(0, 0, 1920, 1080), (1920, 0, 1920, 1080)];
-    assert!(position_reachable(2600, 200, &two));
+    assert_eq!(restored_place(2600, 200, &two), Some((2600, 200)));
+    assert_eq!(
+        restored_place(2600, 200, &one),
+        Some((0, 0)),
+        "falling back to the primary, not the gone monitor"
+    );
+    // Partly off-screen: kept while the title row is on a monitor, even with the window's left
+    // edge past it; the primary's place once the title row is off it too.
+    assert_eq!(restored_place(-30, 100, &one), Some((-30, 100)));
+    assert_eq!(restored_place(-100, 100, &one), Some((0, 0)));
+    assert_eq!(
+        restored_place(1900, 900, &two),
+        Some((1900, 900)),
+        "partly over the second monitor with its title row on it"
+    );
     // A monitor above the first: the window's title row there is on it.
     let stacked = [(0, 0, 1920, 1080), (0, -1080, 1920, 1080)];
     assert!(position_reachable(100, -1000, &stacked));
+    assert_eq!(restored_place(100, -1000, &stacked), Some((100, -1000)));
+    // A primary that does not start at the origin is the fallback as it is.
+    assert_eq!(
+        restored_place(5000, 0, &[(-1920, 0, 1920, 1080)]),
+        Some((-1920, 0))
+    );
     // The very corner: the title row's point counts as on the monitor it starts on.
     assert!(position_reachable(-60, -16, &one));
     assert!(!position_reachable(-60, -17, &one), "one pixel above it");
+    // No monitor at all: nothing to place it on.
+    assert_eq!(restored_place(0, 0, &[]), None);
 }
 
 #[test]

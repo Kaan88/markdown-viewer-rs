@@ -1916,13 +1916,24 @@ fn style(w: &Window, dark: bool, corners: Corners) {
 /// Whether a saved window place still shows: its title row's first reachable point (60 px in,
 /// 16 px down) must be on one of `monitors`, given as (x, y, width, height) in physical screen
 /// px. A window saved on a monitor that is gone — unplugged, or rearranged so that its place is
-/// on no screen — is not reachable, and the window opens on a present one instead (winit's own
-/// default place, as a first start).
+/// on no screen — is not reachable.
 fn position_reachable(x: i32, y: i32, monitors: &[(i32, i32, u32, u32)]) -> bool {
     monitors.iter().any(|&(mx, my, mw, mh)| {
         let (px, py) = (x + 60, y + 16);
         px >= mx && px < mx + mw as i32 && py >= my && py < my + mh as i32
     })
+}
+
+/// Where a saved window place opens: the place itself while its title row is on a monitor that
+/// is there, and the primary monitor's own place otherwise (the first of `monitors`, which the
+/// caller lists primary first), so a window saved on an unplugged or rearranged monitor opens on
+/// one that is there rather than where no hand can reach it. `None` when no monitor is known.
+fn restored_place(x: i32, y: i32, monitors: &[(i32, i32, u32, u32)]) -> Option<(i32, i32)> {
+    let &(mx, my, _, _) = monitors.first()?;
+    match position_reachable(x, y, monitors) {
+        true => Some((x, y)),
+        false => Some((mx, my)),
+    }
 }
 
 #[cfg(windows)]
@@ -1950,17 +1961,28 @@ impl ApplicationHandler<Wake> for App {
                 .with_window_level(WindowLevel::AlwaysOnBottom);
         }
         // Back where it was, if a screen still shows that place: the title row's left end has
-        // to be on one, or the window could not be reached.
+        // to be on one, or the window could not be reached. A place on a monitor that is gone
+        // opens on the primary monitor's own place instead.
         if let Some((x, y)) = self.ws.window_position() {
-            let monitors: Vec<(i32, i32, u32, u32)> = event_loop
+            let mut monitors: Vec<(i32, i32, u32, u32)> = event_loop
                 .available_monitors()
                 .map(|m| {
                     let (origin, size) = (m.position(), m.size());
                     (origin.x, origin.y, size.width, size.height)
                 })
                 .collect();
-            if position_reachable(x, y, &monitors) {
-                attributes = attributes.with_position(PhysicalPosition::new(x, y));
+            // The primary first: `available_monitors` does not say which it is, and the
+            // fallback place is the primary's.
+            if let Some(primary) = event_loop.primary_monitor() {
+                let (origin, size) = (primary.position(), primary.size());
+                let primary = (origin.x, origin.y, size.width, size.height);
+                match monitors.iter().position(|m| *m == primary) {
+                    Some(i) => monitors.swap(0, i),
+                    None => monitors.insert(0, primary),
+                }
+            }
+            if let Some((px, py)) = restored_place(x, y, &monitors) {
+                attributes = attributes.with_position(PhysicalPosition::new(px, py));
             }
         }
         #[cfg(windows)]
