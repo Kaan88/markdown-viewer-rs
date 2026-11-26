@@ -11,6 +11,20 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Release 1.2.0 (2026-11-27)
+
+Prepared on `f/renderer` for the coordinator to merge and tag after CI. This
+release adds interface motion with a setting to turn it off, better text
+hinting, the shared renderer at `7fd559f` with security and resource-limit
+fixes, and private engine placement in Linux packages. See
+[the 1.2.0 release notes](release-notes/1.2.0.md).
+
+The owner deferred the hosted Mac self-update test because macOS is not a
+primary target. The scratch-folder fix and the test stay in `mac-look`, but
+that step alone is allowed to fail. Neither `ci` nor `release` runs it.
+Not verified for 1.2.0: running the Windows installer, installing or trying
+the Linux and macOS packages by hand, or a successful hosted Mac update.
+
 ## Shared renderer (2026-11-26, `f/renderer`)
 
 **Text rendering (owner, 2026-11-27).** The toolkit's vertical-only hinting changes glyph edges in
@@ -48,7 +62,7 @@ so production still finds its sibling. Tarball uninstall preserves unrelated
 installed link with no override, and checks that removing the private engine makes the
 same shot fail before a PNG is written. The mac look workflow stages mdedit's helper
 using mdedit's own renderer-branch recipe and pin, not mdview's.
-Change `mac-look.yml` back to `ref: main` once mdedit's renderer branch merges.
+`mac-look.yml` now uses mdedit's `main` again for the 1.2.0 release.
 The write-permission release job runs `mdv-bench --test release_manifest`, sharing
 mdview's production updater descriptor but not depending on its test engine fixture.
 
