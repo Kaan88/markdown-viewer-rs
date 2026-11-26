@@ -26,7 +26,7 @@ shot() {
     shift
     # The scale is pinned, so the system's display scale cannot change the pictures; a shot
     # that asks for its own --scale comes later on the line and wins.
-    "$exe" --behind --no-session --scale 1.0 --shot "$out/$name.png" "$@"
+    "$exe" --no-session --scale 1.0 --shot "$out/$name.png" "$@"
 }
 
 # Both themes.
@@ -102,8 +102,9 @@ shot dialog-settings-backdrop --dark --backdrop mica --dialog settings "$fx/show
 # The first 16 ms shot frame starts the fade, so its clock reads 101 ms at the midpoint.
 shot theme-fading-dark --light --theme-flip dark --motion-at 101 "$fx/showcase.md"
 shot theme-fading-light --dark --theme-flip light --motion-at 101 "$fx/showcase.md"
-shot theme-fading-settings-dark --light --theme-flip dark --motion-at 101 --dialog settings "$fx/showcase.md"
-shot theme-fading-settings-light --dark --theme-flip light --motion-at 101 --dialog settings "$fx/showcase.md"
+# No explicit theme: the Theme row stays on System while the simulated desktop flips.
+shot theme-fading-settings-dark --theme-flip dark --motion-at 101 --dialog settings "$fx/showcase.md"
+shot theme-fading-settings-light --theme-flip light --motion-at 101 --dialog settings "$fx/showcase.md"
 # A switch of the settings dialog (Reading, "Tick task boxes without asking") turned with Space:
 # 67 ms into its slide, the knob part way and its fill coming in; and at rest once turned.
 for theme in light dark; do

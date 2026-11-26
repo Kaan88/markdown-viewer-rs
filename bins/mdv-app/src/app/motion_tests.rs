@@ -2246,3 +2246,36 @@ fn a_theme_flip_crossfades_an_already_open_settings_dialog() {
         "the settled light dialog"
     );
 }
+
+#[test]
+fn a_system_theme_flip_shot_keeps_settings_on_system_in_both_themes() {
+    let out = std::env::temp_dir().join(format!("mdview-theme-shot-{}.png", std::process::id()));
+    let render = |mut a: App| {
+        a.args.dark = None;
+        a.args.dialog = Some(ShotDialog::Settings);
+        a.args.scale = Some(1.0);
+        assert_eq!(shot(a, &out), 0);
+        let bytes = std::fs::read(&out).unwrap();
+        std::fs::remove_file(&out).unwrap();
+        bytes
+    };
+    let still = |dark| {
+        let mut a = app(&[]);
+        a.ws.set_theme_choice(ThemeChoice::System);
+        a.ws.set_system_dark(dark);
+        render(a)
+    };
+    let (light, dark) = (still(false), still(true));
+    assert!(light != dark);
+    for (target, before, after) in [(true, &light, &dark), (false, &dark, &light)] {
+        for (ms, expected) in [(0, before), (200, after)] {
+            let mut a = app(&[]);
+            a.args.theme_flip = Some(target);
+            a.args.motion_at = Some(ms);
+            assert!(
+                &render(a) == expected,
+                "flip to dark={target} at {ms} ms must match the System dialog"
+            );
+        }
+    }
+}

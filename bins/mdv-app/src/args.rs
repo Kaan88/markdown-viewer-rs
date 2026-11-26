@@ -110,8 +110,9 @@ pub struct Args {
     /// `--flip-setting <id>`: with `--dialog settings`, the row of that id (`settings.rs`)
     /// focused and turned with Space, for a shot; with `--motion-at`, as its switch slides.
     pub flip_setting: Option<u32>,
-    /// `--theme-flip <light|dark>`: a shot starts in the theme `--light` or `--dark` gave and
-    /// changes to this one; with `--motion-at`, as the window crossfades.
+    /// `--theme-flip <light|dark>`: a shot changes to this theme. Without `--light` or `--dark`,
+    /// it uses the System choice and simulates a desktop flip from the opposite theme.
+    /// With `--motion-at`, the shot shows the window crossfading.
     pub theme_flip: Option<bool>,
     /// `--zoom-level F`: with `--zoom-diagram`, its drawing size in device px per raster px (1.0,
     /// the default, is twice the page's size at any scale).

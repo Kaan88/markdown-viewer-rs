@@ -2393,6 +2393,14 @@ fn shot(mut app: App, path: &Path) -> i32 {
         (lw as f32 * app.scale).round() as u32,
         (lh as f32 * app.scale).round() as u32,
     );
+    // Without an explicit starting theme, simulate the desktop in the opposite theme.
+    // Do this before Settings builds its form, so the Theme row shows System throughout.
+    if app.args.dark.is_none()
+        && let Some(dark) = app.args.theme_flip
+    {
+        app.ws.set_theme_choice(ThemeChoice::System);
+        app.ws.set_system_dark(!dark);
+    }
     // A document mdedit has not saved, as its "Preview in mdview" would hand it over.
     if let Some(text) =
         (app.args.demo_untitled.as_deref()).and_then(|file| std::fs::read_to_string(file).ok())
@@ -2597,10 +2605,14 @@ fn shot(mut app: App, path: &Path) -> i32 {
     // A theme change, made after the clock has started and the frame before it is drawn, so the
     // frames of its crossfade are the ones shot.
     if let Some(dark) = app.args.theme_flip {
-        app.ws.set_theme_choice(match dark {
-            true => ThemeChoice::Dark,
-            false => ThemeChoice::Light,
-        });
+        if app.args.dark.is_none() {
+            app.ws.set_system_dark(dark);
+        } else {
+            app.ws.set_theme_choice(match dark {
+                true => ThemeChoice::Dark,
+                false => ThemeChoice::Light,
+            });
+        }
     }
     // The tip under `--hover` shows now (with `--motion-at`, as the motion starts). A shot of a
     // title-row hover is no tip: a window shows none after a few ms on the button, and one ticked
