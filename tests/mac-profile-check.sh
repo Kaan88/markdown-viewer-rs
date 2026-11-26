@@ -32,7 +32,7 @@ export MDVIEW_SETTINGS=inherited MDEDIT_SETTINGS=inherited MD_SISTER_MDEDIT=inhe
 mac_profile_init
 test -z "${MD_SISTER_MDEDIT+x}"
 mac_open -n "$work/Test.app" --args --no-session
-for name in HOME MDVIEW_SETTINGS MDEDIT_SETTINGS MD_SISTER_MDVIEW_SETTINGS MD_SISTER_MDEDIT_SETTINGS; do
+for name in HOME MDVIEW_SETTINGS MDEDIT_SETTINGS MD_SISTER_MDVIEW_SETTINGS MD_SISTER_MDEDIT_SETTINGS MDVIEW_TEST_SKIP_NATIVE_RECENTS; do
     grep -Fxq -- "$name=${!name}" "$work/open"
 done
 test "$MDVIEW_SETTINGS" != "$MDEDIT_SETTINGS"
@@ -60,7 +60,7 @@ with open(sys.argv[1], "rb") as file:
 assert info["CFBundleIdentifier"] == "io.github.kaan88.test"
 assert info["LSEnvironment"] == {
     name: os.environ[name]
-    for name in ("HOME", "MDVIEW_SETTINGS", "MDEDIT_SETTINGS",
+    for name in ("HOME", "MDVIEW_SETTINGS", "MDEDIT_SETTINGS", "MDVIEW_TEST_SKIP_NATIVE_RECENTS",
                  "MD_SISTER_MDVIEW_SETTINGS", "MD_SISTER_MDEDIT_SETTINGS")
 }
 PY

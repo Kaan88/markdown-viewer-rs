@@ -31,7 +31,12 @@ for _ in $(seq 1 40); do
     sleep 0.25
 done
 if [[ "$edit" =~ ^[1-9][0-9]*$ ]] && mac_profile_check_process "$edit"; then
-    echo "PASS Command+E started scratch editor PID $edit"
+    if (pid="$edit"; wid="$(window_id)" && mac_wait_document "$editor" "showcase.md — mdedit"); then
+        echo "PASS Command+E opened showcase.md in scratch editor PID $edit"
+    else
+        echo "FAIL scratch editor did not show showcase.md"
+        fail=1
+    fi
 else
     echo "FAIL Command+E did not start an isolated mdedit"
     fail=1

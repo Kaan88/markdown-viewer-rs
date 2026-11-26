@@ -989,7 +989,7 @@ impl Workspace {
     pub fn open(&mut self, path: &Path) -> Result<usize, String> {
         let path = untitled_key(path).unwrap_or_else(|| canonical_or_absolute(path));
         if let Some(index) = self.tabs.iter().position(|t| same_file(&t.path, &path)) {
-            mdshared_ui::platform::note_recent_document(&path);
+            note_native_recent(&path);
             self.recents.add(path);
             self.activate(index);
             self.persist();
@@ -1009,7 +1009,7 @@ impl Workspace {
                 tab.set_document(document, loaded.stamp);
                 self.tabs.push(tab);
                 // macOS: the Dock icon's menu and Recent Items list it too.
-                mdshared_ui::platform::note_recent_document(&path);
+                note_native_recent(&path);
                 self.recents.add(path);
                 self.relabel();
                 let index = self.tabs.len() - 1;
@@ -4154,8 +4154,43 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
+fn register_native_recent(
+    path: &Path,
+    skip: Option<&std::ffi::OsStr>,
+    register: impl FnOnce(&Path),
+) {
+    if skip != Some(std::ffi::OsStr::new("1")) {
+        register(path);
+    }
+}
+
+fn note_native_recent(path: &Path) {
+    register_native_recent(
+        path,
+        std::env::var_os("MDVIEW_TEST_SKIP_NATIVE_RECENTS").as_deref(),
+        mdshared_ui::platform::note_recent_document,
+    );
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scratch_opt_out_skips_only_native_recent_registration() {
+        use std::{ffi::OsStr, path::Path};
+
+        let path = Path::new("showcase.md");
+        super::register_native_recent(path, Some(OsStr::new("1")), |_| {
+            panic!("scratch file registered in native recents")
+        });
+        for setting in [None, Some(OsStr::new("0"))] {
+            let mut called = false;
+            super::register_native_recent(path, setting, |registered| {
+                assert_eq!(registered, path);
+                called = true;
+            });
+            assert!(called);
+        }
+    }
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
 

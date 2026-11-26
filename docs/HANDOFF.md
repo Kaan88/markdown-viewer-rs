@@ -96,6 +96,12 @@ certificate fingerprint before changing trust, so cleanup also runs after a
 failed add. Shell syntax and mock checks passed; the native macOS SDK, event
 delivery, accessibility actions and keychain behavior still need hosted CI.
 
+**Mac harness follow-up (after `3d986f0`).** Scratch launches and restarted test
+bundles set `MDVIEW_TEST_SKIP_NATIVE_RECENTS=1`; it suppresses only the native
+recent-document call on new and reopened files. Normal opens and mdview's own
+recents are unchanged. The sister test now waits for `showcase.md` in the
+verified scratch editor's window, rather than accepting a process alone.
+
 Test files that left with the local crates (paths below are relative to `crates/`):
 
 - `core/tests/`: `core_tests.rs`, `fuzz.rs`, `regressions.rs`, `spec.rs`, and

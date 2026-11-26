@@ -7,6 +7,7 @@ mac_profile_init() {
     scratch_profile "$mac_profile" || return
     unset MD_SISTER_MDEDIT MD_SISTER_MDVIEW MDV_ENGINE_STALL
     export MDVIEW_SETTINGS="$mac_profile/viewer/settings.ini"
+    export MDVIEW_TEST_SKIP_NATIVE_RECENTS=1
     export MDEDIT_SETTINGS="$mac_profile/editor/settings.ini"
     export MD_SISTER_MDVIEW_SETTINGS="$MDVIEW_SETTINGS"
     export MD_SISTER_MDEDIT_SETTINGS="$MDEDIT_SETTINGS"
@@ -20,6 +21,7 @@ mac_profile_cleanup() {
 mac_open() {
     : "${mac_profile:?initialize a scratch profile before using LaunchServices}"
     command open --env "HOME=$HOME" --env "MDVIEW_SETTINGS=$MDVIEW_SETTINGS" \
+        --env "MDVIEW_TEST_SKIP_NATIVE_RECENTS=$MDVIEW_TEST_SKIP_NATIVE_RECENTS" \
         --env "MDEDIT_SETTINGS=$MDEDIT_SETTINGS" \
         --env "MD_SISTER_MDVIEW_SETTINGS=$MD_SISTER_MDVIEW_SETTINGS" \
         --env "MD_SISTER_MDEDIT_SETTINGS=$MD_SISTER_MDEDIT_SETTINGS" "$@"
@@ -47,7 +49,7 @@ path, bundle_id = sys.argv[1:]
 with open(path, "rb") as file:
     info = plistlib.load(file)
 env = info.setdefault("LSEnvironment", {})
-for name in ("HOME", "MDVIEW_SETTINGS", "MDEDIT_SETTINGS",
+for name in ("HOME", "MDVIEW_SETTINGS", "MDEDIT_SETTINGS", "MDVIEW_TEST_SKIP_NATIVE_RECENTS",
              "MD_SISTER_MDVIEW_SETTINGS", "MD_SISTER_MDEDIT_SETTINGS"):
     env[name] = os.environ[name]
 if bundle_id:
