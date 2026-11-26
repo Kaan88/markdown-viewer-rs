@@ -19,6 +19,11 @@ use std::path::Path;
 /// closing menu goes at once.
 pub const MENU: document::Pair = document::MENU;
 
+/// How long the pointer rests on a row that opens a submenu before it opens, or on another row
+/// of its menu before the open one closes or gives way, as in Windows (`SPI_GETMENUSHOWDELAY`);
+/// the shared `submenu::Cascade`'s delay (`Cascade::with_delay`).
+pub const SUBMENU: std::time::Duration = std::time::Duration::from_millis(300);
+
 /// The presence of the open menu, `serial` naming this opening of it: a menu opened again is
 /// new and fades in again.
 pub fn menu(anim: &mut Animator, serial: u64) -> f32 {

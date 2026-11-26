@@ -6,6 +6,7 @@ use crate::gfx::Rect;
 use crate::menu::Menu;
 use crate::textfield::TextField;
 use crate::tree::{FileTree, new_tree};
+use mdshared_ui::submenu::Cascade;
 use mdview_core::commands::CommandId;
 use mdview_render::SourceKind;
 use std::path::PathBuf;
@@ -248,6 +249,10 @@ pub struct Popup {
     pub sub: Option<Menu<Act>>,
     /// The submenu item the pointer rests on and when its submenu opens by itself.
     pub dwell: Option<(usize, Instant)>,
+    /// The shared `submenu::Cascade` this popup's menu is being moved onto (the main menu's
+    /// Open recent beside it). While the old `sub`, `dwell` and `SUBMENU_DWELL` still drive the
+    /// window, it is built alongside them.
+    pub cascade: Option<Cascade<Act>>,
     /// The marked letters of the items are underlined: the menu was opened with Alt held, or Alt
     /// was pressed since (the Windows convention; a menu opened with the pointer shows none).
     pub access: bool,
@@ -274,6 +279,24 @@ impl Popup {
             menu,
             sub: None,
             dwell: None,
+            cascade: None,
+            access: false,
+            serial: next_serial(),
+            sub_serial: 0,
+        }
+    }
+
+    /// A popup whose menu is a `submenu::Cascade`, with the menu the cascade's root is made
+    /// from until every call site reads the cascade.
+    pub fn main(kind: PopupKind, mut menu: Menu<Act>, mut cascade: Cascade<Act>) -> Popup {
+        menu.set_access_visible(false);
+        cascade.set_access_visible(false);
+        Popup {
+            kind,
+            menu,
+            sub: None,
+            dwell: None,
+            cascade: Some(cascade),
             access: false,
             serial: next_serial(),
             sub_serial: 0,
@@ -287,6 +310,9 @@ impl Popup {
         self.menu.set_access_visible(true);
         if let Some(s) = self.sub.as_mut() {
             s.set_access_visible(true);
+        }
+        if let Some(c) = self.cascade.as_mut() {
+            c.set_access_visible(true);
         }
     }
 

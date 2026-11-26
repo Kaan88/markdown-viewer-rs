@@ -391,12 +391,15 @@ impl App {
             return;
         }
         let (x, y, right) = self.popup_anchor(kind);
-        let menu = match kind {
-            PopupKind::Main => overlays::main_menu(&self.ws, &self.ui, x, y),
-            PopupKind::Recent => overlays::recent_menu(&self.ws, x, y, right),
+        let mut popup = match kind {
+            PopupKind::Main => Popup::main(
+                kind,
+                overlays::main_menu(&self.ws, &self.ui, x, y),
+                overlays::main_cascade(&self.ws, &self.ui, Rect::new(x, y, 0.0, 0.0)),
+            ),
+            PopupKind::Recent => Popup::new(kind, overlays::recent_menu(&self.ws, x, y, right)),
             _ => return,
         };
-        let mut popup = Popup::new(kind, menu);
         if self.mods.alt {
             popup.show_access();
         }
