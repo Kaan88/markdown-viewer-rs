@@ -2,7 +2,7 @@
 //! files, and `mdshared_fetch` as the transport. `docs/UPDATE.md` describes the whole flow.
 
 use mdshared_app::updater as shared;
-use mdview_core::update::Version;
+use mdview::update::Version;
 use std::time::Duration;
 
 pub use shared::{
@@ -65,7 +65,7 @@ mod tests {
     /// release when the manifest lists an entry for it.
     #[test]
     fn the_release_scripts_write_a_manifest_this_build_reads() {
-        use mdview_core::update;
+        use mdview::update;
         use std::collections::HashMap;
         let target = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
         let current = if cfg!(windows) {

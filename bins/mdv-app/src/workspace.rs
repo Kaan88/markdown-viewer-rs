@@ -34,12 +34,12 @@ fn add_focus(tabs: &mut [Tab], path: &Path, ms: u64) {
         t.focus_ms = Some(t.focus_ms.unwrap_or(0).saturating_add(ms));
     }
 }
-use mdview_core::commands::strings;
-use mdview_core::files::{FileStamp, canonical_or_absolute, read_stable, stamp, tab_labels};
+use mdview::commands::strings;
+use mdview::files::{FileStamp, canonical_or_absolute, read_stable, stamp, tab_labels};
+use mdview::place::{Fit, ReadingPlace, Remap};
+use mdview::session::{self, PageWidth, RecentEntry, Recents, Session};
 use mdview_core::links::{LinkAction, classify_link};
 use mdview_core::model::{BlockKind, NONE, ScrollPos};
-use mdview_core::place::{Fit, ReadingPlace, Remap};
-use mdview_core::session::{self, PageWidth, RecentEntry, Recents, Session};
 use mdview_core::{Document, parse_bytes, tasks};
 use mdview_render::{
     DARK, DocumentRenderer, Frame, Hit, Jump, LIGHT, Options, PageLayout, Rect, RemoteState,
@@ -54,7 +54,7 @@ mod notes;
 pub use notes::WIKI_SCHEME;
 
 /// The View menu's theme choice; `System` follows the desktop.
-pub use mdview_core::session::Theme as ThemeChoice;
+pub use mdview::session::Theme as ThemeChoice;
 
 /// Space left above a jumped-to heading, footnote or match, in logical px.
 const JUMP_MARGIN: f32 = 24.0;
@@ -720,7 +720,7 @@ impl Workspace {
         ws
     }
 
-    /// [`new`](Self::new) with `mdview_core::session::default_settings_path()`.
+    /// [`new`](Self::new) with `mdview::session::default_settings_path()`.
     #[allow(dead_code)] // Workspace API the shell does not call yet.
     pub fn with_default_session() -> Workspace {
         Workspace::new(session::default_settings_path())
@@ -1466,8 +1466,7 @@ impl Workspace {
         }
         tab.follow_end = tab.at_end;
         tab.set_document(document, stamp);
-        tab.source =
-            (live || tab.presenting).then(|| mdview_core::files::decode(bytes).0.into_owned());
+        tab.source = (live || tab.presenting).then(|| mdview::files::decode(bytes).0.into_owned());
         tab.missing = live && tab.missing;
         tab.live = live;
         tab.live_pending = None;
@@ -1510,7 +1509,7 @@ impl Workspace {
         let tab = &mut self.tabs[index];
         if tab.source.is_none() {
             let loaded = read_stable(&tab.path).map_err(|e| e.to_string())?;
-            tab.source = Some(mdview_core::files::decode(&loaded.bytes).0.into_owned());
+            tab.source = Some(mdview::files::decode(&loaded.bytes).0.into_owned());
         }
         tab.presenting = true;
         let source = tab.source.clone().unwrap_or_default();
@@ -1817,7 +1816,7 @@ impl Workspace {
     }
 
     pub fn set_corners(&mut self, radius: u8) {
-        let radius = mdview_core::session::clean_corners(radius);
+        let radius = mdview::session::clean_corners(radius);
         if self.session.corners == radius {
             return;
         }
@@ -3004,13 +3003,13 @@ impl Workspace {
     pub fn preview_text(
         &self,
         target: &crate::preview::Target,
-    ) -> Option<mdview_core::preview::Preview> {
+    ) -> Option<mdview::preview::Preview> {
         use crate::preview::Target;
         let doc = self.active_document()?;
         match target {
-            Target::Footnote(i) => mdview_core::preview::footnote(doc, *i),
-            Target::Heading(b) => mdview_core::preview::heading(doc, *b),
-            Target::Abbr(i) => mdview_core::preview::abbr(doc, *i),
+            Target::Footnote(i) => mdview::preview::footnote(doc, *i),
+            Target::Heading(b) => mdview::preview::heading(doc, *b),
+            Target::Abbr(i) => mdview::preview::abbr(doc, *i),
             Target::File { .. } => None,
         }
     }
@@ -3402,7 +3401,7 @@ impl Workspace {
                 if loaded.stamp != tab.stamp {
                     return Err("The file changed on disk: reload, then copy again");
                 }
-                read = mdview_core::files::decode(&loaded.bytes).0.into_owned();
+                read = mdview::files::decode(&loaded.bytes).0.into_owned();
                 &read
             }
         };
@@ -6057,28 +6056,9 @@ A line of text here.
         _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Whether the engine process that draws math and diagrams is built beside the tests.
-    fn engine_available() -> bool {
-        if let Some(path) = std::env::var_os("MDV_ENGINE") {
-            return Path::new(&path).is_file();
-        }
-        let name = if cfg!(windows) {
-            "mdview-engine.exe"
-        } else {
-            "mdview-engine"
-        };
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/release")
-            .join(name)
-            .is_file()
-    }
-
     #[test]
     fn a_click_on_a_diagram_opens_it_and_its_raster_is_there() {
-        if !engine_available() {
-            eprintln!("skipping: no mdview-engine in target/release");
-            return;
-        }
+        crate::test_engine::require_engine();
         let dir = temp_dir("zoom-diagram");
         let path = write(
             &dir,
@@ -6121,10 +6101,7 @@ A line of text here.
 
     #[test]
     fn a_right_click_on_a_formula_or_diagram_offers_its_source() {
-        if !engine_available() {
-            eprintln!("skipping: no mdview-engine in target/release");
-            return;
-        }
+        crate::test_engine::require_engine();
         let dir = temp_dir("sources");
         let path = write(
             &dir,

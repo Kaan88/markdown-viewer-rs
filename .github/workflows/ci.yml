@@ -45,11 +45,14 @@ jobs:
           key: linux
       - run: cargo fmt --all --check
       - run: cargo clippy --release --workspace --all-targets -- -D warnings
+      - name: Build viewer and pinned toolkit engine
+        run: |
+          cargo build --release --locked -p mdview -p mdshared-md-engine --bins
+          echo "MDV_ENGINE=$PWD/target/release/mdview-engine" >> "$GITHUB_ENV"
       - run: cargo test --release --workspace --no-fail-fast
       - name: Screenshot suite (smoke test)
         if: ${{ !cancelled() }}
         run: |
-          cargo build --release -p mdview -p mdview-engine
           bash tests/shots.sh target/shots
           bash tests/shots-check.sh target/shots
       - uses: actions/upload-artifact@v7
@@ -75,12 +78,16 @@ jobs:
           key: windows
       - run: cargo fmt --all --check
       - run: cargo clippy --release --workspace --all-targets -- -D warnings
+      - name: Build viewer and pinned toolkit engine
+        shell: bash
+        run: |
+          cargo build --release --locked -p mdview -p mdshared-md-engine --bins
+          echo "MDV_ENGINE=$(cygpath -w "$PWD/target/release/mdview-engine.exe")" >> "$GITHUB_ENV"
       - run: cargo test --release --workspace --no-fail-fast
       - name: Screenshot suite (smoke test)
         if: ${{ !cancelled() }}
         shell: bash
         run: |
-          cargo build --release -p mdview -p mdview-engine
           bash tests/shots.sh target/shots
           bash tests/shots-check.sh target/shots
       - uses: actions/upload-artifact@v7
@@ -113,11 +120,14 @@ jobs:
           key: macos-${{ matrix.arch }}
       - run: cargo fmt --all --check
       - run: cargo clippy --release --workspace --all-targets -- -D warnings
+      - name: Build viewer and pinned toolkit engine
+        run: |
+          cargo build --release --locked -p mdview -p mdshared-md-engine --bins
+          echo "MDV_ENGINE=$PWD/target/release/mdview-engine" >> "$GITHUB_ENV"
       - run: cargo test --release --workspace --no-fail-fast
       - name: Screenshot suite (smoke test)
         if: ${{ !cancelled() }}
         run: |
-          cargo build --release -p mdview -p mdview-engine
           bash tests/shots.sh target/shots
           bash tests/shots-check.sh target/shots
       - uses: actions/upload-artifact@v7

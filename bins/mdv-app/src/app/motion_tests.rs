@@ -2161,7 +2161,7 @@ fn closing_an_overlay_mid_theme_fade_immediately_removes_it() {
                     at: (500.0, 300.0),
                     due: Instant::now(),
                     loading: false,
-                    content: Some(mdview_core::preview::Preview {
+                    content: Some(mdview::preview::Preview {
                         title: "Preview".into(),
                         body: "A heading".into(),
                     }),

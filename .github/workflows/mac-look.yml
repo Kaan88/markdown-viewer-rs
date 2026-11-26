@@ -36,7 +36,7 @@ jobs:
           workspaces: |
             . -> target
             editor -> target
-      - run: cargo build --release -p mdview -p mdview-engine
+      - run: cargo build --release --locked -p mdview -p mdshared-md-engine --bins
       - name: Screenshot suite
         run: bash tests/shots.sh target/shots
       - name: The bundle

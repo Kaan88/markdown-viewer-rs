@@ -38,7 +38,7 @@ if (-not $SkipBuild) {
   # target directory keeps normal builds from rebuilding.
   $env:RUSTFLAGS = '-C target-feature=+crt-static'
   Push-Location $root
-  try { cargo build --release -p mdview -p mdview-engine --target-dir target\dist } finally { Pop-Location; Remove-Item Env:RUSTFLAGS }
+  try { cargo build --release --locked -p mdview -p mdshared-md-engine --bins --target-dir target\dist } finally { Pop-Location; Remove-Item Env:RUSTFLAGS }
   if ($LASTEXITCODE -ne 0) { Fail 'cargo build failed.' }
 }
 foreach ($f in 'mdview.exe', 'mdview-engine.exe') {

@@ -41,7 +41,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
     -v "$cache/$app/target-linux:/cache/target" \
     -e CARGO_HOME=/cache/cargo -e CARGO_TARGET_DIR=/cache/target -e CARGO_TERM_COLOR=never \
     -w /src "$image" \
-    bash -c 'PATH=/opt/cargo/bin:$PATH cargo build --release --locked -p mdview -p mdview-engine'
+    bash -c 'PATH=/opt/cargo/bin:$PATH cargo build --release --locked -p mdview -p mdshared-md-engine --bins'
 bins=(mdview mdview-engine)
 for b in "${bins[@]}"; do
     [ -x "$cache/$app/target-linux/release/$b" ] || { echo "build left no $b" >&2; exit 1; }

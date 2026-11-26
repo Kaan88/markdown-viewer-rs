@@ -14,8 +14,8 @@ use mdshared_ui::chrome::{
     tab_natural_width, tab_widths, win_button_rect,
 };
 pub use mdshared_ui::glyph;
-use mdview_core::commands::{CommandId, strings};
-use mdview_core::session::PageWidth;
+use mdview::commands::{CommandId, strings};
+use mdview::session::PageWidth;
 
 const FIND_W: f32 = 260.0;
 

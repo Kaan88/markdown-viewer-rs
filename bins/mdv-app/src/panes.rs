@@ -10,7 +10,7 @@ use mdshared_ui::anim::Animator;
 pub use mdshared_ui::pane::ROW;
 use mdshared_ui::pane::{HEAD, ROW_H, draw_head, draw_row_fill, draw_splitter};
 pub use mdshared_ui::scroll::{draw_scrollbar, offset_for_thumb, scrollbar};
-use mdview_core::commands::strings;
+use mdview::commands::strings;
 
 fn pane_head(c: &mut Ctx, r: Rect, title: &str) {
     draw_head(c.p, c.pal, r, title);

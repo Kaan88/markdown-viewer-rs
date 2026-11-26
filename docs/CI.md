@@ -9,16 +9,20 @@ default `GITHUB_TOKEN`.
 Runs on a push to `main`, on every pull request, and by hand (`workflow_dispatch`). A newer run of
 the same branch cancels the older one. Permissions: `contents: read`.
 
-Two jobs, `linux` (ubuntu-latest) and `windows` (windows-latest, the MSVC toolchain, natively):
+The checks run on Linux, native Windows with MSVC, and both macOS architectures:
 
 1. `cargo fmt --all --check`
 2. `cargo clippy --release --workspace --all-targets -- -D warnings`
-3. `cargo test --release --workspace`
-4. The headless screenshot suite as a smoke test: `cargo build --release -p mdview -p mdview-engine`,
-   `bash tests/shots.sh target/shots`, then `tests/shots-check.sh target/shots`, which fails when
+3. `cargo build --release --locked -p mdview -p mdshared-md-engine --bins` builds the viewer and
+   the toolkit's `mdview-engine` side by side from one lockfile.
+4. `cargo test --release --workspace`. CI points `MDV_ENGINE` at the build from step 3.
+   The test harness also works without that override: it uses the profile's engine or
+   builds the pinned one in a separate test target directory.
+5. The headless screenshot suite as a smoke test: `bash tests/shots.sh target/shots`, then
+   `tests/shots-check.sh target/shots`, which fails when
    any shot named in `shots.sh` is missing, empty or not a PNG. There is no pixel comparison:
    the runners' fonts differ from the development machines'. The PNGs are uploaded as the
-   artifacts `shots-linux` and `shots-windows` (14 days).
+   artifacts `shots-linux`, `shots-windows` and `shots-macos-*`.
 
 The Rust toolchain is pinned in the workflows (`RUST_TOOLCHAIN`, 1.99.1) with
 `dtolnay/rust-toolchain`; there is no `rust-toolchain.toml`, so a local build keeps using

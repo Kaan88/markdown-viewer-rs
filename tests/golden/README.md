@@ -53,7 +53,7 @@ inline, a missing file's placeholder, and the SVG badge that the engine now draw
 `shell-winui-images.png` and `shell-qt-images.png` show the same file in both shells, with the badge
 drawn both ways.
 
-**Pixel test.** The four `showcase-*.png` images are a baseline: `crates/render/tests/golden.rs`
+**Pixel test.** The four `showcase-*.png` images are a baseline: `bins/mdv-app/tests/golden.rs`
 renders the showcase at the same four settings and fails when more than 64 pixels differ by more than
 24 in any channel, writing the actual image to `target/golden-actual-<fixture>-<name>.png`.
 `tables-light@1.0.png` and `tables-dark@1.5.png` are the same for `fixtures/tables.md` (table
@@ -66,15 +66,16 @@ Limits:
 
 - They use this host's system fonts (Segoe UI, Consolas), so the comparison runs on Windows only;
   elsewhere it passes with a note. Bundled fonts would make it portable; that is still open.
-- Only the four showcase renders are compared. The `shell-*` captures and `images-light.png` are
+- The showcase, tables and floats renders are compared. The `shell-*` captures and `images-light.png` are
   evidence that the shells run, not a baseline.
 - Fenced code is coloured from syntect's bundled syntaxes and two themes; unknown languages, inline
   code and blocks over 256 KiB stay plain.
 - The window captures include the 31 px title bar, which follows Windows; compare the client area.
 
-After an intended visual change, regenerate the baseline with
-`MDV_BLESS=1 cargo test --release -p mdview-render --test golden`, look at the new images, and commit
-them only once they are approved.
+After an intended visual change, regenerate with
+`MDV_BLESS=1 cargo test --release -p mdview --test golden`, look at the new images, and commit
+them only once they are approved. The test harness builds the pinned toolkit engine if it is not
+already in the release directory; `MDV_ENGINE` is an optional absolute override.
 
 To regenerate:
 

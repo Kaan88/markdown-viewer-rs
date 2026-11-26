@@ -5,7 +5,7 @@
 
 use crate::gfx::{Face, Painter, Rect};
 use crate::theme::Palette;
-use mdview_core::preview::Preview;
+use mdview::preview::Preview;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
@@ -158,8 +158,8 @@ pub fn load(path: &Path, fragment: Option<&str>) -> Option<Preview> {
     let doc = mdview_core::parse_bytes(&bytes);
     fragment
         .and_then(|f| doc.resolve_fragment(f))
-        .and_then(|b| mdview_core::preview::heading(&doc, b))
-        .or_else(|| mdview_core::preview::start(&doc))
+        .and_then(|b| mdview::preview::heading(&doc, b))
+        .or_else(|| mdview::preview::start(&doc))
 }
 
 // ---- layout and drawing ----------------------------------------------------------------------

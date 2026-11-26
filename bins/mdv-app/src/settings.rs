@@ -11,7 +11,7 @@ use crate::workspace::{ThemeChoice, Workspace};
 use mdshared_ui::corners::{self, Corners};
 use mdshared_ui::settings::Row;
 use mdshared_ui::settings::pages::{Form, Item, Page};
-use mdview_core::session::{PageWidth, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
+use mdview::session::{PageWidth, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
 
 pub const PAGE_WIDTH: u32 = 1;
 pub const TEXT_SIZE: u32 = 2;

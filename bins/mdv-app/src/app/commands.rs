@@ -5,7 +5,7 @@ use super::*;
 use crate::ui::EditAct;
 use crate::workspace::{SourcePlace, resolve};
 
-use mdview_core::session::PageWidth;
+use mdview::session::PageWidth;
 use mdview_render::SourceKind;
 
 impl App {
@@ -283,7 +283,7 @@ impl App {
         match id {
             C::CopyFilePath | C::ShowInFileManager if untitled.is_some() => {
                 self.ws
-                    .set_status(mdview_core::commands::strings::UNTITLED_NO_FILE);
+                    .set_status(mdview::commands::strings::UNTITLED_NO_FILE);
             }
             C::EditInMdedit if untitled.is_some() => {
                 let (doc, title) = untitled.unwrap_or_default();
@@ -296,7 +296,7 @@ impl App {
                 };
                 if !mdshared_app::sister::send("mdedit", &request) {
                     self.ws
-                        .set_status(mdview_core::commands::strings::EDITOR_NOT_RUNNING);
+                        .set_status(mdview::commands::strings::EDITOR_NOT_RUNNING);
                 }
             }
             C::LibraryAdd => self.library_add(index),
@@ -516,7 +516,7 @@ impl App {
     }
 
     pub(super) fn set_folder(&mut self, dir: PathBuf) {
-        let dir = mdview_core::files::canonical_or_absolute(&dir);
+        let dir = mdview::files::canonical_or_absolute(&dir);
         self.ws.set_folder(Some(dir.clone()));
         self.ui.tree.set_root(Some(dir));
         self.ui.panes.files_scroll = 0.0;
@@ -575,8 +575,8 @@ impl App {
             C::MakeDefault => {
                 let result = platform::make_mdview_default();
                 self.ws.set_status(match result {
-                    Ok(()) => mdview_core::commands::strings::DEFAULT_APP_DONE,
-                    Err(_) => mdview_core::commands::strings::DEFAULT_APP_FAILED,
+                    Ok(()) => mdview::commands::strings::DEFAULT_APP_DONE,
+                    Err(_) => mdview::commands::strings::DEFAULT_APP_FAILED,
                 });
             }
             C::Refresh => {
@@ -1185,7 +1185,7 @@ impl App {
             let _ = self.ws.open(&path);
         } else {
             self.ws
-                .set_status(mdview_core::commands::strings::ONLY_MARKDOWN_LINKS);
+                .set_status(mdview::commands::strings::ONLY_MARKDOWN_LINKS);
         }
         self.redraw();
     }

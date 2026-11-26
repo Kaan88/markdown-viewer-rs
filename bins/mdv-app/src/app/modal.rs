@@ -14,7 +14,7 @@ use crate::settings as setting;
 use mdshared_ui::corners::Corners;
 use mdshared_ui::palette::Outcome as Pick;
 use mdshared_ui::settings::{Outcome as Form, Value};
-use mdview_core::session::{PageWidth, clamp_zoom};
+use mdview::session::{PageWidth, clamp_zoom};
 use std::sync::Arc;
 
 impl App {

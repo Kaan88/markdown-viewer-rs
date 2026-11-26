@@ -164,7 +164,7 @@ jobs:
           key: release-macos-${{ matrix.arch }}
       - name: The bundle (packaging/macos/make-bundle.sh, ad-hoc signature), zipped
         run: |
-          cargo build --release -p mdview -p mdview-engine
+          cargo build --release --locked -p mdview -p mdshared-md-engine --bins
           bash packaging/macos/make-bundle.sh target/release target/dist
           codesign --verify --deep --strict target/dist/mdview.app
           zip="target/dist/mdview-${{ needs.meta.outputs.version }}-macos-${{ matrix.arch }}.zip"

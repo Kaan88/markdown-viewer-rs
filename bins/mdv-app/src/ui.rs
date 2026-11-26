@@ -11,7 +11,7 @@ use crate::tree::{FileTree, new_tree};
 use mdshared_ui::anim::Animator;
 use mdshared_ui::menu::Entrance;
 use mdshared_ui::submenu::{Cascade, Outcome};
-use mdview_core::commands::CommandId;
+use mdview::commands::CommandId;
 use mdview_render::SourceKind;
 use std::path::PathBuf;
 use std::time::Instant;

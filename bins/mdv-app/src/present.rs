@@ -1,6 +1,6 @@
 //! Presentation mode: the document as slides, one at a time, in the whole window.
 //!
-//! The slides are cut by `mdview_core::slides`. Each is parsed and laid out on its own with the
+//! The slides are cut by `mdview::slides`. Each is parsed and laid out on its own with the
 //! normal page renderer (its own, made when a presentation starts and dropped when it ends, so
 //! nothing exists outside the mode), at a zoom chosen so the slide fills the window comfortably:
 //! as large as the width allows, as small as the height needs, never below what reads as a page
@@ -130,7 +130,7 @@ pub struct Show {
 impl Show {
     /// A presentation of `source`; `None` when it has no slides.
     pub fn new(tab: usize, revision: u64, source: &str, base_dir: Option<PathBuf>) -> Option<Show> {
-        let slides = mdview_core::slides::split(source);
+        let slides = mdview::slides::split(source);
         if slides.is_empty() {
             return None;
         }
@@ -164,7 +164,7 @@ impl Show {
     /// The text changed: cuts it again and stays on the same slide number (the last one when
     /// there are fewer now). False, and nothing changed, when it has no slides any more.
     pub fn set_source(&mut self, revision: u64, source: &str) -> bool {
-        let slides = mdview_core::slides::split(source);
+        let slides = mdview::slides::split(source);
         if slides.is_empty() {
             return false;
         }

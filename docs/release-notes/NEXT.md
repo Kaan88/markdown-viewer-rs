@@ -2,6 +2,8 @@ mdview next: menus fade in as they open, folders' arrows turn, toasts rise in an
 
 ## New
 
+- **Shared Markdown renderer.** mdview now uses the toolkit's renderer and brings in fixes that restrict network image paths, SVG file access, and engine discovery; bound WebP and preview sizes; avoid blocking on named pipes on Unix; and keep inline math and export from slowing down on large inputs.
+
 - **Menus fade in.** The main menu, the context menus and the Open recent submenu fade in and settle into place as they open, quickly; they close at once.
 
 - **A menu row's hover fills in.** The row the pointer or the keys reach fills in quickly instead of at once, and fades out as they leave it; with animations off or the system asking for less motion it is at once.

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/render", "crates/preview", "crates/engine", "crates/engine-proto", "bins/mdv-bench", "bins/mdv-app"]
+members = ["bins/mdv-bench", "bins/mdv-app"]
 exclude = ["spikes"]
 
 [workspace.package]
@@ -16,7 +16,7 @@ strip = "symbols"
 panic = "unwind"
 
 # The engine is a separate process that starts on demand; code size matters more than its speed.
-[profile.release.package.mdview-engine]
+[profile.release.package.mdshared-md-engine]
 opt-level = "s"
 
 # The Wayland client-drawn window shadow (mdshared-ui's `client-margin`): winit gets a content margin

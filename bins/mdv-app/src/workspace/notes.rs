@@ -659,7 +659,7 @@ fn no_note(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mdview_core::files::canonical_or_absolute;
+    use mdview::files::canonical_or_absolute;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
@@ -1192,15 +1192,10 @@ A ref link [x] and [[x]].
     }
 
     /// The watcher as the window sets it: the open files and notes, and the note folders.
-    fn watcher_for(
-        ws: &Workspace,
-    ) -> (
-        mdview_core::watch::FileWatcher,
-        std::sync::mpsc::Receiver<()>,
-    ) {
+    fn watcher_for(ws: &Workspace) -> (mdview::watch::FileWatcher, std::sync::mpsc::Receiver<()>) {
         let (send, woken) = std::sync::mpsc::channel();
         let mut watcher =
-            mdview_core::watch::FileWatcher::new(move || _ = send.send(())).expect("a watcher");
+            mdview::watch::FileWatcher::new(move || _ = send.send(())).expect("a watcher");
         watcher.set_files(ws.watched_paths().chain(ws.note_files(100)));
         watcher.set_folders(ws.note_folders(100).iter().map(PathBuf::as_path));
         (watcher, woken)
