@@ -29,7 +29,7 @@ missing was built. One commit per item, each with a test that fails with the fix
 | X3 `notice::draw_sliding` / `bar_height` | done: each of the three notice bars slides in by its own presence (`motion::bar`), its height taken by `notice::bar_height`, and the page is laid out under what shows (`page::Bars`, `viewport_bars`) on every frame; a bar that goes is forgotten, so a later one slides in again. A bar that is already there on the window's first frame is in place (`App::bar_t`), so the frame the window first shows never slides, and nothing jumps when the system's motion setting is read after it |
 | X3 tree chevron `draw_disclosure_animated_with`, rows named by path | already done (`motion::folder(path)`, `motion::notes_fold(key)`) |
 | L10 `Form::draw_animated` / `set_high_contrast` | already done |
-| L1 `submenu::Cascade` in place of the hand-made submenus and dwell | **not done this stage.** mdview's one hand-made submenu (the main menu's Open recent) is a `Menu` inside `Popup` with `dwell: Option<(usize, Instant)>`, `SUBMENU_DWELL` (300 ms) and its own key handling; moving it to `Cascade` means the popup body becoming a `Menu`/`Cascade` enum, its draw, hit tests, keys, clicks and about thirty tests — a rewrite, not a wiring, and it was left for its own session rather than half done |
+| L1 `submenu::Cascade` in place of the hand-made submenus and dwell | **done** (`e1d3074`, `060250b`, `36b6faf`, `9d2740a`): the main menu's Open recent is a `submenu::Cascade`, the `Menu`/`Cascade` body, `sub`, `dwell` and `SUBMENU_DWELL` are gone and the tests read the cascade; see the L1 section below |
 | W3 `window_state` restores onto a monitor that still exists | the behaviour was already there (mdview keeps its own physical place in the session, not a shared `WindowState`): a place is used only if the title row's left end is on a monitor that is there. This stage only moved that check into the pure `position_reachable` and tested it — no change of behaviour |
 
 **D4 is done at shared's pin `09b01c1`.** Shared's PR 31 gave the three animated title pieces their
@@ -110,33 +110,81 @@ review of the stage added a sixth, and its scale counterparts below.
   reachable on the only monitor, not on a place where the second one was, the corner cases —
   fails with `position_reachable` made to answer true (`445403a`).
 
-**Next: L1.** mdview's one hand-made submenu, the main menu's **Open recent**, is a `Menu` kept
-inside `Popup` with `dwell: Option<(usize, Instant)>`, `ui::SUBMENU_DWELL` (300 ms) and its own
-pointer, key and click handling, plus about thirty tests in `app/tests.rs`. Moving it to
-`submenu::Cascade` means: the popup body becomes a `Menu`/`Cascade` enum (the palette's body has
-no `Menu`), `Popup`'s draw, `hit`, keys and `timers` delegate to the cascade, the dwell and its
-constant go, the damage comes from `presence_bounds` (a cascade's submenu is its `menu(1)`'s
-rect), and the tests are kept one for one (the 300 ms is `Cascade::with_delay`). Read shared's
-`submenu.rs` at `535ad4c` first: `Cascade` has `menu`, `depth`, `pointer`, `key` returning
-`Outcome`, `rect`, `set_access_visible` and `with_look`.
+### L1: the main menu's Open recent is a `submenu::Cascade` (2026-11-26)
 
-Workspace after the stage: 769 passed, 6 ignored (`mdview`'s own: 328 passed, 1 ignored). With
-the review's fixes (the launch rule, the scale pairs, the palette's close): 773 passed, 6 ignored
-(`mdview`'s own: 332 passed, 1 ignored).
+Four commits, each built, tested and shot-checked: `e1d3074` builds the cascade beside the
+menu, `060250b` moves every call site onto the popup (nothing drawn changes; 195 shots
+byte-identical), `36b6faf` makes the body the `Menu`/`Cascade` enum and deletes the hand-made
+submenu, `9d2740a` adds the two tests below.
+
+- **The body.** `Popup { kind, body: MenuBody, access, serial }`, `MenuBody::Menu(Menu<Act>)` or
+  `MenuBody::Cascade(Cascade<Act>)`. Only the main menu is a cascade; the context menus, the
+  recent list and the find box's stay plain menus. `sub`, `dwell`, `sub_serial`, `SUBMENU_DWELL`
+  and the separate `menu` field are gone. `Popup` owns what the window used to do around it:
+  `pointer` (the 300 ms rest and the aim test), `key`, `click`, `wheel`, `deadline`/`tick`,
+  `open_submenu`, `place_in`, `draw`, `presence`, `presence_bounds` and `state` (the overlay
+  signature hashes it). The tests read the menus through `root()` and `submenu()` (both
+  `#[cfg(test)]`: the window reads through the cascade), and `root_mut()` for a shot's scroll.
+- **Kept.** The menu's 117 ms fade (`motion::menu`) and the hover fade (`motion::MENUS`,
+  `draw_in_animated`): the cascade's own `draw_animated` draws rows plain, so `Popup::draw` walks
+  the open menus and gives each the entrance mdview had (`Entrance::Drop` for the root, `Side`
+  for a submenu, 117 ms each). A submenu's presence is named by the row path
+  (`motion::submenu(anim, serial, path)`), so a submenu opened afresh fades in and one put back
+  in its own place does not. The 300 ms rest is `motion::SUBMENU` (`Cascade::with_delay`); the
+  keys, Tab stepping down, the access keys and the mouse dwell are as they were.
+- **Access keys.** The cascade reads every menu for them, so the submenu's labels are escaped
+  (`escape_access`): a file name's `&` is drawn as one `&` and marks no letter, as the recent
+  menu that reads none draws it.
+- **The keys go to the open submenu, however it was opened.** The shared cascade keeps them in
+  the menu the pointer was last in; `cascade_key` moves them into the submenu with a `Right`
+  first (putting out the row it lights when none was lit), so Up/Down/Enter/Escape/Left act on
+  the submenu as they always did. Home and End, and a letter with Ctrl or Alt, stay no menu keys.
+- **Placement.** The shared `around`/`beside` keep 4 px from the edges of the area they are
+  handed; a menu's own placement kept them from the window. `cascade_room` widens the room by
+  them at the top and the bottom, so the cascade's root lands on the menu's rectangle at every
+  size (the test below). The submenu now sits `beside` its menu with the shared 2 px gap; the old
+  code overlapped the menu by 4 px, so it moved 6 px (the cascade shots).
+- **Two changes of behaviour, both the shared rules, not regressions:** the pointer resting on
+  its menu's padding (not on a row) while a submenu is open now asks for it to close after the
+  300 ms if it is not on its way to the submenu (the old code kept it until a row was rested
+  on); and a key pressed while a pointer change still waits makes that change first
+  (`Cascade::key`), so a key during the rest acts on what is lit. The crossing test asserts the
+  first: a `tick` at the move's own time does not close it.
+
+Tests: 4 re-pointed in `app/tests.rs` (`menu` → `root`, `sub` → `submenu`, `dwell` →
+`deadline`), one in `motion_tests.rs` and one in `frost_tests.rs`, one in `library_tests.rs`. Two
+assertions say the same thing through the cascade rather than the fields:
+`a_click_opens_the_submenu_at_once_and_other_items_close_it`'s crossing no longer expects no
+pending close (see above), and `a_submenu_opens_after_the_pointer_rests_and_the_parent_stays`
+asserts the submenu lies just beside the menu's left edge (the shared gap) rather than over it.
+Two are new, each failing with its fix reverted:
+- `the_cascades_menu_is_placed_exactly_where_the_menus_own_placement_puts_it`: the cascade's root
+  equals the menu's own placed rectangle at 1280x800, 1000x520 and 520x360 — fails with
+  `cascade_room` left as the plain room (1000x520: y 44 in a 472 px box instead of 40 in 476);
+- `a_recent_files_ampersand_is_drawn_as_one_and_marks_no_letter`: `R&D.md` in the submenu parses
+  to `R&D.md` with no access key — fails without the escape.
 
 ### Shots
 
-`tests/shots.sh` into `target/shots/stage6`: 193 shots (195 since the title-row hovers). Against `final5` (189) every one of the
-189 is byte-identical and four are new, looked at: `palette-rising-light` / `-dark`
-(`--palette "" --motion-at 41`: the card about half there, paler, its page showing through) and
-`update-rising-light` / `-dark` (`--update-bar available --motion-at 21`: about 12 of the bar's
-34 px, its label cut, the page under it). No other shot changed — the animated draws at rest are
-the plain ones pixel for pixel, as shared's tests say. During the review those two shots were
-re-rendered: the script line still said `--motion-at 67` (the 67 was left from the first draft)
-while this text and the checks said 21, so the pair differed from `stage6` for that reason alone;
-both now say 21 and the pair is the 21 ms picture. The launch rule itself leaves every shot
-byte-identical: the bar rests at 1 with its track on the first frame, so the slide the shot
-restarts still ends at 21 ms.
+`tests/shots.sh` into `target/shots/l1-final`: 195 shots, 185 byte-identical to
+`target/shots/l1-before`. Ten differ, looked at in both themes:
+- the seven main-menu shots (`menu-main-light`/`-dark`, `-keys`, `-fading-light`/`-dark`,
+  `menu-tall-main`, `hover-menu`) differ by 30 pixels each: the Open recent row's arrow is the
+  shared `glyph::RIGHT`, which the menu draws for any row a cascade marks as opening a submenu,
+  where the old hint was the text `›` (measured: 30 px, x 1252–1257, y 163–170 at 1280x800; the
+  tall shot at x 972–977, y 121–128);
+- `menu-cascade-light`/`-dark` and `scale-150-menu` differ over the submenu's whole rectangle:
+  it moved 6 px away from its menu (the shared 2 px gap in place of the old 4 px overlap). Its
+  rows, width, height and row alignment are as they were.
+
+`menu-recent`, `menu-tab*`, `menu-page`, `menu-find`, `menu-library-*`, the palette, the dialogs
+and every content shot are byte-identical.
+
+Not verified: the owner's look at the changed menu shots (the arrow and the 6 px gap are his
+judgement calls, and the shared gap cannot be the old overlap without changing shared); the 300
+ms rest and the aim test by hand in a real window; the cost of a menu frame (the cascade places
+its menus once more a frame than the old code, `place_in` before the draw and again inside it);
+Linux and macOS.
 
 ### Numbers (release, this PC, 2026-11-26)
 
@@ -156,6 +204,12 @@ folder was fast too, with the repo's own fixture. The commit was ruled out by bu
 the stage's commits in one worktree: `2c35084`, `5bedbbc`, `79e530c` and `445403a` are all the
 before build's 0.4 ms paint there. What was not found is why that one combination was slow; no
 number above is taken from those runs.
+
+**Next: the owner's look at L1, then the branch is ready to merge.** Shared's close-out list is
+complete on this branch (its pin stays `09b01c1`; nothing in shared was changed). The changed
+menu shots are the only owner-visible difference; nothing else is on the list.
+
+Workspace after L1: 777 passed, 6 ignored (`mdview`'s own: 336 passed, 1 ignored).
 
 ---
 
