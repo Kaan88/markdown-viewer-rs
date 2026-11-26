@@ -620,6 +620,26 @@ fn escape_and_left_close_only_the_submenu_and_right_opens_it() {
 }
 
 #[test]
+fn the_keys_act_in_the_submenu_the_pointer_opened() {
+    let mut a = app(&["linked.md"]);
+    click(&mut a, Hit::Bar(BarItem::More));
+    let r = recent_row(&a);
+    let (x, y) = menu_row(&a, r);
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_some()));
+    // The pointer opened it and stayed in the menu; the keys go to the submenu all the same,
+    // as they always did (the shared cascade keeps them where the pointer last was).
+    key(&mut a, KeyName::Down, None);
+    let p = a.ui.popup.as_ref().unwrap();
+    let sub = p.submenu().expect("still open");
+    assert_eq!(sub.hover, Some(0), "the submenu's first row");
+    assert!(p.root().hover.is_some(), "its row stays lit");
+}
+
+#[test]
 fn choosing_in_the_submenu_acts_and_closes_both() {
     let mut a = app(&["linked.md"]);
     click(&mut a, Hit::Bar(BarItem::More));

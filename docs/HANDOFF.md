@@ -151,18 +151,23 @@ submenu, `9d2740a` adds the two tests below.
   (`Cascade::key`), so a key during the rest acts on what is lit. The crossing test asserts the
   first: a `tick` at the move's own time does not close it.
 
-Tests: 4 re-pointed in `app/tests.rs` (`menu` → `root`, `sub` → `submenu`, `dwell` →
-`deadline`), one in `motion_tests.rs` and one in `frost_tests.rs`, one in `library_tests.rs`. Two
-assertions say the same thing through the cascade rather than the fields:
-`a_click_opens_the_submenu_at_once_and_other_items_close_it`'s crossing no longer expects no
-pending close (see above), and `a_submenu_opens_after_the_pointer_rests_and_the_parent_stays`
-asserts the submenu lies just beside the menu's left edge (the shared gap) rather than over it.
-Two are new, each failing with its fix reverted:
+Tests: fourteen tests read the cascade's state where they read the old fields — `root()` for
+`menu`, `submenu()` for `sub` and `deadline()` for `dwell` — across `app/tests.rs`,
+`motion_tests.rs`, `frost_tests.rs` and `library_tests.rs`, and three helpers (`menu_row`,
+`recent_row`, `menu_middle`). Two assertions say the same thing through the cascade rather than
+the fields: `a_click_opens_the_submenu_at_once_and_other_items_close_it`'s crossing no longer
+expects no pending close (see above), and
+`a_submenu_opens_after_the_pointer_rests_and_the_parent_stays` asserts the submenu lies just
+beside the menu's left edge (the shared gap) rather than over it. Three are new, each failing
+with its fix reverted:
 - `the_cascades_menu_is_placed_exactly_where_the_menus_own_placement_puts_it`: the cascade's root
   equals the menu's own placed rectangle at 1280x800, 1000x520 and 520x360 — fails with
   `cascade_room` left as the plain room (1000x520: y 44 in a 472 px box instead of 40 in 476);
 - `a_recent_files_ampersand_is_drawn_as_one_and_marks_no_letter`: `R&D.md` in the submenu parses
-  to `R&D.md` with no access key — fails without the escape.
+  to `R&D.md` with no access key — fails without the escape;
+- `the_keys_act_in_the_submenu_the_pointer_opened`: after a click opens the submenu, Down lights
+  its first row and the menu keeps its row lit — fails with the `Right` that moves the keys into
+  the submenu removed (the submenu closes instead).
 
 ### Shots
 
@@ -209,7 +214,7 @@ number above is taken from those runs.
 complete on this branch (its pin stays `09b01c1`; nothing in shared was changed). The changed
 menu shots are the only owner-visible difference; nothing else is on the list.
 
-Workspace after L1: 777 passed, 6 ignored (`mdview`'s own: 336 passed, 1 ignored).
+Workspace after L1: 778 passed, 6 ignored (`mdview`'s own: 337 passed, 1 ignored).
 
 ---
 
