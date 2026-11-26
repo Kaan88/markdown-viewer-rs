@@ -207,27 +207,26 @@ switches the palette. `App::theme_frame` blends the snapshot back over each whol
 `Snapshot::crossfade`: 170 ms linear, starting at 0 (the old frame). A second flip starts from
 the currently blended frame. The snapshot includes Settings if it was already showing.
 
-There is no capture on launch, with animations off or reduced, during a presentation, with
-frosted chrome, or above 2560 × 1600 device pixels (15.625 MiB; see [DECISIONS.md](DECISIONS.md)).
-A presentation immediately frees any existing snapshot. Frost snaps to the new palette because
-the shared blend only accepts one key, but the two palettes use different keys. A content-size
-change ends the fade before asking for progress, even if a theme flip arrives on the same
-frame; a same-size resize notification does not end a fade. The fade leaves no timer of its own.
+There is no capture on launch, with animations off or reduced, or during a presentation.
+Entering a presentation immediately frees any existing snapshot. A resize that changes the
+content size frees the snapshot on the event, even when minimization prevents the next frame
+from drawing. A same-size notification keeps the fade. A theme flip arriving together with a
+resize cannot capture the newly allocated bitmap.
 
 Tests (`motion_tests.rs`): the kept frame is exactly the window's rectangle and size (and the
 4,096,000 bytes); the change's first frame is the old palette's pixel for pixel; the damage
 covers every row of the window, on the first frame and at 85 ms; at 85 ms of 170 the page's
 colour is neither palette; the end is the window a run that started light draws, and the kept
 frame is freed; motion off and reduced motion keep nothing and equal the still run; a resize
-mid-fade ends it with no timer and the new palette alone. Revert checks: without the snapshot the
-fade tests fail on the kept frame; without the resize guard the resize test fails on "asks for no
-frame" (the asked presence leaves a deadline).
+mid-fade ends it with no timer and the new palette alone. A minimizing resize releases the
+snapshot before another frame is composed, and restoring the original size does not replay it.
 
 **Shots.** `dialog-settings-opening-light` and `-dark` show the dim and card entering together.
 `theme-fading-{dark,light}` and `theme-fading-settings-{dark,light}` capture the theme fade
 with and without the dialog already open. `--theme-flip light|dark` applies the change after
-the clock starts. The fade begins on the first 16 ms frame, so `--motion-at 101` captures
-85 ms into its 170 ms.
+the clock starts. Without `--light` or `--dark`, it simulates a desktop theme change so the
+dialog's Theme row stays on System. The fade begins on the first 16 ms frame, so
+`--motion-at 101` captures 85 ms into its 170 ms.
 
 **Review verification (Windows).** Workspace release suite: 798 passed, 0 failed; the six
 pre-existing ignored cases passed in separate runs of the release test binaries. Format and
@@ -237,11 +236,30 @@ The shot suite produced 201 PNGs: 197 byte-identical to the 199-shot baseline, t
 theme fades and two new Settings theme fades. All four were inspected. At (640, 400), the
 page blends RGB 32 ↔ 251 to 142 and the Settings card blends 44 ↔ 252 to 148 in both directions.
 
-**Not verified.** The frosted theme change is tested headless with a compositor stand-in, not
-on a real backdrop. An OS `ThemeChanged`, a real fullscreen or maximized window, 144 Hz, macOS
-(including its app-menu dispatch), and Linux were not exercised. The memory figure is the
-snapshot size, not a measured private-memory peak; see [STATE.md](STATE.md) for the open
-Settings allocation.
+**Follow-up verification (Windows).** Format and release Clippy passed; 806 release workspace
+tests passed, including the six normally ignored cases. The two added regressions failed with
+their fixes reverted, then passed after restoration. Of the 195 `--no-session` shots rerun,
+193 are byte-identical to the previous review; only the two Settings theme fades changed.
+Both were inspected and show System selected. Six legacy scratch-profile shots were not
+rerun because they need a session to read the scratch preferences.
+
+### Decisions taken without the owner
+
+- Cap the theme snapshot at 2560 × 1600 device pixels (15.625 MiB). Above that area the theme
+  snaps; do not downscale. A 3840 × 2160 snapshot alone is about 31.6 MiB, beyond the 30 MiB
+  private-memory budget.
+- With frosted chrome active, the theme snaps with no fade. The shared blend accepts only one
+  frost key, but light and dark use different keys. Enabling frost also ends an in-flight fade.
+
+### Not verified / next steps
+
+- The frosted theme change is tested headless with a compositor stand-in, not on a real
+  backdrop. An OS `ThemeChanged`, native minimize/fullscreen/maximize, 144 Hz, macOS
+  (including its app-menu dispatch), and Linux were not exercised.
+- The Settings entrance still takes a whole-window snapshot on every blended frame. Reducing
+  that allocation needs a shared-crate change.
+- No peak private memory has been measured against the 30 MiB budget. The cap limits just the
+  theme snapshot, not the total process.
 
 ### L1: the main menu's Open recent is a `submenu::Cascade` (2026-11-26)
 
