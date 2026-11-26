@@ -14,4 +14,3 @@ png = "0.18"
 zune-jpeg = "=0.5.15"
 gif = { version = "=0.14.2", default-features = false, features = ["std"] }
 image-webp = { version = "=0.2.4", default-features = false }
-
