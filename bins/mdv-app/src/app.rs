@@ -23,7 +23,7 @@ use crate::platform;
 use crate::textfield::EditKey;
 use crate::theme::{self, Palette};
 use crate::ui::{
-    Act, Areas, BarItem, Dialog, DialogKind, Drag, Hit, PAGE_MIN, PANE_MAX, PANE_MIN, Popup,
+    Act, Areas, BarItem, Dialog, DialogKind, Drag, Hit, Keyed, PAGE_MIN, PANE_MAX, PANE_MIN, Popup,
     PopupKind, REGIONS, Region, Scroller, Side, Ui,
 };
 use crate::updater;
@@ -31,7 +31,6 @@ use crate::workspace::{Click, LinkOutcome, ThemeChoice, Workspace};
 use mdshared_app::sister::Request;
 use mdshared_ui::anim::{Animator, Id};
 use mdshared_ui::corners::Corners;
-use mdshared_ui::menu::Entrance;
 use mdview_core::commands::CommandId as C;
 use mdview_core::watch::FileWatcher;
 use mdview_render::Bitmap;
@@ -824,13 +823,7 @@ impl App {
         // The open menus are asked for on every frame they are open, whatever else the frame
         // draws, so none is forgotten and taken for new on a frame that skips the overlays.
         self.menu_t = match self.ui.popup.as_ref() {
-            Some(p) => (
-                crate::motion::menu(&mut self.anim, p.serial),
-                match p.sub {
-                    Some(_) => crate::motion::submenu(&mut self.anim, p.serial, p.sub_serial),
-                    None => 1.0,
-                },
-            ),
+            Some(p) => p.presence(&mut self.anim),
             None => (1.0, 1.0),
         };
         // The palette's entrance, asked for on every frame it is open for the same reason.
@@ -1070,10 +1063,7 @@ impl App {
             };
             if let Some(popup) = self.ui.popup.as_mut() {
                 let room = menu_room(self.areas.title, w, h);
-                popup.menu.place_in(&mut p, room);
-                if let Some(s) = popup.sub.as_mut() {
-                    s.place_in(&mut p, room);
-                }
+                popup.place_in(&mut p, room);
             }
         }
         self.toast_until = self.toasts.deadline();
@@ -1088,10 +1078,7 @@ impl App {
         bounds.extend(card.iter().map(crate::preview::Layout::bounds));
         if let Some(popup) = &self.ui.popup {
             // Everything a menu touches as it fades in, its shadow and its drop included.
-            bounds.push(popup.menu.presence_bounds());
-            if let Some(s) = &popup.sub {
-                bounds.push(s.presence_bounds());
-            }
+            bounds.push(popup.presence_bounds());
         }
         if self.ui.dialog.is_some() || self.ui.settings.is_some() {
             bounds.push(Rect::new(0.0, 0.0, w, h));
@@ -1124,12 +1111,8 @@ impl App {
             self.ui.popup.as_ref().map(|p| {
                 (
                     p.kind,
-                    (p.menu.hover, p.menu.scroll().to_bits()),
-                    p.menu.items.len(),
+                    sig(p.state()),
                     p.access,
-                    p.sub
-                        .as_ref()
-                        .map(|s| (s.hover, s.items.len(), s.scroll().to_bits())),
                     // A menu fading in is drawn anew on each frame of it.
                     (self.menu_t.0.to_bits(), self.menu_t.1.to_bits()),
                 )
@@ -1339,33 +1322,8 @@ impl App {
                     let room = menu_room(self.areas.title, w, h);
                     // At rest (1) each is `draw_in`, pixel for pixel; the hover fill of a row
                     // fades in on the row the pointer or the keys reach (`draw_in_animated`).
-                    let (t, ts) = self.menu_t;
-                    let serial = popup.serial;
-                    let sub_serial = popup.sub_serial;
                     self.anim.group(crate::motion::MENUS);
-                    popup
-                        .menu
-                        .draw_entering_with(c.p, room, t, Entrance::Drop, |p, m| {
-                            m.draw_in_animated(
-                                p,
-                                &pal,
-                                room,
-                                &mut self.anim,
-                                ("menu-hover", serial),
-                            );
-                        });
-                    if let Some(s) = popup.sub.as_mut() {
-                        let leftward = s.rect().x < popup.menu.rect().x;
-                        s.draw_entering_with(c.p, room, ts, Entrance::Side { leftward }, |p, m| {
-                            m.draw_in_animated(
-                                p,
-                                &pal,
-                                room,
-                                &mut self.anim,
-                                ("submenu-hover", sub_serial),
-                            );
-                        });
-                    }
+                    popup.draw(c.p, &pal, room, self.menu_t, &mut self.anim);
                     self.anim.ungroup();
                     menus_drawn = true;
                 }
@@ -2500,10 +2458,7 @@ fn shot(mut app: App, path: &Path) -> i32 {
         }
         app.show_card_now();
         if let Some(p) = app.ui.popup.as_mut() {
-            p.menu.pointer(x, y);
-            if let Some(s) = p.sub.as_mut() {
-                s.pointer(x, y);
-            }
+            p.pointer(x, y, Instant::now());
         }
     }
     // What a shot sets moving: what is on screen now is at rest, then the change comes and

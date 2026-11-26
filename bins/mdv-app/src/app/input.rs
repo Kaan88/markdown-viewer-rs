@@ -94,50 +94,10 @@ impl App {
         }
         let edge = self.edge_at(x, y);
         let in_menu = self.ui.popup.as_ref().is_some_and(|p| p.contains(x, y));
-        if let Some(p) = self.ui.popup.as_mut() {
-            // An open submenu is never closed by the move itself, or the pointer could not reach
-            // it: on its way there it crosses the menu's padding, a separator, or the corner of
-            // another row. Off the rows it stays; on another row it stays until the pointer has
-            // rested there for the dwell.
-            let opener = p
-                .sub
-                .as_ref()
-                .and_then(|_| p.menu.items.iter().position(|it| it.id.is_submenu()));
-            let before = p.menu.hover;
-            let on_sub = p.sub.as_ref().is_some_and(|s| s.contains(x, y));
-            if let Some(s) = p.sub.as_mut()
-                && s.pointer(x, y)
-            {
-                self.wants_frame = true;
-            }
-            if on_sub || (p.sub.is_some() && !p.menu.contains(x, y)) {
-                // On the submenu, or off both menus: the parent keeps its highlight on the item
-                // the submenu came from, and nothing is pending.
-                p.dwell = None;
-                p.menu.hover = opener;
-            } else {
-                p.menu.pointer(x, y);
-                match p.menu.hover {
-                    None => {
-                        p.dwell = None;
-                        if opener.is_some() {
-                            p.menu.hover = opener;
-                        }
-                    }
-                    Some(i) => {
-                        // Something happens after a rest here only if it would change what is
-                        // open: a submenu item opens its submenu, any other item closes it.
-                        if p.menu.items[i].id.is_submenu() == p.sub.is_some() {
-                            p.dwell = None;
-                        } else if p.dwell.map(|d| d.0) != Some(i) {
-                            p.dwell = Some((i, now + crate::ui::SUBMENU_DWELL));
-                        }
-                    }
-                }
-            }
-            if p.menu.hover != before {
-                self.wants_frame = true;
-            }
+        if let Some(p) = self.ui.popup.as_mut()
+            && p.pointer(x, y, now)
+        {
+            self.wants_frame = true;
         }
         let hit = if edge.is_some() || in_menu {
             None
@@ -566,16 +526,10 @@ impl App {
             self.redraw();
             return;
         }
-        if let Some(p) = &self.ui.popup
+        if let Some(p) = self.ui.popup.as_mut()
             && p.contains(x, y)
         {
-            let on_sub = p.sub.as_ref().is_some_and(|s| s.contains(x, y));
-            let act = if on_sub {
-                p.sub.as_ref().and_then(|s| s.chosen())
-            } else {
-                p.menu.chosen()
-            };
-            if let Some(act) = act {
+            if let mdshared_ui::submenu::Outcome::Chosen(act) = p.click(x, y) {
                 self.choose(act, false);
             }
             self.redraw();
@@ -706,16 +660,7 @@ impl App {
                 Some(py) => -py / self.scale,
                 None => -notches * PANE_WHEEL,
             };
-            let over_sub = p.sub.as_ref().is_some_and(|s| s.contains(x, y));
-            let menu = match p.sub.as_mut() {
-                Some(s) if over_sub => Some(s),
-                _ => Some(&mut p.menu).filter(|m| m.contains(x, y)),
-            };
-            if let Some(m) = menu.filter(|m| m.scrolls())
-                && m.scroll_by(dy)
-            {
-                let hover = m.pointer(x, y);
-                self.wants_frame |= hover;
+            if p.wheel(x, y, dy) {
                 self.redraw();
             }
             return;
@@ -923,42 +868,10 @@ impl App {
         }
         // A menu takes the keyboard.
         if let Some(p) = self.ui.popup.as_mut() {
-            p.dwell = None;
-            // With a submenu open the keys go to it; Escape and Left close only the submenu.
-            if let Some(s) = p.sub.as_mut() {
-                match name {
-                    KeyName::Up => s.step(false),
-                    KeyName::Down | KeyName::Tab => s.step(true),
-                    KeyName::Enter | KeyName::Space => {
-                        if let Some(act) = s.chosen() {
-                            self.choose(act, true);
-                        }
-                    }
-                    KeyName::Escape | KeyName::Left => p.sub = None,
-                    _ => {}
-                }
-                return;
-            }
-            match name {
-                KeyName::Up => p.menu.step(false),
-                KeyName::Down | KeyName::Tab => p.menu.step(true),
-                KeyName::Enter | KeyName::Space | KeyName::Right => {
-                    let arrow = name == KeyName::Right;
-                    if let Some(act) = p.menu.chosen()
-                        && (!arrow || act.is_submenu())
-                    {
-                        self.choose(act, true);
-                    }
-                }
-                KeyName::Escape => self.ui.popup = None,
-                // A letter picks the item marked with it, as Enter would (menus that read no
-                // access keys answer None and the key does nothing, as before).
-                KeyName::Char(ch) if !mods.ctrl && !mods.alt => {
-                    if let Some(act) = p.menu.access_key(ch) {
-                        self.choose(act, true);
-                    }
-                }
-                _ => {}
+            match p.key(&name, mods) {
+                Keyed::Chosen(act) => self.choose(act, true),
+                Keyed::Close => self.ui.popup = None,
+                Keyed::Nothing => {}
             }
             return;
         }

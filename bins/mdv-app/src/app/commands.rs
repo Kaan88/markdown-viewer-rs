@@ -379,14 +379,7 @@ impl App {
             && p.kind == PopupKind::Main
         {
             // Asked by name, not by the pointer: highlight the item it belongs to.
-            if let Some(i) = p
-                .menu
-                .items
-                .iter()
-                .position(|it| it.id.is_submenu() && it.enabled)
-            {
-                p.menu.hover = Some(i);
-            }
+            p.hover_submenu_row();
             self.open_submenu(false);
             return;
         }
@@ -428,15 +421,8 @@ impl App {
         } else {
             (parent.right() - 4.0, false)
         };
-        let mut menu = overlays::recent_menu(&self.ws, x, row_y - 5.0, right);
-        if keyboard {
-            menu.step(true);
-        }
-        // A submenu that opens fades in; one put in the place of the one showing does not.
-        if p.sub.is_none() {
-            p.sub_serial += 1;
-        }
-        p.sub = Some(menu);
+        let menu = overlays::recent_menu(&self.ws, x, row_y - 5.0, right);
+        p.set_submenu(menu, keyboard);
         self.ui.tips.hide();
     }
 
@@ -1343,22 +1329,9 @@ impl App {
         }
         // The pointer resting on a submenu item: open it when the dwell is up. Nothing is
         // scheduled when no menu is open, because the dwell lives in the popup.
-        let dwell = self.ui.popup.as_ref().and_then(|p| p.dwell);
-        if let Some((_, due)) = dwell {
+        if let Some(due) = self.ui.popup.as_ref().and_then(Popup::deadline) {
             if now >= due {
-                // The pointer rested: on a submenu item its submenu opens, on any other item
-                // the open submenu closes.
-                let opens = self.ui.popup.as_mut().is_some_and(|p| {
-                    let i = p.dwell.take().map(|d| d.0);
-                    let opens =
-                        i.is_some_and(|i| p.menu.items.get(i).is_some_and(|it| it.id.is_submenu()));
-                    if opens {
-                        p.menu.hover = i;
-                    } else {
-                        p.sub = None;
-                    }
-                    opens
-                });
+                let opens = self.ui.popup.as_mut().is_some_and(|p| p.tick(now));
                 if opens {
                     self.open_submenu(false);
                 }

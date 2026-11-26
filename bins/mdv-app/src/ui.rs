@@ -2,11 +2,15 @@
 //! is over, what is being dragged, which popup or dialog is open, the panes and the find box.
 //! Drawing code reads it; the event loop in `app.rs` changes it.
 
-use crate::gfx::Rect;
+use crate::gfx::{Painter, Rect};
+use crate::keys::{KeyName, Mods};
 use crate::menu::Menu;
 use crate::textfield::TextField;
+use crate::theme::Palette;
 use crate::tree::{FileTree, new_tree};
-use mdshared_ui::submenu::Cascade;
+use mdshared_ui::anim::Animator;
+use mdshared_ui::menu::Entrance;
+use mdshared_ui::submenu::{Cascade, Outcome};
 use mdview_core::commands::CommandId;
 use mdview_render::SourceKind;
 use std::path::PathBuf;
@@ -242,6 +246,14 @@ pub enum PopupKind {
     Library,
 }
 
+/// What a popup's overlay signature holds of one open menu: its highlighted row, its scroll in
+/// bits and how many rows it has.
+type RowState = (Option<usize>, u32, usize);
+
+/// Everything of a popup that changes what is drawn when it is the same kind: each open menu's
+/// rows, and the path of open submenus.
+pub type PopupState = (Vec<RowState>, Vec<usize>);
+
 pub struct Popup {
     pub kind: PopupKind,
     pub menu: Menu<Act>,
@@ -320,6 +332,261 @@ impl Popup {
     pub fn contains(&self, x: f32, y: f32) -> bool {
         self.menu.contains(x, y) || self.sub.as_ref().is_some_and(|s| s.contains(x, y))
     }
+
+    /// The pointer moved to `x`, `y` at `now`. True when what is drawn changed.
+    pub fn pointer(&mut self, x: f32, y: f32, now: Instant) -> bool {
+        // An open submenu is never closed by the move itself, or the pointer could not reach
+        // it: on its way there it crosses the menu's padding, a separator, or the corner of
+        // another row. Off the rows it stays; on another row it stays until the pointer has
+        // rested there for the dwell.
+        let opener = self
+            .sub
+            .as_ref()
+            .and_then(|_| self.menu.items.iter().position(|it| it.id.is_submenu()));
+        let before = self.menu.hover;
+        let on_sub = self.sub.as_ref().is_some_and(|s| s.contains(x, y));
+        let mut changed = false;
+        if let Some(s) = self.sub.as_mut()
+            && s.pointer(x, y)
+        {
+            changed = true;
+        }
+        if on_sub || (self.sub.is_some() && !self.menu.contains(x, y)) {
+            // On the submenu, or off both menus: the parent keeps its highlight on the item
+            // the submenu came from, and nothing is pending.
+            self.dwell = None;
+            self.menu.hover = opener;
+        } else {
+            self.menu.pointer(x, y);
+            match self.menu.hover {
+                None => {
+                    self.dwell = None;
+                    if opener.is_some() {
+                        self.menu.hover = opener;
+                    }
+                }
+                Some(i) => {
+                    // Something happens after a rest here only if it would change what is
+                    // open: a submenu item opens its submenu, any other item closes it.
+                    if self.menu.items[i].id.is_submenu() == self.sub.is_some() {
+                        self.dwell = None;
+                    } else if self.dwell.map(|d| d.0) != Some(i) {
+                        self.dwell = Some((i, now + SUBMENU_DWELL));
+                    }
+                }
+            }
+        }
+        changed || self.menu.hover != before
+    }
+
+    /// A click: the item under the point, when it is one. `Outcome::Outside` when the click
+    /// was not on the menu.
+    pub fn click(&mut self, x: f32, y: f32) -> Outcome<Act> {
+        if !self.contains(x, y) {
+            return Outcome::Outside;
+        }
+        let on_sub = self.sub.as_ref().is_some_and(|s| s.contains(x, y));
+        let act = if on_sub {
+            self.sub.as_ref().and_then(|s| s.chosen())
+        } else {
+            self.menu.chosen()
+        };
+        act.map_or(Outcome::Nothing, Outcome::Chosen)
+    }
+
+    /// The wheel turned by `dy` over the menus: scrolls the menu under the point, if it is
+    /// taller than its room. True when a menu scrolled.
+    pub fn wheel(&mut self, x: f32, y: f32, dy: f32) -> bool {
+        let over_sub = self.sub.as_ref().is_some_and(|s| s.contains(x, y));
+        let menu = match self.sub.as_mut() {
+            Some(s) if over_sub => Some(s),
+            _ => Some(&mut self.menu).filter(|m| m.contains(x, y)),
+        };
+        if let Some(m) = menu.filter(|m| m.scrolls())
+            && m.scroll_by(dy)
+        {
+            m.pointer(x, y);
+            return true;
+        }
+        false
+    }
+
+    /// A key, for the submenu if one is open and the menu otherwise. `Chosen` closes the popup
+    /// after acting; `Close` closes it; anything else changed only what is drawn.
+    pub fn key(&mut self, name: &KeyName, mods: Mods) -> Keyed {
+        self.dwell = None;
+        // With a submenu open the keys go to it; Escape and Left close only the submenu.
+        if let Some(s) = self.sub.as_mut() {
+            match name {
+                KeyName::Up => s.step(false),
+                KeyName::Down | KeyName::Tab => s.step(true),
+                KeyName::Enter | KeyName::Space => {
+                    if let Some(act) = s.chosen() {
+                        return Keyed::Chosen(act);
+                    }
+                }
+                KeyName::Escape | KeyName::Left => self.sub = None,
+                _ => {}
+            }
+            return Keyed::Nothing;
+        }
+        match name {
+            KeyName::Up => self.menu.step(false),
+            KeyName::Down | KeyName::Tab => self.menu.step(true),
+            KeyName::Enter | KeyName::Space | KeyName::Right => {
+                let arrow = *name == KeyName::Right;
+                if let Some(act) = self.menu.chosen()
+                    && (!arrow || act.is_submenu())
+                {
+                    return Keyed::Chosen(act);
+                }
+            }
+            KeyName::Escape => return Keyed::Close,
+            // A letter picks the item marked with it, as Enter would (menus that read no
+            // access keys answer None and the key does nothing, as before).
+            KeyName::Char(ch) if !mods.ctrl && !mods.alt => {
+                if let Some(act) = self.menu.access_key(*ch) {
+                    return Keyed::Chosen(act);
+                }
+            }
+            _ => {}
+        }
+        Keyed::Nothing
+    }
+
+    /// When the pointer's rest on a row is up: when its submenu opens, or the open one closes.
+    pub fn deadline(&self) -> Option<Instant> {
+        self.dwell.map(|d| d.1)
+    }
+
+    /// The pointer's rest is up at `now`: the highlighted row's submenu is to be opened (true;
+    /// the caller builds it from the recent files) or the open one closes (false).
+    pub fn tick(&mut self, now: Instant) -> bool {
+        let Some((_, due)) = self.dwell else {
+            return false;
+        };
+        if now < due {
+            return false;
+        }
+        let i = self.dwell.take().map(|d| d.0);
+        let opens = i.is_some_and(|i| self.menu.items.get(i).is_some_and(|it| it.id.is_submenu()));
+        if opens {
+            self.menu.hover = i;
+        } else {
+            self.sub = None;
+        }
+        opens
+    }
+
+    /// Highlights the enabled row that opens a submenu, if the menu has one: the Recent button
+    /// asked by name while the main menu is open.
+    pub fn hover_submenu_row(&mut self) {
+        if let Some(i) = self
+            .menu
+            .items
+            .iter()
+            .position(|it| it.id.is_submenu() && it.enabled)
+        {
+            self.menu.hover = Some(i);
+        }
+    }
+
+    /// Puts `menu` beside the highlighted row. A keyboard opening highlights its first row. A
+    /// submenu that opens fades in; one put in the place of the one showing does not.
+    pub fn set_submenu(&mut self, mut menu: Menu<Act>, keyboard: bool) {
+        if keyboard {
+            menu.step(true);
+        }
+        if self.sub.is_none() {
+            self.sub_serial += 1;
+        }
+        self.sub = Some(menu);
+    }
+
+    /// Places the menu and its open submenu inside `area`.
+    pub fn place_in(&mut self, p: &mut Painter, area: Rect) {
+        self.menu.place_in(p, area);
+        if let Some(s) = self.sub.as_mut() {
+            s.place_in(p, area);
+        }
+    }
+
+    /// Draws the menu and its open submenu at their presence `t.0` and `t.1`: each fades in as
+    /// it opened, its row's hover fill fading with it (`draw_in_animated`).
+    pub fn draw(
+        &mut self,
+        p: &mut Painter,
+        pal: &Palette,
+        area: Rect,
+        t: (f32, f32),
+        anim: &mut Animator,
+    ) {
+        let serial = self.serial;
+        let sub_serial = self.sub_serial;
+        let (tm, ts) = t;
+        self.menu
+            .draw_entering_with(p, area, tm, Entrance::Drop, |p, m| {
+                m.draw_in_animated(p, pal, area, anim, ("menu-hover", serial));
+            });
+        if let Some(s) = self.sub.as_mut() {
+            let leftward = s.rect().x < self.menu.rect().x;
+            s.draw_entering_with(p, area, ts, Entrance::Side { leftward }, |p, m| {
+                m.draw_in_animated(p, pal, area, anim, ("submenu-hover", sub_serial));
+            });
+        }
+    }
+
+    /// The presence of the menu and of its open submenu, asked on every frame they are open
+    /// (`crate::motion`): a menu opened again fades in again.
+    pub fn presence(&self, anim: &mut Animator) -> (f32, f32) {
+        (
+            crate::motion::menu(anim, self.serial),
+            match self.sub.is_some() {
+                true => crate::motion::submenu(anim, self.serial, self.sub_serial),
+                false => 1.0,
+            },
+        )
+    }
+
+    /// Everything the popup draws at any presence, its shadow and its drop included.
+    pub fn presence_bounds(&self) -> Rect {
+        let mut r = self.menu.presence_bounds();
+        if let Some(s) = &self.sub {
+            let b = s.presence_bounds();
+            let (x, y) = (r.x.min(b.x), r.y.min(b.y));
+            r = Rect::new(
+                x,
+                y,
+                r.right().max(b.right()) - x,
+                r.bottom().max(b.bottom()) - y,
+            );
+        }
+        r
+    }
+
+    /// The rows, scrolls and item counts of the menus, and the path of open submenus: what
+    /// changes what is drawn for the overlay signature.
+    pub fn state(&self) -> PopupState {
+        let mut rows = vec![(
+            self.menu.hover,
+            self.menu.scroll().to_bits(),
+            self.menu.items.len(),
+        )];
+        if let Some(s) = &self.sub {
+            rows.push((s.hover, s.scroll().to_bits(), s.items.len()));
+        }
+        (rows, Vec::new())
+    }
+}
+
+/// What a pressed key did to the open menu.
+pub enum Keyed {
+    /// Nothing that is drawn changed.
+    Nothing,
+    /// An item was chosen: act on it, and the popup closes.
+    Chosen(Act),
+    /// Escape with nothing open inside the menu: the popup closes.
+    Close,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

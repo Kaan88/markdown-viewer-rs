@@ -285,15 +285,10 @@ fn the_redraw_covers_everything_the_menu_touches_while_it_fades() {
     a.compose();
     step(&mut a, FRAME);
     let p = a.ui.popup.as_ref().unwrap();
-    let (menu, sub) = (
-        p.menu.presence_bounds(),
-        p.sub.as_ref().unwrap().presence_bounds(),
-    );
-    for b in [menu, sub] {
-        assert!(a.overlay_bounds.contains(&b), "{b:?} is redrawn");
-    }
-    // And they hold the shadow and the drop: wider than the old 20 px round the menu.
-    assert!(menu.y < p.menu.rect().y - 20.0 || menu.bottom() > p.menu.rect().bottom() + 20.0);
+    let bounds = p.presence_bounds();
+    assert!(a.overlay_bounds.contains(&bounds), "{bounds:?} is redrawn");
+    // And it holds the shadow and the drop: wider than the old 20 px round the menu.
+    assert!(bounds.y < p.menu.rect().y - 20.0 || bounds.bottom() > p.menu.rect().bottom() + 20.0);
 }
 
 #[test]
