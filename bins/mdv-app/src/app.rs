@@ -78,10 +78,6 @@ const EDITOR: &str = "mdedit";
 /// How long a closing window waits for the editor to be told of the tabs it asked for: the
 /// process ends after it, and its listener with it.
 const EDITOR_CLOSE_WAIT: Duration = Duration::from_millis(500);
-/// More than the settings card's corner radius (the shared `pages::RADIUS`, 10, not exported):
-/// a frame that redraws the card alone keeps clear of its corners, which blend with the window
-/// under them.
-const SETTINGS_CARD_CORNER: f32 = 12.0;
 const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
 /// While a tab shows the editor's text: how often to ask whether the editor still answers.
@@ -929,15 +925,9 @@ impl App {
     /// Shows `text` until `until`: under the others when `stack`, in their place otherwise.
     fn show_toast(&mut self, text: &str, until: Instant, stack: bool) {
         if stack {
-            let key = self.toasts.show(text.to_string(), Some(until));
-            // The shared stack makes a new toast wait for the ones above to lift. Under
-            // `Policy::Never` (a shot, a test, Animations off, reduced motion) that wait would
-            // hold it back 167 ms with nothing moving: bringing it back drops the wait, so it
-            // is there at once as every other still frame is. (Shared keeps a delay under
-            // reduced motion on purpose, so this is the window's correction.)
-            if !self.anim.animates() {
-                self.toasts.revive(key, Some(until));
-            }
+            // The shared stack makes a new toast wait for the ones above to lift, and not at all
+            // when the animator does not animate (shared PR 24), so a still frame has it at once.
+            self.toasts.show(text.to_string(), Some(until));
             return;
         }
         let key = self.toasts.replace_newest(text.to_string(), Some(until));
@@ -1034,6 +1024,11 @@ impl App {
         let files = Id::new(crate::motion::FILES);
         if self.anim.group_deadlines().iter().any(|(g, _)| *g == files) {
             dirty[Region::Files.index()] = true;
+        }
+        // So is the title row while one of its hover fills fades.
+        let title = Id::new(crate::motion::TITLE);
+        if self.anim.group_deadlines().iter().any(|(g, _)| *g == title) {
+            dirty[Region::Title.index()] = true;
         }
         for r in REGIONS {
             if self.areas.region(r).is_none() {
@@ -1246,6 +1241,7 @@ impl App {
         // The page rows a draw of an animation's next frame is limited to.
         let mut partial: Option<(u32, u32)> = None;
         let mut files_drawn = false;
+        let mut title_drawn = false;
         let mut menus_drawn = false;
         let mut settings_drawn = false;
         {
@@ -1278,7 +1274,17 @@ impl App {
                 };
                 match r {
                     Region::Title => {
-                        chrome::draw_title(&mut c, &self.ws, &self.ui, rect, maximized)
+                        self.anim.group(crate::motion::TITLE);
+                        chrome::draw_title(
+                            &mut c,
+                            &mut self.anim,
+                            &self.ws,
+                            &self.ui,
+                            rect,
+                            maximized,
+                        );
+                        self.anim.ungroup();
+                        title_drawn = true;
                     }
                     Region::Bar => chrome::draw_bar(&mut c, &self.ws, &mut self.ui, rect),
                     Region::Files => {
@@ -1405,7 +1411,10 @@ impl App {
                 // rest is as it was. A card with a dropdown is drawn whole instead (see
                 // `settings_only`).
                 let card = f.rect();
-                let corner = SETTINGS_CARD_CORNER;
+                // The card's own corner radius (the shared `pages::CARD_RADIUS`, 10): a frame
+                // that redraws the card alone keeps clear of its corners, which blend with the
+                // window under them.
+                let corner = mdshared_ui::settings::pages::CARD_RADIUS;
                 let inner = Rect::new(card.x, card.y + corner, card.w, card.h - 2.0 * corner);
                 let list = Rect::new(inner.x, inner.y, f.page_rect().x - inner.x, inner.h);
                 let rows: Vec<Rect> = (self.settings_changed.iter())
@@ -1432,6 +1441,10 @@ impl App {
         // where it was drawn, instead of being taken for new (and shown at rest).
         if !files_drawn {
             self.anim.keep_group(crate::motion::FILES);
+        }
+        // So does the title row on a frame that leaves it as it was.
+        if !title_drawn {
+            self.anim.keep_group(crate::motion::TITLE);
         }
         // So does a hover fill fading in an open menu.
         if !menus_drawn {
@@ -1944,8 +1957,8 @@ fn style(w: &Window, dark: bool, corners: Corners) {
 
 /// Whether a saved window place still shows: its title row's first reachable point (60 px in,
 /// 16 px down) must be on one of `monitors`, given as (x, y, width, height) in physical screen
-/// px. A window saved on a monitor that is gone — unplugged, or rearranged so that its place is
-/// on no screen — is not reachable, and the window opens on a present one instead (winit's own
+/// px. A window saved on a monitor that is gone â€” unplugged, or rearranged so that its place is
+/// on no screen â€” is not reachable, and the window opens on a present one instead (winit's own
 /// default place, as a first start).
 fn position_reachable(x: i32, y: i32, monitors: &[(i32, i32, u32, u32)]) -> bool {
     monitors.iter().any(|&(mx, my, mw, mh)| {
@@ -2419,6 +2432,15 @@ fn shot(mut app: App, path: &Path) -> i32 {
             }
             p.poll_folder();
         }
+    }
+    // The pointer on the window's Close button, for a shot of its hover fill (with
+    // `--motion-at`, part way into the fade).
+    if app.args.hover_close
+        && let Some(r) = app.hit_rect(Hit::WinClose)
+    {
+        let (x, y) = (r.cx(), r.cy());
+        app.pointer_moved(x, y);
+        app.compose();
     }
     // A notice bar or a palette part of the way into its own entrance: the clock must start
     // before its first frame, since a still frame would put it in place at once.

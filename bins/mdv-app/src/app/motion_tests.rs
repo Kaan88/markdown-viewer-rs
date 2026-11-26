@@ -175,6 +175,61 @@ fn menu_hover_fade_at(scale: f32) {
 }
 
 #[test]
+fn the_title_rows_hover_shows_at_once_with_motion_off() {
+    let mut a = app(&["showcase.md"]);
+    a.full = true;
+    a.compose();
+    let r = a.hit_rect(Hit::WinClose).expect("the Close button");
+    let (x, y) = (r.cx(), r.cy());
+    let rest = pixel(&a, x, y);
+    a.pointer_moved(x, y);
+    a.compose();
+    let hovered = pixel(&a, x, y);
+    assert_ne!(rest, hovered, "the hover fill is there on its own frame");
+    step(&mut a, FRAME);
+    assert_eq!(pixel(&a, x, y), hovered, "and nothing of it faded");
+    assert!(a.anim_due.is_none(), "nothing moves");
+}
+
+#[test]
+fn the_title_rows_hover_fades_in_from_the_resting_look() {
+    let mut a = moving(&["showcase.md"]);
+    a.full = true;
+    a.compose();
+    let r = a.hit_rect(Hit::WinClose).expect("the Close button");
+    let (x, y) = (r.cx(), r.cy());
+    let rest = pixel(&a, x, y);
+    a.pointer_moved(x, y);
+    a.compose();
+    // The frame the hover begins draws the resting look, not the lit one: shared's one-frame
+    // flash (fixed by shared's PR 31) must not come back through mdview's wiring.
+    assert_eq!(
+        pixel(&a, x, y),
+        rest,
+        "no flash on the frame the hover begins"
+    );
+    assert!(a.anim_due.is_some(), "a frame is asked for");
+    step(&mut a, FRAME);
+    let early = pixel(&a, x, y);
+    assert_ne!(early, rest, "the fill has begun");
+    // At rest it is the look a still run with the pointer there draws, pixel for pixel.
+    let mut still = app(&["showcase.md"]);
+    still.full = true;
+    still.compose();
+    still.pointer_moved(x, y);
+    still.compose();
+    for _ in 0..20 {
+        step(&mut a, FRAME);
+    }
+    assert_eq!(
+        pixel(&a, x, y),
+        pixel(&still, x, y),
+        "the fill at rest is the still run's"
+    );
+    assert_ne!(early, pixel(&a, x, y), "it kept going past the first frame");
+}
+
+#[test]
 fn a_menu_rows_hover_fill_fades_in_and_the_overlays_are_drawn_for_it() {
     menu_hover_fade_at(1.0);
 }

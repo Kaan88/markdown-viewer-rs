@@ -75,6 +75,27 @@ pub const MENUS: &str = "menus";
 /// kept on a frame that leaves the dialog undrawn.
 pub const SETTINGS: &str = "settings";
 
+/// The animator's group for the title row's hover fills (the window's three buttons, a tab's, the
+/// new tab button's): the row is drawn again while one of them moves.
+pub const TITLE: &str = "title";
+
+/// The name of the hover fill of the window's button `kind` (its function, so the button keeps
+/// its fade when it turns from Maximize to Restore).
+pub fn win_button(kind: &'static str) -> Id {
+    Id::new(("win-hover", kind))
+}
+
+/// The name of a tab's hover fill: by the document it shows, so a tab that moves along the row
+/// keeps its fade.
+pub fn tab(key: &str) -> Id {
+    Id::new(("tab-hover", key))
+}
+
+/// The name of the new tab button's hover fill.
+pub fn new_tab() -> Id {
+    Id::new(("new-tab", "hover"))
+}
+
 /// The name of the chevron of the folder at `path` in the Files tree: by its path, so a row that
 /// moves up or down the list (a folder above it opened) keeps its turn.
 pub fn folder(path: &Path) -> Id {

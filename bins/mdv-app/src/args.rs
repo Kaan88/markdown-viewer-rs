@@ -76,6 +76,9 @@ pub struct Args {
     pub hover: Option<(f32, f32)>,
     /// Show the copy button of the code block under `--hover` with its check mark (for shots).
     pub copied: bool,
+    /// `--hover-close`: the pointer on the window's Close button, for a shot (with
+    /// `--motion-at`, part way into its fade).
+    pub hover_close: bool,
     pub focus_mode: bool,
     /// `--notes`: the Files pane shows the notes library (when there is one), for a shot.
     pub notes_face: bool,
@@ -307,6 +310,7 @@ impl Args {
                 "--scroll" => out.scroll = value(&a).and_then(|v| v.parse().ok()),
                 "--scroll-steps" => out.scroll_steps = value(&a).and_then(|v| v.parse().ok()),
                 "--copied" => out.copied = true,
+                "--hover-close" => out.hover_close = true,
                 "--menu-at" => out.menu_at = value(&a).and_then(|v| v.parse().ok()),
                 "--turn" => out.turn = value(&a),
                 "--toast" => out.toasts.extend(value(&a)),

@@ -6,6 +6,8 @@ mdview next: menus fade in as they open, folders' arrows turn, toasts rise in an
 
 - **A menu row's hover fills in.** The row the pointer or the keys reach fills in quickly instead of at once, and fades out as they leave it; with animations off or the system asking for less motion it is at once.
 
+- **Title row hovers fill in.** The window buttons, a tab and the new tab button fill in quickly instead of at once, and fade out as the pointer leaves; with animations off or the system asking for less motion they are at once.
+
 - **The command palette fades in.** It fades and drops into place as it opens, quickly; it closes at once.
 
 - **A notice bar slides in.** The update bar, last time's crash report and the offer to close old tabs slide down into place and the page moves under them, quickly; a bar that is dismissed goes at once.

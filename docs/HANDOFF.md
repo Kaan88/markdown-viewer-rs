@@ -21,7 +21,7 @@ missing was built. One commit per item, each with a test that fails with the fix
 | Popup damage: `presence_bounds()`, no hand-made margin | done (`7eda58d`): the palette was the last `rect.inset(-20)`; menus, the submenu and bubbles already used the shared bounds, and a dialog dims the whole window so its damage stays the window |
 | D1 groups: `group`/`ungroup`, `keep_group`, damage from `group_deadlines` | Files and Settings were done; the menus' hover fills were added (`motion::MENUS`) |
 | D3 `Painter::set_frost_key` | already done (`app.rs`, before the frame is drawn) |
-| D4 `chrome::draw_*_animated` in the title row | **blocked on shared** — see below |
+| D4 `chrome::draw_*_animated` in the title row | **done** (pin `09b01c1`, shared PR 31), see the pin section below: the window's three buttons, a tab and the new tab button fade their hover fills in the animator's group `motion::TITLE` |
 | D6 `Tooltip::hover_at` from rest | already done |
 | D7 `watch_motion_reduced` on a helper thread | already done: `App::watch_motion_with` starts the watch on a short-lived helper thread (on Windows it makes a hidden window and may wait 5 s for it); the wake only sends `Wake::Motion`, and the setting is read on the window thread after it |
 | X3 `Menu::draw_in_animated` (hover row) | done (`2c35084`) |
@@ -32,16 +32,44 @@ missing was built. One commit per item, each with a test that fails with the fix
 | L1 `submenu::Cascade` in place of the hand-made submenus and dwell | **not done this stage.** mdview's one hand-made submenu (the main menu's Open recent) is a `Menu` inside `Popup` with `dwell: Option<(usize, Instant)>`, `SUBMENU_DWELL` (300 ms) and its own key handling; moving it to `Cascade` means the popup body becoming a `Menu`/`Cascade` enum, its draw, hit tests, keys, clicks and about thirty tests — a rewrite, not a wiring, and it was left for its own session rather than half done |
 | W3 `window_state` restores onto a monitor that still exists | the behaviour was already there (mdview keeps its own physical place in the session, not a shared `WindowState`): a place is used only if the title row's left end is on a monitor that is there. This stage only moved that check into the pure `position_reachable` and tested it — no change of behaviour |
 
-**D4 is stopped on a shared defect.** In `draw_win_button_animated`, `draw_tab_animated` and
-`draw_new_tab_button_animated` (through `button_fill_animated`) the early-out is
-`... || t >= 1.0 || t <= 0.0`, and its plain call is given `hovered || t >= 1.0`. On the first
-frame of a hover the toggle is still 0 with the pointer on the control, so the plain path draws
-the **fully hovered** look; the next frame draws the partial fade at 19 %: a one-frame flash
-before every fade-in, and the mirror of it (0 → 80 %) on every fade-out. Measured through
-mdview's caption button: frame 0 the danger fill, frame 1 `t = 0.19`. To ask shared: decide the
-plain look by `t > 0.0` rather than by `hovered` (`lit = t > 0.0` at `t <= 0` and `t >= 1`), in
-those three and in `button_fill_animated`; `Menu::draw_in_animated` is already right (its `a > 0.0`
-guard draws the rest look at `a = 0`). Until then the title row keeps its at-once hovers.
+**D4 is done at shared's pin `09b01c1`.** Shared's PR 31 gave the three animated title pieces their
+plain look by `t > 0.0` instead of by `hovered`, so the frame a hover begins draws the resting
+look (no flash), and mdview wires it: `chrome::draw_title` takes the animator, draws the window's
+three buttons (`draw_win_button_animated`, named by function: close/max/min), each tab
+(`draw_tab_animated`, named by its document's path so a tab that moves keeps its fade) and the
+new tab button (`draw_new_tab_button_animated`) in `motion::TITLE`; the row is redrawn while
+that group has a deadline and kept (`keep_group`) on a frame that leaves it undrawn. With
+Animations off, reduced motion, a shot or a test, each draws its plain self, pixel for pixel.
+
+### The pin at `09b01c1` (2026-11-26)
+
+Shared's `main` (PRs 21-31, 34 commits on from `535ad4c`), pinned in `Cargo.toml` and
+`Cargo.lock`. `Cargo.lock` moves the five `mdshared-*` source lines and one dependency line
+inside `serde-saphyr` (`base64 0.23.1` -> `0.22.1`, both already in the tree): no crate added or
+removed. All 193 shots byte-identical (`target/shots/pin-before` against `pin-after`), 773 tests
+passing.
+
+- **`revive` is gone.** `App::show_toast` no longer revives a stacked toast under
+  `Policy::Never`: shared's PR 24 makes `with_wait_for_lift` wait only when the animator
+  animates (its own test: `Stack::new().with_wait_for_lift()` under `Policy::Never` shows the new
+  toast at once). `under_no_motion_two_confirmations_are_both_there_on_the_next_frame` passes
+  without it.
+- **`pages::CARD_RADIUS`** (10) replaces the local `SETTINGS_CARD_CORNER` (12) that the clipped
+  settings redraw kept clear of: the clip is 2 px tighter at the card's corners.
+- **Item 4 (the dropdown's `menu_rect`/`menu_bounds`) was not adopted: nothing to replace.**
+  Hits and presses go straight into the shared `Form` (`Form::press`, `Form::pointer_move`,
+  `Form::key`), which places its own menu — mdview has no rect test of its own to swap. Damage
+  for an open settings dialog is already the whole window (`app.rs`, the `bounds` it pushes), on
+  the frame it closes too (the previous frame's `overlay_bounds`), so `menu_bounds` could only
+  repeat it. And the clipped frame's clip cannot be the card union the menu: the card's clip
+  exists to keep its rounded corners, so a union would square them. `has_dropdown` therefore
+  stays as the gate that makes such a frame draw the dialog whole; its test is unchanged.
+- **From `09b01c1`, nothing else changes what mdview draws.** The backdrop veil (PR 27) is an
+  opt-in strength for a window whose backdrop mdview does not use — not free, not adopted. The
+  pool cancelling by key (PR 28) is `mdshared-app`'s pool: mdview does not use it. The handover
+  (PR 29) reaches a winit window; mdview has its own single instance (`mdview_core::single`) and
+  is unchanged. The colour picker open (PR 30) drops a drag cursor and a row caret in the shared
+  form's colour row; mdview does not offer that row.
 
 ### Tests, with the revert each fails under
 

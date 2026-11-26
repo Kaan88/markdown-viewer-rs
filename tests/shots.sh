@@ -215,6 +215,10 @@ shot update-available --light --update-bar available "$fx/showcase.md"
 # 21 ms into the bar's 117 ms slide: its label cut, the page under it.
 shot update-rising-light --light --update-bar available --motion-at 21 "$fx/showcase.md"
 shot update-rising-dark --dark --update-bar available --motion-at 21 "$fx/showcase.md"
+
+# A window button's hover fill part way into its fade (it is quick), both themes.
+shot title-hover-light --light --hover-close --motion-at 40 "$fx/showcase.md"
+shot title-hover-dark --dark --hover-close --motion-at 40 "$fx/showcase.md"
 shot update-installing --dark --update-bar installing "$fx/showcase.md"
 shot update-installed --dark --update-bar installed
 shot update-installed-plain --light --update-bar installed-plain
