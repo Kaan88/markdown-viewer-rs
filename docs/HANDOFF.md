@@ -97,6 +97,12 @@ review of the stage added a sixth, and its scale counterparts below.
   meeting the key for the first time and sliding it in from 0); a bar that arrives after the
   first frame still starts its slide — fails with that `set` removed (the bar collapses on frame
   2, the page jumps 34 px, and it slides in again).
+- **the title row's hover** (`the_title_rows_hover_shows_at_once_with_motion_off`,
+  `the_title_rows_hover_fades_in_from_the_resting_look`): with motion off the fill is there on its
+  own frame and nothing moves; with motion the frame the hover begins draws the resting look (no
+  flash), the next one has begun, and once settled no timer is left and the look is the still
+  run's — fails with the plain `draw_win_button` (on the no-flash assertion) and with the
+  `dirty[Region::Title]` arm removed (on "the fill has begun").
 - **the palette closes at once** (`the_palette_closes_at_once`): after the entrance, closing
   leaves no timer and the still run's pixels — fails with the presence asked with `shown: false`
   when the palette is gone (an exit the window does not play).
@@ -120,7 +126,7 @@ the review's fixes (the launch rule, the scale pairs, the palette's close): 773 
 
 ### Shots
 
-`tests/shots.sh` into `target/shots/stage6`: 193 shots. Against `final5` (189) every one of the
+`tests/shots.sh` into `target/shots/stage6`: 193 shots (195 since the title-row hovers). Against `final5` (189) every one of the
 189 is byte-identical and four are new, looked at: `palette-rising-light` / `-dark`
 (`--palette "" --motion-at 41`: the card about half there, paler, its page showing through) and
 `update-rising-light` / `-dark` (`--update-bar available --motion-at 21`: about 12 of the bar's

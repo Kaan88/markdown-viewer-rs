@@ -218,9 +218,8 @@ fn the_title_rows_hover_fades_in_from_the_resting_look() {
     still.compose();
     still.pointer_moved(x, y);
     still.compose();
-    for _ in 0..20 {
-        step(&mut a, FRAME);
-    }
+    settle(&mut a);
+    assert!(a.anim_due.is_none(), "nothing is left moving");
     assert_eq!(
         pixel(&a, x, y),
         pixel(&still, x, y),

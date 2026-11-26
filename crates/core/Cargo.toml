@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "mdview-core"
 version.workspace = true
 edition.workspace = true

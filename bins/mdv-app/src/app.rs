@@ -1957,8 +1957,8 @@ fn style(w: &Window, dark: bool, corners: Corners) {
 
 /// Whether a saved window place still shows: its title row's first reachable point (60 px in,
 /// 16 px down) must be on one of `monitors`, given as (x, y, width, height) in physical screen
-/// px. A window saved on a monitor that is gone â€” unplugged, or rearranged so that its place is
-/// on no screen â€” is not reachable, and the window opens on a present one instead (winit's own
+/// px. A window saved on a monitor that is gone — unplugged, or rearranged so that its place is
+/// on no screen — is not reachable, and the window opens on a present one instead (winit's own
 /// default place, as a first start).
 fn position_reachable(x: i32, y: i32, monitors: &[(i32, i32, u32, u32)]) -> bool {
     monitors.iter().any(|&(mx, my, mw, mh)| {
@@ -2433,26 +2433,26 @@ fn shot(mut app: App, path: &Path) -> i32 {
             p.poll_folder();
         }
     }
-    // The pointer on the window's Close button, for a shot of its hover fill (with
-    // `--motion-at`, part way into the fade).
-    if app.args.hover_close
-        && let Some(r) = app.hit_rect(Hit::WinClose)
-    {
-        let (x, y) = (r.cx(), r.cy());
-        app.pointer_moved(x, y);
-        app.compose();
-    }
     // A notice bar or a palette part of the way into its own entrance: the clock must start
     // before its first frame, since a still frame would put it in place at once.
     let has_bar = app.ws.update_bar().is_some()
         || app.ws.crash_report().is_some()
         || app.ws.stale_offer() > 0;
-    let early = if app.ui.palette.is_some() || has_bar {
+    let hover = app.args.hover_close;
+    let early = if app.ui.palette.is_some() || has_bar || hover {
         app.args.motion_at.map(|ms| {
             if has_bar {
                 restart_bars(&mut app);
             }
-            (start_moving(&mut app), ms)
+            let start = start_moving(&mut app);
+            // The pointer on the Close button after the clock has started, so its fill begins
+            // at `start` and the shot has it part way in rather than finished.
+            if hover && let Some(r) = app.hit_rect(Hit::WinClose) {
+                let (x, y) = (r.cx(), r.cy());
+                app.pointer_moved(x, y);
+                app.compose();
+            }
+            (start, ms)
         })
     } else {
         None
@@ -2552,6 +2552,14 @@ fn shot(mut app: App, path: &Path) -> i32 {
     }
     if let Some((start, ms)) = moving {
         frames_until(&mut app, start, ms);
+    }
+    // `--hover-close` without a motion: the pointer rests on the button, drawn at once.
+    if app.args.hover_close
+        && app.args.motion_at.is_none()
+        && let Some(r) = app.hit_rect(Hit::WinClose)
+    {
+        let (x, y) = (r.cx(), r.cy());
+        app.pointer_moved(x, y);
     }
     app.full = true;
     app.compose();
