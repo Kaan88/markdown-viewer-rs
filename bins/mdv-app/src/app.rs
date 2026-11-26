@@ -879,6 +879,9 @@ impl App {
             return 0.0;
         }
         if self.frames == 0 {
+            // At rest, and *tracked*: a track kept for the frames it is seen, so the next frame
+            // continues from 1 rather than meeting the bar for the first time and sliding it in.
+            self.anim.set(("bar", key), 1.0_f32);
             return 1.0;
         }
         crate::motion::bar(&mut self.anim, key)

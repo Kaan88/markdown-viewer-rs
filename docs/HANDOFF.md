@@ -63,10 +63,12 @@ review of the stage added a sixth, and its scale counterparts below.
   frame later with the viewport following, whole at the still run's pixels — fails with
   `draw_page` given `Bars::FULL` (`79e530c`); the menu hover has the same pair of tests.
 - **a bar that is there at launch is in place** (`a_bar_that_is_there_at_launch_is_in_place_on_the_first_frame`):
-  a crash report waiting when the window starts is at 1 on the first frame, no timer is left,
-  and the frame is the still run's pixel for pixel; a bar that arrives after the first frame
-  still starts its slide — fails with the `frames == 0` arm of `App::bar_t` removed (the bar
-  then slides in on frame 2, when `read_motion` has also run, and the page jumps 34 px).
+  a crash report waiting when the window starts is at 1 on the first frame *and on the second*,
+  no timer is left, and both frames are the still run's pixel for pixel (`App::bar_t` puts the
+  track at 1 with `Animator::set`, so the next frame's `presence` continues from it instead of
+  meeting the key for the first time and sliding it in from 0); a bar that arrives after the
+  first frame still starts its slide — fails with that `set` removed (the bar collapses on frame
+  2, the page jumps 34 px, and it slides in again).
 - **the palette closes at once** (`the_palette_closes_at_once`): after the entrance, closing
   leaves no timer and the still run's pixels — fails with the presence asked with `shown: false`
   when the palette is gone (an exit the window does not play).
@@ -95,9 +97,12 @@ the review's fixes (the launch rule, the scale pairs, the palette's close): 773 
 (`--palette "" --motion-at 41`: the card about half there, paler, its page showing through) and
 `update-rising-light` / `-dark` (`--update-bar available --motion-at 21`: about 12 of the bar's
 34 px, its label cut, the page under it). No other shot changed — the animated draws at rest are
-the plain ones pixel for pixel, as shared's tests say. The review's launch rule changed the two
-`update-rising` shots, and only them (ten rows inside the bar): the window's first frame now has
-the bar in place, so the slide the shot shows starts where the shot restarts it.
+the plain ones pixel for pixel, as shared's tests say. During the review those two shots were
+re-rendered: the script line still said `--motion-at 67` (the 67 was left from the first draft)
+while this text and the checks said 21, so the pair differed from `stage6` for that reason alone;
+both now say 21 and the pair is the 21 ms picture. The launch rule itself leaves every shot
+byte-identical: the bar rests at 1 with its track on the first frame, so the slide the shot
+restarts still ends at 21 ms.
 
 ### Numbers (release, this PC, 2026-11-26)
 

@@ -902,6 +902,15 @@ fn a_bar_that_is_there_at_launch_is_in_place_on_the_first_frame() {
         a.screen.pixels == still.screen.pixels,
         "the first frame is the still run's, pixel for pixel"
     );
+    // The next frame too, with the bar still up: it stays where it is instead of being met for
+    // the first time and slid in from nothing.
+    step(&mut a, FRAME);
+    assert_eq!(a.bars.crash, 1.0, "the second frame keeps it in place");
+    assert!(a.anim_due.is_none(), "and still nothing moves");
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "the second frame is the still run's, pixel for pixel"
+    );
     // A bar that arrives after the window has shown once slides in.
     a.ws.set_crash_report(None);
     a.compose();
