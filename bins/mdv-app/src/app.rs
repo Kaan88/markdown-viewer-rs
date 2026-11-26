@@ -1924,16 +1924,14 @@ fn position_reachable(x: i32, y: i32, monitors: &[(i32, i32, u32, u32)]) -> bool
     })
 }
 
-/// Where a saved window place opens: the place itself while its title row is on a monitor that
-/// is there, and the primary monitor's own place otherwise (the first of `monitors`, which the
-/// caller lists primary first), so a window saved on an unplugged or rearranged monitor opens on
-/// one that is there rather than where no hand can reach it. `None` when no monitor is known.
-fn restored_place(x: i32, y: i32, monitors: &[(i32, i32, u32, u32)]) -> Option<(i32, i32)> {
-    let &(mx, my, _, _) = monitors.first()?;
-    match position_reachable(x, y, monitors) {
-        true => Some((x, y)),
-        false => Some((mx, my)),
-    }
+/// The place a saved window asks for: itself while its title row is on a monitor that is there,
+/// and none otherwise, so the window is created without a position and the system places it —
+/// inside the work area, where a taskbar cannot cover its title row. Shared's
+/// `window_state::restore` would clamp into the work area too, but mdview's session keeps a
+/// physical point and a logical size with no monitor identity or scale, so adopting it would
+/// mean a new session format; see `docs/HANDOFF.md`.
+fn saved_place(x: i32, y: i32, monitors: &[(i32, i32, u32, u32)]) -> Option<(i32, i32)> {
+    position_reachable(x, y, monitors).then_some((x, y))
 }
 
 #[cfg(windows)]
@@ -1962,26 +1960,17 @@ impl ApplicationHandler<Wake> for App {
         }
         // Back where it was, if a screen still shows that place: the title row's left end has
         // to be on one, or the window could not be reached. A place on a monitor that is gone
-        // opens on the primary monitor's own place instead.
+        // asks for no position at all, so the system opens the window where it opens a new one
+        // (inside the work area, clear of any taskbar).
         if let Some((x, y)) = self.ws.window_position() {
-            let mut monitors: Vec<(i32, i32, u32, u32)> = event_loop
+            let monitors: Vec<(i32, i32, u32, u32)> = event_loop
                 .available_monitors()
                 .map(|m| {
                     let (origin, size) = (m.position(), m.size());
                     (origin.x, origin.y, size.width, size.height)
                 })
                 .collect();
-            // The primary first: `available_monitors` does not say which it is, and the
-            // fallback place is the primary's.
-            if let Some(primary) = event_loop.primary_monitor() {
-                let (origin, size) = (primary.position(), primary.size());
-                let primary = (origin.x, origin.y, size.width, size.height);
-                match monitors.iter().position(|m| *m == primary) {
-                    Some(i) => monitors.swap(0, i),
-                    None => monitors.insert(0, primary),
-                }
-            }
-            if let Some((px, py)) = restored_place(x, y, &monitors) {
+            if let Some((px, py)) = saved_place(x, y, &monitors) {
                 attributes = attributes.with_position(PhysicalPosition::new(px, py));
             }
         }
