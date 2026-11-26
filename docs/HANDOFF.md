@@ -168,17 +168,16 @@ at `1588e0f` (`page.rs`, `region.rs`, `gfx.rs`), and `docs/ANIMATION.md` documen
 stays.
 
 **1. The Settings dialog fades in (`00670b1`).** `motion::settings` is a presence named per
-opening (`App::settings_serial`, bumped in `open_settings`), using `document::MENU`'s enter — the
-menus' 117 ms, 30 ms longer would be a `fluent::FAST` fade — rather than shared's
+opening (`App::settings_serial`, bumped only when Settings was closed), using `document::MENU`'s
+117 ms enter — the menus' duration — rather than shared's
 `document::DIALOG` (250 ms): the dialog is opened from a menu and should not arrive slower than
 the menu did (the owner's "quick and quiet"). The dim and the card are drawn over the window as
 it was and given one opacity (`Painter::snapshot` of the window, the form drawn, `Painter::fade`),
 so nothing of the page shows between the dim and the card and both come in together. Closing is
 instant: no exit is played, the presence is simply not asked for, and the name is forgotten.
 `settings_t` is in the overlay signature, so every frame of the fade is drawn whole; the dialog's
-bounds are the whole window anyway. A shot of it (`--dialog settings --motion-at 67`) opens the
-dialog after the clock started — the one place the shot flow draws an opened dialog at rest at
-once, so `--motion-at` skips that frame and the fade's first frame is the window under it.
+bounds are the whole window anyway. An entrance shot (`--dialog settings --motion-at 67`) skips
+the usual at-rest draw, so the first frame on the shot clock is the window under the dialog.
 
 Tests (`motion_tests.rs`): the first frame at 0 is the window under the dialog pixel for pixel;
 the damage covers every row; a frame at 16 ms is part way (0 < t < 1); the fade ends in at most
@@ -201,19 +200,19 @@ open one on every frame. Dialogs other than Settings (About, Shortcuts, Recent, 
 library) still appear at once: they draw their own card, have no entrance, and the owner asked
 only for the Settings window. Menus and dialogs all close instantly.
 
-**3. A light/dark change crossfades (`82380ec`).** `App::sync_theme` sees the palette change (the
-setting, or `WindowEvent::ThemeChanged` → `ws.set_system_dark` → the next frame), keeps the frame
-the window showed (`Snapshot::take` of the whole screen: `4 * w * h` bytes, **4,096,000 at
-1280x800 = 3.91 MiB**, 33,177,600 = 31.6 MiB at 3840x2160, held only while it fades and dropped
-the frame the blend ends), switches the palette, and `App::theme_frame` blends the kept frame
-back over each frame with `Snapshot::crossfade_keyed` and `self.frost.key()`, so a pixel that was
-frosted chrome still is (with no key it is `crossfade`). 170 ms, `Easing::Linear`: a mix is even
-all the way, and no curve makes a colour change look better. Every frame of the change is drawn
-whole (`self.full` while a kept frame is held). `presence` starts at 0, so the change's first
-frame is exactly the old frame; then it moves. A resize ends it: the `Resized` handler drops the
-kept frame, and `theme_frame` checks `fits` **before** asking for progress, so no timer is left
-over from a change that is over. With Animations off or reduced motion nothing is kept and the
-new palette is drawn at once, as before.
+**3. A light/dark change crossfades (`82380ec`, with review fixes).** `App::sync_theme` sees the
+palette change (the setting, or `WindowEvent::ThemeChanged` → `ws.set_system_dark` → the next
+frame), captures the frame that was shown (`4 * w * h` bytes, under 4 MiB at 1280x800), then
+switches the palette. `App::theme_frame` blends the snapshot back over each whole redraw using
+`Snapshot::crossfade`: 170 ms linear, starting at 0 (the old frame). A second flip starts from
+the currently blended frame. The snapshot includes Settings if it was already showing.
+
+There is no capture on launch, with animations off or reduced, during a presentation, with
+frosted chrome, or above 2560 × 1600 device pixels (15.625 MiB; see [DECISIONS.md](DECISIONS.md)).
+A presentation immediately frees any existing snapshot. Frost snaps to the new palette because
+the shared blend only accepts one key, but the two palettes use different keys. A content-size
+change ends the fade before asking for progress, even if a theme flip arrives on the same
+frame; a same-size resize notification does not end a fade. The fade leaves no timer of its own.
 
 Tests (`motion_tests.rs`): the kept frame is exactly the window's rectangle and size (and the
 4,096,000 bytes); the change's first frame is the old palette's pixel for pixel; the damage
@@ -224,23 +223,25 @@ mid-fade ends it with no timer and the new palette alone. Revert checks: without
 fade tests fail on the kept frame; without the resize guard the resize test fails on "asks for no
 frame" (the asked presence leaves a deadline).
 
-**Shots.** Four new, taken part-way and looked at in both themes: `dialog-settings-opening-light`
-and `-dark` (67 ms into the 117 ms fade; the dim and the card uniformly translucent over the
-page), `theme-fading-dark` (light to dark, 85 ms into 170) and `theme-fading-light` (dark to
-light). The other 195 shots are byte-identical to `target/shots/review-head` (the settings
-dialog at rest, other dialogs, every menu shot included). `--theme-flip light|dark` is the shot
-flag for the theme change; it is applied after the clock starts.
+**Shots.** `dialog-settings-opening-light` and `-dark` show the dim and card entering together.
+`theme-fading-{dark,light}` and `theme-fading-settings-{dark,light}` capture the theme fade
+with and without the dialog already open. `--theme-flip light|dark` applies the change after
+the clock starts. The fade begins on the first 16 ms frame, so `--motion-at 101` captures
+85 ms into its 170 ms.
 
-**Numbers.** Tests: 786 passed / 0 failed / 6 ignored (mdview 345/1). `cargo fmt --check` and
-`cargo clippy --workspace --all-targets -D warnings` clean, every cargo command with `-j 8
---config 'build.rustc-wrapper=""'`.
+**Review verification (Windows).** Workspace release suite: 798 passed, 0 failed; the six
+pre-existing ignored cases passed in separate runs of the release test binaries. Format and
+release Clippy passed. All 12 added tests and the two strengthened tests failed under their
+respective temporary reverts or mutations, then all 14 passed after restoring the code.
+The shot suite produced 201 PNGs: 197 byte-identical to the 199-shot baseline, two changed
+theme fades and two new Settings theme fades. All four were inspected. At (640, 400), the
+page blends RGB 32 ↔ 251 to 142 and the Settings card blends 44 ↔ 252 to 148 in both directions.
 
-**Not verified.** The keyed blend over really frosted chrome (`--backdrop mica` in a real
-window): a shot has no backdrop, so `crossfade_keyed` is exercised only by shared's tests and with
-no key here. A `ThemeChanged` from the system, and a theme change under a maximized window, were
-not driven by hand. The look on a 144 Hz display (the fade is a frame interval apart, not a fixed
-60). macOS and Linux were not run. The memory figure is the arithmetic of the kept rectangle as
-the snapshot reports it, not a measured process peak.
+**Not verified.** The frosted theme change is tested headless with a compositor stand-in, not
+on a real backdrop. An OS `ThemeChanged`, a real fullscreen or maximized window, 144 Hz, macOS
+(including its app-menu dispatch), and Linux were not exercised. The memory figure is the
+snapshot size, not a measured private-memory peak; see [STATE.md](STATE.md) for the open
+Settings allocation.
 
 ### L1: the main menu's Open recent is a `submenu::Cascade` (2026-11-26)
 
@@ -3820,4 +3821,3 @@ Cancel, the group menu, and a second add in the same run (the tests do all three
 clicked them). The pin is still `f/library-dir`, not shared `main`; merging waits for that branch
 to land. The viewer keeps no memory of the face across launches: a new window starts on Files
 unless `--notes` is given (mdedit remembers its face; mdview does not).
-
