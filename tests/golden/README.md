@@ -42,8 +42,8 @@ second one active, with the Qt status bar and the WinUI title carrying `2 of 4`.
 
 Math and Mermaid changed the showcase: the page is now 4071 px at 100% (taller formula lines and
 diagram images instead of code boxes) and the Mathematics and Diagrams sections show rendered output,
-so the four `showcase-*` images were regenerated. The engine must be built (or `MDV_ENGINE` set) when
-regenerating, because SVG, math and Mermaid go through it. Syntax highlighting changed only the Rust
+so the four `showcase-*` images were regenerated. SVG, math and Mermaid go through the
+engine. Syntax highlighting changed only the Rust
 block's glyph colours, so the page height stayed 4071 px. Dark images use Mermaid's dark palette with
 contrast overrides, gantt section labels clear the task bars and date ticks no longer collide, and
 mindmap labels match their node size.
@@ -74,8 +74,8 @@ Limits:
 
 After an intended visual change, regenerate with
 `MDV_BLESS=1 cargo test --release -p mdview --test golden`, look at the new images, and commit
-them only once they are approved. The test harness builds the pinned toolkit engine if it is not
-already in the release directory; `MDV_ENGINE` is an optional absolute override.
+them only once they are approved. Cargo stages the pinned toolkit engine before running tests.
+Blessing refuses to write any golden unless a known Mermaid diagram produces a raster.
 
 To regenerate:
 

@@ -4359,8 +4359,22 @@ fn a_pinch_over_the_zoom_view_zooms_the_diagram_not_the_page() {
 }
 
 #[test]
+fn a_shot_requiring_a_missing_diagram_does_not_write_a_png() {
+    let mut a = app(&["tables.md"]);
+    a.args.scale = Some(1.0);
+    a.args.zoom_diagram = Some(1);
+    let dir = std::env::temp_dir().join(format!("mdview-missing-diagram-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("shot.png");
+    let status = shot(a, &path);
+    let wrote = path.exists();
+    std::fs::remove_dir_all(dir).unwrap();
+    assert_eq!(status, 2);
+    assert!(!wrote);
+}
+
+#[test]
 fn a_diagram_click_opens_the_zoom_view_with_the_pages_own_raster() {
-    crate::test_engine::require_engine();
     let mut a = app(&["diagrams.md"]);
     let source = a.ws.diagram_source(0).expect("a diagram on the page");
     let raster = a.ws.diagram_raster(&source).expect("the diagram is drawn");

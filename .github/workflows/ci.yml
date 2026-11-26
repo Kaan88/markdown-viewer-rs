@@ -48,11 +48,11 @@ jobs:
       - name: Build viewer and pinned toolkit engine
         run: |
           cargo build --release --locked -p mdview -p mdshared-md-engine --bins
-          echo "MDV_ENGINE=$PWD/target/release/mdview-engine" >> "$GITHUB_ENV"
       - run: cargo test --release --workspace --no-fail-fast
       - name: Screenshot suite (smoke test)
         if: ${{ !cancelled() }}
         run: |
+          bash tests/shots-isolation-check.sh
           bash tests/shots.sh target/shots
           bash tests/shots-check.sh target/shots
       - uses: actions/upload-artifact@v7
@@ -82,12 +82,12 @@ jobs:
         shell: bash
         run: |
           cargo build --release --locked -p mdview -p mdshared-md-engine --bins
-          echo "MDV_ENGINE=$(cygpath -w "$PWD/target/release/mdview-engine.exe")" >> "$GITHUB_ENV"
       - run: cargo test --release --workspace --no-fail-fast
       - name: Screenshot suite (smoke test)
         if: ${{ !cancelled() }}
         shell: bash
         run: |
+          bash tests/shots-isolation-check.sh
           bash tests/shots.sh target/shots
           bash tests/shots-check.sh target/shots
       - uses: actions/upload-artifact@v7
@@ -123,11 +123,11 @@ jobs:
       - name: Build viewer and pinned toolkit engine
         run: |
           cargo build --release --locked -p mdview -p mdshared-md-engine --bins
-          echo "MDV_ENGINE=$PWD/target/release/mdview-engine" >> "$GITHUB_ENV"
       - run: cargo test --release --workspace --no-fail-fast
       - name: Screenshot suite (smoke test)
         if: ${{ !cancelled() }}
         run: |
+          bash tests/shots-isolation-check.sh
           bash tests/shots.sh target/shots
           bash tests/shots-check.sh target/shots
       - uses: actions/upload-artifact@v7

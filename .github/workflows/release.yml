@@ -124,13 +124,7 @@ jobs:
       - name: Smoke test of the tar.gz
         run: |
           v='${{ needs.meta.outputs.version }}'
-          d="$(mktemp -d)"
-          tar -xzf "target/dist-linux/mdview-$v-linux-x86_64.tar.gz" -C "$d"
-          "$d/mdview-$v-linux-x86_64/install.sh" "$d/prefix"
-          "$d/prefix/bin/mdview" --no-session --scale 1.0 --shot "$d/shot.png" --light fixtures/showcase.md
-          test -s "$d/shot.png"
-          "$d/mdview-$v-linux-x86_64/uninstall.sh" "$d/prefix"
-          test ! -e "$d/prefix/bin/mdview"
+          bash tests/linux-tarball-smoke.sh "target/dist-linux/mdview-$v-linux-x86_64.tar.gz"
       - uses: actions/upload-artifact@v7
         with:
           name: linux-files

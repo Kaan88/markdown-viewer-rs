@@ -21,13 +21,13 @@ exe="${MDVIEW_EXE:-target/release/mdview.exe}"
 fx="fixtures"
 mkdir -p "$out"
 
-# Even --no-session checks for pending crash reports on startup; keep the Windows app-data
-# lookup in scratch space as well. Use a Windows path when passing it to the executable.
-if command -v cygpath >/dev/null; then
-    appdata="$(mktemp -d)"
-    trap 'rm -rf "$appdata"' EXIT
-    export LOCALAPPDATA="$(cygpath -w "$appdata")"
-fi
+# Even --no-session checks for pending crash reports. Never inherit a viewer or editor profile
+# or an engine override; these shots exercise the engine shipped beside the viewer.
+source "$root/tests/scratch-profile.sh"
+profile="$(mktemp -d)"
+notes_scratch=
+trap 'rm -rf "$profile"; if [ -n "$notes_scratch" ]; then rm -rf "$notes_scratch"; fi' EXIT
+scratch_profile "$profile"
 
 shot() {
     local name="$1"
@@ -121,7 +121,8 @@ done
 shot settings-switch-turned-light --light --dialog settings --flip-setting 5 "$fx/showcase.md"
 # The Appearance page with "Animations" turned off, from a scratch settings file, at the
 # smallest size in both themes.
-still="$(mktemp -d)"
+still="$profile/still"
+mkdir -p "$still"
 printf '[mdview]
 motion=0
 ' >"$still/settings.ini"
@@ -133,7 +134,8 @@ rm -rf "$still"
 # Settings, every page at the default size and the smallest, in both themes. "tabs-on" is the
 # Tabs page with the brief-tab rule on (its seconds enabled), read from a scratch settings file
 # (a shot reads one named by MDVIEW_SETTINGS and never the user's); "tabs" is the rule off.
-brief="$(mktemp -d)"
+brief="$profile/brief"
+mkdir -p "$brief"
 printf '[mdview]\nskip_brief=1\n' >"$brief/settings.ini"
 for page in appearance reading tabs updates tabs-on; do
     section="${page%-on}"
@@ -322,8 +324,12 @@ shot render-more-abbr-card --light --size 640x640 --hover 89,254 "$fx/render-mor
 # of mdedit's settings and libraries (MDEDIT_SETTINGS names a settings file of mdedit's; a shot
 # never reads the owner's). `notes-library` is the fixture; `one` lacks Work.md, `empty` has no
 # library file, `nowhere` names a folder that is not there.
+# The library-add dialog displays the path. Keep it stable between comparisons, but
+# never reuse or remove a directory already present when this run reaches the notes.
 nl="$root/target/shots-notes"
-rm -rf "$nl"
+mkdir -p "$root/target"
+mkdir "$nl"
+notes_scratch="$nl"
 abs() { (cd "$1" && (pwd -W 2>/dev/null || pwd)); }
 mkdir -p "$nl/full" "$nl/one" "$nl/empty" "$nl/small"
 cp -r "tests/notes-library/." "$nl/full/"
@@ -355,6 +361,4 @@ for theme in light dark; do
     MDEDIT_SETTINGS="$full" shot "menu-page-library-$theme" --"$theme" --menu page "$fx/showcase.md"
     MDEDIT_SETTINGS="$full" shot "palette-notes-$theme" --"$theme" --palette "" "$fx/showcase.md"
 done
-rm -rf "$nl"
-
 ls "$out" | wc -l

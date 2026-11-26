@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The generic Linux tarball: mdview-<version>-linux-x86_64.tar.gz, one folder holding bin/,
+# The generic Linux tarball: mdview-<version>-linux-x86_64.tar.gz, one folder holding bin/, lib/,
 # share/ (desktop entry, icon), LICENSE, README.md, install.sh and uninstall.sh.
 #   packaging/linux/make-tarball.sh        (see lib.sh for BIN_DIR, OUT_DIR, SOURCE_DATE_EPOCH)
 set -euo pipefail

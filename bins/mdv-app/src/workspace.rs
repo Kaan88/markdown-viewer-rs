@@ -628,6 +628,8 @@ impl Workspace {
 
     /// [`new`](Self::new) with the session already read (`saved`, from `session_path`).
     pub fn from_session(saved: Session, session_path: Option<PathBuf>) -> Workspace {
+        #[cfg(test)]
+        crate::test_engine::require_engine();
         let mut ws = Workspace {
             back: Vec::new(),
             forward: Vec::new(),
@@ -6058,7 +6060,6 @@ A line of text here.
 
     #[test]
     fn a_click_on_a_diagram_opens_it_and_its_raster_is_there() {
-        crate::test_engine::require_engine();
         let dir = temp_dir("zoom-diagram");
         let path = write(
             &dir,
@@ -6101,7 +6102,6 @@ A line of text here.
 
     #[test]
     fn a_right_click_on_a_formula_or_diagram_offers_its_source() {
-        crate::test_engine::require_engine();
         let dir = temp_dir("sources");
         let path = write(
             &dir,

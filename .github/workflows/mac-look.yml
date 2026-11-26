@@ -44,12 +44,21 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: Kaan88/markdown-editor-rs
-          ref: main
+          # mdedit's renderer migration supplies its independently pinned engine recipe.
+          ref: 721c8e359dc2b9f3c348eb24cc5e3114e4ece06e
           path: editor
       - name: The editor's bundle, beside the viewer's
         run: |
-          cargo build --release -p mdedit --manifest-path editor/Cargo.toml
+          (
+            cd editor
+            cargo build --release --locked -p mdedit -p mdedit-ai
+            bash packaging/engine-source.sh target/engine-src
+            cargo build --release --locked -p mdshared-md-engine --bin mdview-engine \
+              --manifest-path target/engine-src/Cargo.toml --target-dir target/engine
+            cp target/engine/release/mdview-engine target/release/
+          )
           bash editor/packaging/macos/make-bundle.sh editor/target/release target/dist
+          test -x target/dist/mdedit.app/Contents/MacOS/mdview-engine
       - name: Updating itself (a newer bundle from a local HTTPS server)
         if: ${{ !cancelled() }}
         run: bash tests/mac-update.sh target/update target/dist/mdview.app

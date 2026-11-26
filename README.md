@@ -152,6 +152,8 @@ The Windows installed copy, the bare exes and the portable zip's exes update the
 folder must be writable), and so does the AppImage. The deb, rpm, tar.gz and Arch installs do not;
 the app says only the AppImage can update itself. They install a desktop file, so the taskbar icon
 and "Open with" work without the AppImage's first-run registration.
+Linux packages keep the two executables together in `lib/mdview/` and expose only the
+`bin/mdview` link.
 
 The AppImage is built in an Ubuntu 20.04 container, so it needs glibc 2.31 or later. It needs the
 system's libc, fontconfig, freetype and the X11/xcb libraries, and loads libcurl and the Wayland

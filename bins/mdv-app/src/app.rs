@@ -2710,7 +2710,8 @@ fn shot(mut app: App, path: &Path) -> i32 {
     // The diagram zoom view, at the size and place the arguments ask for.
     if let Some(n) = app.args.zoom_diagram {
         if !app.open_zoom_nth(n) {
-            eprintln!("mdview: no diagram {n}");
+            eprintln!("mdview: could not render diagram {n}");
+            return 2;
         }
         let area = app.zoom_area();
         if let Some(view) = app.ui.zoom.as_mut() {

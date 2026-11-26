@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs mdview from this folder into ~/.local, or into the prefix given as the argument:
 #   ./install.sh [PREFIX]
-# Copies bin/ and share/ under PREFIX and points the desktop entry's Exec at the installed binary,
+# Installs the private executables, a public viewer link and the desktop files. Exec uses the link
 # so the launcher works even when PREFIX/bin is not on PATH. uninstall.sh removes it again.
 set -eu
 app=mdview
@@ -9,12 +9,14 @@ here="$(cd "$(dirname "$0")" && pwd)"
 prefix="${1:-${HOME:?HOME is not set}/.local}"
 case "$prefix" in /*) ;; *) prefix="$(pwd)/$prefix" ;; esac
 
-mkdir -p "$prefix/bin" "$prefix/share/applications" "$prefix/share/icons/hicolor/256x256/apps"
+lib="$prefix/lib/$app"
+mkdir -p "$prefix/bin" "$lib" "$prefix/share/applications" "$prefix/share/icons/hicolor/256x256/apps"
 for b in $app $app-engine; do
-    cp "$here/bin/$b" "$prefix/bin/$b.new"
-    chmod 755 "$prefix/bin/$b.new"
-    mv -f "$prefix/bin/$b.new" "$prefix/bin/$b"
+    cp "$here/lib/$app/$b" "$lib/$b.new"
+    chmod 755 "$lib/$b.new"
+    mv -f "$lib/$b.new" "$lib/$b"
 done
+ln -sfn "../lib/$app/$app" "$prefix/bin/$app"
 cp "$here/share/icons/hicolor/256x256/apps/$app.png" "$prefix/share/icons/hicolor/256x256/apps/$app.png"
 # Exec is rewritten to the absolute path; a path with a space is quoted as the desktop entry
 # specification asks.

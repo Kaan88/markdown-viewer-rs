@@ -134,6 +134,8 @@ impl Show {
         if slides.is_empty() {
             return None;
         }
+        #[cfg(test)]
+        crate::test_engine::require_engine();
         Some(Show {
             tab,
             revision,

@@ -9,6 +9,16 @@ out="${1:?usage: tests/mac-open.sh <out-dir> <app>}"
 app="${2:?app}"
 mkdir -p "$out"
 source "$(dirname "$0")/mac-launch.sh"
+source "$(dirname "$0")/scratch-profile.sh"
+profile="$(mktemp -d)"
+trap 'rm -rf "$profile"' EXIT
+scratch_profile "$profile"
+# LaunchServices need not inherit the calling shell's HOME. Pass the scratch home and
+# settings explicitly to both launches; the Finder-style launch has no --no-session.
+open() {
+    command open --env "HOME=$HOME" --env "MDVIEW_SETTINGS=$profile/settings.ini" \
+        --env "MDEDIT_SETTINGS=$profile/editor.ini" "$@"
+}
 launch "$app" --no-session
 wid="$(window_id)"
 echo "window id: ${wid:-none}"

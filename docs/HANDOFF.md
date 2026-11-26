@@ -25,14 +25,38 @@ the toolkit owns the other parser, renderer, engine and preview suites. The appr
 executables from this lockfile, in the same release directory. The installer, portable
 zip, Linux packages and macOS bundle still put them next to one another. In production
 there is no parent-directory search: the renderer looks beside the running executable
-or takes an explicit absolute `MDV_ENGINE`. For Cargo tests only, `tests/support/engine.rs`
-under `bins/mdv-app` uses the engine in the test profile directory or builds it from
-the lockfile in a separate target directory. `MDV_ENGINE` is optional.
+or takes an explicit absolute `MDV_ENGINE`. During Cargo's build phase, the local
+dev dependency `tests/engine-fixture` stages the toolkit binary from the viewer lockfile
+in its private `OUT_DIR`. The test support uses only that compile-time path; it neither
+runs Cargo nor consults `MDV_ENGINE` or the profile's executable directory. To see build
+stderr or the missing artifact's path, set `MDVIEW_TEST_ENGINE_VERBOSE=1`.
 `a_diagram_click_opens_the_zoom_view_with_the_pages_own_raster`,
 `a_click_on_a_diagram_opens_it_and_its_raster_is_there`, and
 `a_right_click_on_a_formula_or_diagram_offers_its_source` no longer assume a
 `target/release` ancestor will be searched. Their raster and hit assertions are
-unchanged. The golden test requires an actual engine so it cannot bless placeholders.
+unchanged. Golden blessing also probes a known Mermaid raster before it writes anything.
+
+**Astra follow-up.** The deb, rpm, tarball, Arch package and AppImage put the real
+executables in `lib/mdview/`. `bin/mdview` is a relative link and there is no
+public engine. Linux `current_exe()` resolves `/proc/self/exe` to the real viewer,
+so production still finds its sibling. Tarball uninstall preserves unrelated
+`bin/mdview-engine` files. Release CI requires a real diagram zoom shot through the
+installed link with no override, and checks that removing the private engine makes the
+same shot fail before a PNG is written. The mac look workflow stages mdedit's helper
+using mdedit's own renderer-branch recipe and pin, not mdview's.
+
+On Windows, Rust 1.99.1 passed fmt, release Clippy and the release workspace suite
+with `MDV_ENGINE` unset: 428 passed, none failed, 1 ignored. The staged raster
+passed with an inherited decoy engine, a stale profile executable and an invalid
+`CARGO`. Removing the staged artifact failed without a fallback and did not print
+its path unless requested. The old golden test failed with the override decoy,
+and the bless regression failed when its raster gate was removed.
+All 195 `--no-session` Windows shots were byte-identical to the migration shots
+even with inherited settings and engine overrides deliberately supplied.
+Shell dry runs checked tarball and Arch staging and the unrelated-engine sentinel;
+the old tarball uninstaller removed that sentinel. A missing diagram exited 2 without
+a PNG in the new viewer; the old viewer exited 0 and wrote one. Native Linux and macOS,
+hosted CI, and real Linux package builds were not exercised for this follow-up.
 
 Test files that left with the local crates (paths below are relative to `crates/`):
 
@@ -61,8 +85,8 @@ headless shots and all eight Windows fixture goldens (four Showcase, two Tables,
 two Floats); see the [full shot comparison](measurements/2026-11-26-renderer-shots.md).
 On Windows with Rust 1.99.1, fmt and release Clippy passed. The old viewer workspace
 had 805 passing tests and 6 ignored; the new workspace has 425 passing and 1 ignored.
-The workspace rerun also passed with `MDV_ENGINE` unset and no prebuilt engine in
-the test profile; the test harness built its own.
+The original migration rerun also passed with `MDV_ENGINE` unset and no prebuilt
+engine in the test profile; the test-time fallback used then was superseded above.
 The five toolkit suites passed separately in a scratch source copy: 405 passing and
 5 ignored. The updater test is unchanged and passed. Local release sizes in bytes:
 `mdview.exe` 9,741,312 → 9,976,832; `mdview-engine.exe` 26,115,072 → 26,113,536.
@@ -1770,8 +1794,10 @@ In Git Bash, run `tests/shots.sh <folder>` before and after a change, then compa
 Point `MDVIEW_EXE` at the just-built viewer (with the toolkit engine next to it), and
 `MDVIEW_SETTINGS` at a scratch file. `MDVIEW_SHOTS_NO_SESSION=1` makes every launch
 `--behind --no-session`, omitting only the six shots that load seeded scratch settings.
-On Windows the harness also gives the shot process a scratch `LOCALAPPDATA`, so the
-startup check for crash reports cannot read the user's app-data folder.
+The harness clears inherited settings and engine overrides, then puts the app-data
+lookup in scratch space on all OSes (`LOCALAPPDATA` on Windows, `HOME` and the XDG roots
+on Unix). Settings are supplied only for the seeded cases. `mac-open.sh` also passes an
+isolated home and settings path directly to LaunchServices.
 
 `MDVIEW_STARTUP_TRACE=1` prints the first-frame and page-refined times with image decode and
 engine job counts; `MDVIEW_TRACE=1` prints per-frame timings (layout, paint, compose, copy,

@@ -6,11 +6,12 @@
 //! for a font or library update nudging an edge, not for real changes. A share of the page would
 //! be too loose: a gantt axis that lost half its labels changed 646 pixels, 0.02% of a 4071 px page.
 //!
-//! The test harness provides the pinned engine if it hasn't been built yet. After an intended visual change,
-//! regenerate with `MDV_BLESS=1 cargo test --release -p mdview --test golden` and review the images.
+//! Cargo stages the pinned engine. After an intended visual change, regenerate with
+//! `MDV_BLESS=1 cargo test --release -p mdview --test golden` and review the images.
 
-use mdview_render::{DARK, LIGHT, Options, Theme, render};
+use mdview_render::{DARK, DocumentRenderer, LIGHT, Options, Theme, render};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 #[path = "support/engine.rs"]
 mod test_engine;
@@ -38,6 +39,51 @@ fn read_rgb(path: &Path) -> (u32, u32, Vec<u8>) {
     (info.width, info.height, buf)
 }
 
+fn engine_raster() -> bool {
+    static WORKS: OnceLock<bool> = OnceLock::new();
+    *WORKS.get_or_init(|| {
+        let source = "graph TD\n  A --> B";
+        let doc = mdview_core::parse(&format!("```mermaid\n{source}\n```\n"));
+        let mut renderer = DocumentRenderer::new();
+        renderer.layout_exact(
+            &doc,
+            &Options {
+                width: 780.0,
+                scale: 1.0,
+                theme: LIGHT,
+                max_height: None,
+                base_dir: None,
+            },
+        );
+        renderer.diagram_raster(source).is_some_and(|image| {
+            image.width > 0
+                && image.height > 0
+                && image.rgba.as_chunks::<4>().0.iter().any(|p| p[3] != 0)
+        })
+    })
+}
+
+fn bless(probe: impl FnOnce() -> bool, write: impl FnOnce()) {
+    assert!(probe(), "golden bless: engine raster probe failed");
+    write();
+}
+
+#[test]
+fn a_failed_engine_probe_never_writes_goldens() {
+    let wrote = std::cell::Cell::new(false);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        bless(|| false, || wrote.set(true));
+    }));
+    assert!(result.is_err());
+    assert!(!wrote.get());
+}
+
+#[test]
+fn the_staged_engine_produces_a_real_raster() {
+    test_engine::require_engine();
+    assert!(engine_raster(), "test engine: diagram raster missing");
+}
+
 fn check(fixture: &str, name: &str, theme: Theme, scale: f32) {
     test_engine::require_engine();
     let showcase = root().join(format!("fixtures/{fixture}.md"));
@@ -54,7 +100,9 @@ fn check(fixture: &str, name: &str, theme: Theme, scale: f32) {
     );
     let golden = root().join(format!("tests/golden/{fixture}-{name}.png"));
     if std::env::var_os("MDV_BLESS").is_some() {
-        rendered.bitmap.write_png(&golden).unwrap();
+        bless(engine_raster, || {
+            rendered.bitmap.write_png(&golden).unwrap()
+        });
         return;
     }
     let (width, height, expected) = read_rgb(&golden);
