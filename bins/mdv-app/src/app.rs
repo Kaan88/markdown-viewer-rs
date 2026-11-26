@@ -259,6 +259,7 @@ struct App {
     sigs: [u64; 5],
     overlay_sig: u64,
     overlay_bounds: Vec<Rect>,
+    drawn_overlays: DrawnOverlays,
     /// Redraw everything next frame (size, scale or theme changed).
     full: bool,
     /// Something happened that may change what is shown.
@@ -439,6 +440,7 @@ impl App {
             sigs: [0; 5],
             overlay_sig: 0,
             overlay_bounds: Vec::new(),
+            drawn_overlays: DrawnOverlays::default(),
             full: true,
             wants_frame: true,
             requested: false,
@@ -614,6 +616,12 @@ impl App {
     fn sync_theme(&mut self) {
         let dark = self.ws.theme().name == mdview_render::DARK.name;
         let pal = if dark { theme::DARK } else { theme::LIGHT };
+        let closed =
+            (self.theme_fade.is_some() || pal != self.pal) && self.drawn_overlays.closed_in(self);
+        if closed && self.theme_fade.is_some() {
+            self.theme_fade = None;
+            self.full = true;
+        }
         if pal != self.pal {
             // A light/dark change crossfades from the frame the window shows now — still the old
             // palette's, since every frame draws into this one bitmap. Release any earlier
@@ -623,6 +631,7 @@ impl App {
             let (w, h) = (self.screen.width, self.screen.height);
             if self.anim.animates()
                 && self.frames > 0
+                && !closed
                 && !self.presenting()
                 && self.frost.key().is_none()
                 && !self.screen.pixels.is_empty()
@@ -1000,6 +1009,19 @@ impl App {
         self.crash_context();
         let mut times = FrameTimes::default();
         let t0 = Instant::now();
+        // Text the editor sent since the last frame: one parse, of the newest.
+        self.ws.apply_live();
+        // A diagram view belongs to its tab, revision and palette. Dismiss it before
+        // sync_theme can capture it in the old frame.
+        if let Some(view) = &self.ui.zoom
+            && let Some(origin) = &view.origin
+            && !self.ws.active_tab().is_some_and(|t| {
+                let dark = self.ws.theme().name == mdview_render::DARK.name;
+                origin.is(t.path(), t.revision(), dark)
+            })
+        {
+            self.close_zoom();
+        }
         self.sync_theme();
         let (pw, ph) = (self.size.0.max(1), self.size.1.max(1));
         if self.screen.width != pw || self.screen.height != ph {
@@ -1011,12 +1033,11 @@ impl App {
             self.full = true;
         }
         self.sync_frost();
-        // Text the editor sent since the last frame: one parse, of the newest.
-        self.ws.apply_live();
         // A presentation is the whole frame.
         if self.ui.present.is_some()
             && let Some(done) = self.compose_present()
         {
+            self.drawn_overlays = DrawnOverlays::default();
             return done;
         }
         let (w, h) = self.logical();
@@ -1025,16 +1046,7 @@ impl App {
             self.areas = areas;
             self.full = true;
         }
-        // A zoom view is a picture of the tab it was opened on: another tab, a new text of it or
-        // another theme under it, and it closes (audit 4, E8). Otherwise it follows the window:
-        // its diagram is kept inside the new area, at the new device scale.
-        if let Some(view) = &self.ui.zoom
-            && let Some(origin) = &view.origin
-            && !(self.ws.active_tab())
-                .is_some_and(|t| origin.is(t.path(), t.revision(), self.pal.dark))
-        {
-            self.close_zoom();
-        }
+        // The view follows the window, keeping its diagram inside the new area and device scale.
         if let Some(view) = self.ui.zoom.as_mut() {
             let area = Rect::new(0.0, 0.0, w, h);
             view.set_scale(area, self.scale);
@@ -1497,6 +1509,7 @@ impl App {
         }
         // Painting may have settled a jump; that is already on screen.
         self.ws.take_dirty();
+        self.drawn_overlays = DrawnOverlays::of(self);
         self.theme_frame();
         self.full = false;
         times.compose = t1.elapsed().saturating_sub(times.paint);
@@ -1998,6 +2011,93 @@ impl App {
 fn menu_room(title: Rect, w: f32, h: f32) -> Rect {
     let top = title.bottom();
     Rect::new(0.0, top, w, h - top)
+}
+
+/// Identities of the overlays in the framebuffer, not their hover/scroll/damage state. An
+/// overlay can be closed in many ways between frames, including while opening a replacement.
+#[derive(Default)]
+struct DrawnOverlays {
+    menu: Option<u64>,
+    submenu: Vec<usize>,
+    palette: Option<u64>,
+    dialog: Option<u64>,
+    settings: Option<u64>,
+    dropdown: bool,
+    tip: Option<Hit>,
+    preview: Option<Instant>,
+    hint: Option<u64>,
+    zoom: bool,
+    toasts: [Option<u64>; crate::motion::TOASTS_MAX],
+}
+
+impl DrawnOverlays {
+    fn of(a: &App) -> Self {
+        Self {
+            menu: a.ui.popup.as_ref().map(|p| p.serial),
+            submenu: a
+                .ui
+                .popup
+                .as_ref()
+                .map_or_else(Vec::new, |p| p.submenu_path().to_vec()),
+            palette: a.ui.palette.as_ref().map(|_| a.palette_serial),
+            dialog: a.ui.dialog.as_ref().map(|d| d.serial),
+            settings: a.ui.settings.as_ref().map(|_| a.settings_serial),
+            dropdown: Self::dropdown(a),
+            tip: a.ui.tips.shown().map(|t| t.key),
+            preview: a
+                .ui
+                .card
+                .as_ref()
+                .filter(|c| c.shown && c.content.is_some())
+                .map(|c| c.due),
+            hint: a.ui.link_hint.as_ref().map(sig),
+            zoom: a.ui.zoom.is_some(),
+            toasts: std::array::from_fn(|i| a.toast_frame.get(i).map(|(id, ..)| *id)),
+        }
+    }
+
+    fn closed_in(&self, a: &App) -> bool {
+        fn gone<T: PartialEq>(before: Option<T>, now: Option<T>) -> bool {
+            before.is_some() && before != now
+        }
+        gone(self.menu, a.ui.popup.as_ref().map(|p| p.serial))
+            || (!self.submenu.is_empty()
+                && a.ui
+                    .popup
+                    .as_ref()
+                    .is_none_or(|p| !p.submenu_path().starts_with(&self.submenu)))
+            || gone(
+                self.palette,
+                a.ui.palette.as_ref().map(|_| a.palette_serial),
+            )
+            || gone(self.dialog, a.ui.dialog.as_ref().map(|d| d.serial))
+            || gone(
+                self.settings,
+                a.ui.settings.as_ref().map(|_| a.settings_serial),
+            )
+            || (self.dropdown && !Self::dropdown(a))
+            || gone(self.tip, a.ui.tips.shown().map(|t| t.key))
+            || gone(
+                self.preview,
+                a.ui.card
+                    .as_ref()
+                    .filter(|c| c.shown && c.content.is_some())
+                    .map(|c| c.due),
+            )
+            || gone(self.hint, a.ui.link_hint.as_ref().map(sig))
+            || (self.zoom && a.ui.zoom.is_none())
+            || self
+                .toasts
+                .iter()
+                .flatten()
+                .any(|id| !a.toast_frame.iter().any(|(now, ..)| now == id))
+    }
+
+    fn dropdown(a: &App) -> bool {
+        a.ui.settings
+            .as_ref()
+            .is_some_and(|f| f.menu_rect().is_some())
+    }
 }
 
 fn overlaps(a: Rect, b: Rect) -> bool {

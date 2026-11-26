@@ -548,6 +548,13 @@ impl Popup {
         }
     }
 
+    pub fn submenu_path(&self) -> &[usize] {
+        match &self.body {
+            MenuBody::Menu(_) => &[],
+            MenuBody::Cascade(c) => c.path(),
+        }
+    }
+
     /// The rows, scrolls and item counts of the menus, and the path of open submenus: what
     /// changes what is drawn for the overlay signature.
     pub fn state(&self) -> PopupState {
@@ -631,6 +638,7 @@ pub enum DialogKind {
 
 pub struct Dialog {
     pub kind: DialogKind,
+    pub serial: u64,
     /// Scroll of a long list, logical px.
     pub scroll: f32,
     /// The scrollable list's height and its content's, set when drawn.
@@ -643,6 +651,7 @@ impl Dialog {
     pub fn new(kind: DialogKind) -> Dialog {
         Dialog {
             kind,
+            serial: next_serial(),
             scroll: 0.0,
             view: 0.0,
             content: 0.0,

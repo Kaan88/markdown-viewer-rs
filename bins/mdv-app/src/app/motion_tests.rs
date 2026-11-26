@@ -1936,6 +1936,78 @@ fn with_motion_off_the_settings_dialog_is_whole_at_once() {
 }
 
 #[test]
+fn choosing_a_theme_in_the_palette_closes_it_without_a_ghost() {
+    let mut a = moving(&[]);
+    a.open_palette(">theme: light");
+    a.compose();
+    for _ in 0..8 {
+        step(&mut a, FRAME);
+    }
+    let with_palette = a.screen.pixels.clone();
+    a.key_named(KeyName::Enter, None);
+    assert!(a.ui.palette.is_none());
+    assert_eq!(a.ws.theme_choice(), ThemeChoice::Light);
+    a.compose();
+
+    let mut light = app(&[]);
+    light.ws.set_theme_choice(ThemeChoice::Light);
+    light.compose();
+    assert!(
+        a.theme_fade.is_none(),
+        "the old frame still had the palette"
+    );
+    assert!(!a.anim.animating());
+    assert!(a.screen.pixels != with_palette);
+    assert!(a.screen.pixels == light.screen.pixels);
+}
+
+#[test]
+fn closing_an_overlay_mid_theme_fade_immediately_removes_it() {
+    for what in ["menu", "palette", "dialog", "settings", "tip"] {
+        let mut a = moving(&[]);
+        match what {
+            "menu" => a.open_popup(PopupKind::Main),
+            "palette" => a.open_palette(""),
+            "dialog" => a.open_dialog(DialogKind::About),
+            "settings" => a.open_settings(),
+            "tip" => {
+                let r = a.hit_rect(Hit::WinClose).unwrap();
+                let now = Instant::now();
+                a.ui.tips.hover(
+                    now,
+                    Some(mdshared_ui::tooltip::Over {
+                        key: Hit::WinClose,
+                        text: "Close".into(),
+                        anchor: r,
+                    }),
+                );
+                assert!(a.ui.tips.tick(now + Duration::from_secs(1)));
+            }
+            _ => unreachable!(),
+        }
+        a.compose();
+        for _ in 0..8 {
+            step(&mut a, FRAME);
+        }
+        a.ws.set_theme_choice(ThemeChoice::Light);
+        a.compose();
+        step(&mut a, FRAME);
+        assert!(a.theme_fade.is_some(), "{what} was in the theme fade");
+        if what == "tip" {
+            a.pointer_moved(640.0, 700.0);
+        } else {
+            a.key_named(KeyName::Escape, None);
+        }
+        a.compose();
+        assert!(a.theme_fade.is_none(), "{what} must not fade out");
+        let mut light = app(&[]);
+        light.ws.set_theme_choice(ThemeChoice::Light);
+        light.compose();
+        assert!(a.screen.pixels == light.screen.pixels, "no ghost of {what}");
+    }
+}
+
+#[test]
 fn a_light_and_dark_change_crossfades_from_the_frame_before() {
     let mut a = moving(&["showcase.md"]);
     a.compose();
