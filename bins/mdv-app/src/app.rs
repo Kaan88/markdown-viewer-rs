@@ -330,6 +330,11 @@ struct App {
     /// 0 while it is open), and this opening of it: opened again it fades in again.
     settings_t: f32,
     settings_serial: u64,
+    /// The frame the window showed before a light/dark change, blended back over each frame of
+    /// the change: the whole window, `4 * w * h` bytes, held only while it fades.
+    theme_fade: Option<mdshared_ui::anim::Snapshot>,
+    /// This light/dark change; a new one starts its own fade.
+    theme_serial: u64,
     /// How high each notice bar shows this frame: the page is laid out under them.
     bars: page::Bars,
     /// Frames composed so far: the first one has the bars the window starts with in place.
@@ -471,6 +476,8 @@ impl App {
             palette_serial: 0,
             settings_t: 1.0,
             settings_serial: 0,
+            theme_fade: None,
+            theme_serial: 0,
             bars: page::Bars::FULL,
             frames: 0,
             motion_watched: false,
@@ -608,6 +615,16 @@ impl App {
         let dark = self.ws.theme().name == mdview_render::DARK.name;
         let pal = if dark { theme::DARK } else { theme::LIGHT };
         if pal != self.pal {
+            // A light/dark change crossfades from the frame the window shows now — still the old
+            // palette's, since every frame draws into this one bitmap. The whole window is kept,
+            // `4 * w * h` bytes, only while it fades. Not with motion off, nor on a window with
+            // no frame yet (its screen holds nothing to blend from).
+            self.theme_fade = None;
+            if self.anim.animates() && self.frames > 0 && !self.screen.pixels.is_empty() {
+                let (w, h) = (self.screen.width as i32, self.screen.height as i32);
+                self.theme_fade = Some(mdshared_ui::anim::Snapshot::take(&self.screen, 0, 0, w, h));
+                self.theme_serial += 1;
+            }
             self.pal = pal;
             self.full = true;
             #[cfg(windows)]
@@ -615,6 +632,27 @@ impl App {
                 style(w, dark, Corners::from_setting(self.ws.corners()));
             }
         }
+    }
+
+    /// Blends the frame the window showed before a light/dark change back over this one for the
+    /// length of the fade, over chrome frosted as it is (`crossfade_keyed`, so a pixel that was
+    /// chrome still is). The snapshot is dropped the frame the blend ends, and when the window's
+    /// size changed under it.
+    fn theme_frame(&mut self) {
+        let Some(under) = self.theme_fade.take() else {
+            return;
+        };
+        // A frame of another size than the kept one ends the change here, without asking for
+        // its progress: an asked name is a value in flight, and this change is over.
+        if !under.fits(&self.screen) {
+            return;
+        }
+        let t = crate::motion::theme(&mut self.anim, self.theme_serial);
+        if t >= 1.0 {
+            return;
+        }
+        under.crossfade_keyed(&mut self.screen, t, self.frost.key());
+        self.theme_fade = Some(under);
     }
 
     /// The "Window backdrop" setting: asks the system when the setting or the focus changed and
@@ -955,6 +993,10 @@ impl App {
             self.full = true;
         }
         self.sync_theme();
+        // A light/dark change changes every pixel: each frame of it is drawn whole.
+        if self.theme_fade.is_some() {
+            self.full = true;
+        }
         self.sync_frost();
         // Text the editor sent since the last frame: one parse, of the newest.
         self.ws.apply_live();
@@ -1442,6 +1484,7 @@ impl App {
         }
         // Painting may have settled a jump; that is already on screen.
         self.ws.take_dirty();
+        self.theme_frame();
         self.full = false;
         times.compose = t1.elapsed().saturating_sub(times.paint);
         times.rows = damage.iter().map(|d| (d.3 - d.1).max(0) as u32).sum();
@@ -2103,6 +2146,9 @@ impl ApplicationHandler<Wake> for App {
                 }
             }
             WindowEvent::Resized(size) => {
+                // A light/dark change is of this window's frame; another size ends it here rather
+                // than at the blend, which would find the snapshot of another size.
+                self.theme_fade = None;
                 if let Some(w) = &self.window {
                     let max = w.is_maximized();
                     if max != self.maximized && self.trace {
@@ -2526,6 +2572,14 @@ fn shot(mut app: App, path: &Path) -> i32 {
     }
     if flip.is_some() {
         app.key_named(KeyName::Space, None);
+    }
+    // A theme change, made after the clock has started and the frame before it is drawn, so the
+    // frames of its crossfade are the ones shot.
+    if let Some(dark) = app.args.theme_flip {
+        app.ws.set_theme_choice(match dark {
+            true => ThemeChoice::Dark,
+            false => ThemeChoice::Light,
+        });
     }
     // The tip under `--hover` shows now (with `--motion-at`, as the motion starts). A shot of a
     // title-row hover is no tip: a window shows none after a few ms on the button, and one ticked

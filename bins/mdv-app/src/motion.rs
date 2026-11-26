@@ -12,7 +12,7 @@
 //! the "Animations" setting is off, nor when the system asks for less motion.
 
 use mdshared_ui::anim::stack::Stack;
-use mdshared_ui::anim::{Animator, Id, Motion, Policy, document, fluent};
+use mdshared_ui::anim::{Animator, Easing, Id, Motion, Policy, document, fluent};
 use std::path::Path;
 
 /// A menu's entrance: the shared preset (117 ms, decelerating). Its exit is not used: a
@@ -55,6 +55,16 @@ pub fn palette(anim: &mut Animator, serial: u64) -> f32 {
 /// "quick and quiet"). Closing is instant, so its exit is not used.
 pub fn settings(anim: &mut Animator, serial: u64) -> f32 {
     anim.presence(("settings-in", serial), true, MENU.enter, MENU.exit)
+}
+
+/// A light/dark change: the window crossfades from the frame drawn before it, 170 ms, linear —
+/// a mix is even all the way, so no curve makes a colour change look better.
+pub const THEME: Motion = Motion::tween(std::time::Duration::from_millis(170), Easing::Linear);
+
+/// The presence of a light/dark change, `serial` naming this flip: 0 on the frame the change is
+/// made (the window still shows the old palette's frame) to 1 when it shows the new alone.
+pub fn theme(anim: &mut Animator, serial: u64) -> f32 {
+    anim.presence(("theme", serial), true, THEME, THEME)
 }
 
 /// A chevron's turn in the Files and Notes panes: the shared `glyph::DISCLOSURE_MOTION` as it

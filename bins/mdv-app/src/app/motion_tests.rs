@@ -1896,3 +1896,99 @@ fn with_motion_off_the_settings_dialog_is_whole_at_once() {
         );
     }
 }
+
+#[test]
+fn a_light_and_dark_change_crossfades_from_the_frame_before() {
+    let mut a = moving(&["showcase.md"]);
+    a.compose();
+    let dark = a.pal;
+    let before = a.screen.pixels.clone();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    let (damage, _) = a.compose();
+    assert_ne!(a.pal, dark, "the palette is the new one at once");
+    let under = a.theme_fade.as_ref().expect("the old frame is kept");
+    // What is held: the whole window, four bytes a pixel.
+    let (x0, y0, x1, y1) = under.rect();
+    assert_eq!(
+        (x0, y0, x1, y1),
+        (0, 0, a.screen.width as i32, a.screen.height as i32)
+    );
+    assert_eq!(under.bitmap_size(), (a.screen.width, a.screen.height));
+    let held = (x1 - x0) as u64 * (y1 - y0) as u64 * 4;
+    assert_eq!(held, 4 * 1280 * 800, "{held} bytes");
+    assert!(
+        a.screen.pixels == before,
+        "the change's first frame is the old palette's"
+    );
+    every_row(&a, &damage);
+    assert!(a.anim_due.is_some(), "a frame is asked for");
+    // Half way: the page is between the two palettes.
+    let mut light = app(&["showcase.md"]);
+    light.ws.set_theme_choice(ThemeChoice::Light);
+    light.compose();
+    let (x, y) = (640.0, 700.0);
+    let settled = pixel(&light, x, y);
+    a.frame_clock = a.frame_clock.map(|t| t + Duration::from_millis(85));
+    let (damage, _) = a.compose();
+    every_row(&a, &damage);
+    let mid = pixel(&a, x, y);
+    assert!(mid != settled, "on its way at 85 ms of 170");
+    assert!(a.theme_fade.is_some());
+    let mut frames = 2;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the fade ends");
+    }
+    assert!(a.theme_fade.is_none(), "the snapshot is freed");
+    // The rest is the window a run that started light draws.
+    assert!(a.screen.pixels == light.screen.pixels, "the light window");
+    step(&mut a, Duration::from_secs(3));
+    assert!(a.anim_due.is_none(), "no timer once it is there");
+}
+
+#[test]
+fn with_motion_off_a_light_and_dark_change_is_simply_drawn() {
+    let mut a = app(&["showcase.md"]);
+    a.compose();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.theme_fade.is_none(), "nothing is kept");
+    assert!(a.anim_due.is_none());
+    let mut light = app(&["showcase.md"]);
+    light.ws.set_theme_choice(ThemeChoice::Light);
+    light.compose();
+    assert!(a.screen.pixels == light.screen.pixels);
+    // The system's wish for less motion too.
+    let mut reduced = moving(&["showcase.md"]);
+    reduced.compose();
+    reduced.anim.set_system_reduced(true);
+    reduced.ws.set_theme_choice(ThemeChoice::Light);
+    reduced.compose();
+    assert!(reduced.theme_fade.is_none());
+    assert!(reduced.anim_due.is_none());
+}
+
+#[test]
+fn a_resize_mid_fade_ends_the_light_and_dark_change() {
+    let mut a = moving(&["showcase.md"]);
+    a.compose();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.theme_fade.is_some());
+    step(&mut a, FRAME);
+    assert!(a.theme_fade.is_some(), "still fading");
+    // Another window size: the kept frame is of the old one and cannot be blended.
+    a.size = (1000, 700);
+    a.compose();
+    assert!(a.theme_fade.is_none(), "the change ended");
+    assert!(a.anim_due.is_none(), "and asks for no frame");
+    let mut light = app(&["showcase.md"]);
+    light.ws.set_theme_choice(ThemeChoice::Light);
+    light.size = (1000, 700);
+    light.compose();
+    assert!(
+        a.screen.pixels == light.screen.pixels,
+        "the new palette alone"
+    );
+}

@@ -110,6 +110,9 @@ pub struct Args {
     /// `--flip-setting <id>`: with `--dialog settings`, the row of that id (`settings.rs`)
     /// focused and turned with Space, for a shot; with `--motion-at`, as its switch slides.
     pub flip_setting: Option<u32>,
+    /// `--theme-flip <light|dark>`: a shot starts in the theme `--light` or `--dark` gave and
+    /// changes to this one; with `--motion-at`, as the window crossfades.
+    pub theme_flip: Option<bool>,
     /// `--zoom-level F`: with `--zoom-diagram`, its drawing size in device px per raster px (1.0,
     /// the default, is twice the page's size at any scale).
     pub zoom_level: Option<f32>,
@@ -320,6 +323,13 @@ impl Args {
                         .map(|ms| ms.min(10_000));
                 }
                 "--flip-setting" => out.flip_setting = value(&a).and_then(|v| v.parse().ok()),
+                "--theme-flip" => {
+                    out.theme_flip = match value(&a).as_deref() {
+                        Some("light") => Some(false),
+                        Some("dark") => Some(true),
+                        _ => None,
+                    }
+                }
                 "--hover" => out.hover = value(&a).and_then(|v| pair(&v, ',')),
                 "--menu" => {
                     out.menu = match value(&a).as_deref() {
@@ -463,6 +473,9 @@ mod tests {
         assert_eq!(a.motion_at, Some(67));
         assert_eq!(parse("--flip-setting 5").flip_setting, Some(5));
         assert_eq!(parse("--flip-setting on").flip_setting, None);
+        assert_eq!(parse("--theme-flip dark").theme_flip, Some(true));
+        assert_eq!(parse("--theme-flip light").theme_flip, Some(false));
+        assert_eq!(parse("--theme-flip sepia").theme_flip, None);
         assert_eq!(a.menu_at, Some(21));
         // A shot's motion waits at most ten seconds.
         assert_eq!(parse("--motion-at 999999").motion_at, Some(10_000));
