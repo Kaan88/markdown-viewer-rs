@@ -125,7 +125,9 @@ fn main_items(ws: &Workspace, ui: &Ui) -> Vec<Item<Act>> {
 }
 
 /// The "⋯" menu: what the bar does not show and people use while reading. Preferences are in
-/// Settings.
+/// Settings. The window opens the cascade (`main_cascade`); this is the same menu as plain
+/// items, for the tests that read the labels and access keys.
+#[cfg(test)]
 pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
     Menu::new(main_items(ws, ui), x, y, true).access_keys(true)
 }
@@ -150,7 +152,8 @@ pub fn main_cascade(ws: &Workspace, ui: &Ui, anchor: Rect) -> Cascade<Act> {
 }
 
 /// How far below the top of a placed menu the row of item `index` starts, from the shared
-/// menu's own layout, for a submenu's anchor.
+/// menu's own layout; the tests read a row's middle with it.
+#[cfg(test)]
 pub fn menu_row_offset(items: &[Item<Act>], index: usize) -> f32 {
     mdshared_ui::menu::row_span(items, index).0
 }

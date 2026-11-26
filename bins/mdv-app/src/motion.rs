@@ -30,9 +30,16 @@ pub fn menu(anim: &mut Animator, serial: u64) -> f32 {
     anim.presence(("menu", serial), true, MENU.enter, MENU.exit)
 }
 
-/// The presence of the submenu opened beside the menu `serial`, `sub` naming this opening of it.
-pub fn submenu(anim: &mut Animator, serial: u64, sub: u64) -> f32 {
-    anim.presence(("submenu", serial, sub), true, MENU.enter, MENU.exit)
+/// The presence of the submenu opened beside the menu `serial`, `path` naming the row that
+/// opened it (the row before it, at a deeper level): opened afresh it fades in, while one put
+/// back in its own place keeps its presence.
+pub fn submenu(anim: &mut Animator, serial: u64, path: &[usize]) -> f32 {
+    anim.presence(
+        ("submenu", serial, path.to_vec()),
+        true,
+        MENU.enter,
+        MENU.exit,
+    )
 }
 
 /// The presence of the palette, `serial` naming this opening of it: the card fades in and drops

@@ -2319,7 +2319,7 @@ fn shot(mut app: App, path: &Path) -> i32 {
         Some(ShotMenu::MainEnd) => {
             app.open_popup(PopupKind::Main);
             if let Some(p) = app.ui.popup.as_mut() {
-                p.menu.scroll_to_end();
+                p.root_mut().scroll_to_end();
             }
         }
         Some(ShotMenu::Recent) => app.open_popup(PopupKind::Recent),

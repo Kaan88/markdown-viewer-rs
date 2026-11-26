@@ -212,7 +212,7 @@ fn with_two_groups_the_reader_picks_one_from_a_menu() {
         a.ui.popup
             .as_ref()
             .unwrap()
-            .menu
+            .root()
             .items
             .iter()
             .map(|i| i.id.clone())

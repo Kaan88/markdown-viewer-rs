@@ -43,7 +43,7 @@ fn pixel(a: &App, x: f32, y: f32) -> [u8; 4] {
 }
 
 fn menu_middle(a: &App) -> (f32, f32) {
-    let r = a.ui.popup.as_ref().expect("a menu").menu.rect();
+    let r = a.ui.popup.as_ref().expect("a menu").root().rect();
     (r.cx(), r.cy())
 }
 
@@ -108,7 +108,7 @@ fn a_submenu_fades_in_beside_its_menu() {
     assert_eq!(a.menu_t, (1.0, 1.0));
     a.open_popup(PopupKind::Recent);
     a.compose();
-    assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_some()));
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_some()));
     assert_eq!(a.menu_t, (1.0, 0.0), "the parent stays; the submenu starts");
     step(&mut a, FRAME);
     assert!(a.menu_t.1 > 0.0 && a.menu_t.1 < 1.0);
@@ -135,14 +135,14 @@ fn menu_hover_fade_at(scale: f32) {
         frames += 1;
         assert!(frames < 40, "the menu's fade ends");
     }
-    let row = a.ui.popup.as_ref().unwrap().menu.row_rect(1);
+    let row = a.ui.popup.as_ref().unwrap().root().row_rect(1);
     let (x, y) = (row.x + 6.0, row.cy());
     let rest = pixel(&a, x, y);
     a.pointer_moved(x, y);
     if let Some(p) = a.ui.popup.as_mut() {
-        p.menu.pointer(x, y);
+        p.root_mut().pointer(x, y);
     }
-    assert_eq!(a.ui.popup.as_ref().unwrap().menu.hover, Some(1));
+    assert_eq!(a.ui.popup.as_ref().unwrap().root().hover, Some(1));
     a.compose();
     assert_eq!(
         pixel(&a, x, y),
@@ -168,7 +168,7 @@ fn menu_hover_fade_at(scale: f32) {
     still.compose();
     still.pointer_moved(x, y);
     if let Some(p) = still.ui.popup.as_mut() {
-        p.menu.pointer(x, y);
+        p.root_mut().pointer(x, y);
     }
     still.compose();
     assert_eq!(end, pixel(&still, x, y));
@@ -288,7 +288,9 @@ fn the_redraw_covers_everything_the_menu_touches_while_it_fades() {
     let bounds = p.presence_bounds();
     assert!(a.overlay_bounds.contains(&bounds), "{bounds:?} is redrawn");
     // And it holds the shadow and the drop: wider than the old 20 px round the menu.
-    assert!(bounds.y < p.menu.rect().y - 20.0 || bounds.bottom() > p.menu.rect().bottom() + 20.0);
+    assert!(
+        bounds.y < p.root().rect().y - 20.0 || bounds.bottom() > p.root().rect().bottom() + 20.0
+    );
 }
 
 #[test]
@@ -362,7 +364,7 @@ fn a_menu_fading_over_frosted_chrome_lets_the_backdrop_through_less() {
     assert!(t > 0.0 && t < 1.0);
     // Inside the menu, where it lies over the chrome, a pixel is neither chrome (keyed out)
     // nor opaque: it is the menu, part of the way in, over the backdrop.
-    let menu = a.ui.popup.as_ref().unwrap().menu.rect().inset(8.0);
+    let menu = a.ui.popup.as_ref().unwrap().root().rect().inset(8.0);
     let (w, h) = (a.screen.width as usize, a.screen.height as usize);
     let mut between = 0;
     for y in 0..h {

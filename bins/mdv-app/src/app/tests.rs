@@ -452,15 +452,19 @@ fn the_backlinks_list_shows_only_with_backlinks_and_a_click_opens_the_linking_fi
 
 /// The middle of row `i` of the open main menu.
 fn menu_row(a: &App, i: usize) -> (f32, f32) {
-    let m = a.ui.popup.as_ref().expect("a menu").menu.rect();
-    let y = m.y + overlays::menu_row_offset(&a.ui.popup.as_ref().unwrap().menu.items, i) + 16.0;
+    let m = a.ui.popup.as_ref().expect("a menu").root().rect();
+    let y = m.y + overlays::menu_row_offset(&a.ui.popup.as_ref().unwrap().root().items, i) + 16.0;
     (m.x + 40.0, y)
 }
 
 /// Index of the "Open recent" row of the main menu.
 fn recent_row(a: &App) -> usize {
     let p = a.ui.popup.as_ref().expect("a menu");
-    p.menu.items.iter().position(|i| i.id.is_submenu()).unwrap()
+    p.root()
+        .items
+        .iter()
+        .position(|i| i.id.is_submenu())
+        .unwrap()
 }
 
 #[test]
@@ -475,23 +479,27 @@ fn a_submenu_opens_after_the_pointer_rests_and_the_parent_stays() {
     a.compose();
     {
         let p = a.ui.popup.as_ref().unwrap();
-        assert!(p.sub.is_none(), "not before the dwell");
-        assert!(p.dwell.is_some());
+        assert!(p.submenu().is_none(), "not before the dwell");
+        assert!(p.deadline().is_some());
     }
     let now = std::time::Instant::now();
     // The timer asks to wake at the dwell's end, and does nothing before it.
     let next = a.timers(now).expect("a wake for the dwell");
-    assert!(next > now && next <= now + crate::ui::SUBMENU_DWELL);
-    assert!(a.ui.popup.as_ref().unwrap().sub.is_none());
+    assert!(next > now && next <= now + crate::motion::SUBMENU);
+    assert!(a.ui.popup.as_ref().unwrap().submenu().is_none());
     // After it the submenu is open beside the item and the main menu is still there.
-    a.timers(now + crate::ui::SUBMENU_DWELL + std::time::Duration::from_millis(5));
+    a.timers(now + crate::motion::SUBMENU + std::time::Duration::from_millis(5));
     a.compose();
     let p = a.ui.popup.as_ref().unwrap();
     assert_eq!(p.kind, PopupKind::Main);
-    let sub = p.sub.as_ref().expect("the submenu");
-    assert!(p.dwell.is_none());
-    assert!(sub.rect().w > 0.0 && sub.rect().right() > p.menu.rect().x);
-    assert!(p.menu.rect().w > 0.0, "the parent stays");
+    let sub = p.submenu().expect("the submenu");
+    assert!(p.deadline().is_none());
+    // The default window has no room on the menu's right, so the submenu opens on its
+    // left, its right edge just beside the menu's left edge.
+    assert!(sub.rect().w > 0.0, "the submenu is placed");
+    assert!(sub.rect().right() < p.root().rect().x);
+    assert!(p.root().rect().x - sub.rect().right() <= 8.0);
+    assert!(p.root().rect().w > 0.0, "the parent stays");
     // Nothing is left to wake for.
     assert_eq!(a.timers(now + std::time::Duration::from_secs(1)), None);
     // Closing the menu leaves no timer behind.
@@ -512,22 +520,27 @@ fn a_click_opens_the_submenu_at_once_and_other_items_close_it() {
     a.left_press();
     a.left_release();
     a.compose();
-    assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_some()));
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_some()));
     // The pointer leaving the item sideways crosses the menu's padding, where no row is
     // hovered: the submenu stays and its item stays lit (0.3.0 closed it there, so the pointer
     // never reached the submenu).
-    let m = a.ui.popup.as_ref().unwrap().menu.rect();
+    let m = a.ui.popup.as_ref().unwrap().root().rect();
     let (mut px, mut end) = (x, m.x);
-    if a.ui.popup.as_ref().unwrap().sub.as_ref().unwrap().rect().x >= m.right() - 8.0 {
+    if a.ui.popup.as_ref().unwrap().submenu().unwrap().rect().x >= m.right() - 8.0 {
         end = m.right() - 1.0;
     }
     let step = if end < px { -1.0 } else { 1.0 };
     while (end - px) * step >= 0.0 {
         a.pointer_moved(px, y);
         let p = a.ui.popup.as_ref().unwrap();
-        assert!(p.sub.is_some(), "closed at x = {px}");
-        assert_eq!(p.menu.hover, Some(r), "the item stays lit at x = {px}");
-        assert!(p.dwell.is_none());
+        assert!(p.submenu().is_some(), "closed at x = {px}");
+        assert_eq!(p.root().hover, Some(r), "the item stays lit at x = {px}");
+        // On its way to the submenu the cascade may keep a close pending for the pointer's
+        // rest there; the move itself must not close it.
+        let now = std::time::Instant::now();
+        let p = a.ui.popup.as_mut().unwrap();
+        p.tick(now);
+        assert!(p.submenu().is_some(), "closed by the move at x = {px}");
         px += step;
     }
     // Another item of the parent does not close the submenu at once (the pointer may be on its
@@ -537,40 +550,40 @@ fn a_click_opens_the_submenu_at_once_and_other_items_close_it() {
     assert!(
         a.ui.popup
             .as_ref()
-            .is_some_and(|p| p.sub.is_some() && p.dwell.is_some())
+            .is_some_and(|p| p.submenu().is_some() && p.deadline().is_some())
     );
     // Into the submenu before the dwell is up: it stays, and nothing is pending.
-    let s = a.ui.popup.as_ref().unwrap().sub.as_ref().unwrap().rect();
+    let s = a.ui.popup.as_ref().unwrap().submenu().unwrap().rect();
     a.pointer_moved(s.x + 40.0, s.y + 16.0);
     assert!(
         a.ui.popup
             .as_ref()
-            .is_some_and(|p| p.sub.is_some() && p.dwell.is_none())
+            .is_some_and(|p| p.submenu().is_some() && p.deadline().is_none())
     );
-    a.timers(std::time::Instant::now() + crate::ui::SUBMENU_DWELL * 2);
-    assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_some()));
+    a.timers(std::time::Instant::now() + crate::motion::SUBMENU * 2);
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_some()));
     // Resting on the other item closes it.
     a.pointer_moved(x0, y0);
-    a.timers(std::time::Instant::now() + crate::ui::SUBMENU_DWELL * 2);
+    a.timers(std::time::Instant::now() + crate::motion::SUBMENU * 2);
     assert!(
         a.ui.popup
             .as_ref()
-            .is_some_and(|p| p.sub.is_none() && p.dwell.is_none())
+            .is_some_and(|p| p.submenu().is_none() && p.deadline().is_none())
     );
     // And back on the item: it opens again after the dwell, not before.
     let (x, y) = menu_row(&a, r);
     a.pointer_moved(x, y);
-    assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_none()));
-    let late = std::time::Instant::now() + crate::ui::SUBMENU_DWELL * 2;
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_none()));
+    let late = std::time::Instant::now() + crate::motion::SUBMENU * 2;
     a.timers(late);
-    assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_some()));
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_some()));
     // The pointer can travel to the submenu, which keeps the parent's item lit.
     a.compose();
-    let s = a.ui.popup.as_ref().unwrap().sub.as_ref().unwrap().rect();
+    let s = a.ui.popup.as_ref().unwrap().submenu().unwrap().rect();
     a.pointer_moved(s.x + 40.0, s.y + 16.0);
     let p = a.ui.popup.as_ref().unwrap();
-    assert_eq!(p.menu.hover, Some(r));
-    assert!(p.sub.as_ref().unwrap().hover.is_some());
+    assert_eq!(p.root().hover, Some(r));
+    assert!(p.submenu().unwrap().hover.is_some());
     // A click outside closes both.
     a.pointer_moved(640.0, 600.0);
     a.left_press();
@@ -586,24 +599,24 @@ fn escape_and_left_close_only_the_submenu_and_right_opens_it() {
     for _ in 0..=r {
         key(&mut a, KeyName::Down, None);
     }
-    assert_eq!(a.ui.popup.as_ref().unwrap().menu.hover, Some(r));
+    assert_eq!(a.ui.popup.as_ref().unwrap().root().hover, Some(r));
     key(&mut a, KeyName::Right, None);
     let p = a.ui.popup.as_ref().unwrap();
-    assert!(p.sub.as_ref().is_some_and(|s| s.hover.is_some()));
+    assert!(p.submenu().is_some_and(|s| s.hover.is_some()));
     key(&mut a, KeyName::Left, None);
     let p = a.ui.popup.as_ref().expect("the parent stays");
-    assert!(p.sub.is_none());
+    assert!(p.submenu().is_none());
     key(&mut a, KeyName::Enter, None);
-    assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_some()));
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_some()));
     key(&mut a, KeyName::Escape, None);
-    assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_none()));
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_none()));
     key(&mut a, KeyName::Escape, None);
     assert!(a.ui.popup.is_none());
     // Right on an ordinary item does nothing.
     click(&mut a, Hit::Bar(BarItem::More));
     key(&mut a, KeyName::Down, None);
     key(&mut a, KeyName::Right, None);
-    assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_none()));
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_none()));
 }
 
 #[test]
@@ -616,7 +629,7 @@ fn choosing_in_the_submenu_acts_and_closes_both() {
     a.left_press();
     a.left_release();
     a.compose();
-    let s = a.ui.popup.as_ref().unwrap().sub.as_ref().unwrap().rect();
+    let s = a.ui.popup.as_ref().unwrap().submenu().unwrap().rect();
     // The first row is the recent file; opening it is a no-op for the same file but closes both.
     a.pointer_moved(s.x + 40.0, s.y + 5.0 + 16.0);
     a.left_press();
@@ -1124,7 +1137,7 @@ fn the_main_menu_holds_what_people_use_while_reading_and_fits_the_window() {
     a.compose();
     let p = a.ui.popup.as_ref().expect("the menu");
     let shown: Vec<String> = p
-        .menu
+        .root()
         .items
         .iter()
         .map(|i| mdshared_ui::menu::parse_access(&i.label).text)
@@ -1158,9 +1171,9 @@ fn the_main_menu_holds_what_people_use_while_reading_and_fits_the_window() {
     ] {
         assert!(labels.contains(&kept), "{kept}");
     }
-    assert!(!p.menu.scrolls(), "it fits the default window");
+    assert!(!p.root().scrolls(), "it fits the default window");
     // The menu's icons are the ones the palette shows for the same commands.
-    for item in &p.menu.items {
+    for item in &p.root().items {
         if let Act::Cmd(id) = item.id {
             assert_eq!(item.icon, overlays::command_icon(id), "{}", item.label);
         }
@@ -1630,8 +1643,8 @@ fn the_wheel_while_a_menu_is_open_does_nothing_over_a_menu_that_fits_or_outside_
     assert!(scrolled > 0.0);
     a.open_popup(PopupKind::Main);
     a.compose();
-    let m = a.ui.popup.as_ref().expect("a menu").menu.rect();
-    assert!(!a.ui.popup.as_ref().unwrap().menu.scrolls());
+    let m = a.ui.popup.as_ref().expect("a menu").root().rect();
+    assert!(!a.ui.popup.as_ref().unwrap().root().scrolls());
     // Over the menu, which fits: nothing happens, the menu stays, the page stays.
     a.pointer_moved(m.cx(), m.cy());
     a.wheel(MouseScrollDelta::LineDelta(0.0, -3.0));
@@ -1650,11 +1663,11 @@ fn the_wheel_while_a_menu_is_open_does_nothing_over_a_menu_that_fits_or_outside_
     a.compose();
     a.open_popup(PopupKind::Main);
     a.compose();
-    let m = a.ui.popup.as_ref().unwrap().menu.rect();
-    assert!(a.ui.popup.as_ref().unwrap().menu.scrolls());
+    let m = a.ui.popup.as_ref().unwrap().root().rect();
+    assert!(a.ui.popup.as_ref().unwrap().root().scrolls());
     a.pointer_moved(m.cx(), m.cy());
     a.wheel(MouseScrollDelta::LineDelta(0.0, -3.0));
-    assert!(a.ui.popup.as_ref().unwrap().menu.scroll() > 0.0);
+    assert!(a.ui.popup.as_ref().unwrap().root().scroll() > 0.0);
     assert_eq!(a.ws.scroll(), scrolled);
 }
 
@@ -3603,7 +3616,7 @@ fn the_recent_menu_stays_out_of_access_keys_because_its_labels_are_file_names() 
     a.compose();
     let p = a.ui.popup.as_ref().expect("the menu");
     assert!(
-        p.menu.items.iter().all(|i| !i.label.contains('&')),
+        p.root().items.iter().all(|i| !i.label.contains('&')),
         "no marks were added to it"
     );
     // A letter does nothing in it.
@@ -3647,7 +3660,7 @@ fn an_access_key_of_a_submenu_item_opens_the_submenu_with_the_item_highlighted()
     click(&mut a, Hit::Bar(BarItem::More));
     key(&mut a, KeyName::Char('r'), Some("r"));
     let p = a.ui.popup.as_ref().expect("still open");
-    assert!(p.sub.is_some(), "Open recent opened beside the menu");
+    assert!(p.submenu().is_some(), "Open recent opened beside the menu");
 }
 
 #[test]

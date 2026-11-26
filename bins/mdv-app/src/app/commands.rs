@@ -379,15 +379,13 @@ impl App {
             && p.kind == PopupKind::Main
         {
             // Asked by name, not by the pointer: highlight the item it belongs to.
-            p.hover_submenu_row();
-            self.open_submenu(false);
+            p.open_submenu(false);
             return;
         }
         let (x, y, right) = self.popup_anchor(kind);
         let mut popup = match kind {
             PopupKind::Main => Popup::main(
                 kind,
-                overlays::main_menu(&self.ws, &self.ui, x, y),
                 overlays::main_cascade(&self.ws, &self.ui, Rect::new(x, y, 0.0, 0.0)),
             ),
             PopupKind::Recent => Popup::new(kind, overlays::recent_menu(&self.ws, x, y, right)),
@@ -403,26 +401,9 @@ impl App {
     /// Opens the submenu of the highlighted item of the open menu beside that item. `keyboard`
     /// also highlights its first row, so the arrow keys carry on inside it.
     pub(super) fn open_submenu(&mut self, keyboard: bool) {
-        let (w, _) = self.logical();
-        let Some(p) = self.ui.popup.as_mut() else {
-            return;
-        };
-        p.dwell = None;
-        let Some(i) = p.menu.hover.filter(|&i| p.menu.items[i].id.is_submenu()) else {
-            return;
-        };
-        let parent = p.menu.rect();
-        let row_y = parent.y + overlays::menu_row_offset(&p.menu.items, i) - p.menu.scroll();
-        // Beside the item, on the right unless the window has no room there.
-        let room = w - parent.right();
-        let left = room < 420.0 && parent.x > room;
-        let (x, right) = if left {
-            (parent.x + 4.0, true)
-        } else {
-            (parent.right() - 4.0, false)
-        };
-        let menu = overlays::recent_menu(&self.ws, x, row_y - 5.0, right);
-        p.set_submenu(menu, keyboard);
+        if let Some(p) = self.ui.popup.as_mut() {
+            p.open_submenu(keyboard);
+        }
         self.ui.tips.hide();
     }
 
@@ -1327,13 +1308,13 @@ impl App {
                 at(due);
             }
         }
-        // The pointer resting on a submenu item: open it when the dwell is up. Nothing is
-        // scheduled when no menu is open, because the dwell lives in the popup.
+        // The pointer resting on a submenu item: open it when the dwell is up, or close the
+        // open one. Nothing is scheduled when no menu is open, because the dwell lives in the
+        // popup's cascade.
         if let Some(due) = self.ui.popup.as_ref().and_then(Popup::deadline) {
             if now >= due {
-                let opens = self.ui.popup.as_mut().is_some_and(|p| p.tick(now));
-                if opens {
-                    self.open_submenu(false);
+                if let Some(p) = self.ui.popup.as_mut() {
+                    p.tick(now);
                 }
                 self.wants_frame = true;
             } else {
