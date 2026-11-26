@@ -646,6 +646,29 @@ fn menu_row_offsets_follow_the_shared_layout() {
     assert_eq!(overlays::menu_row_offset(&items, 2), 5.0 + 64.0);
 }
 
+/// The shared cascade keeps 4 px from the edges of the area it is handed; a menu's own
+/// placement kept them from the window's. The room is widened by them for the cascade, so its
+/// root lands on the menu's own rectangle at every size — the ones the menu overflows, where it
+/// scrolls, included.
+#[test]
+fn the_cascades_menu_is_placed_exactly_where_the_menus_own_placement_puts_it() {
+    let mut a = app(&["showcase.md"]);
+    for (w, h) in [(1280.0f32, 800.0f32), (1000.0, 520.0), (520.0, 360.0)] {
+        a.size = ((w * a.scale).round() as u32, (h * a.scale).round() as u32);
+        a.compose();
+        a.open_popup(PopupKind::Main);
+        a.compose();
+        let (x, y, _) = a.popup_anchor(PopupKind::Main);
+        let mut menu = overlays::main_menu(&a.ws, &a.ui, x, y);
+        let room = menu_room(a.areas.title, w, h);
+        let mut p = Painter::new(&mut a.screen, &mut a.gfx, a.scale);
+        menu.place_in(&mut p, room);
+        let popup = a.ui.popup.as_ref().expect("the menu");
+        assert_eq!(popup.root().rect(), menu.rect(), "{w}x{h}");
+        a.ui.popup = None;
+    }
+}
+
 // ---- the command palette and the settings dialog -------------------------------------------------
 
 const CTRL: Mods = Mods {
@@ -3622,6 +3645,36 @@ fn the_recent_menu_stays_out_of_access_keys_because_its_labels_are_file_names() 
     // A letter does nothing in it.
     key(&mut a, KeyName::Char('m'), Some("m"));
     assert!(a.ui.popup.is_some());
+}
+
+/// The main menu's submenu is a cascade, which reads every menu for access keys. A file name's
+/// `&` must still be drawn as one `&`, marking no letter, as the recent menu itself draws it.
+#[test]
+fn a_recent_files_ampersand_is_drawn_as_one_and_marks_no_letter() {
+    let (mut a, dir, _file) = live_app("ampersand-recent");
+    let named = dir.join("R&D.md");
+    std::fs::write(&named, "# Rock and roll\n").unwrap();
+    a.ws.open_recent(&named).unwrap();
+    a.compose();
+    a.open_popup(PopupKind::Main);
+    a.compose();
+    a.open_popup(PopupKind::Recent);
+    a.compose();
+    let plain =
+        a.ws.recent_entries()
+            .into_iter()
+            .find(|e| e.path.ends_with("R&D.md"))
+            .expect("the recent file")
+            .label;
+    let sub = a.ui.popup.as_ref().unwrap().submenu().expect("the submenu");
+    let item = sub
+        .items
+        .iter()
+        .find(|i| matches!(&i.id, Act::Recent(p) if p.ends_with("R&D.md")))
+        .expect("its row");
+    assert!(item.label.contains("&&"), "{:?} is escaped", item.label);
+    assert_eq!(mdshared_ui::menu::parse_access(&item.label).text, plain);
+    assert_eq!(mdshared_ui::menu::access_key_of(&item.label), None);
 }
 
 #[test]
