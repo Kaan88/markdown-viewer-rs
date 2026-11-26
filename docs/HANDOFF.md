@@ -112,10 +112,11 @@ review of the stage added a sixth, and its scale counterparts below.
 
 ### L1: the main menu's Open recent is a `submenu::Cascade` (2026-11-26)
 
-Four commits, each built, tested and shot-checked: `e1d3074` builds the cascade beside the
-menu, `060250b` moves every call site onto the popup (nothing drawn changes; 195 shots
-byte-identical), `36b6faf` makes the body the `Menu`/`Cascade` enum and deletes the hand-made
-submenu, `9d2740a` adds the two tests below.
+Seven commits: four for the move, each built, tested and shot-checked — `e1d3074` builds the
+cascade beside the menu, `060250b` moves every call site onto the popup (nothing drawn changes;
+195 shots byte-identical), `36b6faf` makes the body the `Menu`/`Cascade` enum and deletes the
+hand-made submenu, `9d2740a` adds the two tests below — and three for the review's fixes (see
+below): `0d98d2b`, `26341e0`, `90f531f`.
 
 - **The body.** `Popup { kind, body: MenuBody, access, serial }`, `MenuBody::Menu(Menu<Act>)` or
   `MenuBody::Cascade(Cascade<Act>)`. Only the main menu is a cascade; the context menus, the
@@ -142,14 +143,16 @@ submenu, `9d2740a` adds the two tests below.
 - **Placement.** The shared `around`/`beside` keep 4 px from the edges of the area they are
   handed; a menu's own placement kept them from the window. `cascade_room` widens the room by
   them at the top and the bottom, so the cascade's root lands on the menu's rectangle at every
-  size (the test below). The submenu now sits `beside` its menu with the shared 2 px gap; the old
-  code overlapped the menu by 4 px, so it moved 6 px (the cascade shots).
+  size (the test below; at a fractional scale the two roundings can be a pixel apart). The
+  submenu now sits `beside` its menu with the shared 2 px gap; the old code overlapped the menu
+  by 4 px, so it moved 6 px (the cascade shots).
 - **Two changes of behaviour, both the shared rules, not regressions:** the pointer resting on
   its menu's padding (not on a row) while a submenu is open now asks for it to close after the
   300 ms if it is not on its way to the submenu (the old code kept it until a row was rested
   on); and a key pressed while a pointer change still waits makes that change first
   (`Cascade::key`), so a key during the rest acts on what is lit. The crossing test asserts the
-  first: a `tick` at the move's own time does not close it.
+  first: on the padding the submenu stays and the row stays lit while a deadline waits, and when
+  that timer comes the submenu has closed.
 
 Tests: fourteen tests read the cascade's state where they read the old fields — `root()` for
 `menu`, `submenu()` for `sub` and `deadline()` for `dwell` — across `app/tests.rs`,
@@ -160,8 +163,9 @@ expects no pending close (see above), and
 `a_submenu_opens_after_the_pointer_rests_and_the_parent_stays` asserts the submenu lies just
 beside the menu's left edge (the shared gap) rather than over it. Three are new, each failing
 with its fix reverted:
-- `the_cascades_menu_is_placed_exactly_where_the_menus_own_placement_puts_it`: the cascade's root
-  equals the menu's own placed rectangle at 1280x800, 1000x520 and 520x360 — fails with
+- `the_cascades_menu_is_placed_where_the_menus_own_placement_puts_it`: the cascade's root equals
+  the menu's own placed rectangle at 1280x800, 1000x520 and 520x360 exactly, and at 1.5x at
+  907x601 within a pixel (the two roundings of the right edge can differ there) — fails with
   `cascade_room` left as the plain room (1000x520: y 44 in a 472 px box instead of 40 in 476);
 - `a_recent_files_ampersand_is_drawn_as_one_and_marks_no_letter`: `R&D.md` in the submenu parses
   to `R&D.md` with no access key — fails without the escape;
@@ -169,10 +173,36 @@ with its fix reverted:
   its first row and the menu keeps its row lit — fails with the `Right` that moves the keys into
   the submenu removed (the submenu closes instead).
 
+One is new and **ignored**, for the shared session:
+`escape_with_a_waiting_pointer_change_closes_only_the_submenu` (`#[ignore = "needs shared: drop
+a waiting change on Escape/Left"]`). A pointer that rested on another row less than 300 ms ago
+leaves a close waiting; shared's `Cascade::key` makes it first, so Escape then sees one menu and
+closes the whole popup. The test wants only the submenu closed and the menu left open; run with
+`--ignored` it fails on "the menu stays".
+
+### Review of L1 (2026-11-26)
+
+Opus's review said FIX. Commits `0d98d2b`, `26341e0`, `90f531f`:
+
+- **The crossing assertion checked nothing.** It ticked at `Instant::now()` after a move, which
+  can never apply a close due 300 ms later. `a_click_opens_the_submenu_at_once_and_other_items_
+  close_it` now states the rule after the crossing: on the padding the cascade has a deadline
+  and the row stays lit, and when the timer comes the submenu has closed — it fails with `tick`
+  made a no-op (the stand-in for the old "stays open on the padding" rule).
+- **Escape with a waiting pointer change** (shared's, not fixable here): the ignored test above;
+  the shared session has been asked.
+- **Placement at a fractional scale**: see the test above, 907x601 at 1.5, a 1 px tolerance.
+- **A tooltip in the title-hover shots.** The tick that shows a shot's tip at once ran for any
+  moving shot, so `title-hover-light`/`-dark` (`--hover-close --motion-at 40`) drew a half-faded
+  "Close" bubble no window shows (a tip waits 500 ms). It now runs only under `--hover`; both
+  shots retaken and looked at, the bubble gone, and `tip-fading-light`/`-dark` byte-identical.
+- **The pin's blank line.** `bins/mdv-app`, `crates/core` and `crates/render`'s `Cargo.toml` each
+  end as they did before the pin; each diff against `d624d61` is its rev lines alone.
+
 ### Shots
 
-`tests/shots.sh` into `target/shots/l1-final`: 195 shots, 185 byte-identical to
-`target/shots/l1-before`. Ten differ, looked at in both themes:
+`tests/shots.sh` into `target/shots/review-head`: 195 shots, 183 byte-identical to
+`target/shots/l1-before`. Twelve differ, looked at in both themes:
 - the seven main-menu shots (`menu-main-light`/`-dark`, `-keys`, `-fading-light`/`-dark`,
   `menu-tall-main`, `hover-menu`) differ by 30 pixels each: the Open recent row's arrow is the
   shared `glyph::RIGHT`, which the menu draws for any row a cascade marks as opening a submenu,
@@ -181,15 +211,18 @@ with its fix reverted:
 - `menu-cascade-light`/`-dark` and `scale-150-menu` differ over the submenu's whole rectangle:
   it moved 6 px away from its menu (the shared 2 px gap in place of the old 4 px overlap). Its
   rows, width, height and row alignment are as they were.
+- `title-hover-light`/`-dark` no longer carry the half-faded "Close" tooltip (the review's fix;
+  the bubble was 40 ms into an 83 ms fade). The button's hover fill itself is unchanged.
 
-`menu-recent`, `menu-tab*`, `menu-page`, `menu-find`, `menu-library-*`, the palette, the dialogs
-and every content shot are byte-identical.
+`menu-recent`, `menu-tab*`, `menu-page`, `menu-find`, `menu-library-*`, `tip-fading-*`, the
+palette, the dialogs and every content shot are byte-identical.
 
 Not verified: the owner's look at the changed menu shots (the arrow and the 6 px gap are his
 judgement calls, and the shared gap cannot be the old overlap without changing shared); the 300
 ms rest and the aim test by hand in a real window; the cost of a menu frame (the cascade places
 its menus once more a frame than the old code, `place_in` before the draw and again inside it);
-Linux and macOS.
+Linux and macOS; the Escape-with-a-waiting-change case, which is the ignored test until
+shared drops a waiting change on Escape/Left.
 
 ### Numbers (release, this PC, 2026-11-26)
 
@@ -212,9 +245,11 @@ number above is taken from those runs.
 
 **Next: the owner's look at L1, then the branch is ready to merge.** Shared's close-out list is
 complete on this branch (its pin stays `09b01c1`; nothing in shared was changed). The changed
-menu shots are the only owner-visible difference; nothing else is on the list.
+menu shots are the only owner-visible difference (the title-hover shots lost a stray tip no
+window showed); nothing else is on the list.
 
-Workspace after L1: 778 passed, 6 ignored (`mdview`'s own: 337 passed, 1 ignored).
+Workspace after L1 and its review: 778 passed, 7 ignored (`mdview`'s own: 337 passed,
+2 ignored, one of them the Escape test waiting on shared).
 
 ---
 
