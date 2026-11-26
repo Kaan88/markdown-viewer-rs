@@ -90,6 +90,11 @@ shot dialog-settings-dark --dark --dialog settings "$fx/showcase.md"
 shot dialog-settings-scale-150 --light --scale 1.5 --dialog settings "$fx/showcase.md"
 shot dialog-settings-min-dark --dark --size 520x360 --dialog settings "$fx/showcase.md"
 shot dialog-settings-640 --light --size 640x800 --dialog settings "$fx/showcase.md"
+# The Settings dialog opening: 67 ms into the menus' 117 ms, the dim and the card fading in as
+# one thing over the window it was opened on.
+for theme in light dark; do
+    shot "dialog-settings-opening-$theme" --"$theme" --dialog settings --motion-at 67 "$fx/showcase.md"
+done
 # The Window backdrop row (offered on Windows) with a choice made. A shot has no window, so
 # there is no backdrop to show: the chrome is the flat colours.
 shot dialog-settings-backdrop --dark --backdrop mica --dialog settings "$fx/showcase.md"

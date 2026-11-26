@@ -1786,3 +1786,113 @@ fn a_page_lists_hover_fades_in_frames_of_the_list_alone_as_a_whole_redraw_would(
     }
     assert!(frames >= 2, "the hover fill fades in: {frames} frames");
 }
+
+/// The settings dialog's card, in the middle of its page area.
+const CARD_MIDDLE: (f32, f32) = (640.0, 400.0);
+
+/// Asserts that the frame's damage covers every row of the window (the rectangles may overlap,
+/// so their rows are counted once each).
+fn every_row(a: &App, damage: &[(i32, i32, i32, i32)]) {
+    let mut row = vec![false; a.screen.height as usize];
+    for d in damage {
+        for y in d.1.max(0)..d.3.min(a.screen.height as i32) {
+            row[y as usize] = true;
+        }
+    }
+    assert!(
+        row.iter().all(|r| *r),
+        "{} of {} rows drawn",
+        row.iter().filter(|r| **r).count(),
+        row.len()
+    );
+}
+
+#[test]
+fn the_settings_dialog_fades_in_when_it_opens() {
+    let mut a = moving(&["showcase.md"]);
+    a.compose();
+    let before = a.screen.pixels.clone();
+    a.open_settings();
+    let (damage, _) = a.compose();
+    assert_eq!(a.settings_t, 0.0, "the dialog's first frame is the start");
+    assert!(a.anim_due.is_some(), "a frame is asked for");
+    // The dim and the card are drawn over the whole window and faded as one: while it fades the
+    // whole window is drawn again.
+    every_row(&a, &damage);
+    assert!(
+        a.screen.pixels == before,
+        "at 0 nothing of the dialog shows yet"
+    );
+    step(&mut a, FRAME);
+    let (x, y) = CARD_MIDDLE;
+    let mid_t = a.settings_t;
+    let mid = pixel(&a, x, y);
+    assert!(mid_t > 0.0 && mid_t < 1.0, "on its way: {mid_t}");
+    let mut frames = 1;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the fade ends");
+    }
+    assert_eq!(a.settings_t, 1.0);
+    // The menus' 117 ms at 16 ms a frame, and one frame more at most.
+    assert!(frames <= 9, "{frames} frames");
+    assert_ne!(pixel(&a, x, y), mid, "the frames of the fade are drawn");
+    // At rest it is the dialog a still run draws.
+    let mut still = app(&["showcase.md"]);
+    still.open_settings();
+    still.compose();
+    assert!(a.screen.pixels == still.screen.pixels);
+    step(&mut a, Duration::from_secs(3));
+    assert!(a.anim_due.is_none(), "nothing moves once it is there");
+}
+
+#[test]
+fn the_settings_dialog_closes_at_once_mid_fade() {
+    let mut a = moving(&["showcase.md"]);
+    a.compose();
+    let before = a.screen.pixels.clone();
+    a.open_settings();
+    a.compose();
+    step(&mut a, FRAME);
+    assert!(a.settings_t > 0.0 && a.settings_t < 1.0, "mid-fade");
+    // Escape, as a hand does: the dialog goes at once, with no exit of its own.
+    a.modal_key(KeyName::Escape, None);
+    a.compose();
+    assert!(a.ui.settings.is_none());
+    assert_eq!(a.settings_t, 1.0, "no exit is played");
+    assert!(a.anim_due.is_none(), "nothing goes on");
+    assert!(a.screen.pixels == before, "the window as it was");
+}
+
+#[test]
+fn with_motion_off_the_settings_dialog_is_whole_at_once() {
+    // A still run showing the same dialog: the switch of the Animations row is part of the card,
+    // so the run with the setting off is compared with one that has it off too.
+    let mut still = app(&["showcase.md"]);
+    still.open_settings();
+    still.compose();
+    let mut still_off = app(&["showcase.md"]);
+    still_off.apply_setting(s::MOTION, Value::Bool(false));
+    still_off.open_settings();
+    still_off.compose();
+    let mut off = moving(&["showcase.md"]);
+    off.apply_setting(s::MOTION, Value::Bool(false));
+    off.open_settings();
+    off.compose();
+    let mut reduced = moving(&["showcase.md"]);
+    reduced.anim.set_system_reduced(true);
+    reduced.open_settings();
+    reduced.compose();
+    for (name, a, at_rest) in [
+        ("setting off", &off, &still_off),
+        ("reduced motion", &reduced, &still),
+    ] {
+        assert_eq!(a.settings_t, 1.0, "{name}");
+        assert!(a.anim_due.is_none(), "{name}: no frame is asked for");
+        assert!(
+            a.screen.pixels == at_rest.screen.pixels,
+            "{name}: the dialog at rest"
+        );
+    }
+}

@@ -326,6 +326,10 @@ struct App {
     /// while it is open), and this opening of it: a palette opened again fades in again.
     palette_t: f32,
     palette_serial: u64,
+    /// How present the Settings dialog is this frame, 0 to 1 (it closes at once, so there is no
+    /// 0 while it is open), and this opening of it: opened again it fades in again.
+    settings_t: f32,
+    settings_serial: u64,
     /// How high each notice bar shows this frame: the page is laid out under them.
     bars: page::Bars,
     /// Frames composed so far: the first one has the bars the window starts with in place.
@@ -465,6 +469,8 @@ impl App {
             menu_t: (1.0, 1.0),
             palette_t: 1.0,
             palette_serial: 0,
+            settings_t: 1.0,
+            settings_serial: 0,
             bars: page::Bars::FULL,
             frames: 0,
             motion_watched: false,
@@ -831,6 +837,12 @@ impl App {
             true => crate::motion::palette(&mut self.anim, self.palette_serial),
             false => 0.0,
         };
+        // The Settings dialog's entrance, asked for on every frame it is open: the dim and the
+        // card fade in as one thing, and closing is instant.
+        self.settings_t = match self.ui.settings.is_some() {
+            true => crate::motion::settings(&mut self.anim, self.settings_serial),
+            false => 1.0,
+        };
         // The notice bars' entrance, asked every frame: a bar that goes is forgotten instead of
         // playing out, since nothing draws it any more.
         let (update, crash, stale) = (
@@ -1134,8 +1146,9 @@ impl App {
             self.ui.modal().then_some((
                 self.ui.overlay_tick,
                 self.ui.palette.is_some().then_some(self.ui.caret_on),
-                // A palette coming in is drawn anew on each frame of it.
+                // A palette or the settings dialog coming in is drawn anew on each frame of it.
                 self.palette_t.to_bits(),
+                self.settings_t.to_bits(),
             )),
             self.ui
                 .zoom
@@ -1351,10 +1364,17 @@ impl App {
                     }
                 }
                 if let Some(f) = self.ui.settings.as_mut() {
+                    // Opening: the dim and the card are drawn over the window as it was and
+                    // faded in as one thing, so nothing of the frame before shows between them.
+                    let t = self.settings_t;
+                    let under = (t < 1.0).then(|| c.p.snapshot(window));
                     let id = crate::motion::SETTINGS;
                     self.anim.group(id);
                     f.draw_animated(c.p, &pal, window, self.ui.caret_on, &mut self.anim, id);
                     self.anim.ungroup();
+                    if let Some(under) = &under {
+                        c.p.fade(under, t);
+                    }
                     settings_drawn = true;
                 }
                 // The diagram view covers everything, so it is drawn after them all.
@@ -2443,7 +2463,12 @@ fn shot(mut app: App, path: &Path) -> i32 {
         }
         app.compose();
     }
-    if app.ui.dialog.is_some() || app.ui.popup.is_some() || app.ui.modal() {
+    // A dialog or a palette just opened is drawn at rest. The Settings dialog with `--motion-at`
+    // is the exception: its entrance is the motion shot, and its first frame — the window under
+    // it — is the one the clock starts on.
+    let settings_entrance =
+        app.args.dialog == Some(ShotDialog::Settings) && app.args.motion_at.is_some();
+    if (app.ui.dialog.is_some() || app.ui.popup.is_some() || app.ui.modal()) && !settings_entrance {
         app.compose();
     }
     if let Some((x, y)) = app.args.hover {

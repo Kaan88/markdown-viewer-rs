@@ -90,6 +90,8 @@ impl App {
         self.ui.find_focused = false;
         self.ui.dialog = None;
         self.ui.palette = None;
+        // A new name for this opening: the dialog fades in again each time.
+        self.settings_serial = self.settings_serial.wrapping_add(1);
         let page = self.ui.settings_page;
         let mut f = setting::form(&self.ws, self.corners_offered(), page);
         f.set_high_contrast(self.high_contrast());

@@ -49,6 +49,14 @@ pub fn palette(anim: &mut Animator, serial: u64) -> f32 {
     anim.presence(("palette", serial), true, MENU.enter, MENU.exit)
 }
 
+/// The presence of the Settings dialog, `serial` naming this opening of it: the dim and the card
+/// fade in as one thing, by the menus' 117 ms (`MENU.enter`) rather than the shared
+/// `document::DIALOG`'s 250 ms, which is slower than the menu it was opened from (the owner's
+/// "quick and quiet"). Closing is instant, so its exit is not used.
+pub fn settings(anim: &mut Animator, serial: u64) -> f32 {
+    anim.presence(("settings-in", serial), true, MENU.enter, MENU.exit)
+}
+
 /// A chevron's turn in the Files and Notes panes: the shared `glyph::DISCLOSURE_MOTION` as it
 /// is (`fluent::MOVE`, 167 ms), chosen here so every timing of the window is in this file.
 pub const DISCLOSURE: Motion = fluent::MOVE;
