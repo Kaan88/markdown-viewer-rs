@@ -16,18 +16,9 @@ fn run(stage: &str, command: &mut Command) -> Vec<u8> {
 fn main() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     println!("cargo:rerun-if-changed=build.rs");
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join("Cargo.toml").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join("Cargo.lock").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join("bins/mdv-app/Cargo.toml").display()
-    );
+    println!("cargo:rerun-if-changed=../../Cargo.toml");
+    println!("cargo:rerun-if-changed=../../Cargo.lock");
+    println!("cargo:rerun-if-changed=../../bins/mdv-app/Cargo.toml");
     println!("cargo:rerun-if-env-changed=MDVIEW_TEST_ENGINE_VERBOSE");
 
     // Use Cargo from the selected compiler's toolchain, not the caller's CARGO
@@ -48,7 +39,7 @@ fn main() {
         Command::new(cargo)
             .current_dir(root)
             .env_remove("CARGO")
-            .env_remove("CARGO_BUILD_BUILD_DIR")
+            .env("CARGO_BUILD_BUILD_DIR", target_dir.join("build"))
             .env_remove("CARGO_ENCODED_RUSTFLAGS")
             .args([
                 "build",
@@ -76,6 +67,5 @@ fn main() {
         .join("release")
         .join(format!("mdview-engine{suffix}"));
     assert!(engine.is_file(), "test engine: build output missing");
-    println!("cargo:rerun-if-changed={}", engine.display());
     println!("cargo:rustc-env=MDVIEW_TEST_ENGINE={}", engine.display());
 }

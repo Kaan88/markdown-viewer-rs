@@ -44,6 +44,7 @@ jobs:
         with:
           key: linux
       - run: cargo fmt --all --check
+      - run: bash tests/engine-fixture-check.sh
       - run: cargo clippy --release --workspace --all-targets -- -D warnings
       - name: Build viewer and pinned toolkit engine
         run: |

@@ -8,6 +8,95 @@ use crate::workspace::{SourcePlace, resolve};
 use mdview::session::PageWidth;
 use mdview_render::SourceKind;
 
+#[cfg(any(target_os = "linux", test))]
+fn editor_in_shared_prefix(env: &mdshared_app::sister::Env) -> Option<PathBuf> {
+    use mdshared_app::sister::{Env, find_in};
+
+    let own = env.exe.as_deref()?;
+    let viewer = own.parent()?;
+    let lib = viewer.parent()?;
+    if !own.ends_with("mdview") || !viewer.ends_with("mdview") || !lib.ends_with("lib") {
+        return None;
+    }
+    let prefix = lib.parent()?;
+    // Preserve the explicit override. Each subsequent lookup uses just one candidate
+    // directory, so e.g. a PATH entry cannot win before the second prefix candidate.
+    find_in(
+        "mdedit",
+        &Env {
+            over: env.over.clone(),
+            ..Env::default()
+        },
+    )
+    .or_else(|| {
+        [lib.join("mdedit"), prefix.join("bin")]
+            .into_iter()
+            .find_map(|dir| {
+                find_in(
+                    "mdedit",
+                    &Env {
+                        exe: Some(dir.join("mdview")),
+                        ..Env::default()
+                    },
+                )
+            })
+    })
+}
+
+fn open_editor(request: &mdshared_app::sister::Request) -> Result<(), String> {
+    use mdshared_app::sister;
+    #[cfg(target_os = "linux")]
+    if let Some(exe) = editor_in_shared_prefix(&sister::Env::current("mdedit")) {
+        use std::os::unix::process::CommandExt;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(exe)
+            .args(request.args("mdedit"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .map_err(|e| format!("mdedit did not start: {e}"))?;
+        std::thread::spawn(move || _ = child.wait());
+        return Ok(());
+    }
+    sister::open("mdedit", request)
+}
+
+#[cfg(test)]
+#[test]
+fn edit_finds_the_same_prefix_off_path() {
+    use mdshared_app::sister::{Env, find_in};
+    let dir = std::env::temp_dir().join(format!("mdview-sister-prefix-{}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let name = format!("mdedit{}", std::env::consts::EXE_SUFFIX);
+    let public = dir.join("bin").join(&name);
+    let private = dir.join("lib/mdedit").join(&name);
+    let override_exe = dir.join(&name);
+    for path in [&public, &private, &override_exe] {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"test fixture, never executed").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    let mut env = Env {
+        exe: Some(dir.join("lib/mdview/mdview")),
+        path: Some(dir.join("elsewhere").into_os_string()),
+        ..Env::default()
+    };
+    assert_eq!(find_in("mdedit", &env), None);
+    assert_eq!(editor_in_shared_prefix(&env), Some(private.clone()));
+    env.over = Some(override_exe.clone().into_os_string());
+    assert_eq!(editor_in_shared_prefix(&env), Some(override_exe));
+    env.over = None;
+    std::fs::remove_file(private).unwrap();
+    assert_eq!(editor_in_shared_prefix(&env), Some(public));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 impl App {
     // ---- activation and commands ---------------------------------------------------------------
 
@@ -329,7 +418,7 @@ impl App {
                     from: Some("mdview".into()),
                     ..Request::new(path)
                 };
-                if let Err(message) = mdshared_app::sister::open("mdedit", &request) {
+                if let Err(message) = open_editor(&request) {
                     self.ws.set_status(&message);
                 }
             }

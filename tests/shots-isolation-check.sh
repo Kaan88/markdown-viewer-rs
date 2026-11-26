@@ -27,4 +27,33 @@ MDVIEW_EXE="$work/viewer" MDVIEW_SETTINGS=inherited MDEDIT_SETTINGS=inherited MD
     LOCALAPPDATA=inherited HOME=inherited XDG_DATA_HOME=inherited XDG_CONFIG_HOME=inherited \
     XDG_STATE_HOME=inherited bash "$root/tests/shots.sh" "$work/shots" || status=$?
 test "$status" -eq 37
-echo "shots: inherited settings, data and engine isolated"
+
+# Emulate a Linux/WSL shell in a scratch copy of the harness. A stale Windows
+# binary must neither win the default selection nor be accepted as an override.
+mkdir -p "$work/host" "$work/repo/tests" "$work/repo/target/release"
+cp "$root/tests/"{shots,scratch-profile}.sh "$work/repo/tests/"
+printf '#!/bin/sh\nprintf "Linux\\n"\n' > "$work/host/uname"
+printf '#!/bin/sh\nexit 91\n' > "$work/repo/target/release/mdview.exe"
+printf '#!/bin/sh\nexit 37\n' > "$work/repo/target/release/mdview"
+chmod +x "$work/host/uname" "$work/repo/target/release/"*
+(
+    export PATH="$work/host:$PATH"
+    unset MDVIEW_EXE
+    status=0
+    bash "$work/repo/tests/shots.sh" "$work/default" || status=$?
+    test "$status" -eq 37
+    rm "$work/repo/target/release/mdview"
+    status=0
+    bash "$work/repo/tests/shots.sh" "$work/no-native" || status=$?
+    test "$status" -eq 2
+    status=0
+    MDVIEW_EXE="$work/repo/target/release/mdview.exe" \
+        bash "$work/repo/tests/shots.sh" "$work/explicit-pe" || status=$?
+    test "$status" -eq 2
+    printf 'MZ' > "$work/repo/target/release/mdview"
+    chmod +x "$work/repo/target/release/mdview"
+    status=0
+    bash "$work/repo/tests/shots.sh" "$work/renamed-pe" || status=$?
+    test "$status" -eq 2
+)
+echo "shots: inherited overrides isolated and Windows binaries refused on Linux"

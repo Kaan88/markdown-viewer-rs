@@ -39,6 +39,8 @@ jobs:
       - run: cargo build --release --locked -p mdview -p mdshared-md-engine --bins
       - name: Screenshot suite
         run: bash tests/shots.sh target/shots
+      - name: Check scratch profile forwarding before launching apps
+        run: bash tests/mac-profile-check.sh
       - name: The bundle
         run: bash packaging/macos/make-bundle.sh target/release target/dist
       - uses: actions/checkout@v7

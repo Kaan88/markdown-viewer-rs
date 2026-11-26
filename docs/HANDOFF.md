@@ -58,6 +58,33 @@ the old tarball uninstaller removed that sentinel. A missing diagram exited 2 wi
 a PNG in the new viewer; the old viewer exited 0 and wrote one. Native Linux and macOS,
 hosted CI, and real Linux package builds were not exercised for this follow-up.
 
+**Astra re-review (after `32bf36f`).** The macOS harnesses give each run a private
+home, separate viewer/editor settings and separate sister instance paths. Normal
+LaunchServices launches use `open --env`; the scratch installed and updated bundles
+also carry those values in `LSEnvironment` because the toolkit restarts with its
+own `/usr/bin/open`. The Command+E script stages both bundles side by side in scratch;
+the editor's direct launch inherits the viewer's scratch environment. The scripts verify the
+live launch environment without dumping it and refuse to reuse a running test bundle.
+The TLS update check
+is restricted to ephemeral GitHub runners and removes its temporary certificate.
+The shot script chooses by host, and a Unix/WSL shell rejects Windows executables
+before launch instead of risking the real Windows app-data directory.
+
+On Linux, Edit in mdedit checks the shared prefix's `lib/mdedit/mdedit` and then
+`bin/mdedit` (explicit overrides still win), before using normal sister discovery.
+It reuses the toolkit's `find_in` candidate validation; engine discovery is unchanged.
+The engine fixture gives nested Cargo a private build directory as well as a private
+target directory and emits manifest-relative input watches. The golden regression
+now calls the actual compare/bless path and verifies a failed probe leaves a scratch
+baseline byte for byte unchanged.
+
+Windows Rust 1.99.1: format, release Clippy and workspace tests passed with
+`MDV_ENGINE` unset (429 passed, 1 ignored). All 195 sessionless shots remained
+byte-identical. Scratch mutations rejected the old editor lookup, unguarded
+golden writes, unisolated Mac launch arguments and restart plist, WSL's old
+viewer selection, and both old Cargo build-script behaviors. Native Mac
+LaunchServices, Linux editor launch, WSL interop and hosted CI were not run here.
+
 Test files that left with the local crates (paths below are relative to `crates/`):
 
 - `core/tests/`: `core_tests.rs`, `fuzz.rs`, `regressions.rs`, `spec.rs`, and

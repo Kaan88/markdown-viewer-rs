@@ -9,23 +9,20 @@ out="${1:?usage: tests/mac-open.sh <out-dir> <app>}"
 app="${2:?app}"
 mkdir -p "$out"
 source "$(dirname "$0")/mac-launch.sh"
-source "$(dirname "$0")/scratch-profile.sh"
-profile="$(mktemp -d)"
-trap 'rm -rf "$profile"' EXIT
-scratch_profile "$profile"
-# LaunchServices need not inherit the calling shell's HOME. Pass the scratch home and
-# settings explicitly to both launches; the Finder-style launch has no --no-session.
-open() {
-    command open --env "HOME=$HOME" --env "MDVIEW_SETTINGS=$profile/settings.ini" \
-        --env "MDEDIT_SETTINGS=$profile/editor.ini" "$@"
-}
-launch "$app" --no-session
+trap mac_profile_cleanup EXIT
+mac_profile_init || exit 1
+# Give Finder's document hand-off a bundle identity no existing viewer can claim.
+ditto "$app" "$mac_profile/mdview.app" || exit 1
+app="$mac_profile/mdview.app"
+mac_profile_bundle "$app" "io.github.kaan88.mdview.test.$$" || exit 1
+codesign --force --sign - "$app" || exit 1
+launch "$app" --no-session || exit 1
 wid="$(window_id)"
 echo "window id: ${wid:-none}"
 sleep 1
 fail=0
 # The event goes to the running copy: no second process starts.
-open -a "$(cd "$app" && pwd)" "$PWD/fixtures/tables.md"
+mac_open -a "$app" "$PWD/fixtures/tables.md" || exit 1
 sleep 3
 n=$(pgrep -f "^$(cd "$app" && pwd)/Contents/MacOS/mdview( |\$)" | wc -l | tr -d ' ')
 pgrep -lf "Contents/MacOS/mdview" || true
@@ -43,13 +40,14 @@ if kill -0 "$pid" 2>/dev/null; then echo "FAIL Command+Q left the process runnin
 stop
 # Launched for a file, as a double-click in Finder launches it: the file comes with the launch's
 # open-documents event.
-open -a "$(cd "$app" && pwd)" "$PWD/fixtures/math.md"
+mac_open -a "$app" "$PWD/fixtures/math.md" || exit 1
 pid=""
 for _ in $(seq 1 40); do
     pid="$(pgrep -n -f "^$(cd "$app" && pwd)/Contents/MacOS/mdview( |\$)" || true)"
     [ -n "$pid" ] && break
     sleep 0.25
 done
+[ -n "$pid" ] && mac_profile_check_process "$pid" || exit 1
 wid="$(window_id)"
 sleep 3
 [ -n "${wid:-}" ] && screencapture -x -o -l "$wid" "$out/launched.png" && echo "launched captured"

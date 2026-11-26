@@ -1,15 +1,22 @@
 # Sourced by the mac-*.sh tests. launch <app-bundle-or-exe> [args...]: starts the application
 # the way the Mac starts one, through LaunchServices (`open`), so it is a regular app and comes to
 # the front; a bare executable is started directly. Sets $pid. stop: ends it.
+source "$(dirname "${BASH_SOURCE[0]}")/mac-profile.sh"
+
 launch() {
+    : "${mac_profile:?initialize a scratch profile before launching}"
     local target="$1"
     shift
     if [[ "$target" == *.app ]]; then
-        local exe
-        exe="$(cd "$target/Contents/MacOS" && pwd)/$(defaults read "$(cd "$target" && pwd)/Contents/Info" CFBundleExecutable)"
-        # Not `open -n`: a copy started as a new instance is not the one LaunchServices sends
-        # later open-documents events to. The tests end each copy before the next starts.
-        open "$target" --stdout "$out/app.log" --stderr "$out/app.log" --args "$@"
+        local bundle name exe
+        bundle="$(cd "$target" && pwd -P)" || return
+        name="$(defaults read "$bundle/Contents/Info" CFBundleExecutable)" || return
+        exe="$bundle/Contents/MacOS/$name"
+        if pgrep -f "^$exe( |\$)" >/dev/null; then
+            echo "FAIL refusing to reuse an already-running test bundle" >&2
+            return 1
+        fi
+        mac_open -n "$target" --stdout "$out/app.log" --stderr "$out/app.log" --args "$@" || return
         pid=""
         for _ in $(seq 1 40); do
             pid="$(pgrep -n -f "^$exe( |\$)" || true)"
@@ -21,6 +28,7 @@ launch() {
         pid=$!
     fi
     echo "started $target as ${pid:-nothing}"
+    [ -n "${pid:-}" ] && mac_profile_check_process "$pid"
 }
 
 # The window server's id of the process's first normal window, once it has one (20 s at most).

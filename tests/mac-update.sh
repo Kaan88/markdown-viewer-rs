@@ -6,20 +6,37 @@
 #
 #   tests/mac-update.sh <out-dir> <app-bundle>
 set -euo pipefail
+[ "${GITHUB_ACTIONS:-}" = true ] || { echo "FAIL this test requires an ephemeral macOS CI runner"; exit 1; }
 out="$1"
 src="$2"
 name="$(basename "$src" .app)"
 upper="$(echo "$name" | tr '[:lower:]' '[:upper:]')"
-rm -rf "$out"
-mkdir -p "$out/apps" "$out/new" "$out/srv"
+mkdir -p "$out"
 out="$(cd "$out" && pwd)"
+mkdir "$out/apps" "$out/new" "$out/srv"
 port=8443
 fail() { echo "FAIL $*"; exit 1; }
+source "$(dirname "$0")/mac-profile.sh"
+cleanup() {
+    [ -z "${pid:-}" ] || kill "$pid" 2>/dev/null || true
+    [ -z "${server:-}" ] || kill "$server" 2>/dev/null || true
+    if [ -n "${cert_hash:-}" ]; then
+        sudo security delete-certificate -Z "$cert_hash" /Library/Keychains/System.keychain ||
+            echo "could not remove the temporary test certificate" >&2
+    fi
+    mac_profile_cleanup
+}
+trap cleanup EXIT
+mac_profile_init
 
 # The installed copy, in a folder this user can write (as /Applications is), and the newer copy:
 # the same program with a marker, signed again (a changed bundle must be).
 ditto "$src" "$out/apps/$name.app"
 ditto "$src" "$out/new/$name.app"
+bundle_id="io.github.kaan88.$name.update-test.$$"
+mac_profile_bundle "$out/apps/$name.app" "$bundle_id"
+mac_profile_bundle "$out/new/$name.app" "$bundle_id"
+codesign --force --sign - "$out/apps/$name.app"
 echo "the update" > "$out/new/$name.app/Contents/Resources/update-marker"
 codesign --force --sign - "$out/new/$name.app"
 (cd "$out/new" && ditto -c -k --keepParent "$name.app" "$out/srv/$name-new.zip")
@@ -43,6 +60,7 @@ done
     -subj /CN=localhost -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
     -addext "extendedKeyUsage=serverAuth" -addext "basicConstraints=critical,CA:true" 2>/dev/null
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$out/cert.pem"
+cert_hash="$("$openssl" x509 -in "$out/cert.pem" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d :)"
 cat > "$out/serve.py" <<'PY'
 import http.server, ssl, sys
 root, cert, key, port = sys.argv[1:5]
@@ -57,7 +75,6 @@ srv.serve_forever()
 PY
 python3 "$out/serve.py" "$out/srv" "$out/cert.pem" "$out/key.pem" "$port" > "$out/server.log" 2>&1 &
 server=$!
-trap 'kill $server 2>/dev/null || true' EXIT
 for _ in $(seq 1 40); do curl -s -o /dev/null "https://localhost:$port/update.txt" && break; sleep 0.25; done
 curl -sS "https://localhost:$port/update.txt" > /dev/null || fail "the system does not trust the test server"
 
@@ -85,6 +102,7 @@ for _ in $(seq 1 60); do
     sleep 0.25
 done
 [ -n "$pid" ] || fail "the new version was not started"
+mac_profile_check_process "$pid" || fail "the restarted viewer is not isolated"
 echo "PASS the new version started ($(ps -o args= -p "$pid"))"
 sleep 3
 kill "$pid" 2>/dev/null || true

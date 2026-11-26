@@ -16,14 +16,25 @@ set -euo pipefail
 out="${1:?usage: tests/shots.sh <output-dir>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
-exe="${MDVIEW_EXE:-target/release/mdview.exe}"
-[ -x "$exe" ] || exe="target/release/mdview"
+source "$root/tests/scratch-profile.sh"
+if windows_host; then
+    exe="${MDVIEW_EXE:-target/release/mdview.exe}"
+else
+    exe="${MDVIEW_EXE:-target/release/mdview}"
+fi
+[ -x "$exe" ] || { echo "shots: no executable for this host (set MDVIEW_EXE)" >&2; exit 2; }
+if ! windows_host; then
+    magic="$(head -c 2 "$exe")" || { echo "shots: cannot inspect viewer executable" >&2; exit 2; }
+    if [[ "$exe" = *.[eE][xX][eE] || "$magic" = MZ ]]; then
+        echo "shots: refusing to launch a Windows viewer without Windows profile isolation" >&2
+        exit 2
+    fi
+fi
 fx="fixtures"
 mkdir -p "$out"
 
 # Even --no-session checks for pending crash reports. Never inherit a viewer or editor profile
 # or an engine override; these shots exercise the engine shipped beside the viewer.
-source "$root/tests/scratch-profile.sh"
 profile="$(mktemp -d)"
 notes_scratch=
 trap 'rm -rf "$profile"; if [ -n "$notes_scratch" ]; then rm -rf "$notes_scratch"; fi' EXIT

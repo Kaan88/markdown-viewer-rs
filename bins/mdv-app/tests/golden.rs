@@ -63,19 +63,20 @@ fn engine_raster() -> bool {
     })
 }
 
-fn bless(probe: impl FnOnce() -> bool, write: impl FnOnce()) {
-    assert!(probe(), "golden bless: engine raster probe failed");
-    write();
-}
-
 #[test]
 fn a_failed_engine_probe_never_writes_goldens() {
-    let wrote = std::cell::Cell::new(false);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        bless(|| false, || wrote.set(true));
-    }));
+    let dir = std::env::temp_dir().join(format!("mdview-golden-probe-{}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let golden = dir.join("existing.png");
+    let original = b"existing golden";
+    std::fs::write(&golden, original).unwrap();
+    let result = std::panic::catch_unwind(|| {
+        check_at("tables", "light@1.0", LIGHT, 1.0, &golden, Some(|| false));
+    });
+    let contents = std::fs::read(&golden);
+    std::fs::remove_dir_all(dir).unwrap();
+    assert_eq!(contents.unwrap(), original);
     assert!(result.is_err());
-    assert!(!wrote.get());
 }
 
 #[test]
@@ -85,6 +86,21 @@ fn the_staged_engine_produces_a_real_raster() {
 }
 
 fn check(fixture: &str, name: &str, theme: Theme, scale: f32) {
+    let golden = root().join(format!("tests/golden/{fixture}-{name}.png"));
+    let probe = std::env::var_os("MDV_BLESS")
+        .is_some()
+        .then_some(engine_raster as fn() -> bool);
+    check_at(fixture, name, theme, scale, &golden, probe);
+}
+
+fn check_at(
+    fixture: &str,
+    name: &str,
+    theme: Theme,
+    scale: f32,
+    golden: &Path,
+    bless_probe: Option<fn() -> bool>,
+) {
     test_engine::require_engine();
     let showcase = root().join(format!("fixtures/{fixture}.md"));
     let doc = mdview_core::parse_bytes(&std::fs::read(&showcase).unwrap());
@@ -98,14 +114,12 @@ fn check(fixture: &str, name: &str, theme: Theme, scale: f32) {
             base_dir: showcase.parent().map(Path::to_path_buf),
         },
     );
-    let golden = root().join(format!("tests/golden/{fixture}-{name}.png"));
-    if std::env::var_os("MDV_BLESS").is_some() {
-        bless(engine_raster, || {
-            rendered.bitmap.write_png(&golden).unwrap()
-        });
+    if let Some(probe) = bless_probe {
+        assert!(probe(), "golden bless: engine raster probe failed");
+        rendered.bitmap.write_png(golden).unwrap();
         return;
     }
-    let (width, height, expected) = read_rgb(&golden);
+    let (width, height, expected) = read_rgb(golden);
     let bitmap = &rendered.bitmap;
     assert_eq!(
         (bitmap.width, bitmap.height),
