@@ -40,7 +40,9 @@ jobs:
       - name: Screenshot suite
         run: bash tests/shots.sh target/shots
       - name: Check scratch profile forwarding before launching apps
-        run: bash tests/mac-profile-check.sh
+        run: |
+          bash tests/mac-profile-check.sh
+          bash tests/mac-review-check.sh
       - name: The bundle
         run: bash packaging/macos/make-bundle.sh target/release target/dist
       - uses: actions/checkout@v7
@@ -64,7 +66,7 @@ jobs:
       - name: Updating itself (a newer bundle from a local HTTPS server)
         if: ${{ !cancelled() }}
         run: bash tests/mac-update.sh target/update target/dist/mdview.app
-      - name: Opening files from the system, Command+Q
+      - name: Opening files from the system, native Quit menu
         run: bash tests/mac-open.sh target/open target/dist/mdview.app
       - name: Edit in mdedit, the two bundles side by side
         if: ${{ !cancelled() }}

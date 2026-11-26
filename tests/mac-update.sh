@@ -6,7 +6,10 @@
 #
 #   tests/mac-update.sh <out-dir> <app-bundle>
 set -euo pipefail
-[ "${GITHUB_ACTIONS:-}" = true ] || { echo "FAIL this test requires an ephemeral macOS CI runner"; exit 1; }
+if [ "${GITHUB_ACTIONS:-}" != true ] || [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ]; then
+    echo "FAIL this test requires a GitHub-hosted macOS runner"
+    exit 1
+fi
 out="$1"
 src="$2"
 name="$(basename "$src" .app)"
@@ -52,15 +55,23 @@ $key.sha256: $sha
 EOF
 
 # A certificate for localhost the system trusts, and a server.
-openssl=openssl
-for p in /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl; do
-    [ -x "$p" ] && openssl="$p" && break
-done
+openssl="$(command -v openssl)"
+if [ "$openssl" = /usr/bin/openssl ]; then
+    for p in /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl; do
+        [ -x "$p" ] && openssl="$p" && break
+    done
+fi
 "$openssl" req -x509 -newkey rsa:2048 -nodes -days 2 -keyout "$out/key.pem" -out "$out/cert.pem" \
     -subj /CN=localhost -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
     -addext "extendedKeyUsage=serverAuth" -addext "basicConstraints=critical,CA:true" 2>/dev/null
+fingerprint="$("$openssl" x509 -in "$out/cert.pem" -noout -fingerprint -sha1)"
+cert_hash="${fingerprint##*=}"
+cert_hash="${cert_hash//:/}"
+if ! [[ "$cert_hash" =~ ^[[:xdigit:]]{40}$ ]]; then
+    cert_hash=
+    fail "could not determine the temporary certificate fingerprint"
+fi
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$out/cert.pem"
-cert_hash="$("$openssl" x509 -in "$out/cert.pem" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d :)"
 cat > "$out/serve.py" <<'PY'
 import http.server, ssl, sys
 root, cert, key, port = sys.argv[1:5]

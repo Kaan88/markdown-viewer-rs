@@ -85,6 +85,17 @@ golden writes, unisolated Mac launch arguments and restart plist, WSL's old
 viewer selection, and both old Cargo build-script behaviors. Native Mac
 LaunchServices, Linux editor launch, WSL interop and hosted CI were not run here.
 
+**Astra third review (after `3429250`).** The Mac open and sister harnesses
+verify the scratch executable, PID, window ownership and exact document title
+before UI input. Edit posts directly to that PID, and application-menu and Quit
+actions use only that PID's accessibility objects. Finder hand-off must show
+`tables.md` in the original window, and the subsequent Finder launch must show
+`math.md`. Process logging reports only the scratch PID and count. The update
+harness requires `RUNNER_ENVIRONMENT=github-hosted` and validates the temporary
+certificate fingerprint before changing trust, so cleanup also runs after a
+failed add. Shell syntax and mock checks passed; the native macOS SDK, event
+delivery, accessibility actions and keychain behavior still need hosted CI.
+
 Test files that left with the local crates (paths below are relative to `crates/`):
 
 - `core/tests/`: `core_tests.rs`, `fuzz.rs`, `regressions.rs`, `spec.rs`, and
