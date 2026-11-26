@@ -8,6 +8,7 @@ cat >"$work/viewer" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 test -z "${MDVIEW_SETTINGS+x}${MDEDIT_SETTINGS+x}${MDV_ENGINE+x}"
+test -z "${MD_SISTER_MDEDIT+x}${MD_SISTER_MDVIEW+x}${MD_SISTER_MDEDIT_SETTINGS+x}${MD_SISTER_MDVIEW_SETTINGS+x}${MD_SISTER_OTHER_SETTINGS+x}"
 if command -v cygpath >/dev/null; then
     test "$LOCALAPPDATA" != inherited
     test -d "$(cygpath -u "$LOCALAPPDATA")"
@@ -24,6 +25,8 @@ EOF
 chmod +x "$work/viewer"
 status=0
 MDVIEW_EXE="$work/viewer" MDVIEW_SETTINGS=inherited MDEDIT_SETTINGS=inherited MDV_ENGINE=inherited \
+    MD_SISTER_MDEDIT=inherited MD_SISTER_MDVIEW=inherited MD_SISTER_MDEDIT_SETTINGS=inherited \
+    MD_SISTER_MDVIEW_SETTINGS=inherited MD_SISTER_OTHER_SETTINGS=inherited \
     LOCALAPPDATA=inherited HOME=inherited XDG_DATA_HOME=inherited XDG_CONFIG_HOME=inherited \
     XDG_STATE_HOME=inherited bash "$root/tests/shots.sh" "$work/shots" || status=$?
 test "$status" -eq 37
@@ -42,6 +45,13 @@ chmod +x "$work/host/uname" "$work/repo/target/release/"*
     status=0
     bash "$work/repo/tests/shots.sh" "$work/default" || status=$?
     test "$status" -eq 37
+    mkdir "$work/repo/target/shots-notes"
+    status=0
+    bash "$work/repo/tests/shots.sh" "$work/stale" 2>"$work/stale.log" || status=$?
+    test "$status" -eq 2
+    grep -Fq 'shots-notes already exists; remove it' "$work/stale.log"
+    test -d "$work/repo/target/shots-notes"
+    rmdir "$work/repo/target/shots-notes"
     rm "$work/repo/target/release/mdview"
     status=0
     bash "$work/repo/tests/shots.sh" "$work/no-native" || status=$?

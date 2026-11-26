@@ -17,6 +17,11 @@ out="${1:?usage: tests/shots.sh <output-dir>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 source "$root/tests/scratch-profile.sh"
+nl="$root/target/shots-notes"
+if [[ -e "$nl" || -L "$nl" ]]; then
+    echo "shots: $nl already exists; remove it after confirming no shot run is active" >&2
+    exit 2
+fi
 if windows_host; then
     exe="${MDVIEW_EXE:-target/release/mdview.exe}"
 else
@@ -337,7 +342,6 @@ shot render-more-abbr-card --light --size 640x640 --hover 89,254 "$fx/render-mor
 # library file, `nowhere` names a folder that is not there.
 # The library-add dialog displays the path. Keep it stable between comparisons, but
 # never reuse or remove a directory already present when this run reaches the notes.
-nl="$root/target/shots-notes"
 mkdir -p "$root/target"
 mkdir "$nl"
 notes_scratch="$nl"

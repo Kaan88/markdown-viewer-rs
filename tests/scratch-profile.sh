@@ -8,6 +8,11 @@ scratch_profile() {
     mkdir -p "$profile"/{home,data,config,state}
     home="$(cd "$profile/home" && pwd)"
     unset MDVIEW_SETTINGS MDEDIT_SETTINGS MDV_ENGINE
+    unset MD_SISTER_MDEDIT MD_SISTER_MDVIEW
+    local name
+    for name in ${!MD_SISTER_@}; do
+        [[ "$name" != *_SETTINGS ]] || unset "$name"
+    done
     if windows_host; then
         local appdata
         appdata="$(cygpath -w "$profile/data")" && [[ -n "$appdata" ]] || {

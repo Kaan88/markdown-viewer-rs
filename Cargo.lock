@@ -1767,6 +1767,7 @@ dependencies = [
 name = "mdv-bench"
 version = "1.1.0"
 dependencies = [
+ "mdshared-app",
  "mdshared-md-core",
  "mdshared-md-render",
 ]

@@ -11,4 +11,5 @@ pub mod single;
 pub mod slides;
 pub mod status;
 pub mod update;
+pub mod update_app;
 pub mod watch;

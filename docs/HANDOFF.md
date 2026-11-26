@@ -13,6 +13,10 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ## Shared renderer (2026-11-26, `f/renderer`)
 
+**Text rendering (owner, 2026-11-27).** The toolkit's vertical-only hinting changes glyph edges in
+190 of 195 shots and in the 8 goldens. The owner approved it: "text rendering is great on other
+apps, mark it fine."
+
 All toolkit dependencies resolve at `7fd559f`. The five local crates under `crates/`
 (`core`, `render`, `engine`, `engine-proto`, `preview`) have been removed. The viewer
 and bench alias the shared Markdown crates; preview still enables `server` and speaks
@@ -44,6 +48,9 @@ so production still finds its sibling. Tarball uninstall preserves unrelated
 installed link with no override, and checks that removing the private engine makes the
 same shot fail before a PNG is written. The mac look workflow stages mdedit's helper
 using mdedit's own renderer-branch recipe and pin, not mdview's.
+Change `mac-look.yml` back to `ref: main` once mdedit's renderer branch merges.
+The write-permission release job runs `mdv-bench --test release_manifest`, sharing
+mdview's production updater descriptor but not depending on its test engine fixture.
 
 On Windows, Rust 1.99.1 passed fmt, release Clippy and the release workspace suite
 with `MDV_ENGINE` unset: 428 passed, none failed, 1 ignored. The staged raster

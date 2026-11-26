@@ -2,6 +2,8 @@ mdview next: menus fade in as they open, folders' arrows turn, toasts rise in an
 
 ## New
 
+- **Linux tarball upgrades:** Installs from 1.1.0 or earlier leave `PREFIX/bin/mdview-engine` behind. If it belongs to that old mdview install, remove it with `rm -- "$PREFIX/bin/mdview-engine"` (the default prefix is `~/.local`).
+
 - **Shared Markdown renderer.** mdview now uses the toolkit's renderer and brings in fixes that restrict network image paths, SVG file access, and engine discovery; bound WebP and preview sizes; avoid blocking on named pipes on Unix; and keep inline math and export from slowing down on large inputs.
 
 - **Menus fade in.** The main menu, the context menus and the Open recent submenu fade in and settle into place as they open, quickly; they close at once.

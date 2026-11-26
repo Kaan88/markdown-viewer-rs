@@ -282,7 +282,7 @@ jobs:
             ) -Out "$all/hub.txt"
           Get-Content "$all/hub.txt"
       - name: The manifest test, run against the assembled folder
-        run: cargo test --release -p mdview the_release_scripts_write_a_manifest_this_build_reads -- --nocapture
+        run: cargo test --release --locked -p mdv-bench --test release_manifest -- --nocapture
       - name: Create the GitHub release
         if: needs.meta.outputs.publish == 'true'
         run: |
