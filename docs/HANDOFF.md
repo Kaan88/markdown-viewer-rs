@@ -18,8 +18,8 @@ missing was built. One commit per item, each with a test that fails with the fix
 
 | Item | State |
 |---|---|
-| Popup damage: `presence_bounds()`, no hand-made margin | done (`7eda58d`): the palette was the last `rect.inset(-20)`; menus, the submenu and bubbles already used the shared bounds, and a dialog dims the whole window so its damage stays the window |
-| D1 groups: `group`/`ungroup`, `keep_group`, damage from `group_deadlines` | Files and Settings were done; the menus' hover fills were added (`motion::MENUS`) |
+| Popup damage: `presence_bounds()`, no hand-made margin | **done, checked against the code (2026-11-26): in place.** The damage pushes each overlay's own bounds: the toasts' `presence_bounds` (`app.rs:1074`), the popup's (`app.rs:1081`, `ui.rs:544` — the menu's or the cascade's) and the palette's (`app.rs:1094`); a dialog and the zoom view dim the whole window. No `rect.inset(-20)` is left in mdview's code: the one occurrence is the palette test's negative assertion (`motion_tests.rs:1046`). (`7eda58d`) |
+| D1 groups: `group`/`ungroup`, `keep_group`, damage from `group_deadlines` | **done, checked: in place.** Each animated region draws in its group — `app.rs:1260` (TITLE), `1274` (FILES; the Notes face is in the same region), `1325` (MENUS), `1355`/`1390` (SETTINGS) — and its `group_deadlines` drive the redraws (`app.rs:854`, `1018`, `1023`, `1153`, `1165`). A frame that leaves a region undrawn calls `keep_group`: `app.rs:1401` (FILES), `1405` (TITLE), `1409` (MENUS), `1413` (SETTINGS). The other overlays (palette, bars, tips, toasts) are drawn on every frame their presence changes, so neither needs a group. |
 | D3 `Painter::set_frost_key` | already done (`app.rs`, before the frame is drawn) |
 | D4 `chrome::draw_*_animated` in the title row | **done** (pin `09b01c1`, shared PR 31), see the pin section below: the window's three buttons, a tab and the new tab button fade their hover fills in the animator's group `motion::TITLE` |
 | D6 `Tooltip::hover_at` from rest | already done |
@@ -30,7 +30,7 @@ missing was built. One commit per item, each with a test that fails with the fix
 | X3 tree chevron `draw_disclosure_animated_with`, rows named by path | already done (`motion::folder(path)`, `motion::notes_fold(key)`) |
 | L10 `Form::draw_animated` / `set_high_contrast` | already done |
 | L1 `submenu::Cascade` in place of the hand-made submenus and dwell | **done** (`e1d3074`, `060250b`, `36b6faf`, `9d2740a`): the main menu's Open recent is a `submenu::Cascade`, the `Menu`/`Cascade` body, `sub`, `dwell` and `SUBMENU_DWELL` are gone and the tests read the cascade. The Escape/Left wait is closed at shared PR 40 (pin `1588e0f`, `b65678f`, `826cab1`); see the L1 section below |
-| W3 `window_state` restores onto a monitor that still exists | the behaviour was already there (mdview keeps its own physical place in the session, not a shared `WindowState`): a place is used only if the title row's left end is on a monitor that is there. This stage only moved that check into the pure `position_reachable` and tested it — no change of behaviour |
+| W3 `window_state` restores onto a monitor that still exists | **checked: the reachability check was there, the fallback was not.** `position_reachable` (`app.rs:1920`) kept a saved place only while its title row was on a monitor that is there; an unreachable place was dropped, so the window opened wherever winit put it. `restored_place` (`app.rs:1931`) now gives the primary monitor's own place for it, the caller putting the primary first from `primary_monitor` (`app.rs:1976`); the test uses fake monitor lists only (`tests.rs:287`: a place on a monitor that is gone, one partly off-screen, a monitor above the first, a primary away from the origin, no monitor). `66d76a5` |
 
 **D4 is done at shared's pin `09b01c1`.** Shared's PR 31 gave the three animated title pieces their
 plain look by `t > 0.0` instead of by `hovered`, so the frame a hover begins draws the resting
@@ -130,6 +130,19 @@ review of the stage added a sixth, and its scale counterparts below.
 - **a saved place on a monitor that is gone** (`a_window_saved_on_a_monitor_that_is_gone_opens_on_a_present_one`):
   reachable on the only monitor, not on a place where the second one was, the corner cases —
   fails with `position_reachable` made to answer true (`445403a`).
+
+### W3: a place on a monitor that is gone opens on the primary (2026-11-26, `66d76a5`)
+
+`position_reachable` (`app.rs:1920`) decided whether a saved physical place still showed; an
+unreachable one was dropped, so the window opened wherever winit put it. `restored_place`
+(`app.rs:1931`) keeps the saved place while its title row is on a monitor that is there and
+otherwise gives the primary monitor's own place; `resumed` (`app.rs:1976`) builds the list
+primary first, since `available_monitors` does not say which it is and `primary_monitor` names
+it. A place only partly off-screen is kept while its title row can be reached (Windows lets a
+window hang over an edge as long as it can be grabbed). The test is with fake monitor lists
+only: a place on a monitor that has gone, one partly off-screen, a monitor above the first, a
+primary away from the origin, and an empty list — fails with the fallback removed (`None` for
+the gone monitor's place). All 195 shots are byte-identical (a shot has no session place).
 
 ### L1: the main menu's Open recent is a `submenu::Cascade` (2026-11-26)
 
@@ -274,7 +287,7 @@ the stage's commits in one worktree: `2c35084`, `5bedbbc`, `79e530c` and `445403
 before build's 0.4 ms paint there. What was not found is why that one combination was slow; no
 number above is taken from those runs.
 
-**Next: the owner's look, then the branch is ready to merge.** Two things the owner will see:
+**Next: the owner's look, then the branch is ready to merge.** Three things the owner will see:
 
 - **The changed menu shots**: the Open recent row's arrow is the shared glyph in place of the
   text `›`, and the submenu sits 6 px further from its menu (the shared 2 px gap in place of the
@@ -282,11 +295,15 @@ number above is taken from those runs.
 - **A rest on the menu's padding now closes the submenu.** With a submenu open, the pointer
   resting on the menu's padding (not on a row) closes it after the 300 ms; the old code kept it
   open however long the pointer rested there.
+- **A window saved on a monitor that is gone opens on the primary monitor**, at its own place,
+  instead of wherever winit put it.
 
-Shared's close-out list is complete on this branch (its pin is `1588e0f`; nothing in shared was
-changed by mdview).
+Shared's close-out list is complete on this branch and checked item by item against the code:
+`presence_bounds` and D1 were already in place (file:line in the table above), W3's fallback is
+new. The pin is `1588e0f`; nothing in shared was changed by mdview.
 
-Workspace after L1 and the pin: 780 passed, 6 ignored (`mdview`'s own: 339 passed, 1 ignored).
+Workspace after the close-out check: 780 passed, 6 ignored (`mdview`'s own: 339 passed, 1
+ignored).
 
 ---
 
