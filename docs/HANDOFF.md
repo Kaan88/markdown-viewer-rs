@@ -157,16 +157,17 @@ below): `0d98d2b`, `26341e0`, `90f531f`.
 Tests: fourteen tests read the cascade's state where they read the old fields — `root()` for
 `menu`, `submenu()` for `sub` and `deadline()` for `dwell` — across `app/tests.rs`,
 `motion_tests.rs`, `frost_tests.rs` and `library_tests.rs`, and three helpers (`menu_row`,
-`recent_row`, `menu_middle`). Two assertions say the same thing through the cascade rather than
-the fields: `a_click_opens_the_submenu_at_once_and_other_items_close_it`'s crossing no longer
-expects no pending close (see above), and
-`a_submenu_opens_after_the_pointer_rests_and_the_parent_stays` asserts the submenu lies just
-beside the menu's left edge (the shared gap) rather than over it. Three are new, each failing
-with its fix reverted:
+`recent_row`, `menu_middle`). One assertion says the same thing through the cascade rather than
+the fields: `a_submenu_opens_after_the_pointer_rests_and_the_parent_stays` asserts the submenu
+lies just beside the menu's left edge (the shared gap) rather than over it. The crossing in
+`a_click_opens_the_submenu_at_once_and_other_items_close_it` is not the same thing: the old rule
+kept the submenu open on the padding, and the cascade closes it after the rest, so the test now
+asserts the new rule (see above). Three are new, each failing with its fix reverted:
 - `the_cascades_menu_is_placed_where_the_menus_own_placement_puts_it`: the cascade's root equals
   the menu's own placed rectangle at 1280x800, 1000x520 and 520x360 exactly, and at 1.5x at
-  907x601 within a pixel (the two roundings of the right edge can differ there) — fails with
-  `cascade_room` left as the plain room (1000x520: y 44 in a 472 px box instead of 40 in 476);
+  907x601 its y, width and height exactly with x 0 or 1 px apart (the two roundings of the right
+  edge differ there) — fails with `cascade_room` left as the plain room (1000x520: y 44 in a
+  472 px box instead of 40 in 476);
 - `a_recent_files_ampersand_is_drawn_as_one_and_marks_no_letter`: `R&D.md` in the submenu parses
   to `R&D.md` with no access key — fails without the escape;
 - `the_keys_act_in_the_submenu_the_pointer_opened`: after a click opens the submenu, Down lights
@@ -243,10 +244,21 @@ the stage's commits in one worktree: `2c35084`, `5bedbbc`, `79e530c` and `445403
 before build's 0.4 ms paint there. What was not found is why that one combination was slow; no
 number above is taken from those runs.
 
-**Next: the owner's look at L1, then the branch is ready to merge.** Shared's close-out list is
-complete on this branch (its pin stays `09b01c1`; nothing in shared was changed). The changed
-menu shots are the only owner-visible difference (the title-hover shots lost a stray tip no
-window showed); nothing else is on the list.
+**Next: the owner's look, then the branch is ready to merge.** Three things the owner will see:
+
+- **The changed menu shots**: the Open recent row's arrow is the shared glyph in place of the
+  text `›`, and the submenu sits 6 px further from its menu (the shared 2 px gap in place of the
+  old 4 px overlap).
+- **A rest on the menu's padding now closes the submenu.** With a submenu open, the pointer
+  resting on the menu's padding (not on a row) closes it after the 300 ms; the old code kept it
+  open however long the pointer rested there.
+- **Escape with a waiting pointer change closes the whole menu.** A pointer that rested on
+  another row less than 300 ms ago leaves a close waiting; Escape makes it and then closes the
+  menu, where it should close only the submenu. Open; waiting on shared's `Cascade::cancel_wait`
+  (the ignored test above).
+
+Shared's close-out list is complete on this branch (its pin stays `09b01c1`; nothing in shared
+was changed).
 
 Workspace after L1 and its review: 778 passed, 7 ignored (`mdview`'s own: 337 passed,
 2 ignored, one of them the Escape test waiting on shared).
