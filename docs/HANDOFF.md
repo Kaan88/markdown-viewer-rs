@@ -258,8 +258,9 @@ at 100%, 125% and 150%, and fails if the snapshot returns to full-window size. A
 `--no-session` shots are byte-identical to the previous review; both Settings entrance shots
 were inspected again. The six scratch-session shots were not rerun. Windows fmt and release
 Clippy passed; the full release suite with the CI-pinned Rust 1.99.1 passed 809 tests including
-the normally ignored cases. The default Cargo 1.100 run hit the unchanged updater test's
-assumption that the test executable lives in `target/release/deps`, not `build/.../out`.
+the normally ignored cases. `updater::tests::a_cargo_build_does_not_update_itself` fails on
+Cargo 1.100 because its test executable moved from `target/release/deps` to `build/.../out`.
+The test is unchanged.
 
 **Settings peak memory (Windows, headless).** At 1280 × 800 logical, the largest sampled OS
 peak private commit over three release runs (Rust 1.99.1) of `fixtures/showcase.md` in dark mode
@@ -275,6 +276,12 @@ The Settings entrance is under 30 MiB in this run at 100% and 125%. At 150% the 
 already exceeds the budget. These are viewer-process measurements from
 `GetProcessMemoryInfo` (`PeakPagefileUsage`), not a native-window memory measurement.
 
+### Owner decision (2026-11-26)
+
+- “Accept the brief overshoot.” Keep the 170 ms theme crossfade and its full-window copy.
+  The fade may push private memory past 30 MiB only while it runs; the snapshot is freed
+  as soon as it ends. This exception does not cover steady-state memory.
+
 ### Decisions taken without the owner
 
 - Cap the theme snapshot at 2560 × 1600 device pixels (15.625 MiB). Above that area the theme
@@ -288,9 +295,6 @@ already exceeds the budget. These are viewer-process measurements from
 - The frosted theme change is tested headless with a compositor stand-in, not on a real
   backdrop. An OS `ThemeChanged`, native minimize/fullscreen/maximize, 144 Hz, macOS
   (including its app-menu dispatch), and Linux were not exercised.
-- The theme fade's full-window copy may push total private memory over 30 MiB for its
-  170 ms lifetime even below the cap. Whether to accept this needs the owner's word; the
-  owner has not given it yet.
 
 ### L1: the main menu's Open recent is a `submenu::Cascade` (2026-11-26)
 
