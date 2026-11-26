@@ -535,14 +535,31 @@ fn a_click_opens_the_submenu_at_once_and_other_items_close_it() {
         let p = a.ui.popup.as_ref().unwrap();
         assert!(p.submenu().is_some(), "closed at x = {px}");
         assert_eq!(p.root().hover, Some(r), "the item stays lit at x = {px}");
-        // On its way to the submenu the cascade may keep a close pending for the pointer's
-        // rest there; the move itself must not close it.
-        let now = std::time::Instant::now();
-        let p = a.ui.popup.as_mut().unwrap();
-        p.tick(now);
-        assert!(p.submenu().is_some(), "closed by the move at x = {px}");
         px += step;
     }
+    // On the padding the cascade waits for the pointer to rest, then closes the submenu: the
+    // old code kept it open there however long the pointer stayed. The row that opened it stays
+    // lit while the rest is waited for.
+    let p = a.ui.popup.as_ref().unwrap();
+    assert!(
+        p.deadline().is_some(),
+        "the rest on the padding is waited for"
+    );
+    assert_eq!(p.root().hover, Some(r), "the row stays lit while it waits");
+    a.timers(std::time::Instant::now() + crate::motion::SUBMENU * 2);
+    assert!(
+        a.ui.popup
+            .as_ref()
+            .is_some_and(|p| p.submenu().is_none() && p.deadline().is_none()),
+        "the rest on the padding closes the submenu"
+    );
+    // Opened again for what follows.
+    let (x, y) = menu_row(&a, r);
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_some()));
     // Another item of the parent does not close the submenu at once (the pointer may be on its
     // way to the submenu), only after it has rested there.
     let (x0, y0) = menu_row(&a, 0);
@@ -619,6 +636,36 @@ fn escape_and_left_close_only_the_submenu_and_right_opens_it() {
     assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_none()));
 }
 
+/// A pointer change still waiting when Escape comes is made first by shared's `Cascade::key`,
+/// so a pointer that rested on another row a moment ago has already closed the submenu by the
+/// time Escape is seen, and Escape closes the whole menu. It should close the submenu it shows
+/// and leave the menu open. Needs shared: drop a waiting change on Escape/Left.
+#[test]
+#[ignore = "needs shared: drop a waiting change on Escape/Left"]
+fn escape_with_a_waiting_pointer_change_closes_only_the_submenu() {
+    let mut a = app(&["linked.md"]);
+    click(&mut a, Hit::Bar(BarItem::More));
+    let r = recent_row(&a);
+    // The submenu opened by the pointer, which then rested on it.
+    let (x, y) = menu_row(&a, r);
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_some()));
+    // Onto another row, less than the rest: the submenu is still open, a close waiting.
+    let (x0, y0) = menu_row(&a, 0);
+    a.pointer_moved(x0, y0);
+    assert!(
+        a.ui.popup
+            .as_ref()
+            .is_some_and(|p| p.submenu().is_some() && p.deadline().is_some())
+    );
+    key(&mut a, KeyName::Escape, None);
+    let p = a.ui.popup.as_ref().expect("the menu stays");
+    assert!(p.submenu().is_none(), "only the submenu closed");
+}
+
 #[test]
 fn the_keys_act_in_the_submenu_the_pointer_opened() {
     let mut a = app(&["linked.md"]);
@@ -668,14 +715,25 @@ fn menu_row_offsets_follow_the_shared_layout() {
 
 /// The shared cascade keeps 4 px from the edges of the area it is handed; a menu's own
 /// placement kept them from the window's. The room is widened by them for the cascade, so its
-/// root lands on the menu's own rectangle at every size — the ones the menu overflows, where it
-/// scrolls, included.
+/// root lands on the menu's own rectangle — the sizes the menu overflows, where it scrolls,
+/// included. At scale 1 they are equal; at a fractional scale the menu's right edge is rounded
+/// from the anchor and the width apart in the cascade, but from their difference in the menu's
+/// own placement, so the two can be a pixel apart (hence the tolerance there).
 #[test]
-fn the_cascades_menu_is_placed_exactly_where_the_menus_own_placement_puts_it() {
+fn the_cascades_menu_is_placed_where_the_menus_own_placement_puts_it() {
     let mut a = app(&["showcase.md"]);
-    for (w, h) in [(1280.0f32, 800.0f32), (1000.0, 520.0), (520.0, 360.0)] {
-        a.size = ((w * a.scale).round() as u32, (h * a.scale).round() as u32);
+    for (scale, (dw, dh), tolerance) in [
+        (1.0f32, (1280u32, 800u32), 0.0f32),
+        (1.0, (1000, 520), 0.0),
+        (1.0, (520, 360), 0.0),
+        // An odd device width at 1.5: the logical width, and so the button's right edge, lies
+        // between device pixels, and the two roundings are a pixel apart (they are here).
+        (1.5, (907, 601), 1.0),
+    ] {
+        a.scale = scale;
+        a.size = (dw, dh);
         a.compose();
+        let (w, h) = a.logical();
         a.open_popup(PopupKind::Main);
         a.compose();
         let (x, y, _) = a.popup_anchor(PopupKind::Main);
@@ -684,7 +742,16 @@ fn the_cascades_menu_is_placed_exactly_where_the_menus_own_placement_puts_it() {
         let mut p = Painter::new(&mut a.screen, &mut a.gfx, a.scale);
         menu.place_in(&mut p, room);
         let popup = a.ui.popup.as_ref().expect("the menu");
-        assert_eq!(popup.root().rect(), menu.rect(), "{w}x{h}");
+        let (got, want) = (popup.root().rect(), menu.rect());
+        let off = (got.x - want.x)
+            .abs()
+            .max((got.y - want.y).abs())
+            .max((got.w - want.w).abs())
+            .max((got.h - want.h).abs());
+        assert!(
+            off <= tolerance,
+            "{scale}x {dw}x{dh}: {got:?} against {want:?}"
+        );
         a.ui.popup = None;
     }
 }
