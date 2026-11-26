@@ -1971,6 +1971,14 @@ impl App {
         // The window reports the surface; the app lives in the content inside the margin
         // (the margin in force was just re-read by `update_shadow`).
         self.size = self.content_size(size.width, size.height);
+        // A minimized window may not compose a frame to release a snapshot that no longer fits.
+        if self
+            .theme_fade
+            .as_ref()
+            .is_some_and(|under| under.bitmap_size() != self.size)
+        {
+            self.theme_fade = None;
+        }
         self.size_save_due = Some(Instant::now() + SIZE_SAVE_DELAY);
         self.redraw();
     }

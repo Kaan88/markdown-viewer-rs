@@ -2050,6 +2050,25 @@ fn a_same_size_resize_notification_does_not_end_the_fade() {
 }
 
 #[test]
+fn a_minimize_resize_releases_the_theme_snapshot_without_a_frame() {
+    for size in [PhysicalSize::new(0, 0), PhysicalSize::new(1000, 700)] {
+        let mut a = moving(&[]);
+        a.compose();
+        let original = PhysicalSize::new(a.size.0, a.size.1);
+        a.ws.set_theme_choice(ThemeChoice::Light);
+        a.compose();
+        assert!(a.theme_fade.is_some());
+
+        a.resized(size);
+        assert!(a.theme_fade.is_none(), "{size:?}: freed without composing");
+        a.resized(original);
+        a.compose();
+        assert!(a.theme_fade.is_none());
+        assert!(a.anim_due.is_none());
+    }
+}
+
+#[test]
 fn a_theme_flip_on_a_resize_does_not_blend_the_newly_allocated_bitmap() {
     let mut a = moving(&[]);
     a.resized(PhysicalSize::new(1000, 700));
