@@ -30,7 +30,7 @@ missing was built. One commit per item, each with a test that fails with the fix
 | X3 tree chevron `draw_disclosure_animated_with`, rows named by path | already done (`motion::folder(path)`, `motion::notes_fold(key)`) |
 | L10 `Form::draw_animated` / `set_high_contrast` | already done |
 | L1 `submenu::Cascade` in place of the hand-made submenus and dwell | **done** (`e1d3074`, `060250b`, `36b6faf`, `9d2740a`): the main menu's Open recent is a `submenu::Cascade`, the `Menu`/`Cascade` body, `sub`, `dwell` and `SUBMENU_DWELL` are gone and the tests read the cascade. The Escape/Left wait is closed at shared PR 40 (pin `1588e0f`, `b65678f`, `826cab1`); see the L1 section below |
-| W3 `window_state` restores onto a monitor that still exists | **checked: the reachability check was there, the fallback was not.** `position_reachable` (`app.rs:1920`) kept a saved place only while its title row was on a monitor that is there; an unreachable place was dropped, so the window opened wherever winit put it. `restored_place` (`app.rs:1931`) now gives the primary monitor's own place for it, the caller putting the primary first from `primary_monitor` (`app.rs:1976`); the test uses fake monitor lists only (`tests.rs:287`: a place on a monitor that is gone, one partly off-screen, a monitor above the first, a primary away from the origin, no monitor). `66d76a5` |
+| W3 `window_state` restores onto a monitor that still exists | **checked: the reachability check was there; the fallback is the system's.** Shared's `window_state::restore` cannot be adopted cleanly: mdview's session keeps a logical size and an absolute physical point with no monitor identity and no saved scale, where a `WindowState` is a logical rectangle relative to a named monitor with its scale. Synthesizing one would keep mdview's own title-row test anyway and lose that model. An unreachable place now asks for no position (`saved_place`, `app.rs:1933`, after `position_reachable`, `app.rs:1920`), so the system places the window as a new one, inside the work area — the behaviour before `66d76a5`; no corner is made up under a taskbar. Test with fake monitor lists only (`tests.rs:287`). `9faa52d` |
 
 **D4 is done at shared's pin `09b01c1`.** Shared's PR 31 gave the three animated title pieces their
 plain look by `t > 0.0` instead of by `hovered`, so the frame a hover begins draws the resting
@@ -131,18 +131,29 @@ review of the stage added a sixth, and its scale counterparts below.
   reachable on the only monitor, not on a place where the second one was, the corner cases —
   fails with `position_reachable` made to answer true (`445403a`).
 
-### W3: a place on a monitor that is gone opens on the primary (2026-11-26, `66d76a5`)
+### W3: a place on a monitor that is gone is the system's to place (2026-11-26, `9faa52d`)
 
-`position_reachable` (`app.rs:1920`) decided whether a saved physical place still showed; an
-unreachable one was dropped, so the window opened wherever winit put it. `restored_place`
-(`app.rs:1931`) keeps the saved place while its title row is on a monitor that is there and
-otherwise gives the primary monitor's own place; `resumed` (`app.rs:1976`) builds the list
-primary first, since `available_monitors` does not say which it is and `primary_monitor` names
-it. A place only partly off-screen is kept while its title row can be reached (Windows lets a
-window hang over an edge as long as it can be grabbed). The test is with fake monitor lists
-only: a place on a monitor that has gone, one partly off-screen, a monitor above the first, a
-primary away from the origin, and an empty list — fails with the fallback removed (`None` for
-the gone monitor's place). All 195 shots are byte-identical (a shot has no session place).
+`position_reachable` (`app.rs:1920`) decides whether a saved physical place still shows.
+`66d76a5`'s first cut added a fallback to the primary monitor's bare corner; in review that
+was wrong where a taskbar sits on the top or the left edge, over the title row. Shared's
+`window_state::restore` (at `1588e0f`) was read first: it picks the nearest monitor and fits
+the rectangle into its work area. It cannot be adopted cleanly — mdview's session
+(`1100x900 [max] @x,y`) keeps a logical size and an absolute physical point, with no monitor
+identity and no saved scale, where a `WindowState` is a logical rectangle relative to a named
+monitor with its scale. Storing that would be a new session format; synthesizing it at launch
+would keep mdview's own title-row test (to find the monitor the place was on) and lose the
+model's point.
+
+So an unreachable place asks for no position (`saved_place`, `app.rs:1933`), and the system
+places the window as it places a new one, inside the work area — what Windows' `CW_USEDEFAULT`
+already did, and what mdview did before `66d76a5`. W3's restore is therefore mdview's title-row
+check with the system's fallback; the work-area handling is the system's job. The test (fake
+monitor lists only) keeps every monitor assertion: a place on a monitor that is gone and one
+whose title row is off the screen ask for no position, a partly off-screen place with its title
+row on a monitor is kept, a monitor above the first is kept, a primary away from the origin
+keeps a reachable place and asks for none for an unreachable one, the corner pixel, and an
+empty list. It fails with a corner fallback put back. All 195 shots are byte-identical (a shot
+has no session place).
 
 ### L1: the main menu's Open recent is a `submenu::Cascade` (2026-11-26)
 
@@ -287,7 +298,7 @@ the stage's commits in one worktree: `2c35084`, `5bedbbc`, `79e530c` and `445403
 before build's 0.4 ms paint there. What was not found is why that one combination was slow; no
 number above is taken from those runs.
 
-**Next: the owner's look, then the branch is ready to merge.** Three things the owner will see:
+**Next: the owner's look, then the branch is ready to merge.** Two things the owner will see:
 
 - **The changed menu shots**: the Open recent row's arrow is the shared glyph in place of the
   text `›`, and the submenu sits 6 px further from its menu (the shared 2 px gap in place of the
@@ -295,12 +306,11 @@ number above is taken from those runs.
 - **A rest on the menu's padding now closes the submenu.** With a submenu open, the pointer
   resting on the menu's padding (not on a row) closes it after the 300 ms; the old code kept it
   open however long the pointer rested there.
-- **A window saved on a monitor that is gone opens on the primary monitor**, at its own place,
-  instead of wherever winit put it.
 
 Shared's close-out list is complete on this branch and checked item by item against the code:
-`presence_bounds` and D1 were already in place (file:line in the table above), W3's fallback is
-new. The pin is `1588e0f`; nothing in shared was changed by mdview.
+`presence_bounds` and D1 were already in place (file:line in the table above); W3's reachability
+check was there, and its fallback is the system's (`9faa52d`), with nothing new for the owner to
+look at. The pin is `1588e0f`; nothing in shared was changed by mdview.
 
 Workspace after the close-out check: 780 passed, 6 ignored (`mdview`'s own: 339 passed, 1
 ignored).
