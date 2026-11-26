@@ -155,6 +155,93 @@ keeps a reachable place and asks for none for an unreachable one, the corner pix
 empty list. It fails with a corner fallback put back. All 195 shots are byte-identical (a shot
 has no session place).
 
+## Motion, milestone 3: the Settings dialog fades in, a light/dark change crossfades (2026-11-26, branch `f/motion2`)
+
+The owner, relayed by the shared session: "put some transition animations to settings menu for
+both apps, and fade in the menu opening, and if possible make light dark change a smooth
+transition", then corrected: "I meant settings menu **window** should fade in when I open it".
+So there are no page-change transitions; the page-turn work is not used.
+
+**Step 0, the pin: nothing was missing.** `anim::PageTransition`/`PageEffect` (unused now),
+`Painter::snapshot`, `Snapshot::crossfade`/`crossfade_keyed` and `Painter::set_frost_key` are all
+at `1588e0f` (`page.rs`, `region.rs`, `gfx.rs`), and `docs/ANIMATION.md` documents them. The pin
+stays.
+
+**1. The Settings dialog fades in (`00670b1`).** `motion::settings` is a presence named per
+opening (`App::settings_serial`, bumped in `open_settings`), using `document::MENU`'s enter — the
+menus' 117 ms, 30 ms longer would be a `fluent::FAST` fade — rather than shared's
+`document::DIALOG` (250 ms): the dialog is opened from a menu and should not arrive slower than
+the menu did (the owner's "quick and quiet"). The dim and the card are drawn over the window as
+it was and given one opacity (`Painter::snapshot` of the window, the form drawn, `Painter::fade`),
+so nothing of the page shows between the dim and the card and both come in together. Closing is
+instant: no exit is played, the presence is simply not asked for, and the name is forgotten.
+`settings_t` is in the overlay signature, so every frame of the fade is drawn whole; the dialog's
+bounds are the whole window anyway. A shot of it (`--dialog settings --motion-at 67`) opens the
+dialog after the clock started — the one place the shot flow draws an opened dialog at rest at
+once, so `--motion-at` skips that frame and the fade's first frame is the window under it.
+
+Tests (`motion_tests.rs`): the first frame at 0 is the window under the dialog pixel for pixel;
+the damage covers every row; a frame at 16 ms is part way (0 < t < 1); the fade ends in at most
+nine 16 ms frames and leaves no timer; at rest it is the still run's dialog pixel for pixel;
+Escape mid-fade leaves the window as it was with no timer. With Animations off, and with the
+system's reduced motion, it is whole at once and equals the still run's. Revert checks: with
+`settings_t` constant 1.0 the first-frame assertion fails; without the snapshot/fade the dialog
+is drawn whole on its first frame and `the_settings_dialog_fades_in_when_it_opens` fails on that
+same assertion.
+
+**2. Every menu and popup already fades in at 117 ms; nothing was fixed.** Checked against the
+code: all six popup kinds go through `Popup::new`/`Popup::main` → `Popup::presence` →
+`motion::menu` (`MENU.enter`), which is `PopupKind::Main`, `Recent`, `Tab`, `Page`, `Find` and
+`Library`, plus every submenu (`motion::submenu`, one presence per path, so one put back in its
+place does not re-fade); the command palette uses `motion::palette` (also `MENU.enter`) and its
+card enters by shared's `draw_presence`. Every `Popup` carries a fresh serial from
+`Popup::new`/`Popup::main`, wherever it is made (`open_popup`, the tab, page and find menus in
+`app/input.rs`, the library's in `app/library.rs`), and `App::compose` asks `presence` for the
+open one on every frame. Dialogs other than Settings (About, Shortcuts, Recent, Allow edit, Add
+library) still appear at once: they draw their own card, have no entrance, and the owner asked
+only for the Settings window. Menus and dialogs all close instantly.
+
+**3. A light/dark change crossfades (`82380ec`).** `App::sync_theme` sees the palette change (the
+setting, or `WindowEvent::ThemeChanged` → `ws.set_system_dark` → the next frame), keeps the frame
+the window showed (`Snapshot::take` of the whole screen: `4 * w * h` bytes, **4,096,000 at
+1280x800 = 3.91 MiB**, 33,177,600 = 31.6 MiB at 3840x2160, held only while it fades and dropped
+the frame the blend ends), switches the palette, and `App::theme_frame` blends the kept frame
+back over each frame with `Snapshot::crossfade_keyed` and `self.frost.key()`, so a pixel that was
+frosted chrome still is (with no key it is `crossfade`). 170 ms, `Easing::Linear`: a mix is even
+all the way, and no curve makes a colour change look better. Every frame of the change is drawn
+whole (`self.full` while a kept frame is held). `presence` starts at 0, so the change's first
+frame is exactly the old frame; then it moves. A resize ends it: the `Resized` handler drops the
+kept frame, and `theme_frame` checks `fits` **before** asking for progress, so no timer is left
+over from a change that is over. With Animations off or reduced motion nothing is kept and the
+new palette is drawn at once, as before.
+
+Tests (`motion_tests.rs`): the kept frame is exactly the window's rectangle and size (and the
+4,096,000 bytes); the change's first frame is the old palette's pixel for pixel; the damage
+covers every row of the window, on the first frame and at 85 ms; at 85 ms of 170 the page's
+colour is neither palette; the end is the window a run that started light draws, and the kept
+frame is freed; motion off and reduced motion keep nothing and equal the still run; a resize
+mid-fade ends it with no timer and the new palette alone. Revert checks: without the snapshot the
+fade tests fail on the kept frame; without the resize guard the resize test fails on "asks for no
+frame" (the asked presence leaves a deadline).
+
+**Shots.** Four new, taken part-way and looked at in both themes: `dialog-settings-opening-light`
+and `-dark` (67 ms into the 117 ms fade; the dim and the card uniformly translucent over the
+page), `theme-fading-dark` (light to dark, 85 ms into 170) and `theme-fading-light` (dark to
+light). The other 195 shots are byte-identical to `target/shots/review-head` (the settings
+dialog at rest, other dialogs, every menu shot included). `--theme-flip light|dark` is the shot
+flag for the theme change; it is applied after the clock starts.
+
+**Numbers.** Tests: 786 passed / 0 failed / 6 ignored (mdview 345/1). `cargo fmt --check` and
+`cargo clippy --workspace --all-targets -D warnings` clean, every cargo command with `-j 8
+--config 'build.rustc-wrapper=""'`.
+
+**Not verified.** The keyed blend over really frosted chrome (`--backdrop mica` in a real
+window): a shot has no backdrop, so `crossfade_keyed` is exercised only by shared's tests and with
+no key here. A `ThemeChanged` from the system, and a theme change under a maximized window, were
+not driven by hand. The look on a 144 Hz display (the fade is a frame interval apart, not a fixed
+60). macOS and Linux were not run. The memory figure is the arithmetic of the kept rectangle as
+the snapshot reports it, not a measured process peak.
+
 ### L1: the main menu's Open recent is a `submenu::Cascade` (2026-11-26)
 
 Commits, each built, tested and shot-checked: four for the move — `e1d3074` builds the cascade
