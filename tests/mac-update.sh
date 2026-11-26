@@ -5,6 +5,7 @@
 # buttons do), and the new copy must be in place, the old one set aside, and the new one started.
 #
 #   tests/mac-update.sh <out-dir> <app-bundle>
+# Each run leaves its logs and test bundles in a fresh run.* child of out-dir.
 set -euo pipefail
 if [ "${GITHUB_ACTIONS:-}" != true ] || [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ]; then
     echo "FAIL this test requires a GitHub-hosted macOS runner"
@@ -16,6 +17,9 @@ name="$(basename "$src" .app)"
 upper="$(echo "$name" | tr '[:lower:]' '[:upper:]')"
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
+# The workflow caches target/, so out-dir can contain an earlier run.
+out="$(mktemp -d "$out/run.XXXXXXXX")"
+echo "Update test work folder: $out"
 mkdir "$out/apps" "$out/new" "$out/srv"
 port=8443
 fail() { echo "FAIL $*"; exit 1; }

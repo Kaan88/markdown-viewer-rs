@@ -79,9 +79,17 @@ for runner in "" self-hosted; do
     test ! -e "$work/denied" && test ! -e "$TEST_KEYCHAIN_LOG"
 done
 export TEST_FINGERPRINT="AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD"
-status=0
-RUNNER_ENVIRONMENT=github-hosted bash "$root/tests/mac-update.sh" "$work/hosted" "$work/mdview.app" || status=$?
-test "$status" -eq 79
+mkdir -p "$work/hosted/"{apps,new,srv}
+printf 'preserve me\n' >"$work/hosted/apps/sentinel"
+for _ in 1 2; do
+    status=0
+    RUNNER_ENVIRONMENT=github-hosted bash "$root/tests/mac-update.sh" "$work/hosted" "$work/mdview.app" || status=$?
+    test "$status" -eq 79
+done
+grep -Fxq 'preserve me' "$work/hosted/apps/sentinel"
+runs=("$work/hosted"/run.*/)
+test "${#runs[@]}" -eq 2
 sed -n '1p' "$TEST_KEYCHAIN_LOG" | grep -Fq 'security add-trusted-cert'
 sed -n '2p' "$TEST_KEYCHAIN_LOG" | grep -Eq '^security delete-certificate -Z [[:xdigit:]]{40} /Library/Keychains/System.keychain$'
+test "$(wc -l <"$TEST_KEYCHAIN_LOG" | tr -d ' ')" -eq 4
 echo "mac review: PID/document guards, hosted-only trust, and cleanup after a failed add"
