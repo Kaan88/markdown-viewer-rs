@@ -636,12 +636,10 @@ fn escape_and_left_close_only_the_submenu_and_right_opens_it() {
     assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_none()));
 }
 
-/// A pointer change still waiting when Escape comes is made first by shared's `Cascade::key`,
-/// so a pointer that rested on another row a moment ago has already closed the submenu by the
-/// time Escape is seen, and Escape closes the whole menu. It should close the submenu it shows
-/// and leave the menu open. Needs shared: drop a waiting change on Escape/Left.
+/// A pointer change still waiting when Escape comes must not be made first: Escape closes the
+/// submenu it shows and leaves the menu open, with the row that opened it lit again (shared's
+/// `cancel_wait`, PR 40, called in `cascade_key` for Escape and Left).
 #[test]
-#[ignore = "needs shared: drop a waiting change on Escape/Left"]
 fn escape_with_a_waiting_pointer_change_closes_only_the_submenu() {
     let mut a = app(&["linked.md"]);
     click(&mut a, Hit::Bar(BarItem::More));
@@ -664,6 +662,41 @@ fn escape_with_a_waiting_pointer_change_closes_only_the_submenu() {
     key(&mut a, KeyName::Escape, None);
     let p = a.ui.popup.as_ref().expect("the menu stays");
     assert!(p.submenu().is_none(), "only the submenu closed");
+    assert_eq!(
+        p.root().hover,
+        Some(r),
+        "the row that opened it is lit again"
+    );
+}
+
+/// The same with Left: the waiting close is dropped, the submenu closes, the menu stays, and
+/// the row that opened the submenu is lit again.
+#[test]
+fn left_with_a_waiting_pointer_change_closes_only_the_submenu() {
+    let mut a = app(&["linked.md"]);
+    click(&mut a, Hit::Bar(BarItem::More));
+    let r = recent_row(&a);
+    let (x, y) = menu_row(&a, r);
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.left_release();
+    a.compose();
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_some()));
+    let (x0, y0) = menu_row(&a, 0);
+    a.pointer_moved(x0, y0);
+    assert!(
+        a.ui.popup
+            .as_ref()
+            .is_some_and(|p| p.submenu().is_some() && p.deadline().is_some())
+    );
+    key(&mut a, KeyName::Left, None);
+    let p = a.ui.popup.as_ref().expect("the menu stays");
+    assert!(p.submenu().is_none(), "only the submenu closed");
+    assert_eq!(
+        p.root().hover,
+        Some(r),
+        "the row that opened it is lit again"
+    );
 }
 
 #[test]

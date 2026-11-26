@@ -579,6 +579,15 @@ fn cascade_key(c: &mut Cascade<Act>, name: &KeyName, mods: Mods) -> Keyed {
     if matches!(name, KeyName::Char(_)) && (mods.ctrl || mods.alt) {
         return Keyed::Nothing;
     }
+    // Escape and Left act on what is open now. A pointer change still waiting (the close of the
+    // open submenu, because the pointer rested on another row a moment ago) is dropped instead
+    // of made, and the row that opened the submenu is lit again — shared's `cancel_wait`, PR 40.
+    // Left is chosen in `cascade_key` rather than by `Cascade::keys_cancel_wait` because the
+    // `Right` below would make the waiting change first, and only these two keys drop it; the
+    // rest still make it, as shared has them.
+    if matches!(name, KeyName::Escape | KeyName::Left) {
+        c.cancel_wait();
+    }
     if c.depth() > 1 && c.focus() == 0 {
         let lit = c.menu(1).is_some_and(|s| s.hover.is_some());
         c.key(&KeyName::Right);
