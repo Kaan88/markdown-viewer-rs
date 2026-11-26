@@ -2522,10 +2522,11 @@ fn shot(mut app: App, path: &Path) -> i32 {
         app.compose();
     }
     // A dialog or a palette just opened is drawn at rest. The Settings dialog with `--motion-at`
-    // is the exception: its entrance is the motion shot, and its first frame — the window under
-    // it — is the one the clock starts on.
-    let settings_entrance =
-        app.args.dialog == Some(ShotDialog::Settings) && app.args.motion_at.is_some();
+    // is the exception when its entrance is the motion shot. For a theme flip the dialog should
+    // already be fully open in the old frame that the crossfade starts from.
+    let settings_entrance = app.args.dialog == Some(ShotDialog::Settings)
+        && app.args.motion_at.is_some()
+        && app.args.theme_flip.is_none();
     if (app.ui.dialog.is_some() || app.ui.popup.is_some() || app.ui.modal()) && !settings_entrance {
         app.compose();
     }
