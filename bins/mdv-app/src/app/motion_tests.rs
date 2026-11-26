@@ -1866,6 +1866,44 @@ fn the_settings_dialog_closes_at_once_mid_fade() {
 }
 
 #[test]
+fn asking_for_settings_again_keeps_the_open_dialogs_presence() {
+    let mut a = moving(&[]);
+    a.command(C::Settings);
+    a.compose();
+    step(&mut a, FRAME);
+    assert!(a.settings_t > 0.0 && a.settings_t < 1.0);
+    let (serial, t) = (a.settings_serial, a.settings_t);
+    let before = a.screen.pixels.clone();
+
+    // The macOS app menu dispatches the same command even while Settings is open.
+    a.command(C::Settings);
+    a.compose();
+    assert_eq!(a.settings_serial, serial, "not a new opening");
+    assert_eq!(a.settings_t, t);
+    assert!(a.screen.pixels == before, "no blink");
+}
+
+#[test]
+fn reopening_settings_starts_a_new_entrance() {
+    let mut a = moving(&[]);
+    a.compose();
+    let before = a.screen.pixels.clone();
+    a.open_settings();
+    a.compose();
+    step(&mut a, FRAME);
+    let first = a.settings_serial;
+    assert!(a.settings_t > 0.0 && a.settings_t < 1.0);
+    a.modal_key(KeyName::Escape, None);
+    // Both actions can happen before the next frame drops the old presence.
+    a.open_settings();
+    a.compose();
+    assert_ne!(a.settings_serial, first);
+    assert_eq!(a.settings_t, 0.0);
+    assert!(a.screen.pixels == before);
+    assert!(a.anim_due.is_some());
+}
+
+#[test]
 fn with_motion_off_the_settings_dialog_is_whole_at_once() {
     // A still run showing the same dialog: the switch of the Animations row is part of the card,
     // so the run with the setting off is compared with one that has it off too.

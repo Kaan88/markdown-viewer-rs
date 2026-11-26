@@ -84,6 +84,9 @@ impl App {
     /// Opens Settings on the page it last showed this run (Appearance the first time), the
     /// keyboard in the list.
     pub(super) fn open_settings(&mut self) {
+        if self.ui.settings.is_some() {
+            return;
+        }
         self.ui.popup = None;
         self.ui.tips.hide();
         self.ui.hover = None;
