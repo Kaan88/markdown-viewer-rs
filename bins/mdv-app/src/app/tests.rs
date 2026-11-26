@@ -722,13 +722,14 @@ fn menu_row_offsets_follow_the_shared_layout() {
 #[test]
 fn the_cascades_menu_is_placed_where_the_menus_own_placement_puts_it() {
     let mut a = app(&["showcase.md"]);
-    for (scale, (dw, dh), tolerance) in [
-        (1.0f32, (1280u32, 800u32), 0.0f32),
-        (1.0, (1000, 520), 0.0),
-        (1.0, (520, 360), 0.0),
+    for (scale, (dw, dh), slack) in [
+        (1.0f32, (1280u32, 800u32), false),
+        (1.0, (1000, 520), false),
+        (1.0, (520, 360), false),
         // An odd device width at 1.5: the logical width, and so the button's right edge, lies
-        // between device pixels, and the two roundings are a pixel apart (they are here).
-        (1.5, (907, 601), 1.0),
+        // between device pixels, so the cascade rounds the right edge and the width apart while
+        // the menu's own placement rounds their difference: x can be a pixel out, and is here.
+        (1.5, (907, 601), true),
     ] {
         a.scale = scale;
         a.size = (dw, dh);
@@ -743,15 +744,20 @@ fn the_cascades_menu_is_placed_where_the_menus_own_placement_puts_it() {
         menu.place_in(&mut p, room);
         let popup = a.ui.popup.as_ref().expect("the menu");
         let (got, want) = (popup.root().rect(), menu.rect());
-        let off = (got.x - want.x)
-            .abs()
-            .max((got.y - want.y).abs())
-            .max((got.w - want.w).abs())
-            .max((got.h - want.h).abs());
-        assert!(
-            off <= tolerance,
+        assert_eq!(
+            (got.y, got.w, got.h),
+            (want.y, want.w, want.h),
             "{scale}x {dw}x{dh}: {got:?} against {want:?}"
         );
+        let dx = (got.x - want.x).abs();
+        if slack {
+            assert!(
+                dx == 0.0 || dx == 1.0,
+                "{scale}x {dw}x{dh}: {got:?} against {want:?}"
+            );
+        } else {
+            assert_eq!(dx, 0.0, "{scale}x {dw}x{dh}: {got:?} against {want:?}");
+        }
         a.ui.popup = None;
     }
 }
