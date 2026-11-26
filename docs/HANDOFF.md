@@ -29,7 +29,7 @@ missing was built. One commit per item, each with a test that fails with the fix
 | X3 `notice::draw_sliding` / `bar_height` | done: each of the three notice bars slides in by its own presence (`motion::bar`), its height taken by `notice::bar_height`, and the page is laid out under what shows (`page::Bars`, `viewport_bars`) on every frame; a bar that goes is forgotten, so a later one slides in again. A bar that is already there on the window's first frame is in place (`App::bar_t`), so the frame the window first shows never slides, and nothing jumps when the system's motion setting is read after it |
 | X3 tree chevron `draw_disclosure_animated_with`, rows named by path | already done (`motion::folder(path)`, `motion::notes_fold(key)`) |
 | L10 `Form::draw_animated` / `set_high_contrast` | already done |
-| L1 `submenu::Cascade` in place of the hand-made submenus and dwell | **done** (`e1d3074`, `060250b`, `36b6faf`, `9d2740a`): the main menu's Open recent is a `submenu::Cascade`, the `Menu`/`Cascade` body, `sub`, `dwell` and `SUBMENU_DWELL` are gone and the tests read the cascade; see the L1 section below |
+| L1 `submenu::Cascade` in place of the hand-made submenus and dwell | **done** (`e1d3074`, `060250b`, `36b6faf`, `9d2740a`): the main menu's Open recent is a `submenu::Cascade`, the `Menu`/`Cascade` body, `sub`, `dwell` and `SUBMENU_DWELL` are gone and the tests read the cascade. The Escape/Left wait is closed at shared PR 40 (pin `1588e0f`, `b65678f`, `826cab1`); see the L1 section below |
 | W3 `window_state` restores onto a monitor that still exists | the behaviour was already there (mdview keeps its own physical place in the session, not a shared `WindowState`): a place is used only if the title row's left end is on a monitor that is there. This stage only moved that check into the pure `position_reachable` and tested it — no change of behaviour |
 
 **D4 is done at shared's pin `09b01c1`.** Shared's PR 31 gave the three animated title pieces their
@@ -70,6 +70,27 @@ passing.
   (PR 29) reaches a winit window; mdview has its own single instance (`mdview_core::single`) and
   is unchanged. The colour picker open (PR 30) drops a drag cursor and a row caret in the shared
   form's colour row; mdview does not offer that row.
+
+### The pin at `1588e0f` (2026-11-26)
+
+Shared's `main` (PRs 32 to 41), for PR 40's `submenu::Cascade::cancel_wait` and
+`keys_cancel_wait`. `Cargo.lock` moves the five `mdshared-*` source lines and nothing else: no
+crate added or bumped (the terminal (`term`) and scroll-area modules are behind features mdview
+does not build). All 195 shots are byte-identical to `target/shots/review-head`.
+
+What is between the pins that could touch mdview, checked file by file:
+- **`submenu.rs`** gains `cancel_wait`, `keys_cancel_wait` and the Escape/Left handling, off
+  unless an application asks; with neither the pin changes nothing in a menu. Wired in the L1
+  section above.
+- **`mdshared-text/src/text.rs`** gains `draw_layout_clipped_tinted`; `draw_layout_clipped` is
+  the same code through `draw_runs(..., None)`. No text a shot draws changes.
+- **`tokens.rs`** changes comments only, and **`platform.rs`** only the Linux settings-portal
+  reads (off the UI thread, a last answer kept); Windows and macOS answer as they did.
+- **`mdshared-ui/Cargo.toml`** adds an optional `term` feature with `mdshared-term`; the new
+  `layout`, `scrollarea` and `termview` modules are new code mdview does not use.
+- **Other files** in the range are the terminal (`mdshared-term`, `mdshared-pty`, `termview`),
+  the scroll area and its example, the page transition and the K5 layout: none is used by
+  mdview.
 
 ### Tests, with the revert each fails under
 
@@ -112,11 +133,12 @@ review of the stage added a sixth, and its scale counterparts below.
 
 ### L1: the main menu's Open recent is a `submenu::Cascade` (2026-11-26)
 
-Seven commits: four for the move, each built, tested and shot-checked — `e1d3074` builds the
-cascade beside the menu, `060250b` moves every call site onto the popup (nothing drawn changes;
-195 shots byte-identical), `36b6faf` makes the body the `Menu`/`Cascade` enum and deletes the
-hand-made submenu, `9d2740a` adds the two tests below — and three for the review's fixes (see
-below): `0d98d2b`, `26341e0`, `90f531f`.
+Commits, each built, tested and shot-checked: four for the move — `e1d3074` builds the cascade
+beside the menu, `060250b` moves every call site onto the popup (nothing drawn changes; 195
+shots byte-identical), `36b6faf` makes the body the `Menu`/`Cascade` enum and deletes the
+hand-made submenu, `9d2740a` adds the two tests below — three for Opus's review (`0d98d2b`,
+`26341e0`, `90f531f`), two for its close-out (`ee1501d`, `e47fe69`), then the pin at `1588e0f`
+(`b65678f`) and the Escape/Left fix on it (`826cab1`).
 
 - **The body.** `Popup { kind, body: MenuBody, access, serial }`, `MenuBody::Menu(Menu<Act>)` or
   `MenuBody::Cascade(Cascade<Act>)`. Only the main menu is a cascade; the context menus, the
@@ -138,21 +160,22 @@ below): `0d98d2b`, `26341e0`, `90f531f`.
   menu that reads none draws it.
 - **The keys go to the open submenu, however it was opened.** The shared cascade keeps them in
   the menu the pointer was last in; `cascade_key` moves them into the submenu with a `Right`
-  first (putting out the row it lights when none was lit), so Up/Down/Enter/Escape/Left act on
-  the submenu as they always did. Home and End, and a letter with Ctrl or Alt, stay no menu keys.
+  first (putting out the row it lights when none was lit), so Up/Down/Enter act on the submenu
+  as they always did, and Escape and Left drop a waiting pointer change first and then close the
+  submenu (below). Home and End, and a letter with Ctrl or Alt, stay no menu keys.
 - **Placement.** The shared `around`/`beside` keep 4 px from the edges of the area they are
   handed; a menu's own placement kept them from the window. `cascade_room` widens the room by
   them at the top and the bottom, so the cascade's root lands on the menu's rectangle at every
   size (the test below; at a fractional scale the two roundings can be a pixel apart). The
   submenu now sits `beside` its menu with the shared 2 px gap; the old code overlapped the menu
   by 4 px, so it moved 6 px (the cascade shots).
-- **Two changes of behaviour, both the shared rules, not regressions:** the pointer resting on
-  its menu's padding (not on a row) while a submenu is open now asks for it to close after the
+- **One change of behaviour, the shared rule, not a regression:** the pointer resting on its
+  menu's padding (not on a row) while a submenu is open now asks for it to close after the
   300 ms if it is not on its way to the submenu (the old code kept it until a row was rested
-  on); and a key pressed while a pointer change still waits makes that change first
-  (`Cascade::key`), so a key during the rest acts on what is lit. The crossing test asserts the
-  first: on the padding the submenu stays and the row stays lit while a deadline waits, and when
-  that timer comes the submenu has closed.
+  on). The crossing test asserts it: on the padding the submenu stays and the row stays lit
+  while a deadline waits, and when that timer comes the submenu has closed. Every other key
+  still makes a waiting pointer change first, as shared has it; Escape and Left are the two
+  that drop it (above).
 
 Tests: fourteen tests read the cascade's state where they read the old fields — `root()` for
 `menu`, `submenu()` for `sub` and `deadline()` for `dwell` — across `app/tests.rs`,
@@ -174,12 +197,17 @@ asserts the new rule (see above). Three are new, each failing with its fix rever
   its first row and the menu keeps its row lit — fails with the `Right` that moves the keys into
   the submenu removed (the submenu closes instead).
 
-One is new and **ignored**, for the shared session:
-`escape_with_a_waiting_pointer_change_closes_only_the_submenu` (`#[ignore = "needs shared: drop
-a waiting change on Escape/Left"]`). A pointer that rested on another row less than 300 ms ago
-leaves a close waiting; shared's `Cascade::key` makes it first, so Escape then sees one menu and
-closes the whole popup. The test wants only the submenu closed and the menu left open; run with
-`--ignored` it fails on "the menu stays".
+**Escape and Left are closed, at shared PR 40 (pin `1588e0f`).** A pointer that rested on
+another row less than 300 ms ago leaves a close waiting; `cascade_key` calls
+`Cascade::cancel_wait` for Escape and Left, which drops it and lights the row that opened the
+submenu again, so the key closes only the submenu.
+`escape_with_a_waiting_pointer_change_closes_only_the_submenu` is un-ignored and
+`left_with_a_waiting_pointer_change_closes_only_the_submenu` is new: both assert the menu stays,
+the submenu is gone and its opening row is lit. With the `cancel_wait` call removed, Escape
+closes the whole menu and Left leaves the other row lit — each fails on its own assertion.
+`cancel_wait` in `cascade_key` was chosen over `Cascade::keys_cancel_wait(true)`: mdview's
+`Right` that moves the keys into the submenu would make the waiting change first, and the other
+keys keep shared's "make it first" rule.
 
 ### Review of L1 (2026-11-26)
 
@@ -190,8 +218,9 @@ Opus's review said FIX. Commits `0d98d2b`, `26341e0`, `90f531f`:
   close_it` now states the rule after the crossing: on the padding the cascade has a deadline
   and the row stays lit, and when the timer comes the submenu has closed — it fails with `tick`
   made a no-op (the stand-in for the old "stays open on the padding" rule).
-- **Escape with a waiting pointer change** (shared's, not fixable here): the ignored test above;
-  the shared session has been asked.
+- **Escape with a waiting pointer change** (shared's, so it waited): closed at shared PR 40 (pin
+  `1588e0f`, `826cab1`) with `Cascade::cancel_wait`, called in `cascade_key` for Escape and Left;
+  the Escape test is un-ignored and a Left one added (above).
 - **Placement at a fractional scale**: see the test above, 907x601 at 1.5, a 1 px tolerance.
 - **A tooltip in the title-hover shots.** The tick that shows a shot's tip at once ran for any
   moving shot, so `title-hover-light`/`-dark` (`--hover-close --motion-at 40`) drew a half-faded
@@ -216,14 +245,15 @@ Opus's review said FIX. Commits `0d98d2b`, `26341e0`, `90f531f`:
   the bubble was 40 ms into an 83 ms fade). The button's hover fill itself is unchanged.
 
 `menu-recent`, `menu-tab*`, `menu-page`, `menu-find`, `menu-library-*`, `tip-fading-*`, the
-palette, the dialogs and every content shot are byte-identical.
+palette, the dialogs and every content shot are byte-identical. The pin at `1588e0f`'s set
+(`target/shots/pin-1588e0f`) and the Escape/Left fix's (`target/shots/pin-keys`) are
+byte-identical to `review-head`, all 195.
 
 Not verified: the owner's look at the changed menu shots (the arrow and the 6 px gap are his
 judgement calls, and the shared gap cannot be the old overlap without changing shared); the 300
 ms rest and the aim test by hand in a real window; the cost of a menu frame (the cascade places
 its menus once more a frame than the old code, `place_in` before the draw and again inside it);
-Linux and macOS; the Escape-with-a-waiting-change case, which is the ignored test until
-shared drops a waiting change on Escape/Left.
+Linux and macOS.
 
 ### Numbers (release, this PC, 2026-11-26)
 
@@ -244,7 +274,7 @@ the stage's commits in one worktree: `2c35084`, `5bedbbc`, `79e530c` and `445403
 before build's 0.4 ms paint there. What was not found is why that one combination was slow; no
 number above is taken from those runs.
 
-**Next: the owner's look, then the branch is ready to merge.** Three things the owner will see:
+**Next: the owner's look, then the branch is ready to merge.** Two things the owner will see:
 
 - **The changed menu shots**: the Open recent row's arrow is the shared glyph in place of the
   text `›`, and the submenu sits 6 px further from its menu (the shared 2 px gap in place of the
@@ -252,16 +282,11 @@ number above is taken from those runs.
 - **A rest on the menu's padding now closes the submenu.** With a submenu open, the pointer
   resting on the menu's padding (not on a row) closes it after the 300 ms; the old code kept it
   open however long the pointer rested there.
-- **Escape with a waiting pointer change closes the whole menu.** A pointer that rested on
-  another row less than 300 ms ago leaves a close waiting; Escape makes it and then closes the
-  menu, where it should close only the submenu. Open; waiting on shared's `Cascade::cancel_wait`
-  (the ignored test above).
 
-Shared's close-out list is complete on this branch (its pin stays `09b01c1`; nothing in shared
-was changed).
+Shared's close-out list is complete on this branch (its pin is `1588e0f`; nothing in shared was
+changed by mdview).
 
-Workspace after L1 and its review: 778 passed, 7 ignored (`mdview`'s own: 337 passed,
-2 ignored, one of them the Escape test waiting on shared).
+Workspace after L1 and the pin: 780 passed, 6 ignored (`mdview`'s own: 339 passed, 1 ignored).
 
 ---
 
