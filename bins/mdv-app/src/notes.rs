@@ -19,6 +19,7 @@ use crate::workspace::Workspace;
 use mdshared_app::library::put::{self, PutError};
 use mdshared_app::library::tree::{self, Kind, Row};
 use mdshared_app::library::{self, Library};
+use mdshared_ui::anim::Animator;
 use mdshared_ui::pane::{
     HEAD, HEAD_ACTION, ROW, ROW_H, Switch, draw_head, draw_head_switches, draw_row_fill,
 };
@@ -380,7 +381,7 @@ fn row_folder(p: &mut Painter, row: &Row, face: Face, pane: f32, room: f32) -> (
 
 /// The Files pane showing the library: the rows, a note's folder dimmed at the right, a missing
 /// note marked, the count of a folder too large to read whole, and Refresh in the head.
-pub fn draw(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
+pub fn draw(c: &mut Ctx, anim: &mut Animator, ws: &Workspace, ui: &mut Ui, r: Rect) {
     let pal = *c.pal;
     draw_head_row(c, ui, r, "NOTES");
     let b = Rect::new(r.right() - HEAD_ACTION, r.y + 6.0, 28.0, 28.0);
@@ -448,12 +449,20 @@ pub fn draw(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
         let cy = rr.cy();
         let (face, color) = match &row.kind {
             Kind::Group | Kind::Section => {
-                let arrow = if ui.notes.is_folded(&row.key) {
-                    glyph::RIGHT
-                } else {
-                    glyph::DOWN
-                };
-                c.p.icon(arrow, 8.0, ix - 8.0, cy, pal.faint);
+                let open = !ui.notes.is_folded(&row.key);
+                let id = crate::motion::notes_fold(&row.key);
+                let motion = crate::motion::DISCLOSURE;
+                glyph::draw_disclosure_animated_with(
+                    c.p,
+                    anim,
+                    id,
+                    ix - 8.0,
+                    cy,
+                    8.0,
+                    open,
+                    pal.faint,
+                    motion,
+                );
                 if row.kind == Kind::Group {
                     c.p.icon(glyph::BOOKMARK, 13.0, ix + 9.0, cy, pal.folder);
                     (Face::Semibold, pal.text)

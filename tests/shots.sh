@@ -64,6 +64,20 @@ shot menu-find --light --find the --menu find "$fx/showcase.md"
 shot menu-main-fading-light --light --menu main --menu-at 21 "$fx/showcase.md"
 shot menu-main-fading-dark --dark --menu main --menu-at 21 "$fx/showcase.md"
 
+# Toasts: one at rest; one 50 ms into its entrance (part way in, below its place); a second
+# one pushed 200 ms in: the first has lifted out of its way (167 ms) and the second is coming
+# in under it, since a new toast waits for the lift (the owner's choice).
+shot toast-light --light --toast "Copied" "$fx/showcase.md"
+shot toast-dark --dark --toast "Copied" "$fx/showcase.md"
+shot toast-rising-light --light --toast "Copied" --motion-at 50 "$fx/showcase.md"
+shot toast-rising-dark --dark --toast "Copied" --motion-at 50 "$fx/showcase.md"
+shot toasts-stacking-light --light --toast "Copied" --toast "Link copied" --motion-at 200 "$fx/showcase.md"
+shot toasts-stacking-dark --dark --toast "Copied" --toast "Link copied" --motion-at 200 "$fx/showcase.md"
+shot toasts-stacked-light --light --toast "Copied" --toast "Link copied" "$fx/showcase.md"
+# Three toasts in a short window: the one that would reach above the page is left out.
+shot toasts-short-light --light --size 520x220 --toast "Copied" --toast "Link copied" --toast "Code copied" "$fx/showcase.md"
+shot toasts-short-dark --dark --size 520x220 --toast "Copied" --toast "Link copied" --toast "Code copied" "$fx/showcase.md"
+
 # Every dialog.
 shot dialog-about-dark --dark --dialog about "$fx/showcase.md"
 shot dialog-about-light --light --dialog about "$fx/showcase.md"
@@ -76,9 +90,27 @@ shot dialog-settings-dark --dark --dialog settings "$fx/showcase.md"
 shot dialog-settings-scale-150 --light --scale 1.5 --dialog settings "$fx/showcase.md"
 shot dialog-settings-min-dark --dark --size 520x360 --dialog settings "$fx/showcase.md"
 shot dialog-settings-640 --light --size 640x800 --dialog settings "$fx/showcase.md"
+# The Settings dialog opening: 67 ms into the menus' 117 ms, the dim and the card fading in as
+# one thing over the window it was opened on.
+for theme in light dark; do
+    shot "dialog-settings-opening-$theme" --"$theme" --dialog settings --motion-at 67 "$fx/showcase.md"
+done
 # The Window backdrop row (offered on Windows) with a choice made. A shot has no window, so
 # there is no backdrop to show: the chrome is the flat colours.
 shot dialog-settings-backdrop --dark --backdrop mica --dialog settings "$fx/showcase.md"
+# A light/dark change: 85 ms into its 170 ms crossfade, the window between the two palettes.
+# The first 16 ms shot frame starts the fade, so its clock reads 101 ms at the midpoint.
+shot theme-fading-dark --light --theme-flip dark --motion-at 101 "$fx/showcase.md"
+shot theme-fading-light --dark --theme-flip light --motion-at 101 "$fx/showcase.md"
+# No explicit theme: the Theme row stays on System while the simulated desktop flips.
+shot theme-fading-settings-dark --theme-flip dark --motion-at 101 --dialog settings "$fx/showcase.md"
+shot theme-fading-settings-light --theme-flip light --motion-at 101 --dialog settings "$fx/showcase.md"
+# A switch of the settings dialog (Reading, "Tick task boxes without asking") turned with Space:
+# 67 ms into its slide, the knob part way and its fill coming in; and at rest once turned.
+for theme in light dark; do
+    shot "settings-switch-sliding-$theme" --"$theme" --dialog settings --flip-setting 5 --motion-at 67 "$fx/showcase.md"
+done
+shot settings-switch-turned-light --light --dialog settings --flip-setting 5 "$fx/showcase.md"
 # The Appearance page with "Animations" turned off, from a scratch settings file, at the
 # smallest size in both themes.
 still="$(mktemp -d)"
@@ -118,6 +150,10 @@ rm -rf "$brief"
 # The command palette: tabs and recent files, commands by prefix, headings by prefix.
 shot palette-empty-light --light --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
 shot palette-empty-dark --dark --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
+# 41 ms into its fade-in (about half there, a few px below its place); --motion-at starts the
+# clock before its first frame, which a still run would draw in place at once.
+shot palette-rising-light --light --palette "" --motion-at 41 "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
+shot palette-rising-dark --dark --palette "" --motion-at 41 "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
 shot palette-commands-light --light --palette ">zoom" "$fx/showcase.md"
 shot palette-commands-dark --dark --palette ">zoom" "$fx/showcase.md"
 shot palette-history-light --light --palette ">back" "$fx/showcase.md"
@@ -134,6 +170,11 @@ shot folder-search-none-light --light --files --folder "$fx" --folder-search "zz
 # Panes, find, focus mode, tabs.
 shot files-pane --light --files --folder "$fx" "$fx/showcase.md"
 shot files-pane-dark --dark --files --folder "$fx/wiki" "$fx/linked.md"
+# A folder's chevron turning as it opens, 67 ms into the turn (about a third of the way round),
+# and the folder open at rest.
+shot files-turning-light --light --files --folder "$fx" --turn wiki --motion-at 67 "$fx/showcase.md"
+shot files-turning-dark --dark --files --folder "$fx" --turn wiki --motion-at 67 "$fx/showcase.md"
+shot files-turned-light --light --files --folder "$fx" --turn wiki "$fx/showcase.md"
 shot outline-pane --light --outline "$fx/showcase.md"
 shot outline-pane-dark --dark --outline "$fx/everything.md"
 shot outline-focus --light --outline --outline-focus 3 "$fx/showcase.md"
@@ -162,6 +203,10 @@ shot scale-200-dark --dark --scale 2.0 --focus-mode "$fx/showcase.md"
 # Pointer positions: a title-bar button, a link in the text, a menu row, the page.
 shot hover-titlebar --light --hover 1200,16 "$fx/showcase.md"
 shot hover-open --light --hover 46,63 "$fx/showcase.md"
+# The Open button's tip 41 ms into its fade-in (83 ms), once the pointer has rested.
+for theme in light dark; do
+    shot "tip-fading-$theme" --"$theme" --hover 46,63 --motion-at 41 "$fx/showcase.md"
+done
 shot hover-page --light --hover 640,300 "$fx/showcase.md"
 shot hover-menu --light --menu main --hover 1100,120 "$fx/showcase.md"
 
@@ -178,6 +223,14 @@ shot preview-remote --light --size 1000x600 --hover 240,242 "$fx/previews.md"
 
 # The update bar.
 shot update-available --light --update-bar available "$fx/showcase.md"
+# 67 ms into the bar's 117 ms slide: about 19 of its 34 px, the page under it.
+# 21 ms into the bar's 117 ms slide: its label cut, the page under it.
+shot update-rising-light --light --update-bar available --motion-at 21 "$fx/showcase.md"
+shot update-rising-dark --dark --update-bar available --motion-at 21 "$fx/showcase.md"
+
+# A window button's hover fill part way into its fade (it is quick), both themes.
+shot title-hover-light --light --hover-close --motion-at 40 "$fx/showcase.md"
+shot title-hover-dark --dark --hover-close --motion-at 40 "$fx/showcase.md"
 shot update-installing --dark --update-bar installing "$fx/showcase.md"
 shot update-installed --dark --update-bar installed
 shot update-installed-plain --light --update-bar installed-plain

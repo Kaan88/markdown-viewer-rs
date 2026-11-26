@@ -15,6 +15,8 @@ fn moving(files: &[&str]) -> App {
     let mut a = app(files);
     a.still = false;
     a.frame_clock = Some(Instant::now());
+    // The machine's "Animation effects" setting must not decide what a test sees.
+    a.reduced = Some(false);
     a
 }
 
@@ -22,6 +24,15 @@ fn moving(files: &[&str]) -> App {
 fn step(a: &mut App, by: Duration) {
     a.frame_clock = a.frame_clock.map(|t| t + by);
     a.compose();
+}
+
+/// A display at `scale`, the window grown to the same logical size (1280x800).
+fn at_scale(a: &mut App, scale: f32) {
+    a.scale = scale;
+    a.size = (
+        (1280.0 * scale).round() as u32,
+        (800.0 * scale).round() as u32,
+    );
 }
 
 /// The colour of the pixel at logical (x, y).
@@ -32,7 +43,7 @@ fn pixel(a: &App, x: f32, y: f32) -> [u8; 4] {
 }
 
 fn menu_middle(a: &App) -> (f32, f32) {
-    let r = a.ui.popup.as_ref().expect("a menu").menu.rect();
+    let r = a.ui.popup.as_ref().expect("a menu").root().rect();
     (r.cx(), r.cy())
 }
 
@@ -97,7 +108,7 @@ fn a_submenu_fades_in_beside_its_menu() {
     assert_eq!(a.menu_t, (1.0, 1.0));
     a.open_popup(PopupKind::Recent);
     a.compose();
-    assert!(a.ui.popup.as_ref().is_some_and(|p| p.sub.is_some()));
+    assert!(a.ui.popup.as_ref().is_some_and(|p| p.submenu().is_some()));
     assert_eq!(a.menu_t, (1.0, 0.0), "the parent stays; the submenu starts");
     step(&mut a, FRAME);
     assert!(a.menu_t.1 > 0.0 && a.menu_t.1 < 1.0);
@@ -110,6 +121,121 @@ fn a_submenu_fades_in_beside_its_menu() {
     a.compose();
     assert_eq!(a.menu_t.1, 1.0);
     assert!(a.anim_due.is_none());
+}
+
+/// The menu hover test at `scale`, so a scaled display is covered too.
+fn menu_hover_fade_at(scale: f32) {
+    let mut a = moving(&["showcase.md"]);
+    at_scale(&mut a, scale);
+    a.open_popup(PopupKind::Main);
+    a.compose();
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 40, "the menu's fade ends");
+    }
+    let row = a.ui.popup.as_ref().unwrap().root().row_rect(1);
+    let (x, y) = (row.x + 6.0, row.cy());
+    let rest = pixel(&a, x, y);
+    a.pointer_moved(x, y);
+    if let Some(p) = a.ui.popup.as_mut() {
+        p.root_mut().pointer(x, y);
+    }
+    assert_eq!(a.ui.popup.as_ref().unwrap().root().hover, Some(1));
+    a.compose();
+    assert_eq!(
+        pixel(&a, x, y),
+        rest,
+        "the hover's first frame is still the row at rest"
+    );
+    assert!(a.anim_due.is_some(), "the fade asks for a frame");
+    step(&mut a, FRAME);
+    let mid = pixel(&a, x, y);
+    assert_ne!(mid, rest, "the second frame is part way");
+    let mut frames = 1;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the fade ends");
+    }
+    let end = pixel(&a, x, y);
+    assert_ne!(end, mid, "the fill arrived");
+    // At rest it is the menu a still run draws with the pointer on the row.
+    let mut still = app(&["showcase.md"]);
+    at_scale(&mut still, scale);
+    still.open_popup(PopupKind::Main);
+    still.compose();
+    still.pointer_moved(x, y);
+    if let Some(p) = still.ui.popup.as_mut() {
+        p.root_mut().pointer(x, y);
+    }
+    still.compose();
+    assert_eq!(end, pixel(&still, x, y));
+}
+
+#[test]
+fn the_title_rows_hover_shows_at_once_with_motion_off() {
+    let mut a = app(&["showcase.md"]);
+    a.full = true;
+    a.compose();
+    let r = a.hit_rect(Hit::WinClose).expect("the Close button");
+    let (x, y) = (r.cx(), r.cy());
+    let rest = pixel(&a, x, y);
+    a.pointer_moved(x, y);
+    a.compose();
+    let hovered = pixel(&a, x, y);
+    assert_ne!(rest, hovered, "the hover fill is there on its own frame");
+    step(&mut a, FRAME);
+    assert_eq!(pixel(&a, x, y), hovered, "and nothing of it faded");
+    assert!(a.anim_due.is_none(), "nothing moves");
+}
+
+#[test]
+fn the_title_rows_hover_fades_in_from_the_resting_look() {
+    let mut a = moving(&["showcase.md"]);
+    a.full = true;
+    a.compose();
+    let r = a.hit_rect(Hit::WinClose).expect("the Close button");
+    let (x, y) = (r.cx(), r.cy());
+    let rest = pixel(&a, x, y);
+    a.pointer_moved(x, y);
+    a.compose();
+    // The frame the hover begins draws the resting look, not the lit one: shared's one-frame
+    // flash (fixed by shared's PR 31) must not come back through mdview's wiring.
+    assert_eq!(
+        pixel(&a, x, y),
+        rest,
+        "no flash on the frame the hover begins"
+    );
+    assert!(a.anim_due.is_some(), "a frame is asked for");
+    step(&mut a, FRAME);
+    let early = pixel(&a, x, y);
+    assert_ne!(early, rest, "the fill has begun");
+    // At rest it is the look a still run with the pointer there draws, pixel for pixel.
+    let mut still = app(&["showcase.md"]);
+    still.full = true;
+    still.compose();
+    still.pointer_moved(x, y);
+    still.compose();
+    settle(&mut a);
+    assert!(a.anim_due.is_none(), "nothing is left moving");
+    assert_eq!(
+        pixel(&a, x, y),
+        pixel(&still, x, y),
+        "the fill at rest is the still run's"
+    );
+    assert_ne!(early, pixel(&a, x, y), "it kept going past the first frame");
+}
+
+#[test]
+fn a_menu_rows_hover_fill_fades_in_and_the_overlays_are_drawn_for_it() {
+    menu_hover_fade_at(1.0);
+}
+
+#[test]
+fn a_menu_rows_hover_fill_fades_in_at_scale_1_25_too() {
+    menu_hover_fade_at(1.25);
 }
 
 #[test]
@@ -159,15 +285,12 @@ fn the_redraw_covers_everything_the_menu_touches_while_it_fades() {
     a.compose();
     step(&mut a, FRAME);
     let p = a.ui.popup.as_ref().unwrap();
-    let (menu, sub) = (
-        p.menu.presence_bounds(),
-        p.sub.as_ref().unwrap().presence_bounds(),
+    let bounds = p.presence_bounds();
+    assert!(a.overlay_bounds.contains(&bounds), "{bounds:?} is redrawn");
+    // And it holds the shadow and the drop: wider than the old 20 px round the menu.
+    assert!(
+        bounds.y < p.root().rect().y - 20.0 || bounds.bottom() > p.root().rect().bottom() + 20.0
     );
-    for b in [menu, sub] {
-        assert!(a.overlay_bounds.contains(&b), "{b:?} is redrawn");
-    }
-    // And they hold the shadow and the drop: wider than the old 20 px round the menu.
-    assert!(menu.y < p.menu.rect().y - 20.0 || menu.bottom() > p.menu.rect().bottom() + 20.0);
 }
 
 #[test]
@@ -241,7 +364,7 @@ fn a_menu_fading_over_frosted_chrome_lets_the_backdrop_through_less() {
     assert!(t > 0.0 && t < 1.0);
     // Inside the menu, where it lies over the chrome, a pixel is neither chrome (keyed out)
     // nor opaque: it is the menu, part of the way in, over the backdrop.
-    let menu = a.ui.popup.as_ref().unwrap().menu.rect().inset(8.0);
+    let menu = a.ui.popup.as_ref().unwrap().root().rect().inset(8.0);
     let (w, h) = (a.screen.width as usize, a.screen.height as usize);
     let mut between = 0;
     for y in 0..h {
@@ -281,15 +404,18 @@ fn a_covered_window_is_left_with_no_deadline_once_the_timer_fired() {
 
 #[test]
 fn a_change_of_the_systems_motion_setting_is_read_and_drawn() {
-    let mut a = moving(&["showcase.md"]);
-    // Taken as reduced before; the wake reads the system's answer again.
-    a.anim.set_system_reduced(!platform::motion_reduced());
-    a.wants_frame = false;
-    a.woken(Wake::Motion);
-    assert!(a.wants_frame, "a frame is asked for");
-    // The frame that follows sets the policy over the system's answer.
-    a.compose();
-    assert_eq!(a.anim.animates(), !platform::motion_reduced());
+    for x in [false, true] {
+        let mut a = moving(&["showcase.md"]);
+        // Taken as the other way round before; the wake reads the test's answer again.
+        a.reduced = Some(x);
+        a.anim.set_system_reduced(!x);
+        a.wants_frame = false;
+        a.woken(Wake::Motion);
+        assert!(a.wants_frame, "a frame is asked for");
+        // The frame that follows sets the policy over the system's answer.
+        a.compose();
+        assert_eq!(a.anim.animates(), !x, "the system's wish is read: {x}");
+    }
 }
 
 #[test]
@@ -347,4 +473,2081 @@ fn the_appearance_page_fits_the_smallest_window_with_every_row() {
         row.bottom() <= card.bottom() && row.bottom() <= page.bottom(),
         "the last row {row:?} lies inside the card {card:?} and its page {page:?}"
     );
+}
+
+// ---- the Files pane's chevrons ---------------------------------------------------------------
+
+/// A folder of two folders, each with a file, and a file: `a/`, `b/`, `c.md`.
+fn folder_tree(name: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("mdview-turn-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    for sub in ["a", "b"] {
+        std::fs::create_dir_all(d.join(sub)).unwrap();
+        std::fs::write(d.join(sub).join("x.md"), "# x\n").unwrap();
+    }
+    std::fs::write(d.join("c.md"), "# c\n").unwrap();
+    d
+}
+
+fn tree_row(a: &App, name: &str) -> usize {
+    a.ui.tree
+        .rows()
+        .iter()
+        .position(|r| r.name == name)
+        .unwrap_or_else(|| panic!("no row {name}"))
+}
+
+/// The pixels of the chevron of tree row `i`, where the Files pane draws it.
+fn chevron(a: &App, i: usize) -> Vec<u8> {
+    let row = a.hit_rect(Hit::FilesRow(i)).expect("the row is on screen");
+    let files = a.areas.region(Region::Files).expect("the Files pane");
+    let depth = a.ui.tree.rows()[i].depth as f32;
+    let cx = files.x + 14.0 + (depth + 1.0) * 14.0 - 8.0;
+    crop(a, Rect::new(cx - 7.0, row.cy() - 7.0, 14.0, 14.0))
+}
+
+fn crop(a: &App, r: Rect) -> Vec<u8> {
+    let w = a.screen.width as usize;
+    let (x0, y0) = ((r.x * a.scale) as usize, (r.y * a.scale) as usize);
+    let (x1, y1) = (
+        (r.right() * a.scale) as usize,
+        (r.bottom() * a.scale) as usize,
+    );
+    let mut out = Vec::new();
+    for y in y0..y1 {
+        out.extend_from_slice(&a.screen.pixels[(y * w + x0) * 4..(y * w + x1) * 4]);
+    }
+    out
+}
+
+/// An app showing `dir` in the Files pane, moving or still.
+fn with_tree(dir: &Path, moving_app: bool) -> App {
+    let mut a = if moving_app {
+        moving(&["showcase.md"])
+    } else {
+        app(&["showcase.md"])
+    };
+    a.ui.tree.set_root(Some(dir.to_path_buf()));
+    a.compose();
+    a
+}
+
+#[test]
+fn a_folder_that_opens_turns_its_chevron_and_then_leaves_no_timer() {
+    let dir = folder_tree("opens");
+    let mut a = with_tree(&dir, true);
+    let b = tree_row(&a, "b");
+    let closed = chevron(&a, b);
+    // Frames that leave the pane undrawn: its chevrons are kept, not forgotten.
+    for _ in 0..3 {
+        step(&mut a, FRAME);
+    }
+    assert!(a.anim_due.is_none(), "nothing moves at rest");
+    a.ui.tree.toggle(b);
+    step(&mut a, FRAME);
+    assert!(a.anim_due.is_some(), "the turn asks for a frame");
+    assert!(chevron(&a, b) == closed, "the turn starts where it was");
+    step(&mut a, FRAME);
+    let mid = chevron(&a, b);
+    assert!(
+        mid != closed,
+        "on its way: drawn on a frame nothing else changed"
+    );
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the turn ends");
+    }
+    // At rest: the open chevron a still run draws, and no timer is left.
+    let mut still = with_tree(&dir, false);
+    still.ui.tree.toggle(tree_row(&still, "b"));
+    still.compose();
+    let open = chevron(&still, b);
+    assert!(mid != open);
+    assert!(chevron(&a, b) == open, "at rest, open");
+    assert!(a.anim.group_deadlines().is_empty());
+    step(&mut a, Duration::from_secs(1));
+    assert!(a.anim_due.is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_chevron_is_named_by_its_folder_and_keeps_turning_when_its_row_moves() {
+    let dir = folder_tree("moves");
+    let mut a = with_tree(&dir, true);
+    let b = tree_row(&a, "b");
+    a.ui.tree.toggle(b);
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    // The folder above opens: "b" is now a row further down, still part of the way round.
+    a.ui.tree.toggle(tree_row(&a, "a"));
+    step(&mut a, FRAME);
+    let b = tree_row(&a, "b");
+    let mut still = with_tree(&dir, false);
+    still.ui.tree.toggle(tree_row(&still, "b"));
+    still.ui.tree.toggle(tree_row(&still, "a"));
+    still.compose();
+    assert_eq!(tree_row(&still, "b"), b);
+    assert!(
+        chevron(&a, b) != chevron(&still, b),
+        "the moved row's chevron is still turning, not taken for new"
+    );
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+    }
+    assert!(chevron(&a, b) == chevron(&still, b), "at rest, open");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn with_animations_off_or_a_still_run_a_folder_opens_at_once() {
+    let dir = folder_tree("still");
+    let mut still = with_tree(&dir, false);
+    let b = tree_row(&still, "b");
+    still.ui.tree.toggle(b);
+    still.compose();
+    assert!(still.anim_due.is_none());
+    let open = chevron(&still, b);
+    let mut off = with_tree(&dir, true);
+    off.apply_setting(s::MOTION, Value::Bool(false));
+    let mut reduced = with_tree(&dir, true);
+    reduced.anim.set_system_reduced(true);
+    for (name, a) in [("setting off", &mut off), ("reduced motion", &mut reduced)] {
+        a.compose();
+        a.ui.tree.toggle(b);
+        step(a, FRAME);
+        assert!(a.anim_due.is_none(), "{name}: no frame is asked for");
+        assert!(chevron(a, b) == open, "{name}: open at once");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_group_of_the_notes_pane_turns_its_chevron_as_it_folds() {
+    let root = std::env::temp_dir().join(format!("mdview-turn-notes-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("Personal")).unwrap();
+    std::fs::write(root.join("Personal/Budget.md"), "# Budget\n").unwrap();
+    std::fs::write(
+        root.join("Personal.md"),
+        "# Personal\n\n## Money\n\n- [Budget](<Personal/Budget.md>)\n",
+    )
+    .unwrap();
+    let mut a = moving(&["showcase.md"]);
+    a.ui.notes = crate::notes::Notes::new(Some(root.clone()));
+    a.ws.set_library_offered(true);
+    a.pane_face(1);
+    a.compose();
+    let i = (a.ui.notes.rows.iter())
+        .position(|r| r.label == "Personal")
+        .expect("the group's row");
+    let row = a.hit_rect(Hit::NotesRow(i)).expect("on screen");
+    let files = a.areas.region(Region::Files).unwrap();
+    let cx = files.x + 14.0 + (a.ui.notes.rows[i].depth as f32 + 1.0) * 14.0 - 8.0;
+    let at = Rect::new(cx - 7.0, row.cy() - 7.0, 14.0, 14.0);
+    let open = crop(&a, at);
+    step(&mut a, FRAME);
+    a.notes_row(i);
+    step(&mut a, FRAME);
+    assert!(a.anim_due.is_some(), "the fold turns the chevron");
+    step(&mut a, FRAME);
+    let mid = crop(&a, at);
+    assert!(mid != open, "on its way");
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+    }
+    let folded = crop(&a, at);
+    assert!(mid != folded && open != folded, "folded at rest");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// ---- toasts ------------------------------------------------------------------------------------
+
+/// Composes frames 16 ms apart until nothing moves.
+fn settle(a: &mut App) -> usize {
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        step(a, FRAME);
+        frames += 1;
+        assert!(frames < 60, "the motion ends");
+    }
+    frames
+}
+
+/// This frame's toasts: text, presence and lift, the bottom one first.
+fn toasts(a: &App) -> Vec<(String, f32, f32)> {
+    (a.toast_frame.iter())
+        .map(|(_, text, t, lift)| (text.clone(), *t, *lift))
+        .collect()
+}
+
+#[test]
+fn a_toast_rises_in_stays_then_leaves_of_itself_with_no_timer_left() {
+    let mut fresh = app(&["showcase.md"]);
+    fresh.full = true;
+    fresh.compose();
+    let mut still = app(&["showcase.md"]);
+    still.ws.set_status("Hello");
+    still.compose();
+    let mut a = moving(&["showcase.md"]);
+    a.ws.set_status("Hello");
+    a.compose();
+    assert_eq!(toasts(&a), [("Hello".into(), 0.0, 0.0)], "it starts gone");
+    assert!(a.anim_due.is_some(), "the entrance asks for frames");
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    let t = toasts(&a)[0].1;
+    assert!(t > 0.0 && t < 1.0, "on its way in: {t}");
+    let mid = a.screen.pixels.clone();
+    assert!(settle(&mut a) <= 12);
+    assert_eq!(toasts(&a), [("Hello".into(), 1.0, 0.0)]);
+    assert!(
+        mid != a.screen.pixels,
+        "each frame of the entrance is drawn"
+    );
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "at rest it is the toast a still run draws"
+    );
+    // Its time to leave is the timer the loop waits for; nothing else is.
+    let until = a.ws.status_expires().unwrap();
+    assert_eq!(a.toast_until, Some(until));
+    assert!(a.anim_due.is_none());
+    a.wants_frame = false;
+    a.timers(until);
+    assert!(a.wants_frame && a.toast_until.is_none());
+    a.frame_clock = Some(until);
+    a.compose();
+    assert!(a.anim_due.is_some(), "it leaves by an exit");
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    let t = toasts(&a)[0].1;
+    assert!(t > 0.0 && t < 1.0, "on its way out: {t}");
+    settle(&mut a);
+    assert!(a.toasts.is_empty() && a.toast_frame.is_empty());
+    assert!(
+        a.anim_due.is_none() && a.toast_until.is_none(),
+        "no timer is left"
+    );
+    assert!(
+        a.screen.pixels == fresh.screen.pixels,
+        "nothing of it is left on screen"
+    );
+    assert_eq!(a.timers(until + Duration::from_secs(5)), None);
+}
+
+#[test]
+fn a_second_toast_stacks_under_the_first_which_moves_up() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.confirm("First");
+    a.compose();
+    settle(&mut a);
+    a.ws.confirm("Second");
+    a.compose();
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    let now = toasts(&a);
+    assert_eq!(now.len(), 2);
+    assert_eq!(
+        (now[0].0.as_str(), now[0].2),
+        ("Second", 0.0),
+        "the new one at the bottom"
+    );
+    assert!(now[0].1 < 1.0, "coming in");
+    let lifting = now[1].2;
+    assert!(
+        lifting > 0.0 && lifting < 44.0,
+        "the first on its way up: {lifting}"
+    );
+    settle(&mut a);
+    assert_eq!(
+        toasts(&a),
+        [("Second".into(), 1.0, 0.0), ("First".into(), 1.0, 44.0)]
+    );
+    // The same message said again keeps its toast, for longer: no third one.
+    let before = a.toast_until;
+    a.ws.confirm("Second");
+    a.compose();
+    assert_eq!(toasts(&a).len(), 2);
+    assert!(a.toasts.current().count() == 2);
+    assert_eq!(a.toast_until, before, "the first still leaves first");
+    // A status cleared sends them all away.
+    a.ws.clear_status();
+    a.compose();
+    settle(&mut a);
+    assert!(a.toasts.is_empty());
+    assert!(a.anim_due.is_none() && a.toast_until.is_none());
+}
+
+#[test]
+fn under_no_motion_two_confirmations_are_both_there_on_the_next_frame() {
+    // A shot, a test, Animations off or reduced motion: nothing moves, so the shared stack's
+    // wait for the lift must not hold the new toast back either.
+    let mut a = app(&["showcase.md"]);
+    a.ws.confirm("First");
+    a.compose();
+    a.ws.confirm("Second");
+    a.compose();
+    let shown = toasts(&a);
+    assert_eq!(shown.len(), 2, "{shown:?}");
+    assert!(
+        shown.iter().all(|(_, t, _)| *t == 1.0),
+        "both are fully shown: {shown:?}"
+    );
+    assert_eq!((shown[0].2, shown[1].2), (0.0, 44.0), "the first lifted");
+}
+
+#[test]
+fn a_confirmation_pushed_onto_others_waits_until_they_have_lifted() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.confirm("First");
+    a.compose();
+    settle(&mut a);
+    a.ws.confirm("Second");
+    a.compose();
+    // 144 ms: less than the lift's 167 ms. The first is on its way up; the second is not there.
+    for i in 0..9 {
+        step(&mut a, FRAME);
+        let now = toasts(&a);
+        assert_eq!(now.len(), 2, "frame {i}: {now:?}");
+        assert_eq!(now[0].0, "Second");
+        assert_eq!(now[0].1, 0.0, "frame {i}: it waits for the lift");
+        assert!(
+            now[1].2 > 0.0 && now[1].2 < 44.0,
+            "frame {i}: the first is lifting: {}",
+            now[1].2
+        );
+    }
+    settle(&mut a);
+    assert_eq!(
+        toasts(&a),
+        [("Second".into(), 1.0, 0.0), ("First".into(), 1.0, 44.0)]
+    );
+}
+
+/// The bar test at `scale`: the same checks, so 1.25 (a quarter more device pixels per logical
+/// one) is covered too.
+fn notice_bar_slide_at(scale: f32) {
+    let mut a = moving(&["showcase.md"]);
+    at_scale(&mut a, scale);
+    a.full = true;
+    a.compose();
+    let before = page::viewport_bars(&a.ws, a.areas.page, a.bars);
+    let before_pixels = a.screen.pixels.clone();
+    // A still run with the bar: the strip it takes is the page's until it is there.
+    let at_rest = {
+        let mut still = app(&["showcase.md"]);
+        at_scale(&mut still, scale);
+        still.ws.preview_update("available");
+        still.compose();
+        still
+    };
+    let width = a.screen.width as usize;
+    let scale = a.scale;
+    let (page, banner) = (a.areas.page, crate::ui::BANNER_H);
+    let mut spot = None;
+    for row in ((page.y * scale) as usize)..(((page.y + banner) * scale) as usize) {
+        for col in ((page.x * scale) as usize)..((page.right() * scale) as usize) {
+            let i = (row * width + col) * 4;
+            if at_rest.screen.pixels[i..i + 4] != before_pixels[i..i + 4] {
+                spot = Some((col as f32 / scale, row as f32 / scale));
+                break;
+            }
+        }
+        if spot.is_some() {
+            break;
+        }
+    }
+    let (x, y) = spot.expect("the bar draws something the page did not");
+    let page_pixel = pixel(&a, x, y);
+    a.ws.preview_update("available");
+    a.compose();
+    assert_eq!(
+        a.bars.update, 0.0,
+        "the bar's first frame is the start of its slide"
+    );
+    assert_eq!(
+        page::viewport_bars(&a.ws, a.areas.page, a.bars),
+        before,
+        "it takes no room yet"
+    );
+    assert_eq!(
+        pixel(&a, x, y),
+        page_pixel,
+        "and nothing of it is drawn yet"
+    );
+    assert!(a.anim_due.is_some(), "a frame is asked for");
+    step(&mut a, FRAME);
+    let mid = a.bars.update;
+    assert!(mid > 0.0 && mid < 1.0, "on its way: {mid}");
+    let vr = page::viewport_bars(&a.ws, a.areas.page, a.bars);
+    assert!(
+        vr.y > before.y && vr.y < before.y + banner,
+        "the page follows the bar: {} against {}",
+        vr.y,
+        before.y
+    );
+    assert_ne!(
+        pixel(&a, x, y),
+        page_pixel,
+        "part of the bar is drawn where the page was"
+    );
+    let mut frames = 1;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the slide ends");
+    }
+    assert_eq!(a.bars.update, 1.0);
+    assert_eq!(
+        page::viewport_bars(&a.ws, a.areas.page, a.bars),
+        page::viewport(&a.ws, a.areas.page),
+        "the bar is whole and the page sits under it"
+    );
+    // At rest it is what a still run draws with the bar there, pixel for pixel.
+    assert!(
+        a.screen.pixels == at_rest.screen.pixels,
+        "the bar at rest is the still one, pixel for pixel"
+    );
+    // And nothing is left moving.
+    step(&mut a, Duration::from_secs(2));
+    assert!(a.anim_due.is_none());
+}
+
+#[test]
+fn a_notice_bar_slides_in_and_the_page_moves_down_under_it() {
+    notice_bar_slide_at(1.0);
+}
+
+#[test]
+fn a_notice_bar_slides_in_at_scale_1_25_too() {
+    notice_bar_slide_at(1.25);
+}
+
+#[test]
+fn a_bar_that_is_there_at_launch_is_in_place_on_the_first_frame() {
+    let dir = std::env::temp_dir().join(format!("mdview-bar-launch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("crash-00000000001.txt"),
+        "mdview closed because of an error.\n",
+    )
+    .unwrap();
+    let report = mdshared_app::crash::pending(&dir).expect("a pending report");
+    // A window that starts with the bar: the frame it shows must be a still one.
+    let mut still = app(&["linked.md"]);
+    still.ws.set_crash_report(Some(report.clone()));
+    still.full = true;
+    still.compose();
+    let mut a = moving(&["linked.md"]);
+    a.ws.set_crash_report(Some(report.clone()));
+    // This compose is its first frame.
+    a.frames = 0;
+    a.full = true;
+    a.compose();
+    assert_eq!(a.bars.crash, 1.0, "in place, not sliding");
+    assert!(a.anim_due.is_none(), "and nothing moves");
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "the first frame is the still run's, pixel for pixel"
+    );
+    // The next frame too, with the bar still up: it stays where it is instead of being met for
+    // the first time and slid in from nothing.
+    step(&mut a, FRAME);
+    assert_eq!(a.bars.crash, 1.0, "the second frame keeps it in place");
+    assert!(a.anim_due.is_none(), "and still nothing moves");
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "the second frame is the still run's, pixel for pixel"
+    );
+    // A bar that arrives after the window has shown once slides in.
+    a.ws.set_crash_report(None);
+    a.compose();
+    a.ws.set_crash_report(Some(report));
+    a.compose();
+    assert_eq!(a.bars.crash, 0.0, "a bar arriving later starts its slide");
+    assert!(a.anim_due.is_some(), "and asks for its frames");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_palette_closes_at_once() {
+    let mut a = moving(&["showcase.md"]);
+    a.open_palette("");
+    a.compose();
+    settle(&mut a);
+    assert_eq!(a.palette_t, 1.0);
+    let mut plain = app(&["showcase.md"]);
+    plain.full = true;
+    plain.compose();
+    a.ui.palette = None;
+    a.compose();
+    assert!(a.anim_due.is_none(), "closing plays nothing");
+    assert!(
+        a.screen.pixels == plain.screen.pixels,
+        "nothing of the palette is left, pixel for pixel"
+    );
+}
+
+#[test]
+fn the_palette_fades_and_drops_in_as_it_opens_and_rests_as_a_still_one() {
+    let mut a = moving(&["showcase.md"]);
+    a.open_palette("");
+    a.compose();
+    assert_eq!(a.palette_t, 0.0, "its first frame is the start of the fade");
+    let card = a.ui.palette.as_ref().unwrap().palette.rect();
+    let (x, y) = (card.cx(), card.y + 20.0);
+    let first = pixel(&a, x, y);
+    assert!(a.anim_due.is_some(), "a frame is asked for");
+    let mut still = app(&["showcase.md"]);
+    still.open_palette("");
+    still.compose();
+    assert_ne!(
+        first,
+        pixel(&still, x, y),
+        "the first frame has not the card in place yet"
+    );
+    let mut frames = 1;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the fade ends");
+    }
+    assert_eq!(a.palette_t, 1.0);
+    assert_eq!(
+        pixel(&a, x, y),
+        pixel(&still, x, y),
+        "the card's place, pixel for pixel"
+    );
+    // The rest of the window too, and nothing left moving.
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "the palette at rest is the still one, pixel for pixel"
+    );
+}
+
+#[test]
+fn the_palette_is_damaged_by_its_presence_bounds_not_a_hand_made_margin() {
+    let mut a = app(&["showcase.md"]);
+    a.open_palette("");
+    a.compose();
+    let Some(p) = a.ui.palette.as_ref() else {
+        panic!("the palette is open");
+    };
+    let want = p.palette.presence_bounds();
+    assert!(
+        a.overlay_bounds.contains(&want),
+        "{want:?} is not among {:?}",
+        a.overlay_bounds
+    );
+    assert!(
+        want != p.palette.rect().inset(-20.0),
+        "a hand-made margin is another rectangle"
+    );
+}
+
+#[test]
+fn the_redraw_covers_everything_a_toast_touches_as_it_rises() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.set_status("Hello");
+    a.compose();
+    step(&mut a, FRAME);
+    let page = a.areas.page;
+    let b = {
+        let mut p = Painter::new(&mut a.screen, &mut a.gfx, a.scale);
+        Bubble::toast(&mut p, "Hello", page)
+    };
+    assert!(a.overlay_bounds.contains(&b.presence_bounds()));
+    assert!(
+        b.presence_bounds().bottom() > b.bounds().bottom(),
+        "the rise is held"
+    );
+}
+
+#[test]
+fn with_animations_off_reduced_motion_or_a_still_run_a_toast_comes_and_goes_at_once() {
+    let mut still = app(&["showcase.md"]);
+    still.ws.set_status("Hello");
+    still.compose();
+    assert_eq!(toasts(&still), [("Hello".into(), 1.0, 0.0)]);
+    assert!(still.anim_due.is_none());
+    let mut off = moving(&["showcase.md"]);
+    off.apply_setting(s::MOTION, Value::Bool(false));
+    let mut reduced = moving(&["showcase.md"]);
+    reduced.anim.set_system_reduced(true);
+    for (name, a) in [("setting off", &mut off), ("reduced motion", &mut reduced)] {
+        a.ws.set_status("Hello");
+        a.compose();
+        assert_eq!(toasts(a), [("Hello".into(), 1.0, 0.0)], "{name}");
+        assert!(a.anim_due.is_none(), "{name}: no frame is asked for");
+        assert!(a.screen.pixels == still.screen.pixels, "{name}: at rest");
+        // Its time up: gone on that frame.
+        a.frame_clock = a.ws.status_expires();
+        a.compose();
+        assert!(a.toasts.is_empty(), "{name}: gone at once");
+        assert!(a.anim_due.is_none(), "{name}");
+    }
+}
+
+#[test]
+fn zoom_steps_replace_the_toast_instead_of_stacking() {
+    let mut a = moving(&["showcase.md"]);
+    for _ in 0..3 {
+        a.ws.zoom_in();
+        a.compose();
+        step(&mut a, FRAME);
+    }
+    let shown = toasts(&a);
+    assert_eq!(shown.len(), 1, "one toast: {shown:?}");
+    assert_eq!(shown[0].0, format!("Zoom {}%", a.ws.zoom()));
+    assert_eq!(shown[0].2, 0.0, "nothing lifts");
+    settle(&mut a);
+    assert_eq!(toasts(&a).len(), 1);
+}
+
+#[test]
+fn an_exports_progress_then_its_result_leave_one_toast() {
+    let mut a = moving(&["showcase.md"]);
+    a.export_progress(super::export::Progress::Working);
+    a.compose();
+    settle(&mut a);
+    a.export_progress(super::export::Progress::Saved(PathBuf::from("x.html")));
+    a.compose();
+    let shown = toasts(&a);
+    assert_eq!(
+        shown,
+        [("Exported to x.html".into(), 1.0, 0.0)],
+        "in the progress's place, at once"
+    );
+    settle(&mut a);
+    assert_eq!(toasts(&a), [("Exported to x.html".into(), 1.0, 0.0)]);
+}
+
+#[test]
+fn never_more_than_three_toasts_show_those_leaving_included() {
+    let mut a = moving(&["showcase.md"]);
+    for text in ["One", "Two", "Three", "Four"] {
+        a.ws.confirm(text);
+        a.compose();
+        step(&mut a, FRAME);
+        assert!(a.toast_frame.len() <= 3, "{:?}", toasts(&a));
+    }
+    // "One" was sent away by the fourth and is leaving: it is not drawn as a fourth.
+    let names: Vec<String> = toasts(&a).into_iter().map(|t| t.0).collect();
+    assert_eq!(names, ["Four", "Three", "Two"]);
+    settle(&mut a);
+    assert_eq!(a.toasts.current().count(), 3);
+    assert_eq!(a.toast_frame.len(), 3);
+}
+
+#[test]
+fn the_same_confirmation_keeps_its_toast_wherever_it_is_in_the_stack() {
+    let mut a = moving(&["showcase.md"]);
+    for text in ["Copied", "Link address copied"] {
+        a.ws.confirm(text);
+        a.compose();
+    }
+    settle(&mut a);
+    a.ws.confirm("Copied");
+    a.compose();
+    settle(&mut a);
+    let names: Vec<String> = toasts(&a).into_iter().map(|t| t.0).collect();
+    assert_eq!(names, ["Link address copied", "Copied"], "no second Copied");
+}
+
+#[test]
+fn a_status_already_past_its_time_shows_no_toast() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.set_status("Long ago");
+    // The first frame after it comes after its time (a window covered all along).
+    a.frame_clock = a.ws.status_expires().map(|u| u + Duration::from_millis(1));
+    a.compose();
+    assert!(a.toasts.is_empty() && a.toast_frame.is_empty());
+    assert!(a.anim_due.is_none() && a.toast_until.is_none());
+}
+
+#[test]
+fn a_toast_leaves_while_a_menu_or_a_dialog_is_open() {
+    for dialog in [false, true] {
+        let mut a = moving(&["showcase.md"]);
+        a.ws.set_status("Hello");
+        a.compose();
+        settle(&mut a);
+        if dialog {
+            a.open_dialog(DialogKind::About);
+        } else {
+            a.open_popup(PopupKind::Main);
+        }
+        a.compose();
+        settle(&mut a);
+        a.frame_clock = a.ws.status_expires();
+        a.compose();
+        assert!(a.anim_due.is_some(), "it leaves by its exit");
+        settle(&mut a);
+        assert!(a.toasts.is_empty(), "gone");
+        assert!(a.anim_due.is_none(), "no timer left");
+        // What is on screen is the menu or the dialog alone.
+        let mut b = app(&["showcase.md"]);
+        if dialog {
+            b.open_dialog(DialogKind::About);
+        } else {
+            b.open_popup(PopupKind::Main);
+        }
+        b.full = true;
+        b.compose();
+        a.full = true;
+        a.compose();
+        assert!(
+            a.screen.pixels == b.screen.pixels,
+            "dialog {dialog}: nothing of it left"
+        );
+    }
+}
+
+#[test]
+fn a_window_resized_while_a_toast_comes_in_shows_it_in_its_new_place() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.set_status("Hello");
+    a.compose();
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    a.size = (900, 600);
+    settle(&mut a);
+    let mut still = app(&["showcase.md"]);
+    still.size = (900, 600);
+    still.ws.set_status("Hello");
+    still.compose();
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "at rest in the new window"
+    );
+}
+
+#[test]
+fn toasts_that_would_reach_above_the_page_are_left_out() {
+    let mut a = app(&["showcase.md"]);
+    a.size = (520, 200);
+    a.compose();
+    for text in ["One", "Two", "Three"] {
+        a.ws.confirm(text);
+        a.compose();
+    }
+    assert_eq!(a.toast_frame.len(), 3);
+    let page = a.areas.page;
+    let drawn: Vec<Rect> = (a.overlay_bounds.iter().copied())
+        .filter(|b| b.y < page.bottom())
+        .collect();
+    assert!(
+        drawn.len() < 3,
+        "fewer than three fit: {drawn:?} in {page:?}"
+    );
+    for b in &drawn {
+        assert!(b.y + 16.0 >= page.y, "{b:?} lies in the page {page:?}");
+    }
+}
+
+#[test]
+fn a_lifting_toast_is_drawn_at_a_whole_device_pixel() {
+    for scale in [1.0_f32, 1.25, 1.5, 2.0] {
+        for lift in [0.3_f32, 13.37, 29.9, 44.0] {
+            let moved = (701.0 - super::toast_y(701.0, lift, scale)) * scale;
+            assert!(
+                (moved - moved.round()).abs() < 1e-3,
+                "{lift} at {scale}: {moved}"
+            );
+            assert!((moved / scale - lift).abs() <= 0.5 / scale + 1e-3);
+        }
+    }
+}
+
+#[test]
+fn moving_shots_move_whatever_the_setting_says() {
+    let mut a = app(&["showcase.md"]);
+    a.apply_setting(s::MOTION, Value::Bool(false));
+    a.anim.set_system_reduced(true);
+    a.open_popup(PopupKind::Main);
+    let start = super::start_moving(&mut a);
+    super::frames_until(&mut a, start, 21);
+    let t = a.menu_t.0;
+    assert!(t > 0.0 && t < 1.0, "half way: {t}");
+}
+
+#[test]
+fn the_files_pane_hidden_mid_turn_leaves_no_timer() {
+    let dir = folder_tree("hidden");
+    let mut a = with_tree(&dir, true);
+    a.ui.tree.toggle(tree_row(&a, "b"));
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    assert!(a.anim_due.is_some());
+    a.ui.panes.files = false;
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(
+            frames < 30,
+            "the hidden pane's turn stops asking for frames"
+        );
+    }
+    step(&mut a, Duration::from_secs(1));
+    assert!(a.anim_due.is_none());
+    assert!(a.anim.group_deadlines().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_window_too_short_for_a_toast_still_shows_its_one_status() {
+    let mut a = app(&["showcase.md"]);
+    a.size = (520, 120);
+    a.compose();
+    a.ws.set_status("Zoom 110%");
+    a.compose();
+    let page = a.areas.page;
+    let mut p = Painter::new(&mut a.screen, &mut a.gfx, a.scale);
+    let rest = Bubble::toast(&mut p, "Zoom 110%", page).rect;
+    assert!(
+        rest.y < page.y + crate::motion::TOAST_GAP,
+        "too short: {rest:?} in {page:?}"
+    );
+    assert_eq!(a.overlay_bounds.len(), 1, "the bottom toast is drawn");
+}
+
+#[test]
+fn a_zoom_step_while_its_toast_is_at_rest_changes_it_in_place() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.zoom_in();
+    a.compose();
+    settle(&mut a);
+    assert_eq!(toasts(&a)[0].1, 1.0);
+    a.ws.zoom_in();
+    a.compose();
+    let shown = toasts(&a);
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert_eq!(
+        shown[0].0,
+        format!("Zoom {}%", a.ws.zoom()),
+        "the new text at once"
+    );
+    assert_eq!(shown[0].1, 1.0, "no frame without it, no entrance");
+}
+
+#[test]
+fn under_repeated_zoom_steps_the_toast_never_fades() {
+    let mut a = moving(&["showcase.md"]);
+    let mut last = 0.0_f32;
+    for i in 0..40 {
+        // In and out, so every step is a new message (a step past the limit says nothing).
+        if i % 2 == 0 {
+            a.ws.zoom_in();
+        } else {
+            a.ws.zoom_out();
+        }
+        a.compose();
+        step(&mut a, FRAME);
+        let shown = toasts(&a);
+        assert_eq!(shown.len(), 1, "step {i}: {shown:?}");
+        assert!(shown[0].1 >= last, "step {i}: {} after {last}", shown[0].1);
+        assert_eq!(shown[0].2, 0.0, "step {i}: nothing lifts");
+        last = shown[0].1;
+    }
+    assert_eq!(last, 1.0, "in, and staying in");
+}
+
+#[test]
+fn a_replacing_status_with_none_showing_comes_in_from_nothing() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.set_status("Hello");
+    a.compose();
+    assert_eq!(toasts(&a)[0].1, 0.0, "it enters");
+    settle(&mut a);
+    // Cleared, it leaves; the clock stays this side of the next message's time.
+    a.ws.set_status("");
+    a.compose();
+    settle(&mut a);
+    assert!(a.toasts.is_empty());
+    a.ws.zoom_in();
+    a.compose();
+    assert_eq!(
+        toasts(&a)[0].1,
+        0.0,
+        "after the last has gone, the next enters again"
+    );
+}
+
+#[test]
+fn a_confirmation_said_again_while_it_leaves_comes_back() {
+    let mut a = moving(&["showcase.md"]);
+    a.ws.confirm("Copied");
+    a.compose();
+    settle(&mut a);
+    a.ws.set_status("");
+    a.compose();
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    let going = toasts(&a)[0].1;
+    assert!(going > 0.0 && going < 1.0, "leaving: {going}");
+    a.ws.confirm("Copied");
+    a.compose();
+    let shown = toasts(&a);
+    assert_eq!(shown.len(), 1, "no second Copied: {shown:?}");
+    assert!(
+        shown[0].1 >= going - 0.2,
+        "turns round where it is: {}",
+        shown[0].1
+    );
+    settle(&mut a);
+    assert_eq!(toasts(&a), [("Copied".into(), 1.0, 0.0)]);
+}
+
+#[test]
+fn a_replacing_status_takes_the_place_of_the_confirmations_showing() {
+    let mut a = moving(&["showcase.md"]);
+    for text in ["Copied", "Link address copied"] {
+        a.ws.confirm(text);
+        a.compose();
+    }
+    settle(&mut a);
+    a.ws.zoom_in();
+    a.compose();
+    let shown = toasts(&a);
+    assert_eq!(shown.len(), 1, "the others went at once: {shown:?}");
+    assert_eq!(shown[0].1, 1.0, "in the newest one's place");
+    assert_eq!(shown[0].2, 0.0);
+}
+
+// ---- the settings dialog in motion ----------------------------------------------------------
+
+/// Opens the settings dialog with the row `row` focused.
+fn settings_at(a: &mut App, row: u32) {
+    a.command(C::Settings);
+    a.compose();
+    assert!(a.ui.settings.as_mut().unwrap().focus_row(row));
+    // Its page drawn (as a click on it in the list would), so its rows are seen at rest.
+    a.full = true;
+    a.compose();
+}
+
+#[test]
+fn a_switch_in_the_settings_dialog_slides_then_rests_as_a_still_run_draws_it() {
+    let mut a = moving(&["showcase.md"]);
+    settings_at(&mut a, s::TICK_BOXES);
+    settle(&mut a);
+    let off = a.screen.pixels.clone();
+    a.key_named(KeyName::Space, None);
+    a.compose();
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    assert!(a.anim_due.is_some(), "the knob is on its way");
+    let mid = a.screen.pixels.clone();
+    settle(&mut a);
+    let on = a.screen.pixels.clone();
+    assert!(mid != off && mid != on, "drawn part way");
+    assert!(a.anim_due.is_none(), "no timer left");
+    let mut b = app(&["showcase.md"]);
+    settings_at(&mut b, s::TICK_BOXES);
+    b.key_named(KeyName::Space, None);
+    b.full = true;
+    b.compose();
+    a.full = true;
+    a.compose();
+    assert!(
+        a.screen.pixels == b.screen.pixels,
+        "at rest, what a still run draws"
+    );
+}
+
+#[test]
+fn with_animations_off_a_settings_switch_changes_at_once() {
+    let mut a = moving(&["showcase.md"]);
+    a.apply_setting(s::MOTION, Value::Bool(false));
+    settings_at(&mut a, s::TICK_BOXES);
+    a.key_named(KeyName::Space, None);
+    a.compose();
+    assert!(a.anim_due.is_none(), "nothing moves");
+    let mut b = app(&["showcase.md"]);
+    b.apply_setting(s::MOTION, Value::Bool(false));
+    settings_at(&mut b, s::TICK_BOXES);
+    b.key_named(KeyName::Space, None);
+    b.full = true;
+    b.compose();
+    a.full = true;
+    a.compose();
+    assert!(
+        a.screen.pixels == b.screen.pixels,
+        "the switch is on at once"
+    );
+}
+
+#[test]
+fn two_settings_rows_changed_while_the_dialog_moves_are_drawn_as_a_whole_redraw_would() {
+    let mut a = moving(&["showcase.md"]);
+    settings_at(&mut a, s::TICK_BOXES);
+    settle(&mut a);
+    // The first switch turned, and two frames into its slide the second one, so the first is
+    // still moving when the second change arrives.
+    a.key_named(KeyName::Space, None);
+    a.compose();
+    step(&mut a, FRAME);
+    step(&mut a, FRAME);
+    assert!(a.ui.settings.as_mut().unwrap().focus_row(s::PREVIEWS));
+    a.key_named(KeyName::Space, None);
+    a.compose();
+    let card = a.ui.settings.as_ref().unwrap().rect();
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        a.frame_clock = a.frame_clock.map(|t| t + FRAME);
+        let (damage, _) = a.compose();
+        let part = a.screen.pixels.clone();
+        let (x1, y1) = (
+            (card.right() * a.scale) as i32,
+            (card.bottom() * a.scale) as i32,
+        );
+        assert!(
+            damage
+                .iter()
+                .all(|d| d.0 >= (card.x * a.scale) as i32 && d.2 <= x1 + 1 && d.3 <= y1 + 1),
+            "frame {frames}: the card alone"
+        );
+        a.full = true;
+        a.compose();
+        assert!(
+            part == a.screen.pixels,
+            "frame {frames}: the rows of both changes are drawn"
+        );
+        frames += 1;
+        assert!(frames < 60);
+    }
+    assert!(frames >= 3, "both slides ran: {frames}");
+}
+
+#[test]
+fn a_tests_motion_state_is_its_own_and_not_the_systems() {
+    let mut a = moving(&["showcase.md"]);
+    a.reduced = Some(true);
+    a.read_motion();
+    a.compose();
+    assert!(!a.anim.animates(), "the test's reduced motion is read");
+    a.reduced = Some(false);
+    a.read_motion();
+    a.compose();
+    assert!(a.anim.animates(), "and its wish for motion");
+}
+
+#[test]
+fn has_dropdown_counts_four_options_and_a_row_forced_to_one() {
+    use mdshared_ui::settings::Row;
+    use mdshared_ui::settings::pages::{Form, Item, Page};
+    let mut a = moving(&["showcase.md"]);
+    let cases: [(&str, Item, bool); 3] = [
+        (
+            "four options",
+            Item::new(Row::choice(
+                9002,
+                "Four",
+                &["One", "Two", "Three", "Four"],
+                0,
+            )),
+            true,
+        ),
+        (
+            "two options",
+            Item::new(Row::choice(9002, "Two", &["One", "Two"], 0)),
+            false,
+        ),
+        (
+            "forced",
+            Item::new(Row::choice(9002, "Two", &["One", "Two"], 0)).dropdown(),
+            true,
+        ),
+    ];
+    for (name, item, want) in cases {
+        a.ui.settings = Some(Form::new("Settings", vec![Page::new("Test", vec![item])]));
+        a.settings_changed.clear();
+        a.full = true;
+        a.compose();
+        let f = a.ui.settings.as_ref().unwrap();
+        assert_eq!(has_dropdown(f), want, "{name}");
+    }
+}
+
+#[test]
+fn a_dropdown_page_keeps_the_dialog_drawn_on_every_frame_of_a_slide() {
+    use mdshared_ui::settings::Row;
+    use mdshared_ui::settings::pages::{Form, Item, Page};
+    let mut a = moving(&["showcase.md"]);
+    a.ui.settings = Some(Form::new(
+        "Settings",
+        vec![Page::new(
+            "Test",
+            vec![
+                Item::new(Row::toggle(9001, "A switch", false)),
+                Item::new(Row::choice(
+                    9002,
+                    "Four",
+                    &["One", "Two", "Three", "Four"],
+                    0,
+                )),
+            ],
+        )],
+    ));
+    a.settings_changed.clear();
+    a.full = true;
+    a.compose();
+    settle(&mut a);
+    assert!(
+        has_dropdown(a.ui.settings.as_ref().unwrap()),
+        "it is a dropdown"
+    );
+    assert!(a.ui.settings.as_mut().unwrap().focus_row(9001));
+    a.key_named(KeyName::Space, None);
+    a.compose();
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        a.frame_clock = a.frame_clock.map(|t| t + FRAME);
+        a.compose();
+        let part = a.screen.pixels.clone();
+        a.full = true;
+        a.compose();
+        assert!(
+            part == a.screen.pixels,
+            "frame {frames}: the dialog is drawn"
+        );
+        frames += 1;
+        assert!(frames < 60);
+    }
+    assert!(frames >= 3, "the switch slid: {frames}");
+}
+
+#[test]
+fn opening_settings_asks_the_system_for_contrast_and_applies_it_at_once() {
+    let mut a = moving(&["showcase.md"]);
+    a.contrast = Some(true);
+    // With the dialog closed nothing asks the system: on Linux that read opens a D-Bus
+    // connection and may wait half a second on the window's thread.
+    a.read_motion();
+    assert_eq!(a.contrast_reads, 0, "a closed Settings asks nothing");
+    settings_at(&mut a, s::TICK_BOXES);
+    assert!(a.contrast_reads >= 1, "opening the dialog asks");
+    assert!(
+        a.anim.animates(),
+        "the test's motion does not depend on the system"
+    );
+    settle(&mut a);
+    // Under high contrast the page list's hover fill changes at once: no fade, no frame asked.
+    let item = a.ui.settings.as_ref().unwrap().list_item_rect(0);
+    a.pointer_moved(item.cx(), item.cy());
+    a.compose();
+    assert!(
+        a.anim_due.is_none(),
+        "the hover fill is there at once, not fading"
+    );
+    // While it is open, a focus gain or a theme change asks again.
+    let reads = a.contrast_reads;
+    a.read_motion();
+    assert_eq!(a.contrast_reads, reads + 1);
+}
+
+// ---- tooltips, from resting -----------------------------------------------------------------
+
+/// The middle of the minimize button, which has a tip.
+fn minimize(a: &mut App) -> (f32, f32) {
+    a.compose();
+    let r = a.hit_rect(Hit::WinMin).expect("the minimize button");
+    (r.cx(), r.cy())
+}
+
+#[test]
+fn a_move_on_the_same_control_starts_the_tips_wait_again() {
+    let mut a = app(&["showcase.md"]);
+    let (x, y) = minimize(&mut a);
+    let t0 = Instant::now();
+    a.pointer_moved_at(x, y, t0);
+    let first = a.ui.tips.deadline().expect("it waits");
+    a.pointer_moved_at(x + 1.0, y, t0 + Duration::from_millis(5));
+    let again = a.ui.tips.deadline().expect("it still waits");
+    assert_eq!(
+        again,
+        first + Duration::from_millis(5),
+        "counted from the last move"
+    );
+    // A move event to where the pointer already is is not a move.
+    a.pointer_moved_at(x + 1.0, y, t0 + Duration::from_millis(90));
+    assert_eq!(a.ui.tips.deadline(), Some(again));
+    assert!(a.ui.tips.shown().is_none());
+}
+
+#[test]
+fn resting_the_delay_shows_the_tip_and_leaving_hides_it() {
+    let mut a = app(&["showcase.md"]);
+    let (x, y) = minimize(&mut a);
+    a.pointer_moved(x, y);
+    let due = a.ui.tips.deadline().expect("it waits");
+    a.timers(due - Duration::from_millis(1));
+    assert!(a.ui.tips.shown().is_none(), "not before the delay");
+    a.timers(due);
+    assert_eq!(a.ui.tips.shown().map(|t| t.text.as_str()), Some("Minimize"));
+    a.compose();
+    assert_eq!(a.tip_t, 1.0);
+    let page = a.areas.page;
+    a.pointer_moved(page.cx(), page.cy());
+    assert!(a.ui.tips.shown().is_none() && a.ui.tips.deadline().is_none());
+    a.compose();
+    assert_eq!(a.tip_t, 0.0, "gone at once");
+}
+
+#[test]
+fn a_tip_fades_in_as_it_shows_and_with_animations_off_is_there_at_once() {
+    for animations in [true, false] {
+        let mut a = moving(&["showcase.md"]);
+        a.apply_setting(s::MOTION, Value::Bool(animations));
+        let (x, y) = minimize(&mut a);
+        a.pointer_moved(x, y);
+        let due = a.ui.tips.deadline().expect("it waits");
+        a.timers(due);
+        a.compose();
+        if animations {
+            assert_eq!(a.tip_t, 0.0, "it fades in");
+            step(&mut a, FRAME);
+            assert!(a.tip_t > 0.0 && a.tip_t < 1.0, "part way: {}", a.tip_t);
+            settle(&mut a);
+            assert_eq!(a.tip_t, 1.0);
+        } else {
+            assert_eq!(a.tip_t, 1.0, "at once");
+            assert!(a.anim_due.is_none(), "no frames asked");
+        }
+    }
+}
+
+#[test]
+fn a_frame_where_only_the_settings_move_redraws_the_card_alone_as_a_whole_redraw_would() {
+    for (scale, size) in [(1.0_f32, (1280, 800)), (1.5, (1920, 1200))] {
+        let mut a = moving(&["showcase.md"]);
+        a.scale = scale;
+        a.size = size;
+        settings_at(&mut a, s::TICK_BOXES);
+        settle(&mut a);
+        a.key_named(KeyName::Space, None);
+        a.compose();
+        let card = a.ui.settings.as_ref().unwrap().rect();
+        let mut clipped = 0;
+        while a.anim_due.is_some() {
+            a.frame_clock = a.frame_clock.map(|t| t + FRAME);
+            let (damage, _) = a.compose();
+            let part = a.screen.pixels.clone();
+            let (x1, y1) = (
+                (card.right() * scale) as i32,
+                (card.bottom() * scale) as i32,
+            );
+            if damage
+                .iter()
+                .all(|d| d.0 >= (card.x * scale) as i32 && d.2 <= x1 + 1 && d.3 <= y1 + 1)
+            {
+                clipped += 1;
+            }
+            // The same frame drawn whole.
+            a.full = true;
+            a.compose();
+            assert!(
+                part == a.screen.pixels,
+                "at {scale}: the card alone is the whole frame"
+            );
+        }
+        assert!(
+            clipped >= 3,
+            "at {scale}: frames of the card alone: {clipped}"
+        );
+    }
+}
+
+#[test]
+fn a_page_lists_hover_fades_in_frames_of_the_list_alone_as_a_whole_redraw_would() {
+    let mut a = moving(&["showcase.md"]);
+    settings_at(&mut a, s::TICK_BOXES);
+    settle(&mut a);
+    let item = a.ui.settings.as_ref().unwrap().list_item_rect(0);
+    a.pointer_moved(item.cx(), item.cy());
+    a.compose();
+    let mut frames = 0;
+    while a.anim_due.is_some() {
+        a.frame_clock = a.frame_clock.map(|t| t + FRAME);
+        a.compose();
+        let part = a.screen.pixels.clone();
+        a.full = true;
+        a.compose();
+        assert!(
+            part == a.screen.pixels,
+            "frame {frames}: the list alone is the whole frame"
+        );
+        frames += 1;
+        assert!(frames < 60);
+    }
+    assert!(frames >= 2, "the hover fill fades in: {frames} frames");
+}
+
+/// The settings dialog's card, in the middle of its page area.
+const CARD_MIDDLE: (f32, f32) = (640.0, 400.0);
+
+/// Asserts that the frame's damage covers every row of the window (the rectangles may overlap,
+/// so their rows are counted once each).
+fn every_row(a: &App, damage: &[(i32, i32, i32, i32)]) {
+    let mut row = vec![false; a.screen.height as usize];
+    for d in damage {
+        for y in d.1.max(0)..d.3.min(a.screen.height as i32) {
+            row[y as usize] = true;
+        }
+    }
+    assert!(
+        row.iter().all(|r| *r),
+        "{} of {} rows drawn",
+        row.iter().filter(|r| **r).count(),
+        row.len()
+    );
+}
+
+#[test]
+fn the_settings_dialog_fades_in_when_it_opens() {
+    let mut a = moving(&["showcase.md"]);
+    a.compose();
+    let before = a.screen.pixels.clone();
+    a.open_settings();
+    let (damage, _) = a.compose();
+    assert_eq!(a.settings_t, 0.0, "the dialog's first frame is the start");
+    assert!(a.anim_due.is_some(), "a frame is asked for");
+    // The dim and the card are drawn over the whole window and faded as one: while it fades the
+    // whole window is drawn again.
+    every_row(&a, &damage);
+    assert!(
+        a.screen.pixels == before,
+        "at 0 nothing of the dialog shows yet"
+    );
+    step(&mut a, FRAME);
+    let (x, y) = CARD_MIDDLE;
+    let mid_t = a.settings_t;
+    let mid = pixel(&a, x, y);
+    assert!(mid_t > 0.0 && mid_t < 1.0, "on its way: {mid_t}");
+    let mut frames = 1;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the fade ends");
+    }
+    assert_eq!(a.settings_t, 1.0);
+    // The menus' 117 ms at 16 ms a frame, and one frame more at most.
+    assert!(frames <= 9, "{frames} frames");
+    assert_ne!(pixel(&a, x, y), mid, "the frames of the fade are drawn");
+    // At rest it is the dialog a still run draws.
+    let mut still = app(&["showcase.md"]);
+    still.open_settings();
+    still.compose();
+    assert!(a.screen.pixels == still.screen.pixels);
+    step(&mut a, Duration::from_secs(3));
+    assert!(a.anim_due.is_none(), "nothing moves once it is there");
+}
+
+#[test]
+fn settings_entrance_copies_only_the_card_and_matches_the_old_blend() {
+    for dark in [false, true] {
+        for scale in [1.0, 1.25, 1.5] {
+            let mut a = moving(&["showcase.md"]);
+            at_scale(&mut a, scale);
+            a.ws.set_theme_choice(if dark {
+                ThemeChoice::Dark
+            } else {
+                ThemeChoice::Light
+            });
+            // Settle the starting palette before opening Settings.
+            a.still = true;
+            a.compose();
+            a.still = false;
+            let paper = a.screen.clone();
+            let (w, h) = a.logical();
+            let window = Rect::new(0.0, 0.0, w, h);
+            let pal = a.pal;
+            let mut form = s::form(&a.ws, a.corners_offered(), 0);
+            form.set_high_contrast(a.high_contrast());
+            let mut gfx = Gfx::new();
+
+            a.open_settings();
+            a.compose();
+            assert!(a.screen.pixels == paper.pixels);
+            assert_eq!(a.settings_snapshot_pixels, 0, "no copy at t=0");
+            for tick in 1..=8 {
+                step(&mut a, FRAME);
+                let t = a.settings_t;
+                let mut reference = paper.clone();
+                let mut p = Painter::new(&mut reference, &mut gfx, scale);
+                let whole = p.snapshot(window);
+                form.draw(&mut p, &pal, window, a.ui.caret_on);
+                p.fade(&whole, t);
+
+                let area = a.settings_snapshot_pixels;
+                if t < 1.0 {
+                    let bounds = mdshared_ui::overlay::dialog_bounds(form.rect());
+                    let (x0, y0, x1, y1) = p.dev_rect(bounds);
+                    assert_eq!(area, ((x1 - x0) * (y1 - y0)) as usize);
+                    assert!(area * 2 < (paper.width * paper.height) as usize);
+                } else {
+                    assert_eq!(area, 0, "no copy at rest");
+                }
+                let max_error = a
+                    .screen
+                    .pixels
+                    .iter()
+                    .zip(&reference.pixels)
+                    .map(|(&actual, &expected)| actual.abs_diff(expected))
+                    .max()
+                    .unwrap();
+                assert!(
+                    max_error <= u8::from(t < 1.0),
+                    "dark={dark}, scale={scale}, tick={tick}, t={t}, max error={max_error}"
+                );
+            }
+            assert_eq!(a.settings_t, 1.0);
+        }
+    }
+}
+
+#[test]
+fn the_settings_dialog_closes_at_once_mid_fade() {
+    let mut a = moving(&["showcase.md"]);
+    a.compose();
+    let before = a.screen.pixels.clone();
+    a.open_settings();
+    a.compose();
+    step(&mut a, FRAME);
+    assert!(a.settings_t > 0.0 && a.settings_t < 1.0, "mid-fade");
+    // Escape, as a hand does: the dialog goes at once, with no exit of its own.
+    a.modal_key(KeyName::Escape, None);
+    a.compose();
+    assert!(a.ui.settings.is_none());
+    assert_eq!(a.settings_t, 1.0, "no exit is played");
+    assert!(a.anim_due.is_none(), "nothing goes on");
+    assert!(a.screen.pixels == before, "the window as it was");
+}
+
+#[test]
+fn asking_for_settings_again_keeps_the_open_dialogs_presence() {
+    let mut a = moving(&[]);
+    a.command(C::Settings);
+    a.compose();
+    step(&mut a, FRAME);
+    assert!(a.settings_t > 0.0 && a.settings_t < 1.0);
+    let (serial, t) = (a.settings_serial, a.settings_t);
+    let before = a.screen.pixels.clone();
+
+    // The macOS app menu dispatches the same command even while Settings is open.
+    a.command(C::Settings);
+    a.compose();
+    assert_eq!(a.settings_serial, serial, "not a new opening");
+    assert_eq!(a.settings_t, t);
+    assert!(a.screen.pixels == before, "no blink");
+}
+
+#[test]
+fn reopening_settings_starts_a_new_entrance() {
+    let mut a = moving(&[]);
+    a.compose();
+    let before = a.screen.pixels.clone();
+    a.open_settings();
+    a.compose();
+    step(&mut a, FRAME);
+    let first = a.settings_serial;
+    assert!(a.settings_t > 0.0 && a.settings_t < 1.0);
+    a.modal_key(KeyName::Escape, None);
+    // Both actions can happen before the next frame drops the old presence.
+    a.open_settings();
+    a.compose();
+    assert_ne!(a.settings_serial, first);
+    assert_eq!(a.settings_t, 0.0);
+    assert!(a.screen.pixels == before);
+    assert!(a.anim_due.is_some());
+}
+
+#[test]
+fn with_motion_off_the_settings_dialog_is_whole_at_once() {
+    // A still run showing the same dialog: the switch of the Animations row is part of the card,
+    // so the run with the setting off is compared with one that has it off too.
+    let mut still = app(&["showcase.md"]);
+    still.open_settings();
+    still.compose();
+    let mut still_off = app(&["showcase.md"]);
+    still_off.apply_setting(s::MOTION, Value::Bool(false));
+    still_off.open_settings();
+    still_off.compose();
+    let mut off = moving(&["showcase.md"]);
+    off.apply_setting(s::MOTION, Value::Bool(false));
+    off.open_settings();
+    off.compose();
+    let mut reduced = moving(&["showcase.md"]);
+    reduced.anim.set_system_reduced(true);
+    reduced.open_settings();
+    reduced.compose();
+    for (name, a, at_rest) in [
+        ("setting off", &off, &still_off),
+        ("reduced motion", &reduced, &still),
+    ] {
+        assert_eq!(a.settings_t, 1.0, "{name}");
+        assert!(a.anim_due.is_none(), "{name}: no frame is asked for");
+        assert!(
+            a.screen.pixels == at_rest.screen.pixels,
+            "{name}: the dialog at rest"
+        );
+    }
+}
+
+#[test]
+fn choosing_dark_from_a_menu_or_palette_starts_a_fade_without_the_overlay() {
+    let mut light = app(&["linked.md"]);
+    light.ws.set_theme_choice(ThemeChoice::Light);
+    light.compose();
+    let dark = app(&["linked.md"]);
+    let (x, y) = (640.0, 700.0);
+    let ends = [pixel(&light, x, y), pixel(&dark, x, y)];
+
+    for from in ["menu", "palette"] {
+        for motion in [true, false] {
+            let mut a = moving(&["linked.md"]);
+            a.still = true;
+            a.ws.set_theme_choice(ThemeChoice::Light);
+            a.compose();
+            a.still = !motion;
+            if from == "menu" {
+                // The Windows ⋯ menu has no theme row. Exercise the common popup command
+                // dispatch with a Dark item rather than adding a new UI entry.
+                let mut menu = crate::menu::Menu::new(
+                    vec![crate::menu::Item::new(Act::Cmd(C::ThemeDark), "Dark")],
+                    48.0,
+                    90.0,
+                    false,
+                );
+                menu.hover = Some(0);
+                a.ui.popup = Some(Popup::new(PopupKind::Page, menu));
+            } else {
+                a.open_palette(">theme: dark");
+            }
+            a.compose();
+            for _ in 0..8 {
+                step(&mut a, FRAME);
+            }
+            assert!(a.screen.pixels != light.screen.pixels, "{from} was drawn");
+            a.key_named(KeyName::Enter, None);
+            assert!(a.ui.popup.is_none() && a.ui.palette.is_none());
+            assert_eq!(a.ws.theme_choice(), ThemeChoice::Dark);
+            a.compose();
+            assert_eq!(a.theme_fade.is_some(), motion, "{from}, motion={motion}");
+            let first = if motion { &light } else { &dark };
+            assert!(a.screen.pixels == first.screen.pixels, "no ghost of {from}");
+            if motion {
+                for _ in 0..5 {
+                    step(&mut a, FRAME);
+                }
+                assert!(!ends.contains(&pixel(&a, x, y)), "mid-fade from {from}");
+                settle(&mut a);
+                assert!(a.theme_fade.is_none());
+                assert!(a.screen.pixels == dark.screen.pixels);
+            }
+        }
+    }
+}
+
+#[test]
+fn zoom_closes_before_the_theme_fade_captures_the_old_page() {
+    let mut a = moving(&["linked.md"]);
+    a.compose();
+    let dark = a.screen.pixels.clone();
+    a.show_zoom(Rc::new(mdview_render::DecodedImage {
+        width: 16,
+        height: 16,
+        baseline: 16,
+        rgba: vec![255; 16 * 16 * 4],
+    }));
+    a.compose();
+    assert!(a.ui.zoom.is_some());
+    assert!(a.screen.pixels != dark);
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.ui.zoom.is_none());
+    assert!(a.theme_fade.is_some());
+    assert!(
+        a.screen.pixels == dark,
+        "the snapshot excludes the zoom view"
+    );
+}
+
+#[test]
+fn opening_a_dropdown_during_the_settings_entrance_finishes_the_entrance() {
+    let mut a = moving(&[]);
+    dropdown_settings(&mut a);
+    a.compose();
+    step(&mut a, FRAME);
+    assert!(a.settings_t > 0.0 && a.settings_t < 1.0);
+
+    open_settings_dropdown(&mut a);
+    a.compose();
+    assert_eq!(
+        a.settings_t, 1.0,
+        "the menu is not clipped to the fading card"
+    );
+    assert_eq!(a.settings_snapshot_pixels, 0);
+    let pixels = a.screen.pixels.clone();
+    a.still = true;
+    a.full = true;
+    a.compose();
+    assert!(a.screen.pixels == pixels, "the open menu is drawn at rest");
+}
+
+fn dropdown_settings(a: &mut App) {
+    use mdshared_ui::settings::Row;
+    use mdshared_ui::settings::pages::{Item, Page};
+    a.open_settings();
+    a.ui.settings.as_mut().unwrap().set_pages(vec![Page::new(
+        "Test",
+        vec![Item::new(Row::choice(
+            9002,
+            "Four",
+            &["One", "Two", "Three", "Four"],
+            0,
+        ))],
+    )]);
+}
+
+fn open_settings_dropdown(a: &mut App) {
+    assert!(a.ui.settings.as_mut().unwrap().focus_row(9002));
+    a.key_named(KeyName::Space, None);
+    assert!(a.ui.settings.as_ref().unwrap().menu_rect().is_some());
+}
+
+#[test]
+fn closing_an_overlay_mid_theme_fade_immediately_removes_it() {
+    for what in [
+        "menu", "submenu", "palette", "dialog", "settings", "dropdown", "tip", "preview", "hint",
+        "toast",
+    ] {
+        let mut a = moving(&["linked.md"]);
+        match what {
+            "menu" => a.open_popup(PopupKind::Main),
+            "submenu" => {
+                a.open_popup(PopupKind::Main);
+                a.open_popup(PopupKind::Recent);
+                assert!(!a.ui.popup.as_ref().unwrap().submenu_path().is_empty());
+            }
+            "palette" => a.open_palette(""),
+            "dialog" => a.open_dialog(DialogKind::About),
+            "settings" => a.open_settings(),
+            "dropdown" => {
+                dropdown_settings(&mut a);
+                a.compose();
+                open_settings_dropdown(&mut a);
+            }
+            "tip" => {
+                let r = a.hit_rect(Hit::WinClose).unwrap();
+                let now = Instant::now();
+                a.ui.tips.hover(
+                    now,
+                    Some(mdshared_ui::tooltip::Over {
+                        key: Hit::WinClose,
+                        text: "Close".into(),
+                        anchor: r,
+                    }),
+                );
+                assert!(a.ui.tips.tick(now + Duration::from_secs(1)));
+            }
+            "preview" => {
+                a.ui.card = Some(crate::preview::Card {
+                    target: crate::preview::Target::Heading(0),
+                    at: (500.0, 300.0),
+                    due: Instant::now(),
+                    loading: false,
+                    content: Some(mdview_core::preview::Preview {
+                        title: "Preview".into(),
+                        body: "A heading".into(),
+                    }),
+                    shown: true,
+                });
+            }
+            "hint" => a.ui.link_hint = Some("Link hint".into()),
+            "toast" => a.ws.confirm("Copied"),
+            _ => unreachable!(),
+        }
+        a.compose();
+        for _ in 0..12 {
+            step(&mut a, FRAME);
+        }
+        a.ws.set_theme_choice(ThemeChoice::Light);
+        a.compose();
+        step(&mut a, FRAME);
+        assert!(a.theme_fade.is_some(), "{what} was in the theme fade");
+        match what {
+            "tip" => a.pointer_moved(640.0, 700.0),
+            "preview" => a.ui.card = None,
+            "hint" => a.ui.link_hint = None,
+            "toast" => {
+                let id = a.toast_frame[0].0;
+                a.toasts.remove(id);
+                a.ws.clear_status();
+            }
+            _ => a.key_named(KeyName::Escape, None),
+        }
+        a.compose();
+        assert!(a.theme_fade.is_none(), "{what} must not fade out");
+        match what {
+            "submenu" => assert!(a.ui.popup.as_ref().unwrap().submenu_path().is_empty()),
+            "dropdown" => assert!(a.ui.settings.as_ref().unwrap().menu_rect().is_none()),
+            _ => (),
+        }
+        if !matches!(what, "submenu" | "dropdown") {
+            let mut light = app(&["linked.md"]);
+            light.ws.set_theme_choice(ThemeChoice::Light);
+            light.compose();
+            assert!(a.screen.pixels == light.screen.pixels, "no ghost of {what}");
+        }
+    }
+}
+
+#[test]
+fn a_light_and_dark_change_crossfades_from_the_frame_before() {
+    let mut a = moving(&["showcase.md"]);
+    a.compose();
+    let dark = a.pal;
+    let before = a.screen.pixels.clone();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    let (damage, _) = a.compose();
+    assert_ne!(a.pal, dark, "the palette is the new one at once");
+    let under = a.theme_fade.as_ref().expect("the old frame is kept");
+    // What is held: the whole window, four bytes a pixel.
+    let (x0, y0, x1, y1) = under.rect();
+    assert_eq!(
+        (x0, y0, x1, y1),
+        (0, 0, a.screen.width as i32, a.screen.height as i32)
+    );
+    assert_eq!(under.bitmap_size(), (a.screen.width, a.screen.height));
+    let held = (x1 - x0) as u64 * (y1 - y0) as u64 * 4;
+    assert_eq!(held, 4 * 1280 * 800, "{held} bytes");
+    assert!(
+        a.screen.pixels == before,
+        "the change's first frame is the old palette's"
+    );
+    every_row(&a, &damage);
+    assert!(a.anim_due.is_some(), "a frame is asked for");
+    // Half way: the page is between the two palettes.
+    let mut light = app(&["showcase.md"]);
+    light.ws.set_theme_choice(ThemeChoice::Light);
+    light.compose();
+    let (x, y) = (640.0, 700.0);
+    let settled = pixel(&light, x, y);
+    let old = pixel(&a, x, y);
+    let tick = Duration::from_millis(17);
+    for _ in 0..4 {
+        step(&mut a, tick);
+    }
+    a.frame_clock = a.frame_clock.map(|t| t + tick);
+    let (damage, _) = a.compose();
+    every_row(&a, &damage);
+    let mid = pixel(&a, x, y);
+    assert!(mid != old && mid != settled, "between palettes at 85 ms");
+    assert!(a.theme_fade.is_some());
+    let mut frames = 6;
+    while a.anim_due.is_some() {
+        step(&mut a, FRAME);
+        frames += 1;
+        assert!(frames < 30, "the fade ends");
+    }
+    assert!(a.theme_fade.is_none(), "the snapshot is freed");
+    // The rest is the window a run that started light draws.
+    assert!(a.screen.pixels == light.screen.pixels, "the light window");
+    step(&mut a, Duration::from_secs(3));
+    assert!(a.anim_due.is_none(), "no timer once it is there");
+}
+
+#[test]
+fn with_motion_off_a_light_and_dark_change_is_simply_drawn() {
+    let mut a = app(&["showcase.md"]);
+    a.compose();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.theme_fade.is_none(), "nothing is kept");
+    assert!(a.anim_due.is_none());
+    let mut light = app(&["showcase.md"]);
+    light.ws.set_theme_choice(ThemeChoice::Light);
+    light.compose();
+    assert!(a.screen.pixels == light.screen.pixels);
+    // The system's wish for less motion too.
+    let mut reduced = moving(&["showcase.md"]);
+    reduced.compose();
+    reduced.anim.set_system_reduced(true);
+    reduced.ws.set_theme_choice(ThemeChoice::Light);
+    reduced.compose();
+    assert!(reduced.theme_fade.is_none());
+    assert!(reduced.anim_due.is_none());
+}
+
+#[test]
+fn a_resize_mid_fade_ends_the_light_and_dark_change() {
+    let mut a = moving(&["showcase.md"]);
+    a.compose();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.theme_fade.is_some());
+    step(&mut a, FRAME);
+    assert!(a.theme_fade.is_some(), "still fading");
+    // Another window size: the kept frame is of the old one and cannot be blended.
+    a.resized(PhysicalSize::new(1000, 700));
+    a.compose();
+    assert!(a.theme_fade.is_none(), "the change ended");
+    assert!(a.anim_due.is_none(), "and asks for no frame");
+    let mut light = app(&["showcase.md"]);
+    light.ws.set_theme_choice(ThemeChoice::Light);
+    light.size = (1000, 700);
+    light.compose();
+    assert!(
+        a.screen.pixels == light.screen.pixels,
+        "the new palette alone"
+    );
+}
+
+#[test]
+fn a_same_size_resize_notification_does_not_end_the_fade() {
+    let mut a = moving(&[]);
+    a.compose();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.theme_fade.is_some());
+    a.resized(PhysicalSize::new(a.size.0, a.size.1));
+    step(&mut a, FRAME);
+    assert!(a.theme_fade.is_some(), "same size, same fade");
+    assert!(a.anim_due.is_some());
+}
+
+#[test]
+fn a_minimize_resize_releases_the_theme_snapshot_without_a_frame() {
+    for size in [PhysicalSize::new(0, 0), PhysicalSize::new(1000, 700)] {
+        let mut a = moving(&[]);
+        a.compose();
+        let original = PhysicalSize::new(a.size.0, a.size.1);
+        a.ws.set_theme_choice(ThemeChoice::Light);
+        a.compose();
+        assert!(a.theme_fade.is_some());
+
+        a.resized(size);
+        assert!(a.theme_fade.is_none(), "{size:?}: freed without composing");
+        a.resized(original);
+        a.compose();
+        assert!(a.theme_fade.is_none());
+        assert!(a.anim_due.is_none());
+    }
+}
+
+#[test]
+fn a_theme_flip_on_a_resize_does_not_blend_the_newly_allocated_bitmap() {
+    let mut a = moving(&[]);
+    a.resized(PhysicalSize::new(1000, 700));
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.pal == theme::LIGHT);
+    assert_eq!(a.theme_serial, 0, "no snapshot taken");
+    assert!(a.theme_fade.is_none());
+    assert!(a.anim_due.is_none());
+}
+
+#[test]
+fn a_theme_flip_during_a_presentation_has_no_fade_on_escape() {
+    let mut a = moving(&["slides.md"]);
+    a.present_begin();
+    a.compose();
+    assert!(a.presenting());
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    step(&mut a, FRAME);
+    assert!(a.pal == theme::LIGHT);
+    assert_eq!(a.theme_serial, 0, "no snapshot taken");
+    assert!(a.theme_fade.is_none(), "no snapshot held during the slide");
+
+    // No Resized event, as when the window was already fullscreen.
+    a.key_named(KeyName::Escape, None);
+    a.compose();
+    let mut light = app(&["slides.md"]);
+    light.ws.set_theme_choice(ThemeChoice::Light);
+    light.compose();
+    assert!(!a.presenting());
+    assert!(a.theme_fade.is_none());
+    assert!(a.anim_due.is_none());
+    assert!(
+        a.screen.pixels == light.screen.pixels,
+        "light on the first frame"
+    );
+}
+
+#[test]
+fn entering_a_presentation_releases_an_existing_theme_snapshot() {
+    let mut a = moving(&["slides.md"]);
+    a.compose();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    assert!(a.theme_fade.is_some());
+    a.present_begin();
+    assert!(a.presenting());
+    assert!(
+        a.theme_fade.is_none(),
+        "release it before the first slide frame"
+    );
+}
+
+#[test]
+fn the_theme_snapshot_is_capped_by_device_pixel_area() {
+    for (w, h, fades) in [(2560, 1600, true), (2561, 1600, false), (3840, 2160, false)] {
+        let mut a = moving(&[]);
+        a.size = (w, h);
+        a.compose();
+        let old = pixel(&a, 40.0, 40.0);
+        a.ws.set_theme_choice(ThemeChoice::Light);
+        a.compose();
+        assert_eq!(a.theme_fade.is_some(), fades, "{w}x{h}");
+        assert_eq!(a.anim_due.is_some(), fades, "{w}x{h}");
+        if fades {
+            assert_eq!(pixel(&a, 40.0, 40.0), old, "starts at the old palette");
+        } else {
+            a.still = true;
+            let first = a.screen.pixels.clone();
+            a.full = true;
+            a.compose();
+            assert!(
+                a.screen.pixels == first,
+                "the new palette on its first frame"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_light_system_first_frame_never_starts_a_theme_fade() {
+    let mut a = App::new(
+        Args {
+            no_session: true,
+            ..Args::default()
+        },
+        Workspace::new(None),
+        None,
+    );
+    a.system_dark = true;
+    a.setup();
+    // The first theme notification can arrive before paint; an allocated bitmap is not a
+    // painted frame.
+    a.size = (640, 400);
+    a.scale = 1.0;
+    a.screen = Bitmap::new(640, 400);
+    a.ws.set_system_dark(false);
+    a.still = false;
+    a.reduced = Some(false);
+    a.frame_clock = Some(Instant::now());
+    assert_eq!(a.frames, 0);
+    a.compose();
+    assert!(a.pal == theme::LIGHT);
+    assert_eq!(a.theme_serial, 0);
+    assert!(a.theme_fade.is_none());
+    assert!(a.anim_due.is_none());
+    let first = a.screen.pixels.clone();
+    a.full = true;
+    step(&mut a, FRAME);
+    assert!(a.screen.pixels == first, "the first frame is already light");
+}
+
+#[test]
+fn a_second_theme_flip_starts_from_the_partly_blended_frame() {
+    let mut a = moving(&[]);
+    a.compose();
+    let dark = a.screen.pixels.clone();
+    a.ws.set_theme_choice(ThemeChoice::Light);
+    a.compose();
+    step(&mut a, FRAME);
+    let mid = a.screen.pixels.clone();
+    assert!(mid != dark);
+    let serial = a.theme_serial;
+    a.ws.set_theme_choice(ThemeChoice::Dark);
+    a.compose();
+    assert_ne!(a.theme_serial, serial);
+    assert!(a.screen.pixels == mid, "no jump back to either endpoint");
+    step(&mut a, FRAME);
+    assert!(a.screen.pixels != mid, "the reverse fade is moving");
+    for _ in 0..11 {
+        step(&mut a, FRAME);
+    }
+    assert!(a.theme_fade.is_none());
+    assert!(a.anim_due.is_none());
+    assert!(a.screen.pixels == dark);
+}
+
+#[test]
+fn a_theme_flip_crossfades_an_already_open_settings_dialog() {
+    let mut a = moving(&["showcase.md"]);
+    // Like a system theme change: the form's Theme choice stays on System.
+    a.ws.set_theme_choice(ThemeChoice::System);
+    a.ws.set_system_dark(true);
+    a.open_settings();
+    a.compose();
+    for _ in 0..8 {
+        step(&mut a, FRAME);
+    }
+    assert_eq!(a.settings_t, 1.0);
+    let dark = a.screen.pixels.clone();
+    let (x, y) = CARD_MIDDLE;
+    let old_card = pixel(&a, x, y);
+    a.ws.set_system_dark(false);
+    a.compose();
+    assert_eq!(a.settings_t, 1.0, "the entrance does not restart");
+    assert!(a.screen.pixels == dark, "the old dialog is in the blend");
+    for _ in 0..5 {
+        step(&mut a, FRAME);
+    }
+    let mid_card = pixel(&a, x, y);
+    for _ in 0..6 {
+        step(&mut a, FRAME);
+    }
+    assert!(mid_card != old_card && mid_card != pixel(&a, x, y));
+    assert!(a.ui.settings.is_some());
+    assert!(a.theme_fade.is_none());
+    assert!(a.anim_due.is_none());
+    let mut still = app(&["showcase.md"]);
+    still.ws.set_theme_choice(ThemeChoice::System);
+    still.ws.set_system_dark(false);
+    still.open_settings();
+    still.compose();
+    assert!(
+        a.screen.pixels == still.screen.pixels,
+        "the settled light dialog"
+    );
+}
+
+#[test]
+fn a_system_theme_flip_shot_keeps_settings_on_system_in_both_themes() {
+    let out = std::env::temp_dir().join(format!("mdview-theme-shot-{}.png", std::process::id()));
+    let render = |mut a: App| {
+        a.args.dark = None;
+        a.args.dialog = Some(ShotDialog::Settings);
+        a.args.scale = Some(1.0);
+        assert_eq!(shot(a, &out), 0);
+        let bytes = std::fs::read(&out).unwrap();
+        std::fs::remove_file(&out).unwrap();
+        bytes
+    };
+    let still = |dark| {
+        let mut a = app(&[]);
+        a.ws.set_theme_choice(ThemeChoice::System);
+        a.ws.set_system_dark(dark);
+        render(a)
+    };
+    let (light, dark) = (still(false), still(true));
+    assert!(light != dark);
+    for (target, before, after) in [(true, &light, &dark), (false, &dark, &light)] {
+        for (ms, expected) in [(0, before), (200, after)] {
+            let mut a = app(&[]);
+            a.args.theme_flip = Some(target);
+            a.args.motion_at = Some(ms);
+            assert!(
+                &render(a) == expected,
+                "flip to dark={target} at {ms} ms must match the System dialog"
+            );
+        }
+    }
 }

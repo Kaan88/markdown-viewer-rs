@@ -7,10 +7,11 @@ use crate::textfield::FieldColors;
 use crate::theme::Palette;
 use crate::ui::{BarItem, Hit, PopupKind, Ui};
 use crate::workspace::{ThemeChoice, Workspace};
+use mdshared_ui::anim::Animator;
 use mdshared_ui::chrome::{
     BAR_H, DRAG_MIN, NATIVE_FRAME, NEW_TAB_W, TABS_LEFT, TITLE_H, TabState, WIN_BTN_W, WinButton,
-    button_fill, draw_new_tab_button, draw_tab, draw_win_button, tab_natural_width, tab_widths,
-    win_button_rect,
+    button_fill, draw_new_tab_button_animated, draw_tab_animated, draw_win_button_animated,
+    tab_natural_width, tab_widths, win_button_rect,
 };
 pub use mdshared_ui::glyph;
 use mdview_core::commands::{CommandId, strings};
@@ -300,8 +301,18 @@ pub fn max_button_rect(w: f32, maximized: bool) -> Rect {
     Rect::new(b.x, top, b.w, (b.h - top).max(0.0))
 }
 
-/// Draws the title row into `r` (the full window width, `TITLE_H` tall).
-pub fn draw_title(c: &mut Ctx, ws: &Workspace, ui: &Ui, r: Rect, maximized: bool) {
+/// Draws the title row into `r` (the full window width, `TITLE_H` tall). The hover fills of its
+/// buttons and tabs fade in and out (`chrome::draw_*_animated`, in the animator's group
+/// `motion::TITLE`); with nothing moving each draws exactly its plain self.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_title(
+    c: &mut Ctx,
+    anim: &mut Animator,
+    ws: &Workspace,
+    ui: &Ui,
+    r: Rect,
+    maximized: bool,
+) {
     let pal = *c.pal;
     c.p.fill(r, pal.title);
     c.hit(Hit::TitleDrag, r);
@@ -325,9 +336,16 @@ pub fn draw_title(c: &mut Ctx, ws: &Workspace, ui: &Ui, r: Rect, maximized: bool
     for &(hit, kind) in buttons {
         let b = win_button_rect(right, 0);
         right -= WIN_BTN_W;
-        draw_win_button(
+        let name = match kind {
+            WinButton::Close => "close",
+            WinButton::Max => "max",
+            WinButton::Min => "min",
+        };
+        draw_win_button_animated(
             c.p,
             &pal,
+            anim,
+            crate::motion::win_button(name),
             kind,
             b,
             maximized,
@@ -381,7 +399,21 @@ pub fn draw_title(c: &mut Ctx, ws: &Workspace, ui: &Ui, r: Rect, maximized: bool
             close_pressed: c.pressed == Some(Hit::TabClose(i)),
             pinned: ws.is_pinned(i),
         };
-        let drawn = draw_tab(c.p, &pal, x, w, r.w, label, &state);
+        let key = ws
+            .tab(i)
+            .map(|t| t.path().to_string_lossy().into_owned())
+            .unwrap_or_else(|| label.clone());
+        let drawn = draw_tab_animated(
+            c.p,
+            &pal,
+            anim,
+            crate::motion::tab(&key),
+            x,
+            w,
+            r.w,
+            label,
+            &state,
+        );
         c.hit(Hit::Tab(i), drawn.tab);
         if let Some(b) = drawn.close {
             c.hit(Hit::TabClose(i), b);
@@ -389,9 +421,11 @@ pub fn draw_title(c: &mut Ctx, ws: &Workspace, ui: &Ui, r: Rect, maximized: bool
         x += w;
     }
     c.p.restore(clip);
-    let b = draw_new_tab_button(
+    let b = draw_new_tab_button_animated(
         c.p,
         &pal,
+        anim,
+        crate::motion::new_tab(),
         x,
         avail,
         c.hover == Some(Hit::NewTab),

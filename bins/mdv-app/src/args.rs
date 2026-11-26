@@ -76,6 +76,9 @@ pub struct Args {
     pub hover: Option<(f32, f32)>,
     /// Show the copy button of the code block under `--hover` with its check mark (for shots).
     pub copied: bool,
+    /// `--hover-close`: the pointer on the window's Close button, for a shot (with
+    /// `--motion-at`, part way into its fade).
+    pub hover_close: bool,
     pub focus_mode: bool,
     /// `--notes`: the Files pane shows the notes library (when there is one), for a shot.
     pub notes_face: bool,
@@ -95,6 +98,22 @@ pub struct Args {
     pub zoom_diagram: Option<usize>,
     /// `--menu-at <ms>`: with `--menu`, the menu as it is this long into its fade-in, for a shot.
     pub menu_at: Option<u64>,
+    /// `--turn <name>`: with `--files`, opens (or closes) the folder of that name at the top of
+    /// the Files tree, for a shot; with `--motion-at`, as its chevron turns.
+    pub turn: Option<String>,
+    /// `--toast <text>`, said once or more: the status messages a shot shows as toasts, the
+    /// last one coming in with `--motion-at`, the others already at rest above it.
+    pub toasts: Vec<String>,
+    /// `--motion-at <ms>`: what a shot's `--turn`, last `--toast` or `--flip-setting` sets
+    /// moving, that long into its motion.
+    pub motion_at: Option<u64>,
+    /// `--flip-setting <id>`: with `--dialog settings`, the row of that id (`settings.rs`)
+    /// focused and turned with Space, for a shot; with `--motion-at`, as its switch slides.
+    pub flip_setting: Option<u32>,
+    /// `--theme-flip <light|dark>`: a shot changes to this theme. Without `--light` or `--dark`,
+    /// it uses the System choice and simulates a desktop flip from the opposite theme.
+    /// With `--motion-at`, the shot shows the window crossfading.
+    pub theme_flip: Option<bool>,
     /// `--zoom-level F`: with `--zoom-diagram`, its drawing size in device px per raster px (1.0,
     /// the default, is twice the page's size at any scale).
     pub zoom_level: Option<f32>,
@@ -115,6 +134,9 @@ pub struct Args {
     pub scroll_steps: Option<u32>,
     /// Start maximized (for checking the frameless maximized geometry).
     pub maximize: bool,
+    /// `--behind`: open without taking the focus, under every other window, so that a test run
+    /// does not cover what the owner is working in. For tests only.
+    pub behind: bool,
     /// `--line N`: scroll to the block holding source line N (counting from 1) of the file.
     pub line: Option<u32>,
     /// `--follow`: a live update from the editor, not an opening. It only ever reaches a window
@@ -126,12 +148,80 @@ pub struct Args {
     pub from: Option<String>,
 }
 
+/// What a launch may do that could bring its window forward: see [`Args::presence`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Presence {
+    /// Hand this launch's files to an mdview already running (which raises its window).
+    pub hand_over: bool,
+    /// Start maximized, as `--maximize` asks.
+    pub maximize: bool,
+    /// Take the keyboard when a hand-over arrives.
+    pub focus: bool,
+}
+
+/// How a launch takes the settings folder, one window per folder
+/// (`mdshared_app::folder_lock`): see [`Args::folder`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Folder {
+    /// Hand this launch's files to a window already holding the folder.
+    pub hand_over: bool,
+    /// How long to wait for that window to start listening.
+    pub wait: std::time::Duration,
+}
+
 fn pair<T: std::str::FromStr>(s: &str, sep: char) -> Option<(T, T)> {
     let (a, b) = s.split_once(sep)?;
     Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
 }
 
 impl Args {
+    /// What this launch may do that could bring its window forward. A `--behind` run is a
+    /// test's, and its window must never come to the front: it does not hand its files to an
+    /// mdview already running (whose window would be raised and focused), it does not start
+    /// maximized even with `--maximize`, and a hand-over that reaches it does not focus it.
+    /// The level given when the window is made (`AlwaysOnBottom`) stands: setting Normal first
+    /// to force the level again would raise the window for a moment, so it is not done, and a
+    /// `--behind` window may show above the others once when it is shown.
+    pub fn presence(&self) -> Presence {
+        Presence {
+            hand_over: !self.behind,
+            maximize: self.maximized(false),
+            focus: !self.behind,
+        }
+    }
+
+    /// Whether the window starts maximized: the place the session kept, or `--maximize`, but
+    /// never under `--behind`. A maximized window is shown with `SW_MAXIMIZE`, which activates
+    /// it, and a `--behind` run must not come to the front.
+    pub fn maximized(&self, saved: bool) -> bool {
+        (saved || self.maximize) && !self.behind
+    }
+
+    /// How this launch takes the settings folder. A `--behind` run is its own instance: it
+    /// still claims the folder (so it cannot write the port file or the session under a window
+    /// that has them), but never hands its files over — which would raise that window — and so
+    /// waits for nobody. A folder another window holds leaves it without a session, as a busy
+    /// folder always does.
+    pub fn folder(&self) -> Folder {
+        if self.behind {
+            Folder {
+                hand_over: false,
+                wait: std::time::Duration::ZERO,
+            }
+        } else {
+            Folder {
+                hand_over: true,
+                wait: mdshared_app::folder_lock::WAIT,
+            }
+        }
+    }
+
+    /// Whether this launch listens for hand-overs, and so writes `instance.port`. A `--behind`
+    /// run does not: a file the user opens must never reach a hidden test window.
+    pub fn listens(&self) -> bool {
+        !self.behind
+    }
+
     /// What each file asks of a window that is already running, when the launch asked for more than
     /// opening it: see [`Request`]. Empty for an ordinary launch.
     pub fn requests(&self) -> Vec<Request> {
@@ -200,6 +290,7 @@ impl Args {
                 "--check-update" => out.check_update = true,
                 "--install-update" => out.install_update = true,
                 "--maximize" => out.maximize = true,
+                "--behind" => out.behind = true,
                 "--follow" => out.follow = true,
                 "--line" => out.line = value(&a).and_then(|v| v.parse().ok()).filter(|&n| n >= 1),
                 "--place" => out.place = value(&a).and_then(|v| Rect::parse(&v)),
@@ -223,7 +314,23 @@ impl Args {
                 "--scroll" => out.scroll = value(&a).and_then(|v| v.parse().ok()),
                 "--scroll-steps" => out.scroll_steps = value(&a).and_then(|v| v.parse().ok()),
                 "--copied" => out.copied = true,
+                "--hover-close" => out.hover_close = true,
                 "--menu-at" => out.menu_at = value(&a).and_then(|v| v.parse().ok()),
+                "--turn" => out.turn = value(&a),
+                "--toast" => out.toasts.extend(value(&a)),
+                "--motion-at" => {
+                    out.motion_at = value(&a)
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .map(|ms| ms.min(10_000));
+                }
+                "--flip-setting" => out.flip_setting = value(&a).and_then(|v| v.parse().ok()),
+                "--theme-flip" => {
+                    out.theme_flip = match value(&a).as_deref() {
+                        Some("light") => Some(false),
+                        Some("dark") => Some(true),
+                        _ => None,
+                    }
+                }
                 "--hover" => out.hover = value(&a).and_then(|v| pair(&v, ',')),
                 "--menu" => {
                     out.menu = match value(&a).as_deref() {
@@ -287,6 +394,95 @@ mod tests {
         assert_eq!(a.zoom, Some(125));
         assert_eq!(a.folder, Some(PathBuf::from("docs")));
         assert!(a.no_session);
+    }
+
+    #[test]
+    fn behind_is_asked_for_by_its_flag_only() {
+        assert!(parse("--no-session --behind a.md").behind);
+        assert!(!parse("--no-session a.md").behind);
+    }
+
+    #[test]
+    fn behind_never_brings_a_window_forward() {
+        // No hand-over (a running mdview would raise its window), no maximize, no focus.
+        assert_eq!(
+            parse("--behind --maximize a.md").presence(),
+            Presence {
+                hand_over: false,
+                maximize: false,
+                focus: false,
+            }
+        );
+        // An ordinary launch hands over, starts maximized when asked, and takes the focus.
+        assert_eq!(
+            parse("--maximize a.md").presence(),
+            Presence {
+                hand_over: true,
+                maximize: true,
+                focus: true,
+            }
+        );
+        // A plain launch asks for neither.
+        assert!(!parse("a.md").presence().maximize);
+    }
+
+    #[test]
+    fn behind_never_starts_maximized_even_where_the_session_left_it() {
+        // The session's saved place would maximize the window, and showing it maximized activates
+        // it; under `--behind` the window stays as it is.
+        assert!(!parse("--behind a.md").maximized(true));
+        assert!(!parse("--behind --maximize a.md").maximized(true));
+        // Elsewhere either asks for it.
+        assert!(parse("a.md").maximized(true));
+        assert!(parse("--maximize a.md").maximized(false));
+        assert!(!parse("a.md").maximized(false));
+    }
+
+    #[test]
+    fn behind_claims_the_folder_but_never_hands_over_or_waits() {
+        // Its own instance: no hand-over, and no waiting for a window that would take one, but a
+        // folder claimed all the same, so a window that has the session is never written under.
+        assert_eq!(
+            parse("--behind a.md").folder(),
+            Folder {
+                hand_over: false,
+                wait: std::time::Duration::ZERO,
+            }
+        );
+        assert_eq!(
+            parse("a.md").folder(),
+            Folder {
+                hand_over: true,
+                wait: mdshared_app::folder_lock::WAIT,
+            }
+        );
+    }
+
+    #[test]
+    fn behind_does_not_listen_for_hand_overs() {
+        // Nothing listens and no port is written: a file the user opens must never reach a
+        // hidden test window.
+        assert!(!parse("--behind a.md").listens());
+        assert!(parse("a.md").listens());
+    }
+
+    #[test]
+    fn motion_shot_flags() {
+        let a = parse("--turn wiki --toast Copied --toast Linked --motion-at 67 --menu-at 21");
+        assert_eq!(a.turn.as_deref(), Some("wiki"));
+        assert_eq!(a.toasts, ["Copied", "Linked"]);
+        assert_eq!(a.motion_at, Some(67));
+        assert_eq!(parse("--flip-setting 5").flip_setting, Some(5));
+        assert_eq!(parse("--flip-setting on").flip_setting, None);
+        assert_eq!(parse("--theme-flip dark").theme_flip, Some(true));
+        assert_eq!(parse("--theme-flip light").theme_flip, Some(false));
+        assert_eq!(parse("--theme-flip sepia").theme_flip, None);
+        assert_eq!(a.menu_at, Some(21));
+        // A shot's motion waits at most ten seconds.
+        assert_eq!(parse("--motion-at 999999").motion_at, Some(10_000));
+        let b = parse("--motion-at soon");
+        assert_eq!(b.motion_at, None);
+        assert!(b.toasts.is_empty() && b.turn.is_none());
     }
 
     #[test]

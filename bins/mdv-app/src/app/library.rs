@@ -175,7 +175,7 @@ impl App {
             .collect();
         let menu = Menu::new(items, x.max(8.0), y.max(8.0), false);
         self.ui.popup = Some(Popup::new(PopupKind::Library, menu));
-        self.ui.tip = None;
+        self.ui.tips.hide();
     }
 
     /// For a shot: the question, as asked of the first document.

@@ -6,6 +6,7 @@ use crate::gfx::{Face, Rect};
 use crate::theme::Palette;
 use crate::ui::{Hit, Scroller, Side, Ui};
 use crate::workspace::Workspace;
+use mdshared_ui::anim::Animator;
 pub use mdshared_ui::pane::ROW;
 use mdshared_ui::pane::{HEAD, ROW_H, draw_head, draw_row_fill, draw_splitter};
 pub use mdshared_ui::scroll::{draw_scrollbar, offset_for_thumb, scrollbar};
@@ -27,10 +28,12 @@ pub fn edge(c: &mut Ctx, r: Rect, side: Side, dragging: bool) {
     c.hit(Hit::Splitter(side), hit);
 }
 
-pub fn draw_files(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
+/// The Files pane (or the Notes pane in its place). `anim` turns the folders' chevrons; its
+/// frame is the caller's.
+pub fn draw_files(c: &mut Ctx, anim: &mut Animator, ws: &Workspace, ui: &mut Ui, r: Rect) {
     let pal = *c.pal;
     if ui.notes.on {
-        return crate::notes::draw(c, ws, ui, r);
+        return crate::notes::draw(c, anim, ws, ui, r);
     }
     crate::notes::draw_head_row(c, ui, r, strings::FILES_DOCK);
     let b = Rect::new(r.right() - 38.0, r.y + 6.0, 28.0, 28.0);
@@ -112,16 +115,17 @@ pub fn draw_files(c: &mut Ctx, ws: &Workspace, ui: &mut Ui, r: Rect) {
         let ix = r.x + 14.0 + (row.depth as f32 + 1.0) * 14.0;
         let cy = rr.cy();
         if row.is_dir {
-            c.p.icon(
-                if row.expanded {
-                    glyph::DOWN
-                } else {
-                    glyph::RIGHT
-                },
-                8.0,
+            // Turns as the folder opens or closes; at rest the right or down chevron.
+            glyph::draw_disclosure_animated_with(
+                c.p,
+                anim,
+                crate::motion::folder(&row.path),
                 ix - 8.0,
                 cy,
+                8.0,
+                row.expanded,
                 pal.faint,
+                crate::motion::DISCLOSURE,
             );
             c.p.icon(
                 if row.expanded {

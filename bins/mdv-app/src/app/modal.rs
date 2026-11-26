@@ -23,7 +23,7 @@ impl App {
     /// Opens the command palette with `query` in its box (the shots pass one).
     pub(super) fn open_palette(&mut self, query: &str) {
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.hover = None;
         self.ui.find_focused = false;
         self.ui.dialog = None;
@@ -36,6 +36,7 @@ impl App {
         // Its notes are resolved once per read, here, not as the reader types (audit 4, E5).
         self.ui.notes.resolve_notes();
         self.ui.palette = Some(PaletteState::open(&self.ws, Some(&self.ui.notes), query));
+        self.palette_serial += 1;
         self.caret_reset();
         self.modal_changed();
     }
@@ -54,12 +55,13 @@ impl App {
         });
         let query = self.ui.find.text().to_string();
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.hover = None;
         self.ui.find_focused = false;
         self.ui.dialog = None;
         self.drop_settings();
         self.ui.palette = Some(PaletteState::open_folder(root, &query, wake));
+        self.palette_serial += 1;
         self.caret_reset();
         self.modal_changed();
     }
@@ -82,14 +84,22 @@ impl App {
     /// Opens Settings on the page it last showed this run (Appearance the first time), the
     /// keyboard in the list.
     pub(super) fn open_settings(&mut self) {
+        if self.ui.settings.is_some() {
+            return;
+        }
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.hover = None;
         self.ui.find_focused = false;
         self.ui.dialog = None;
         self.ui.palette = None;
+        // A new name for this opening: the dialog fades in again each time.
+        self.settings_serial = self.settings_serial.wrapping_add(1);
         let page = self.ui.settings_page;
-        self.ui.settings = Some(setting::form(&self.ws, self.corners_offered(), page));
+        let mut f = setting::form(&self.ws, self.corners_offered(), page);
+        f.set_high_contrast(self.high_contrast());
+        self.ui.settings = Some(f);
+        self.settings_changed.clear();
         self.modal_changed();
     }
 
@@ -120,6 +130,7 @@ impl App {
         if let Some(f) = self.ui.settings.take() {
             self.ui.settings_page = f.page();
         }
+        self.settings_changed.clear();
     }
 
     /// Makes the pages again from what the workspace holds now, so a switch turned off or on
@@ -292,6 +303,11 @@ impl App {
             Form::Redraw => self.modal_changed(),
             Form::Closed => self.close_settings(),
             Form::Changed { id, value } => {
+                // Every row that changed while the group was in flight is drawn again on its
+                // frames (`App::compose`); the list is cleared once the group settles.
+                if !self.settings_changed.contains(&id) {
+                    self.settings_changed.push(id);
+                }
                 self.apply_setting(id, value);
                 // The one switch with a row under it: the form keeps every other value itself.
                 if id == setting::SKIP_BRIEF {

@@ -2,14 +2,19 @@
 //! is over, what is being dragged, which popup or dialog is open, the panes and the find box.
 //! Drawing code reads it; the event loop in `app.rs` changes it.
 
-use crate::gfx::Rect;
+use crate::gfx::{Painter, Rect};
+use crate::keys::{KeyName, Mods};
 use crate::menu::Menu;
 use crate::textfield::TextField;
+use crate::theme::Palette;
 use crate::tree::{FileTree, new_tree};
+use mdshared_ui::anim::Animator;
+use mdshared_ui::menu::Entrance;
+use mdshared_ui::submenu::{Cascade, Outcome};
 use mdview_core::commands::CommandId;
 use mdview_render::SourceKind;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub use mdshared_ui::chrome::{BAR_H, TITLE_H};
 pub const PANE_MIN: f32 = 160.0;
@@ -241,20 +246,32 @@ pub enum PopupKind {
     Library,
 }
 
+/// What a popup's overlay signature holds of one open menu: its highlighted row, its scroll in
+/// bits and how many rows it has.
+type RowState = (Option<usize>, u32, usize);
+
+/// Everything of a popup that changes what is drawn when it is the same kind: each open menu's
+/// rows, and the path of open submenus.
+pub type PopupState = (Vec<RowState>, Vec<usize>);
+
+/// A popup's menu: one that opens nothing beside it, or the shared cascade that the main menu's
+/// Open recent needs.
+pub enum MenuBody {
+    /// A menu alone: a context menu, the recent list, the find box's.
+    Menu(Menu<Act>),
+    /// A tree of menus: the main menu, and the submenu its Open recent row opens.
+    Cascade(Cascade<Act>),
+}
+
 pub struct Popup {
     pub kind: PopupKind,
-    pub menu: Menu<Act>,
-    /// The submenu opened beside one of this menu's items; the menu stays visible under it.
-    pub sub: Option<Menu<Act>>,
-    /// The submenu item the pointer rests on and when its submenu opens by itself.
-    pub dwell: Option<(usize, Instant)>,
+    pub body: MenuBody,
     /// The marked letters of the items are underlined: the menu was opened with Alt held, or Alt
     /// was pressed since (the Windows convention; a menu opened with the pointer shows none).
     pub access: bool,
-    /// This opening of the menu, and of its submenu: what their fade-in is known by
-    /// (`crate::motion`), so a menu opened again fades in again.
+    /// This opening of the menu: what its fade-in is known by (`crate::motion`), so a menu
+    /// opened again fades in again.
     pub serial: u64,
-    pub sub_serial: u64,
 }
 
 /// A number no popup had before: each opening of a menu is a new one.
@@ -263,37 +280,349 @@ fn next_serial() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// How long the pointer rests on an item that leads to a submenu before it opens, as in Windows.
-pub const SUBMENU_DWELL: Duration = Duration::from_millis(300);
+/// The room a cascade is placed in: the shared placement keeps 4 px from the edges of its area,
+/// while a menu's own placement kept them from the edges of the window. The area is widened by
+/// them at the top and the bottom, so the shared margin falls where the menu's edge was and a
+/// menu taller than the window is placed as it always was.
+fn cascade_room(area: Rect) -> Rect {
+    Rect::new(area.x, area.y - 4.0, area.w, area.h + 4.0)
+}
 
 impl Popup {
     pub fn new(kind: PopupKind, mut menu: Menu<Act>) -> Popup {
         menu.set_access_visible(false);
         Popup {
             kind,
-            menu,
-            sub: None,
-            dwell: None,
+            body: MenuBody::Menu(menu),
             access: false,
             serial: next_serial(),
-            sub_serial: 0,
         }
     }
 
-    /// Underlines the access keys of the menu and its submenu (a menu that does not read access
+    /// A popup whose menu is a `submenu::Cascade`: the main menu, whose Open recent opens the
+    /// recent list beside it.
+    pub fn main(kind: PopupKind, mut cascade: Cascade<Act>) -> Popup {
+        cascade.set_access_visible(false);
+        Popup {
+            kind,
+            body: MenuBody::Cascade(cascade),
+            access: false,
+            serial: next_serial(),
+        }
+    }
+
+    /// Underlines the access keys of every menu of the popup (a menu that does not read access
     /// keys has none to show).
     pub fn show_access(&mut self) {
         self.access = true;
-        self.menu.set_access_visible(true);
-        if let Some(s) = self.sub.as_mut() {
-            s.set_access_visible(true);
+        match &mut self.body {
+            MenuBody::Menu(m) => m.set_access_visible(true),
+            MenuBody::Cascade(c) => c.set_access_visible(true),
+        }
+    }
+
+    /// The menu the popup draws first: its items and rows (`Menu::rect`, `Menu::items`). The
+    /// window reads the menus through the methods here; the tests read these.
+    #[cfg(test)]
+    pub fn root(&self) -> &Menu<Act> {
+        match &self.body {
+            MenuBody::Menu(m) => m,
+            MenuBody::Cascade(c) => c.menu(0).expect("a cascade has its root"),
+        }
+    }
+
+    /// [`root`](Self::root), to change: its highlight, its scroll.
+    pub fn root_mut(&mut self) -> &mut Menu<Act> {
+        match &mut self.body {
+            MenuBody::Menu(m) => m,
+            MenuBody::Cascade(c) => c.menu_mut(0).expect("a cascade has its root"),
+        }
+    }
+
+    /// The submenu open beside the menu, if one is: the cascade's second menu. The tests read it;
+    /// the window asks the cascade.
+    #[cfg(test)]
+    pub fn submenu(&self) -> Option<&Menu<Act>> {
+        match &self.body {
+            MenuBody::Menu(_) => None,
+            MenuBody::Cascade(c) => c.menu(1),
         }
     }
 
     /// Whether the point is on the menu or on its open submenu.
     pub fn contains(&self, x: f32, y: f32) -> bool {
-        self.menu.contains(x, y) || self.sub.as_ref().is_some_and(|s| s.contains(x, y))
+        match &self.body {
+            MenuBody::Menu(m) => m.contains(x, y),
+            MenuBody::Cascade(c) => c.contains(x, y),
+        }
     }
+
+    /// The pointer moved to `x`, `y` at `now`. True when what is drawn changed.
+    pub fn pointer(&mut self, x: f32, y: f32, now: Instant) -> bool {
+        match &mut self.body {
+            MenuBody::Menu(m) => m.pointer(x, y),
+            // The cascade never closes an open submenu on the move alone: on the way there the
+            // pointer crosses padding and other rows, and only a rest there closes it.
+            MenuBody::Cascade(c) => c.pointer(x, y, now),
+        }
+    }
+
+    /// A click: the item under the point, when it is one. `Outcome::Outside` when the click was
+    /// not on the menu, `Outcome::Changed` when it opened a submenu.
+    pub fn click(&mut self, x: f32, y: f32) -> Outcome<Act> {
+        match &mut self.body {
+            MenuBody::Menu(m) => {
+                if !m.contains(x, y) {
+                    return Outcome::Outside;
+                }
+                m.chosen().map_or(Outcome::Nothing, Outcome::Chosen)
+            }
+            MenuBody::Cascade(c) => c.click(x, y),
+        }
+    }
+
+    /// The wheel turned by `dy` over the menus: scrolls the menu under the point, if it is
+    /// taller than its room. True when a menu scrolled.
+    pub fn wheel(&mut self, x: f32, y: f32, dy: f32) -> bool {
+        match &mut self.body {
+            MenuBody::Menu(m) => {
+                m.contains(x, y) && m.scrolls() && m.scroll_by(dy) && {
+                    m.pointer(x, y);
+                    true
+                }
+            }
+            MenuBody::Cascade(c) => {
+                let moved = c.wheel(x, y, dy);
+                if moved {
+                    // The rows moved under the pointer: its row follows them.
+                    c.pointer(x, y, Instant::now());
+                }
+                moved
+            }
+        }
+    }
+
+    /// A key, for the submenu if one is open and the menu otherwise. `Chosen` closes the popup
+    /// after acting; `Close` closes it; anything else changed only what is drawn.
+    pub fn key(&mut self, name: &KeyName, mods: Mods) -> Keyed {
+        match &mut self.body {
+            MenuBody::Menu(m) => match name {
+                KeyName::Up => {
+                    m.step(false);
+                    Keyed::Nothing
+                }
+                KeyName::Down | KeyName::Tab => {
+                    m.step(true);
+                    Keyed::Nothing
+                }
+                KeyName::Enter | KeyName::Space | KeyName::Right => {
+                    let arrow = *name == KeyName::Right;
+                    match m.chosen() {
+                        Some(act) if !arrow || act.is_submenu() => Keyed::Chosen(act),
+                        _ => Keyed::Nothing,
+                    }
+                }
+                KeyName::Escape => Keyed::Close,
+                // A letter picks the item marked with it, as Enter would (menus that read no
+                // access keys answer None and the key does nothing, as before).
+                KeyName::Char(ch) if !mods.ctrl && !mods.alt => match m.access_key(*ch) {
+                    Some(act) => Keyed::Chosen(act),
+                    None => Keyed::Nothing,
+                },
+                _ => Keyed::Nothing,
+            },
+            MenuBody::Cascade(c) => cascade_key(c, name, mods),
+        }
+    }
+
+    /// When the pointer's rest is up: when a submenu opens, or the open one closes.
+    pub fn deadline(&self) -> Option<Instant> {
+        match &self.body {
+            MenuBody::Menu(_) => None,
+            MenuBody::Cascade(c) => c.deadline(),
+        }
+    }
+
+    /// The pointer's rest is up at `now`: its ask is made. True when what is drawn changed.
+    pub fn tick(&mut self, now: Instant) -> bool {
+        match &mut self.body {
+            MenuBody::Menu(_) => false,
+            MenuBody::Cascade(c) => c.tick(now),
+        }
+    }
+
+    /// Opens the submenu of the enabled row that opens one (Open recent, in the main menu), with
+    /// its first row highlighted for a keyboard opening. One asked by the pointer or by name
+    /// lights none, as a submenu the pointer opens.
+    pub fn open_submenu(&mut self, keyboard: bool) {
+        let MenuBody::Cascade(c) = &mut self.body else {
+            return;
+        };
+        let Some(i) = c.menu(0).and_then(|m| {
+            m.items
+                .iter()
+                .position(|it| it.id.is_submenu() && it.enabled)
+        }) else {
+            return;
+        };
+        if let Some(root) = c.menu_mut(0) {
+            root.hover = Some(i);
+        }
+        c.key(&KeyName::Right);
+        // A keyboard opening lit its first row (`enter`); one asked by the pointer or by name
+        // lights none, as a submenu the pointer opens.
+        if !keyboard
+            && c.depth() > 1
+            && let Some(sub) = c.menu_mut(1)
+        {
+            sub.hover = None;
+        }
+    }
+
+    /// Places the menu and its open submenu inside `area`.
+    pub fn place_in(&mut self, p: &mut Painter, area: Rect) {
+        match &mut self.body {
+            MenuBody::Menu(m) => m.place_in(p, area),
+            MenuBody::Cascade(c) => c.place_in(p, cascade_room(area)),
+        }
+    }
+
+    /// Draws the menu and its open submenu at their presence `t.0` and `t.1`: each fades in as
+    /// it opened, its row's hover fill fading with it (`draw_in_animated`).
+    pub fn draw(
+        &mut self,
+        p: &mut Painter,
+        pal: &Palette,
+        area: Rect,
+        t: (f32, f32),
+        anim: &mut Animator,
+    ) {
+        let (tm, ts) = t;
+        let serial = self.serial;
+        match &mut self.body {
+            MenuBody::Menu(m) => {
+                m.draw_entering_with(p, area, tm, Entrance::Drop, |p, m| {
+                    m.draw_in_animated(p, pal, area, anim, ("menu-hover", serial));
+                });
+            }
+            MenuBody::Cascade(c) => {
+                let room = cascade_room(area);
+                c.place_in(p, room);
+                let depth = c.depth();
+                if let Some(root) = c.menu_mut(0) {
+                    root.draw_entering_with(p, room, tm, Entrance::Drop, |p, m| {
+                        m.draw_in_animated(p, pal, room, anim, ("menu-hover", serial));
+                    });
+                }
+                for k in 1..depth {
+                    let leftward = c.menu(k).is_some_and(|m| m.opened_left());
+                    if let Some(sub) = c.menu_mut(k) {
+                        sub.draw_entering_with(p, room, ts, Entrance::Side { leftward }, |p, m| {
+                            m.draw_in_animated(p, pal, room, anim, ("submenu-hover", serial));
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// The presence of the menu and of its open submenu, asked on every frame they are open
+    /// (`crate::motion`): a menu opened again fades in again, and a submenu opened afresh (its
+    /// path is new) fades in while one put back in its own place does not.
+    pub fn presence(&self, anim: &mut Animator) -> (f32, f32) {
+        let menu = crate::motion::menu(anim, self.serial);
+        let sub = match &self.body {
+            MenuBody::Cascade(c) if c.depth() > 1 => {
+                crate::motion::submenu(anim, self.serial, c.path())
+            }
+            _ => 1.0,
+        };
+        (menu, sub)
+    }
+
+    /// Everything the popup draws at any presence, its shadow and its drop included.
+    pub fn presence_bounds(&self) -> Rect {
+        match &self.body {
+            MenuBody::Menu(m) => m.presence_bounds(),
+            MenuBody::Cascade(c) => c.presence_bounds(),
+        }
+    }
+
+    pub fn submenu_path(&self) -> &[usize] {
+        match &self.body {
+            MenuBody::Menu(_) => &[],
+            MenuBody::Cascade(c) => c.path(),
+        }
+    }
+
+    /// The rows, scrolls and item counts of the menus, and the path of open submenus: what
+    /// changes what is drawn for the overlay signature.
+    pub fn state(&self) -> PopupState {
+        match &self.body {
+            MenuBody::Menu(m) => (
+                vec![(m.hover, m.scroll().to_bits(), m.items.len())],
+                Vec::new(),
+            ),
+            MenuBody::Cascade(c) => (
+                (0..c.depth())
+                    .filter_map(|k| c.menu(k))
+                    .map(|m| (m.hover, m.scroll().to_bits(), m.items.len()))
+                    .collect(),
+                c.path().to_vec(),
+            ),
+        }
+    }
+}
+
+/// A key for the cascade's menus. Home and End, and a letter with a modifier, were no menu key
+/// before and are none now. The window's keys went to the open submenu whenever one was open,
+/// however it was opened; the shared cascade keeps them in the menu the pointer was last in, so
+/// a Right moves them in first, and the row it lights is put out again when no row of that
+/// submenu was lit (the pointer opened it, and a pointer-opened submenu shows none).
+fn cascade_key(c: &mut Cascade<Act>, name: &KeyName, mods: Mods) -> Keyed {
+    if matches!(name, KeyName::Home | KeyName::End) {
+        return Keyed::Nothing;
+    }
+    if matches!(name, KeyName::Char(_)) && (mods.ctrl || mods.alt) {
+        return Keyed::Nothing;
+    }
+    // Escape and Left act on what is open now. A pointer change still waiting (the close of the
+    // open submenu, because the pointer rested on another row a moment ago) is dropped instead
+    // of made, and the row that opened the submenu is lit again — shared's `cancel_wait`, PR 40.
+    // Left is chosen in `cascade_key` rather than by `Cascade::keys_cancel_wait` because the
+    // `Right` below would make the waiting change first, and only these two keys drop it; the
+    // rest still make it, as shared has them.
+    if matches!(name, KeyName::Escape | KeyName::Left) {
+        c.cancel_wait();
+    }
+    if c.depth() > 1 && c.focus() == 0 {
+        let lit = c.menu(1).is_some_and(|s| s.hover.is_some());
+        c.key(&KeyName::Right);
+        if !lit && let Some(sub) = c.menu_mut(1) {
+            sub.hover = None;
+        }
+    }
+    // Tab has always stepped down the open menu.
+    let key = if matches!(name, KeyName::Tab) {
+        KeyName::Down
+    } else {
+        name.clone()
+    };
+    match c.key(&key) {
+        Outcome::Chosen(act) => Keyed::Chosen(act),
+        Outcome::Close => Keyed::Close,
+        _ => Keyed::Nothing,
+    }
+}
+
+/// What a pressed key did to the open menu.
+pub enum Keyed {
+    /// Nothing that is drawn changed.
+    Nothing,
+    /// An item was chosen: act on it, and the popup closes.
+    Chosen(Act),
+    /// Escape with nothing open inside the menu: the popup closes.
+    Close,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -309,6 +638,7 @@ pub enum DialogKind {
 
 pub struct Dialog {
     pub kind: DialogKind,
+    pub serial: u64,
     /// Scroll of a long list, logical px.
     pub scroll: f32,
     /// The scrollable list's height and its content's, set when drawn.
@@ -321,6 +651,7 @@ impl Dialog {
     pub fn new(kind: DialogKind) -> Dialog {
         Dialog {
             kind,
+            serial: next_serial(),
             scroll: 0.0,
             view: 0.0,
             content: 0.0,
@@ -356,16 +687,6 @@ pub enum Drag {
     Zoom {
         last: (f32, f32),
     },
-}
-
-/// A tooltip waiting to show, or showing.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Tip {
-    pub hit: Hit,
-    pub text: String,
-    pub anchor: Rect,
-    pub due: Instant,
-    pub shown: bool,
 }
 
 pub struct Panes {
@@ -439,9 +760,9 @@ pub struct Ui {
     pub drag: Option<Drag>,
     pub popup: Option<Popup>,
     pub dialog: Option<Dialog>,
-    pub tip: Option<Tip>,
-    /// A tooltip was dismissed by a press; it stays hidden until the pointer leaves that hit.
-    pub tip_blocked: Option<Hit>,
+    /// The tooltip waiting to show or showing, by the shared rules: the delay counted from the
+    /// pointer coming to rest (`hover_at`), a pressed control showing none until left.
+    pub tips: mdshared_ui::tooltip::Tooltip<Hit>,
     /// The link under the pointer on the page.
     pub link_hint: Option<String>,
     /// The card for a footnote or link the pointer rests on, and what files showed before.
@@ -493,8 +814,7 @@ impl Ui {
             drag: None,
             popup: None,
             dialog: None,
-            tip: None,
-            tip_blocked: None,
+            tips: mdshared_ui::tooltip::Tooltip::new().with_delay(crate::motion::TIP_DELAY),
             link_hint: None,
             card: None,
             previews: Default::default(),

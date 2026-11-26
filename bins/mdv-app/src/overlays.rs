@@ -15,6 +15,7 @@ use mdshared_ui::overlay::{
     DIALOG_FOOTER, DIALOG_PAD, dialog_button_w, dialog_card, draw_backdrop, draw_dialog_button,
     draw_dialog_card, draw_keycaps,
 };
+use mdshared_ui::submenu::{Cascade, Node};
 use mdview_core::commands::{CommandId as C, strings};
 use mdview_render::SourceKind;
 
@@ -79,14 +80,14 @@ pub fn command_icon(id: C) -> &'static str {
     }
 }
 
-/// The "⋯" menu: what the bar does not show and people use while reading. Preferences are in
-/// Settings.
-pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
+/// The "⋯" menu's items: what the bar does not show and people use while reading. Preferences
+/// are in Settings.
+fn main_items(ws: &Workspace, ui: &Ui) -> Vec<Item<Act>> {
     let has_tab = ws.active().is_some();
     let can_edit = ws.active_tab().is_some_and(|t| !t.is_missing());
     // What people use while reading; the preferences (page width, remote images, task boxes,
     // animations, the default app) are in Settings.
-    let items = vec![
+    vec![
         cmd(C::OpenFiles, "&Open files…", glyph::OPEN),
         cmd(C::OpenFolder, "Open fol&der…", glyph::FOLDER_OPEN),
         Item::new(Act::RecentMenu, "Open &recent")
@@ -120,17 +121,46 @@ pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
         cmd(C::ShowShortcuts, "&Keyboard shortcuts", glyph::KEYBOARD).sep(),
         cmd(C::About, "A&bout mdview", glyph::INFO),
         cmd(C::Exit, "E&xit", glyph::POWER).sep(),
-    ];
-    Menu::new(items, x, y, true).access_keys(true)
+    ]
+}
+
+/// The "⋯" menu: what the bar does not show and people use while reading. Preferences are in
+/// Settings. The window opens the cascade (`main_cascade`); this is the same menu as plain
+/// items, for the tests that read the labels and access keys.
+#[cfg(test)]
+pub fn main_menu(ws: &Workspace, ui: &Ui, x: f32, y: f32) -> Menu<Act> {
+    Menu::new(main_items(ws, ui), x, y, true).access_keys(true)
+}
+
+/// The "⋯" menu as a `submenu::Cascade`, anchored to `anchor` and kept on screen at any corner:
+/// Open recent opens its own menu beside the row, by the pointer's rest or a click.
+pub fn main_cascade(ws: &Workspace, ui: &Ui, anchor: Rect) -> Cascade<Act> {
+    let nodes = (main_items(ws, ui))
+        .into_iter()
+        .map(|item| {
+            if item.id.is_submenu() {
+                Node::submenu(item, recent_nodes(ws))
+            } else {
+                Node::new(item)
+            }
+        })
+        .collect();
+    let delay = crate::motion::SUBMENU;
+    Cascade::new(nodes, anchor)
+        .access_keys(true)
+        .with_delay(delay)
 }
 
 /// How far below the top of a placed menu the row of item `index` starts, from the shared
-/// menu's own layout, for a submenu's anchor.
+/// menu's own layout; the tests read a row's middle with it.
+#[cfg(test)]
 pub fn menu_row_offset(items: &[Item<Act>], index: usize) -> f32 {
     mdshared_ui::menu::row_span(items, index).0
 }
 
-pub fn recent_menu(ws: &Workspace, x: f32, y: f32, align_right: bool) -> Menu<Act> {
+/// The recent files, in the order the list keeps them, then the two commands on the list. The
+/// labels come from file names: a menu that does not read access keys draws them as they are.
+fn recent_items(ws: &Workspace) -> Vec<Item<Act>> {
     let mut items: Vec<Item<Act>> = Vec::new();
     let entries = ws.recent_entries();
     if entries.is_empty() {
@@ -161,7 +191,24 @@ pub fn recent_menu(ws: &Workspace, x: f32, y: f32, align_right: bool) -> Menu<Ac
             .icon(glyph::DELETE)
             .enabled(any),
     );
-    Menu::new(items, x, y, align_right)
+    items
+}
+
+/// The recent menu as the nodes of a cascade's submenu. Their labels are escaped: the cascade
+/// reads its menus for access keys, and a file name's `&` must stay a `&` (drawn as one, with no
+/// letter marked), as it is in a recent menu that reads none.
+fn recent_nodes(ws: &Workspace) -> Vec<Node<Act>> {
+    (recent_items(ws))
+        .into_iter()
+        .map(|mut item| {
+            item.label = mdshared_ui::menu::escape_access(&item.label);
+            Node::new(item)
+        })
+        .collect()
+}
+
+pub fn recent_menu(ws: &Workspace, x: f32, y: f32, align_right: bool) -> Menu<Act> {
+    Menu::new(recent_items(ws), x, y, align_right)
 }
 
 /// `library`: there is a notes library to add the file to (a build with none offers no row, so

@@ -11,7 +11,781 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## Motion, milestone 1: menus fade in (2026-11-25, branch `f/motion`, not merged)
+## Shared's close-out list (2026-11-26, branch `f/motion2`, pin `535ad4c`)
+
+Shared's list of what both apps should wire, checked item by item in mdview, then what was
+missing was built. One commit per item, each with a test that fails with the fix reverted.
+
+| Item | State |
+|---|---|
+| Popup damage: `presence_bounds()`, no hand-made margin | **done, checked against the code (2026-11-26): in place.** The damage pushes each overlay's own bounds: the toasts' `presence_bounds` (`app.rs:1074`), the popup's (`app.rs:1081`, `ui.rs:544` — the menu's or the cascade's) and the palette's (`app.rs:1094`); a dialog and the zoom view dim the whole window. No `rect.inset(-20)` is left in mdview's code: the one occurrence is the palette test's negative assertion (`motion_tests.rs:1046`). (`7eda58d`) |
+| D1 groups: `group`/`ungroup`, `keep_group`, damage from `group_deadlines` | **done, checked: in place.** Each animated region draws in its group — `app.rs:1260` (TITLE), `1274` (FILES; the Notes face is in the same region), `1325` (MENUS), `1355`/`1390` (SETTINGS) — and its `group_deadlines` drive the redraws (`app.rs:854`, `1018`, `1023`, `1153`, `1165`). A frame that leaves a region undrawn calls `keep_group`: `app.rs:1401` (FILES), `1405` (TITLE), `1409` (MENUS), `1413` (SETTINGS). The other overlays (palette, bars, tips, toasts) are drawn on every frame their presence changes, so neither needs a group. |
+| D3 `Painter::set_frost_key` | already done (`app.rs`, before the frame is drawn) |
+| D4 `chrome::draw_*_animated` in the title row | **done** (pin `09b01c1`, shared PR 31), see the pin section below: the window's three buttons, a tab and the new tab button fade their hover fills in the animator's group `motion::TITLE` |
+| D6 `Tooltip::hover_at` from rest | already done |
+| D7 `watch_motion_reduced` on a helper thread | already done: `App::watch_motion_with` starts the watch on a short-lived helper thread (on Windows it makes a hidden window and may wait 5 s for it); the wake only sends `Wake::Motion`, and the setting is read on the window thread after it |
+| X3 `Menu::draw_in_animated` (hover row) | done (`2c35084`) |
+| X3 `Palette::draw_presence` | done: the card fades and drops in on each opening (`motion::palette`, a serial an opening; closing instant), its presence in the overlay signature so its frames are drawn |
+| X3 `notice::draw_sliding` / `bar_height` | done: each of the three notice bars slides in by its own presence (`motion::bar`), its height taken by `notice::bar_height`, and the page is laid out under what shows (`page::Bars`, `viewport_bars`) on every frame; a bar that goes is forgotten, so a later one slides in again. A bar that is already there on the window's first frame is in place (`App::bar_t`), so the frame the window first shows never slides, and nothing jumps when the system's motion setting is read after it |
+| X3 tree chevron `draw_disclosure_animated_with`, rows named by path | already done (`motion::folder(path)`, `motion::notes_fold(key)`) |
+| L10 `Form::draw_animated` / `set_high_contrast` | already done |
+| L1 `submenu::Cascade` in place of the hand-made submenus and dwell | **done** (`e1d3074`, `060250b`, `36b6faf`, `9d2740a`): the main menu's Open recent is a `submenu::Cascade`, the `Menu`/`Cascade` body, `sub`, `dwell` and `SUBMENU_DWELL` are gone and the tests read the cascade. The Escape/Left wait is closed at shared PR 40 (pin `1588e0f`, `b65678f`, `826cab1`); see the L1 section below |
+| W3 `window_state` restores onto a monitor that still exists | **checked: the reachability check was there; the fallback is the system's.** Shared's `window_state::restore` cannot be adopted cleanly: mdview's session keeps a logical size and an absolute physical point with no monitor identity and no saved scale, where a `WindowState` is a logical rectangle relative to a named monitor with its scale. Synthesizing one would keep mdview's own title-row test anyway and lose that model. An unreachable place now asks for no position (`saved_place`, `app.rs:1933`, after `position_reachable`, `app.rs:1920`), so the system places the window as a new one, inside the work area — the behaviour before `66d76a5`; no corner is made up under a taskbar. Test with fake monitor lists only (`tests.rs:287`). `9faa52d` |
+
+**D4 is done at shared's pin `09b01c1`.** Shared's PR 31 gave the three animated title pieces their
+plain look by `t > 0.0` instead of by `hovered`, so the frame a hover begins draws the resting
+look (no flash), and mdview wires it: `chrome::draw_title` takes the animator, draws the window's
+three buttons (`draw_win_button_animated`, named by function: close/max/min), each tab
+(`draw_tab_animated`, named by its document's path so a tab that moves keeps its fade) and the
+new tab button (`draw_new_tab_button_animated`) in `motion::TITLE`; the row is redrawn while
+that group has a deadline and kept (`keep_group`) on a frame that leaves it undrawn. With
+Animations off, reduced motion, a shot or a test, each draws its plain self, pixel for pixel.
+
+### The pin at `09b01c1` (2026-11-26)
+
+Shared's `main` (PRs 21-31, 34 commits on from `535ad4c`), pinned in `Cargo.toml` and
+`Cargo.lock`. `Cargo.lock` moves the five `mdshared-*` source lines and one dependency line
+inside `serde-saphyr` (`base64 0.23.1` -> `0.22.1`, both already in the tree): no crate added or
+removed. All 193 shots byte-identical (`target/shots/pin-before` against `pin-after`), 773 tests
+passing.
+
+- **`revive` is gone.** `App::show_toast` no longer revives a stacked toast under
+  `Policy::Never`: shared's PR 24 makes `with_wait_for_lift` wait only when the animator
+  animates (its own test: `Stack::new().with_wait_for_lift()` under `Policy::Never` shows the new
+  toast at once). `under_no_motion_two_confirmations_are_both_there_on_the_next_frame` passes
+  without it.
+- **`pages::CARD_RADIUS`** (10) replaces the local `SETTINGS_CARD_CORNER` (12) that the clipped
+  settings redraw kept clear of: the clip is 2 px tighter at the card's corners.
+- **Item 4 (the dropdown's `menu_rect`/`menu_bounds`) was not adopted: nothing to replace.**
+  Hits and presses go straight into the shared `Form` (`Form::press`, `Form::pointer_move`,
+  `Form::key`), which places its own menu — mdview has no rect test of its own to swap. Damage
+  for an open settings dialog is already the whole window (`app.rs`, the `bounds` it pushes), on
+  the frame it closes too (the previous frame's `overlay_bounds`), so `menu_bounds` could only
+  repeat it. And the clipped frame's clip cannot be the card union the menu: the card's clip
+  exists to keep its rounded corners, so a union would square them. `has_dropdown` therefore
+  stays as the gate that makes such a frame draw the dialog whole; its test is unchanged.
+- **From `09b01c1`, nothing else changes what mdview draws.** The backdrop veil (PR 27) is an
+  opt-in strength for a window whose backdrop mdview does not use — not free, not adopted. The
+  pool cancelling by key (PR 28) is `mdshared-app`'s pool: mdview does not use it. The handover
+  (PR 29) reaches a winit window; mdview has its own single instance (`mdview_core::single`) and
+  is unchanged. The colour picker open (PR 30) drops a drag cursor and a row caret in the shared
+  form's colour row; mdview does not offer that row.
+
+### The pin at `1588e0f` (2026-11-26)
+
+Shared's `main` (PRs 32 to 41), for PR 40's `submenu::Cascade::cancel_wait` and
+`keys_cancel_wait`. `Cargo.lock` moves the five `mdshared-*` source lines and nothing else: no
+crate added or bumped (the terminal (`term`) and scroll-area modules are behind features mdview
+does not build). All 195 shots are byte-identical to `target/shots/review-head`.
+
+What is between the pins that could touch mdview, checked file by file:
+- **`submenu.rs`** gains `cancel_wait`, `keys_cancel_wait` and the Escape/Left handling, off
+  unless an application asks; with neither the pin changes nothing in a menu. Wired in the L1
+  section above.
+- **`mdshared-text/src/text.rs`** gains `draw_layout_clipped_tinted`; `draw_layout_clipped` is
+  the same code through `draw_runs(..., None)`. No text a shot draws changes.
+- **`tokens.rs`** changes comments only, and **`platform.rs`** only the Linux settings-portal
+  reads (off the UI thread, a last answer kept); Windows and macOS answer as they did.
+- **`mdshared-ui/Cargo.toml`** adds an optional `term` feature with `mdshared-term`; the new
+  `layout`, `scrollarea` and `termview` modules are new code mdview does not use.
+- **Other files** in the range are the terminal (`mdshared-term`, `mdshared-pty`, `termview`),
+  the scroll area and its example, the page transition and the K5 layout: none is used by
+  mdview.
+
+### Tests, with the revert each fails under
+
+Five tests, one per item that changed something (the "already done" items needed none); the
+review of the stage added a sixth, and its scale counterparts below.
+
+- **the palette's damage** (`the_palette_is_damaged_by_its_presence_bounds_not_a_hand_made_margin`):
+  the presence bounds are among the damage and the hand-made `inset(-20)` is not — the old
+  margin pushed back (`7eda58d`);
+- **a menu row's hover fade** (`a_menu_rows_hover_fill_fades_in_and_the_overlays_are_drawn_for_it`):
+  the row is at rest on the first frame, part way on the second, the still run's at the end, and
+  no timer is left — two reverts, each fails it: `draw_in` for `draw_in_animated`, and the
+  `menus_moving` arm of `overlay_changed` removed (`2c35084`);
+- **the palette's entrance** (`the_palette_fades_and_drops_in_as_it_opens_and_rests_as_a_still_one`):
+  its first frame is 0 with no card drawn, it ends at 1 and at the still run's pixels — fails with
+  `draw` for `draw_presence`, and with `palette_t` out of the overlay signature (`5bedbbc`);
+- **a notice bar's slide** (`a_notice_bar_slides_in_and_the_page_moves_down_under_it`, and the
+  same at 1.25 in `…_at_scale_1_25_too`): 0 on the first frame with no room taken, part way one
+  frame later with the viewport following, whole at the still run's pixels — fails with
+  `draw_page` given `Bars::FULL` (`79e530c`); the menu hover has the same pair of tests.
+- **a bar that is there at launch is in place** (`a_bar_that_is_there_at_launch_is_in_place_on_the_first_frame`):
+  a crash report waiting when the window starts is at 1 on the first frame *and on the second*,
+  no timer is left, and both frames are the still run's pixel for pixel (`App::bar_t` puts the
+  track at 1 with `Animator::set`, so the next frame's `presence` continues from it instead of
+  meeting the key for the first time and sliding it in from 0); a bar that arrives after the
+  first frame still starts its slide — fails with that `set` removed (the bar collapses on frame
+  2, the page jumps 34 px, and it slides in again).
+- **the title row's hover** (`the_title_rows_hover_shows_at_once_with_motion_off`,
+  `the_title_rows_hover_fades_in_from_the_resting_look`): with motion off the fill is there on its
+  own frame and nothing moves; with motion the frame the hover begins draws the resting look (no
+  flash), the next one has begun, and once settled no timer is left and the look is the still
+  run's — fails with the plain `draw_win_button` (on the no-flash assertion) and with the
+  `dirty[Region::Title]` arm removed (on "the fill has begun").
+- **the palette closes at once** (`the_palette_closes_at_once`): after the entrance, closing
+  leaves no timer and the still run's pixels — fails with the presence asked with `shown: false`
+  when the palette is gone (an exit the window does not play).
+- **a saved place on a monitor that is gone** (`a_window_saved_on_a_monitor_that_is_gone_opens_on_a_present_one`):
+  reachable on the only monitor, not on a place where the second one was, the corner cases —
+  fails with `position_reachable` made to answer true (`445403a`).
+
+### W3: a place on a monitor that is gone is the system's to place (2026-11-26, `9faa52d`)
+
+`position_reachable` (`app.rs:1920`) decides whether a saved physical place still shows.
+`66d76a5`'s first cut added a fallback to the primary monitor's bare corner; in review that
+was wrong where a taskbar sits on the top or the left edge, over the title row. Shared's
+`window_state::restore` (at `1588e0f`) was read first: it picks the nearest monitor and fits
+the rectangle into its work area. It cannot be adopted cleanly — mdview's session
+(`1100x900 [max] @x,y`) keeps a logical size and an absolute physical point, with no monitor
+identity and no saved scale, where a `WindowState` is a logical rectangle relative to a named
+monitor with its scale. Storing that would be a new session format; synthesizing it at launch
+would keep mdview's own title-row test (to find the monitor the place was on) and lose the
+model's point.
+
+So an unreachable place asks for no position (`saved_place`, `app.rs:1933`), and the system
+places the window as it places a new one, inside the work area — what Windows' `CW_USEDEFAULT`
+already did, and what mdview did before `66d76a5`. W3's restore is therefore mdview's title-row
+check with the system's fallback; the work-area handling is the system's job. The test (fake
+monitor lists only) keeps every monitor assertion: a place on a monitor that is gone and one
+whose title row is off the screen ask for no position, a partly off-screen place with its title
+row on a monitor is kept, a monitor above the first is kept, a primary away from the origin
+keeps a reachable place and asks for none for an unreachable one, the corner pixel, and an
+empty list. It fails with a corner fallback put back. All 195 shots are byte-identical (a shot
+has no session place).
+
+## Motion, milestone 3: the Settings dialog fades in, a light/dark change crossfades (2026-11-26, branch `f/motion2`)
+
+The owner, relayed by the shared session: "put some transition animations to settings menu for
+both apps, and fade in the menu opening, and if possible make light dark change a smooth
+transition", then corrected: "I meant settings menu **window** should fade in when I open it".
+So there are no page-change transitions; the page-turn work is not used.
+
+**Step 0, the pin: nothing was missing.** `anim::PageTransition`/`PageEffect` (unused now),
+`Painter::snapshot`, `Snapshot::crossfade`/`crossfade_keyed` and `Painter::set_frost_key` are all
+at `1588e0f` (`page.rs`, `region.rs`, `gfx.rs`), and `docs/ANIMATION.md` documents them. The pin
+stays.
+
+**1. The Settings dialog fades in (`00670b1`).** `motion::settings` is a presence named per
+opening (`App::settings_serial`, bumped only when Settings was closed), using `document::MENU`'s
+117 ms enter — the menus' duration — rather than shared's
+`document::DIALOG` (250 ms): the dialog is opened from a menu and should not arrive slower than
+the menu did (the owner's "quick and quiet"). The dim and the card are drawn over the window as
+it was and given one opacity, so they come in together. The entrance now snapshots only the
+card and shadow (`overlay::dialog_bounds`), clips the form to those bounds, then fades the
+copy. Outside those bounds it dims the original pixels in place. This is equivalent to
+rescaling the fully dimmed pixels by `(1 − a·t) / (1 − a)` before rounding, but starting with
+the original pixels lets it reproduce the old two integer rounding steps and keep alpha
+unchanged. At 0 it lays out without copying or painting; at 1 it draws as before without
+copying. An opened dropdown ends the entrance so the card clip cannot cut it off. Closing
+is instant, with no exit. At 1280 × 800 and 100%, the blended frame copies 372,096 pixels
+(1.42 MiB), down from 1,024,000 pixels (3.91 MiB).
+`settings_t` is in the overlay signature, so every frame of the fade is drawn whole; the dialog's
+bounds are the whole window anyway. An entrance shot (`--dialog settings --motion-at 67`) skips
+the usual at-rest draw, so the first frame on the shot clock is the window under the dialog.
+
+Tests (`motion_tests.rs`): the first frame at 0 is the window under the dialog pixel for pixel;
+the damage covers every row; a frame at 16 ms is part way (0 < t < 1); the fade ends in at most
+nine 16 ms frames and leaves no timer; at rest it is the still run's dialog pixel for pixel;
+Escape mid-fade leaves the window as it was with no timer. With Animations off, and with the
+system's reduced motion, it is whole at once and equals the still run's. Revert checks: with
+`settings_t` constant 1.0 the first-frame assertion fails; without the snapshot/fade the dialog
+is drawn whole on its first frame and `the_settings_dialog_fades_in_when_it_opens` fails on that
+same assertion.
+
+**2. Every menu and popup already fades in at 117 ms; nothing was fixed.** Checked against the
+code: all six popup kinds go through `Popup::new`/`Popup::main` → `Popup::presence` →
+`motion::menu` (`MENU.enter`), which is `PopupKind::Main`, `Recent`, `Tab`, `Page`, `Find` and
+`Library`, plus every submenu (`motion::submenu`, one presence per path, so one put back in its
+place does not re-fade); the command palette uses `motion::palette` (also `MENU.enter`) and its
+card enters by shared's `draw_presence`. Every `Popup` carries a fresh serial from
+`Popup::new`/`Popup::main`, wherever it is made (`open_popup`, the tab, page and find menus in
+`app/input.rs`, the library's in `app/library.rs`), and `App::compose` asks `presence` for the
+open one on every frame. Dialogs other than Settings (About, Shortcuts, Recent, Allow edit, Add
+library) still appear at once: they draw their own card, have no entrance, and the owner asked
+only for the Settings window. Menus and dialogs all close instantly.
+
+**3. A light/dark change crossfades (`82380ec`, with review fixes).** `App::sync_theme` sees the
+palette change (the setting, or `WindowEvent::ThemeChanged` → `ws.set_system_dark` → the next
+frame), captures the frame that was shown (`4 * w * h` bytes, under 4 MiB at 1280x800), then
+switches the palette. `App::theme_frame` blends the snapshot back over each whole redraw using
+`Snapshot::crossfade`: 170 ms linear, starting at 0 (the old frame). A second flip starts from
+the currently blended frame. The snapshot includes Settings if it was already showing.
+
+There is no capture on launch, with animations off or reduced, or during a presentation.
+Entering a presentation immediately frees any existing snapshot. A resize that changes the
+content size frees the snapshot on the event, even when minimization prevents the next frame
+from drawing. A same-size notification keeps the fade. A theme flip arriving together with a
+resize cannot capture the newly allocated bitmap.
+
+Tests (`motion_tests.rs`): the kept frame is exactly the window's rectangle and size (and the
+4,096,000 bytes); the change's first frame is the old palette's pixel for pixel; the damage
+covers every row of the window, on the first frame and at 85 ms; at 85 ms of 170 the page's
+colour is neither palette; the end is the window a run that started light draws, and the kept
+frame is freed; motion off and reduced motion keep nothing and equal the still run; a resize
+mid-fade ends it with no timer and the new palette alone. A minimizing resize releases the
+snapshot before another frame is composed, and restoring the original size does not replay it.
+Choosing a new theme from the command palette dismisses the palette immediately and still
+crossfades the unobstructed window. The same applies to a popup command that dismisses its
+menu. If an overlay closes after a fade has started, it disappears immediately and the window
+finishes at the new palette without replaying the overlay. With motion off, the new palette
+appears immediately as before.
+
+The headless regressions use the real command palette and a Dark item on the normal popup
+dispatch path (the Windows `⋯` menu itself has no theme row). They compare the first frame
+against the unobstructed old palette, check a pixel between the palettes, and compare the
+settled frame against the new palette. Separate checks cover zoom dismissal before capture,
+submenu and Settings dropdown dismissal while their parents stay open, and the disappearance
+of a preview, link hint or toast mid-fade. Opening a dropdown during the Settings entrance
+finishes the entrance before it draws the dropdown.
+
+**Shots.** `dialog-settings-opening-light` and `-dark` show the dim and card entering together.
+`theme-fading-{dark,light}` and `theme-fading-settings-{dark,light}` capture the theme fade
+with and without the dialog already open. `--theme-flip light|dark` applies the change after
+the clock starts. Without `--light` or `--dark`, it simulates a desktop theme change so the
+dialog's Theme row stays on System. The fade begins on the first 16 ms frame, so
+`--motion-at 101` captures 85 ms into its 170 ms.
+
+**Review verification (Windows).** Workspace release suite: 798 passed, 0 failed; the six
+pre-existing ignored cases passed in separate runs of the release test binaries. Format and
+release Clippy passed. All 12 added tests and the two strengthened tests failed under their
+respective temporary reverts or mutations, then all 14 passed after restoring the code.
+The shot suite produced 201 PNGs: 197 byte-identical to the 199-shot baseline, two changed
+theme fades and two new Settings theme fades. All four were inspected. At (640, 400), the
+page blends RGB 32 ↔ 251 to 142 and the Settings card blends 44 ↔ 252 to 148 in both directions.
+
+**Follow-up verification (Windows).** Format and release Clippy passed; 806 release workspace
+tests passed, including the six normally ignored cases. The two added regressions failed with
+their fixes reverted, then passed after restoration. Of the 195 `--no-session` shots rerun,
+193 are byte-identical to the previous review; only the two Settings theme fades changed.
+Both were inspected and show System selected. Six legacy scratch-profile shots were not
+rerun because they need a session to read the scratch preferences.
+
+**Overlay and entrance follow-up.** The palette ghost and mid-fade close regressions failed
+before the fix. The Settings regression compares the old whole-window blend in both themes
+at 100%, 125% and 150%, and fails if the snapshot returns to full-window size. All 195
+`--no-session` shots are byte-identical to the previous review; both Settings entrance shots
+were inspected again. The six scratch-session shots were not rerun. Windows fmt and release
+Clippy passed; the full release suite with the CI-pinned Rust 1.99.1 passed 809 tests including
+the normally ignored cases. `updater::tests::a_cargo_build_does_not_update_itself` fails on
+Cargo 1.100 because its test executable moved from `target/release/deps` to `build/.../out`.
+The test is unchanged.
+
+**Settings peak memory (Windows, headless).** At 1280 × 800 logical, the largest sampled OS
+peak private commit over three release runs (Rust 1.99.1) of `fixtures/showcase.md` in dark mode
+(`--dialog settings --motion-at 117`, including PNG encoding):
+
+| Scale | Device px | Old entrance | Bounded entrance | Page alone, after | Theme fade, after |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 100% | 1280 × 800 | 22.77 MiB | 22.33 MiB | 21.75 MiB | 22.73 MiB |
+| 125% | 1600 × 1000 | 28.98 MiB | 28.00 MiB | 28.02 MiB | 29.43 MiB |
+| 150% | 1920 × 1200 | 36.95 MiB | 35.58 MiB | 35.35 MiB | 36.81 MiB |
+
+The Settings entrance is under 30 MiB in this run at 100% and 125%. At 150% the page alone
+already exceeds the budget. These are viewer-process measurements from
+`GetProcessMemoryInfo` (`PeakPagefileUsage`), not a native-window memory measurement.
+
+### Owner decision (2026-11-26)
+
+- “Accept the brief overshoot.” Keep the 170 ms theme crossfade and its full-window copy.
+  The fade may push private memory past 30 MiB only while it runs; the snapshot is freed
+  as soon as it ends. This exception does not cover steady-state memory.
+
+### Decisions taken without the owner
+
+- If a dismissal would contaminate the source of a new theme fade, compose once more in the
+  old palette without the closed overlay, then capture that clean frame. The extra compose is
+  only on such a flip; there is still just one theme snapshot. If an overlay closes mid-fade
+  without another flip, discard the snapshot and snap to the new palette rather than trying
+  to reconstruct the blend from a bitmap that already contains the overlay.
+- Cap the theme snapshot at 2560 × 1600 device pixels (15.625 MiB). Above that area the theme
+  snaps; do not downscale. A 3840 × 2160 snapshot alone is about 31.6 MiB, beyond the 30 MiB
+  private-memory budget. The cap limits the snapshot only, not total process memory.
+- With frosted chrome active, the theme snaps with no fade. The shared blend accepts only one
+  frost key, but light and dark use different keys. Enabling frost also ends an in-flight fade.
+
+### Not verified / next steps
+
+- The frosted theme change is tested headless with a compositor stand-in, not on a real
+  backdrop. An OS `ThemeChanged`, native minimize/fullscreen/maximize, 144 Hz, macOS
+  (including its app-menu dispatch), and Linux were not exercised.
+
+### L1: the main menu's Open recent is a `submenu::Cascade` (2026-11-26)
+
+Commits, each built, tested and shot-checked: four for the move — `e1d3074` builds the cascade
+beside the menu, `060250b` moves every call site onto the popup (nothing drawn changes; 195
+shots byte-identical), `36b6faf` makes the body the `Menu`/`Cascade` enum and deletes the
+hand-made submenu, `9d2740a` adds the two tests below — three for Opus's review (`0d98d2b`,
+`26341e0`, `90f531f`), two for its close-out (`ee1501d`, `e47fe69`), then the pin at `1588e0f`
+(`b65678f`) and the Escape/Left fix on it (`826cab1`).
+
+- **The body.** `Popup { kind, body: MenuBody, access, serial }`, `MenuBody::Menu(Menu<Act>)` or
+  `MenuBody::Cascade(Cascade<Act>)`. Only the main menu is a cascade; the context menus, the
+  recent list and the find box's stay plain menus. `sub`, `dwell`, `sub_serial`, `SUBMENU_DWELL`
+  and the separate `menu` field are gone. `Popup` owns what the window used to do around it:
+  `pointer` (the 300 ms rest and the aim test), `key`, `click`, `wheel`, `deadline`/`tick`,
+  `open_submenu`, `place_in`, `draw`, `presence`, `presence_bounds` and `state` (the overlay
+  signature hashes it). The tests read the menus through `root()` and `submenu()` (both
+  `#[cfg(test)]`: the window reads through the cascade), and `root_mut()` for a shot's scroll.
+- **Kept.** The menu's 117 ms fade (`motion::menu`) and the hover fade (`motion::MENUS`,
+  `draw_in_animated`): the cascade's own `draw_animated` draws rows plain, so `Popup::draw` walks
+  the open menus and gives each the entrance mdview had (`Entrance::Drop` for the root, `Side`
+  for a submenu, 117 ms each). A submenu's presence is named by the row path
+  (`motion::submenu(anim, serial, path)`), so a submenu opened afresh fades in and one put back
+  in its own place does not. The 300 ms rest is `motion::SUBMENU` (`Cascade::with_delay`); the
+  keys, Tab stepping down, the access keys and the mouse dwell are as they were.
+- **Access keys.** The cascade reads every menu for them, so the submenu's labels are escaped
+  (`escape_access`): a file name's `&` is drawn as one `&` and marks no letter, as the recent
+  menu that reads none draws it.
+- **The keys go to the open submenu, however it was opened.** The shared cascade keeps them in
+  the menu the pointer was last in; `cascade_key` moves them into the submenu with a `Right`
+  first (putting out the row it lights when none was lit), so Up/Down/Enter act on the submenu
+  as they always did, and Escape and Left drop a waiting pointer change first and then close the
+  submenu (below). Home and End, and a letter with Ctrl or Alt, stay no menu keys.
+- **Placement.** The shared `around`/`beside` keep 4 px from the edges of the area they are
+  handed; a menu's own placement kept them from the window. `cascade_room` widens the room by
+  them at the top and the bottom, so the cascade's root lands on the menu's rectangle at every
+  size (the test below; at a fractional scale the two roundings can be a pixel apart). The
+  submenu now sits `beside` its menu with the shared 2 px gap; the old code overlapped the menu
+  by 4 px, so it moved 6 px (the cascade shots).
+- **One change of behaviour, the shared rule, not a regression:** the pointer resting on its
+  menu's padding (not on a row) while a submenu is open now asks for it to close after the
+  300 ms if it is not on its way to the submenu (the old code kept it until a row was rested
+  on). The crossing test asserts it: on the padding the submenu stays and the row stays lit
+  while a deadline waits, and when that timer comes the submenu has closed. Every other key
+  still makes a waiting pointer change first, as shared has it; Escape and Left are the two
+  that drop it (above).
+
+Tests: fourteen tests read the cascade's state where they read the old fields — `root()` for
+`menu`, `submenu()` for `sub` and `deadline()` for `dwell` — across `app/tests.rs`,
+`motion_tests.rs`, `frost_tests.rs` and `library_tests.rs`, and three helpers (`menu_row`,
+`recent_row`, `menu_middle`). One assertion says the same thing through the cascade rather than
+the fields: `a_submenu_opens_after_the_pointer_rests_and_the_parent_stays` asserts the submenu
+lies just beside the menu's left edge (the shared gap) rather than over it. The crossing in
+`a_click_opens_the_submenu_at_once_and_other_items_close_it` is not the same thing: the old rule
+kept the submenu open on the padding, and the cascade closes it after the rest, so the test now
+asserts the new rule (see above). Three are new, each failing with its fix reverted:
+- `the_cascades_menu_is_placed_where_the_menus_own_placement_puts_it`: the cascade's root equals
+  the menu's own placed rectangle at 1280x800, 1000x520 and 520x360 exactly, and at 1.5x at
+  907x601 its y, width and height exactly with x 0 or 1 px apart (the two roundings of the right
+  edge differ there) — fails with `cascade_room` left as the plain room (1000x520: y 44 in a
+  472 px box instead of 40 in 476);
+- `a_recent_files_ampersand_is_drawn_as_one_and_marks_no_letter`: `R&D.md` in the submenu parses
+  to `R&D.md` with no access key — fails without the escape;
+- `the_keys_act_in_the_submenu_the_pointer_opened`: after a click opens the submenu, Down lights
+  its first row and the menu keeps its row lit — fails with the `Right` that moves the keys into
+  the submenu removed (the submenu closes instead).
+
+**Escape and Left are closed, at shared PR 40 (pin `1588e0f`).** A pointer that rested on
+another row less than 300 ms ago leaves a close waiting; `cascade_key` calls
+`Cascade::cancel_wait` for Escape and Left, which drops it and lights the row that opened the
+submenu again, so the key closes only the submenu.
+`escape_with_a_waiting_pointer_change_closes_only_the_submenu` is un-ignored and
+`left_with_a_waiting_pointer_change_closes_only_the_submenu` is new: both assert the menu stays,
+the submenu is gone and its opening row is lit. With the `cancel_wait` call removed, Escape
+closes the whole menu and Left leaves the other row lit — each fails on its own assertion.
+`cancel_wait` in `cascade_key` was chosen over `Cascade::keys_cancel_wait(true)`: mdview's
+`Right` that moves the keys into the submenu would make the waiting change first, and the other
+keys keep shared's "make it first" rule.
+
+### Review of L1 (2026-11-26)
+
+Opus's review said FIX. Commits `0d98d2b`, `26341e0`, `90f531f`:
+
+- **The crossing assertion checked nothing.** It ticked at `Instant::now()` after a move, which
+  can never apply a close due 300 ms later. `a_click_opens_the_submenu_at_once_and_other_items_
+  close_it` now states the rule after the crossing: on the padding the cascade has a deadline
+  and the row stays lit, and when the timer comes the submenu has closed — it fails with `tick`
+  made a no-op (the stand-in for the old "stays open on the padding" rule).
+- **Escape with a waiting pointer change** (shared's, so it waited): closed at shared PR 40 (pin
+  `1588e0f`, `826cab1`) with `Cascade::cancel_wait`, called in `cascade_key` for Escape and Left;
+  the Escape test is un-ignored and a Left one added (above).
+- **Placement at a fractional scale**: see the test above, 907x601 at 1.5, a 1 px tolerance.
+- **A tooltip in the title-hover shots.** The tick that shows a shot's tip at once ran for any
+  moving shot, so `title-hover-light`/`-dark` (`--hover-close --motion-at 40`) drew a half-faded
+  "Close" bubble no window shows (a tip waits 500 ms). It now runs only under `--hover`; both
+  shots retaken and looked at, the bubble gone, and `tip-fading-light`/`-dark` byte-identical.
+- **The pin's blank line.** `bins/mdv-app`, `crates/core` and `crates/render`'s `Cargo.toml` each
+  end as they did before the pin; each diff against `d624d61` is its rev lines alone.
+
+### Shots
+
+`tests/shots.sh` into `target/shots/review-head`: 195 shots, 183 byte-identical to
+`target/shots/l1-before`. Twelve differ, looked at in both themes:
+- the seven main-menu shots (`menu-main-light`/`-dark`, `-keys`, `-fading-light`/`-dark`,
+  `menu-tall-main`, `hover-menu`) differ by 30 pixels each: the Open recent row's arrow is the
+  shared `glyph::RIGHT`, which the menu draws for any row a cascade marks as opening a submenu,
+  where the old hint was the text `›` (measured: 30 px, x 1252–1257, y 163–170 at 1280x800; the
+  tall shot at x 972–977, y 121–128);
+- `menu-cascade-light`/`-dark` and `scale-150-menu` differ over the submenu's whole rectangle:
+  it moved 6 px away from its menu (the shared 2 px gap in place of the old 4 px overlap). Its
+  rows, width, height and row alignment are as they were.
+- `title-hover-light`/`-dark` no longer carry the half-faded "Close" tooltip (the review's fix;
+  the bubble was 40 ms into an 83 ms fade). The button's hover fill itself is unchanged.
+
+`menu-recent`, `menu-tab*`, `menu-page`, `menu-find`, `menu-library-*`, `tip-fading-*`, the
+palette, the dialogs and every content shot are byte-identical. The pin at `1588e0f`'s set
+(`target/shots/pin-1588e0f`) and the Escape/Left fix's (`target/shots/pin-keys`) are
+byte-identical to `review-head`, all 195.
+
+Not verified: the owner's look at the changed menu shots (the arrow and the 6 px gap are his
+judgement calls, and the shared gap cannot be the old overlap without changing shared); the 300
+ms rest and the aim test by hand in a real window; the cost of a menu frame (the cascade places
+its menus once more a frame than the old code, `place_in` before the draw and again inside it);
+Linux and macOS.
+
+### Numbers (release, this PC, 2026-11-26)
+
+The scroll-frame path changed (the page's viewport and each notice bar), so it was measured;
+the other item commits only add work while something moves. Before = `f8ce783`, after =
+`445403a`. Both binaries in one folder with the same copy of `showcase.md` and fresh settings,
+`--behind --no-session`, alternating: 300 scroll frames, own work, medians 0.85–0.96 ms before
+(paint 0.43–0.47, p90 1.21–1.40, max ≤ 2.5) and 0.93–0.96 ms after (paint 0.46, p90 1.37–1.38,
+max ≤ 2.5): parity within the noise. Idle CPU from 3 s to 6 s: 0, 0.016 and 0 s before, 0, 0 and
+0 s after; memory about 41–42 MiB both. First frame 148.7 ms before, 179.6 ms after (one run
+each, and 141.5 ms in an earlier after run: the launch varies more than this).
+
+**An anomaly, not explained.** Runs of the same after binary with the settings file under
+`target/scratch` inside the repo made some scroll frames paint at 10–60 ms (mean paint 1.0–1.3 ms,
+max 25–68 ms); the before build in the same repo root was fast, and the after binary in a temp
+folder was fast too, with the repo's own fixture. The commit was ruled out by building each of
+the stage's commits in one worktree: `2c35084`, `5bedbbc`, `79e530c` and `445403a` are all the
+before build's 0.4 ms paint there. What was not found is why that one combination was slow; no
+number above is taken from those runs.
+
+**Next: the owner's look, then the branch is ready to merge.** Two things the owner will see:
+
+- **The changed menu shots**: the Open recent row's arrow is the shared glyph in place of the
+  text `›`, and the submenu sits 6 px further from its menu (the shared 2 px gap in place of the
+  old 4 px overlap).
+- **A rest on the menu's padding now closes the submenu.** With a submenu open, the pointer
+  resting on the menu's padding (not on a row) closes it after the 300 ms; the old code kept it
+  open however long the pointer rested there.
+
+Shared's close-out list is complete on this branch and checked item by item against the code:
+`presence_bounds` and D1 were already in place (file:line in the table above); W3's reachability
+check was there, and its fallback is the system's (`9faa52d`), with nothing new for the owner to
+look at. The pin is `1588e0f`; nothing in shared was changed by mdview.
+
+Workspace after the close-out check: 780 passed, 6 ignored (`mdview`'s own: 339 passed, 1
+ignored).
+
+---
+
+## Motion, milestone 2: chevrons turn, toasts rise and stack, the dialog moves (2026-11-25, branch `f/motion2`, not merged)
+
+Built on `main` `01f67b2` (milestone 1 merged). The branch's commits: the chevron, the toasts,
+a pin move, the menu's preset, the Settings dialog in motion, tooltips from resting, `--behind`,
+the clipped frame for a dialog that only moves, four pin moves and the review's fixes below.
+
+- **Pins.** Shared moved from `48eb3ce` to `a3bfca4` (X3 the turning disclosure, L10 the
+  settings form in motion): all 172 shots byte-identical, the workspace tests passed. Then to
+  `6ec1dee` (shared `main`, PR 15: `document::MENU` enters in 117 ms, ANIMATION.md): all 182
+  shots byte-identical. Then `f45a71c` (the `Stack`'s `replace_newest`, `show` and `revive`, the
+  paged form's `draw_animated`, `Tooltip::hover_at`), which the dialog's motion, the toasts'
+  replace and the resting tips are built on; and `535ad4c` (PR 20,
+  `Stack::with_wait_for_lift`), whose move alone left all 189 shots byte-identical against the
+  run at `f45a71c` and the workspace tests passing. Each time `Cargo.lock` changed only the five
+  `mdshared-*` sources; no crate added or bumped.
+- **The menu's preset.** `motion::MENU` is `document::MENU` itself now; the local 117 ms
+  override (`MENU_IN`) is gone, as the shared preset is 117 ms. The half-faded menu shots are
+  byte-identical.
+- **A folder's chevron turns.** In the Files pane, and for a group or a section of the Notes
+  pane, the chevron is `glyph::draw_disclosure_animated` (the shared `DISCLOSURE_MOTION`,
+  `fluent::MOVE`, 167 ms) instead of a swap of `RIGHT` and `DOWN`. Each is named by what it
+  is, not where (`motion::folder(path)`, `motion::notes_fold(key)`), so a row pushed down by a
+  folder opening above it keeps its turn. The pane's values are in the animator's group
+  `motion::FILES`: the Files region is drawn on each frame while the group has anything in
+  flight (`group_deadlines`, whenever the frame comes, so a frame a little before the deadline
+  still draws it), and a frame that leaves the region undrawn calls `keep_group`, so a folder
+  clicked after a quiet spell turns from where it was drawn instead of being taken for new.
+  At rest it is the old glyph, pixel for pixel (every Files and Notes shot byte-identical).
+- **Toasts rise in; confirmations stack.** The status line is shown through the shared
+  `anim::Stack` (`App::sync_toasts`, asked in `compose` on every frame, as the menus are).
+  A status says whether it **replaces** or **stacks** (`StatusLine::stack`):
+  - `Workspace::set_status` (the default, every caller but those below) **replaces**, as
+    before: the toasts showing go at once, with no exit and no lift, and the new one enters with
+    its fade. Done with the shared `Stack::replace_newest` (a readout that changes in place
+    keeps its key, presence and place) and `Stack::remove` for the others; there is no
+    `toast_gen` and no new stack name any more. Zoom steps, page width, an export's or a print's
+    progress and then its result, refusals, errors: one toast, as before.
+  - `Workspace::confirm` **stacks** under the toasts still showing (`Stack::show`), which move
+    up by `fluent::MOVE`. Used only by one-shot confirmations that are separate events: "Copied"
+    (Copy, Copy as Markdown, a slide's copy), "Code copied", "Link address copied",
+    "Formula source copied", "Diagram source copied", "File path copied", the crash report's
+    "copied" message.
+  - The same text still showing (anywhere in the stack, not only the newest) keeps its toast
+    for longer instead of adding one: `Stack::show` finds it and `revive`s it with the new time.
+    A matching toast already **leaving** is brought back by `revive` too, turning round where it
+    is in its exit; a replacing message does so only when that toast is alone.
+  - Never more than three are drawn, those leaving included (`motion::TOASTS_MAX`; the stack is
+    `with_max(3).with_max_drawn(3)`, so a fourth push drops the oldest leaving ones and still
+    draws three at most). A toast pushed out of the newest three vanishes at once rather than
+    playing its exit: left so on purpose after the second review, for the owner's look.
+  - A confirmation pushed onto others **waits until they have lifted** (`with_wait_for_lift`,
+    the owner's "New waits for the lift", 2026-11-25): its entrance starts when the lift's
+    167 ms are over, so the one above never covers it on the way in. Onto an empty stack it
+    enters at once. Under `Policy::Never` the shared stack still keeps the delay (a delay is a
+    wait, not a movement), which would show the new toast 167 ms late with nothing moving:
+    `App::show_toast` calls `revive` on the key right after a push when the animator does not
+    animate, which drops the wait, so every still frame is whole at once. Shared keeps a delay
+    under reduced motion on purpose (a delay is a wait); a caller that never animates has no way
+    to say so, so this is the window's correction. Shared PR #24 (unmerged, 2026-11-25) makes
+    `with_wait_for_lift` skip the delay under `Policy::Never`; when the pin moves past it, the
+    `revive` in `App::show_toast` (and its test's second half) goes.
+  - A toast that would reach above the page (a short window) is left out, except the bottom one
+    (no lift), so a window however short still shows its one status; a lifting toast moves
+    by whole device pixels (`toast_y`), so its text keeps the grid it has at rest; the height
+    used for the lift is `Bubble::toast`'s own `rect.h` (shared exports no constant for it).
+  - Each leaves of itself at its time by `document::TOAST`'s exit (167 ms each way,
+    `motion::TOAST`); a cleared status sends them all away; a status already past its time when
+    the first frame after it comes (a covered window) shows no toast. Drawn by
+    `Bubble::draw_presence` (plain `draw` at rest); the redraw holds each toast's
+    `presence_bounds` and the overlay signature its presence. `toast_until` is the stack's
+    deadline.
+- **Nothing moves** under `Policy::Never` (a shot, a test, the setting off, the system's
+  reduced motion): the chevron is open or closed at once; a toast is there at once and gone on
+  the frame its time is up. Every new motion goes through the one `Animator` and `anim_due`;
+  nothing new runs at launch.
+- **`--turn <folder>`, `--toast <text>` (repeatable), `--motion-at <ms>`, `--flip-setting <id>`**
+  (shot only): open a top-level folder of the Files tree (no such folder: the shot exits with
+  2), show messages as stacking toasts, turn a Settings row with Space; with `--motion-at`, the
+  last of them is set moving on a clock set by hand and drawn that long in (16 ms frames, as
+  `--menu-at`, whose loop is the shared `frames_until`), at most 10000 ms. A moving shot
+  (`--menu-at`, `--motion-at`) runs under `Policy::Always` (`App::forced_motion`), so its
+  picture does not depend on the Animations setting or the system's reduced motion. With
+  `MDVIEW_TRACE` it prints each frame's cost.
+
+### The Settings dialog in motion
+
+`mdshared_ui::settings::pages::Form::draw_animated` (shared `f45a71c`) draws the dialog's values
+in the animator's group `motion::SETTINGS`: a switch's knob slides and its fill comes in, a chosen
+segment slides, the page list's hover fill fades, and a row's keyboard highlight is as it is.
+Each row's values are named under its page and id, so a row of another page at the same place
+starts at rest. At rest it is `Form::draw` pixel for pixel.
+
+A frame where only the dialog moves (the group has something in flight and nothing else changed)
+redraws the inside of the card alone, not the window (`App::compose`, `settings_only`): the page
+list and **every row changed while the group has been in flight** (`settings_changed`, a list
+kept until the group settles and cleared when the dialog opens or closes). The list is what the
+first review fixed: with only the last changed row redrawn, a second switch turned while the
+first was still sliding was drawn once and its knob froze part way. A card with a dropdown is
+drawn whole instead: a choice of more than three options is one, and so is a row an application
+forced to a dropdown whatever its count (its flag is private to the shared form, so the laid-out
+control answers: a segmented row has segment rects, a dropdown none). Its menu reaches past the
+card, and the shared form does not say whether one is open. Such a dialog moving counts as an
+overlay change on its own (`overlay_changed ... || (settings_moving && !settings_only)`), or the
+frames after the first would draw nothing and the card would freeze — the second review found
+exactly that, as mdview's own pages have no dropdown and every test passed without it.
+
+The system's contrast theme is read only while the dialog is open: when it opens and, while it is
+open, on a focus gain, a theme change and a motion wake (`App::read_motion`). With it closed
+nothing asks the system. On Linux the answer is false, as the shared host has it, because the
+shared read opens a D-Bus connection and may wait 500 ms on the window's thread. Under high
+contrast the highlights change at once and only the knob still slides.
+
+### Tooltips wait for the pointer to rest (the owner's "From resting")
+
+A tooltip waits `motion::TIP_DELAY` (500 ms, the shared `document::TIP_DELAY`) from the pointer's
+last move on its control, not from entering it (`Tooltip::hover_at`, on every pointer move), and
+then fades in by `motion::TIP` (the shared `document::TIP`: 83 ms). A neighbour's shows at once
+while one shows; leaving hides it at once. With animations off, reduced motion or a still run it
+is there at once. The test's time is given (`App::pointer_moved_at`), not slept.
+
+### `--behind`: a test run's window
+
+`--behind` opens the window inactive (`with_active(false)`) and `AlwaysOnBottom`, and makes the
+launch never hand its files to an mdview already running (whose `handed_over` would unminimize and
+focus its window): `Args::folder` gives `hand_over: false` and a wait of zero — `admit` builds the
+forward and `claim` does call it, but it always returns false — and the launch still **claims the
+settings folder** (`folder_lock::claim`), so it cannot write the session under a window that has
+it. A folder another window holds leaves it without a session through the usual busy path, so the
+session is not written. It does not listen for hand-overs either (`Args::listens`, gated in
+`run`): no `instance.port` is written, and a file the user opens never reaches a hidden test
+window. A `--behind` run on a real session therefore holds the folder for as long as it lives, so
+the user's own launch waits `folder_lock::WAIT` (10 s) and then opens without its session: test
+runs must always use a scratch `MDVIEW_SETTINGS`. `--maximize` is ignored under it, and so is a maximized place in the session
+(`Args::maximized`): a maximized window is shown with `SW_MAXIMIZE`, which activates it. A
+hand-over that reaches it does not focus it. The level set when the window is made stands: setting
+Normal first to force `AlwaysOnBottom` again (winit skips a level that has not changed) would
+raise the window for a moment, so it is not done. What remains: showing a window can raise it
+once, so a `--behind` window may show above the others as it appears and is not sent down
+afterwards; nothing of mdview's raises it after that. The decisions are `Args::presence`,
+`Args::folder`, `Args::listens` and `Args::maximized` (pure, with tests) and `admit` (the folder
+step of `run`, which a test drives with its own `claim` and a live listener that would take a
+hand-over, so re-gating `--behind` there fails it). `--behind --no-session` has no session to
+claim and claims none.
+
+### Decisions
+
+- **The owner (2026-11-25):** tooltips wait from the pointer coming to rest on a control, not
+  from entering it ("From resting"): wired to `Tooltip::hover_at`, which shared added at
+  `f45a71c`, and a tip fades in by `document::TIP` (83 ms).
+- **The owner (2026-11-25), "New waits for the lift":** a confirmation pushed onto stacked
+  toasts enters once the ones above have lifted (167 ms), so it is never covered on its way in.
+  Under `Policy::Never` the window drops the shared wait with `revive` (see above).
+- The coordinator, after Fable's review (for the owner's look): a status replaces by default
+  (the old behaviour) and stacks only for one-shot confirmations; never more than three shown,
+  leaving ones included. The first version stacked every message, which made zoom steps a
+  ladder and left "Exporting…" above "Exported to …". The toast's timings are the shared preset
+  as it is (167 ms in, 167 ms out), set in `motion.rs`; the chevron's are the shared
+  `DISCLOSURE_MOTION`, which `draw_disclosure_animated` fixes (`motion.rs` cannot tune it).
+  The Files region is redrawn whole on each frame of a turn (one pane).
+
+### Tests
+
+`app/motion_tests.rs`, eight more, each failing with its fix reverted (checked one by one: the
+`keep_group` removed, the in-flight redraw removed, the folder named by its row index, the
+Notes chevron drawn as before, `draw_presence` replaced by `draw`, `bounds` for
+`presence_bounds`, the presence out of the overlay signature, a repeated message pushed again):
+a folder that opens turns its chevron on frames nothing else changed, after quiet frames, and
+ends at the still run's pixels with no timer left; a chevron named by its folder keeps turning
+when a folder above opens; the setting off and reduced motion open a folder at once; a Notes
+group's chevron turns as it folds; a toast rises in, rests at the still run's pixels, leaves
+of itself by its timer and an exit, and leaves nothing on screen nor any timer; a second toast
+stacks under the first, which lifts by 44 px, the same message again adds none, a cleared
+status sends them away; the redraw holds a rising toast's `presence_bounds`; the setting off
+and reduced motion show and drop a toast at once.
+
+After Fable's review, twelve more (`motion_tests.rs`, and `motion_shot_flags` in `args.rs`),
+with the revert each fails under:
+- three zoom steps leave one toast, and an export's progress then its result leave one (the
+  replace turned back into a push);
+- a fourth stacked push still draws three, the leaving one left out (the cap removed);
+- the same confirmation keeps its toast when it is not the newest (the look at the newest only);
+- a status already past its time shows no toast (the `until > now` guard removed);
+- a window resized while a toast comes in shows it at rest in its new place (the presence out
+  of the overlay signature);
+- toasts that would reach above the page in a 520x200 window are left out (the clamp removed);
+- a 520x120 window too short for a toast still draws its one status (the bottom toast's
+  exemption from the clamp removed);
+- a lift moves by whole device pixels at 1, 1.25, 1.5 and 2 (the rounding removed);
+- a moving shot moves with the setting off and reduced motion on (the forced policy removed);
+- the stacking test's 44 px lift fails with the lift's height taken as any other number than
+  the bubble's own;
+- the shot flags parse (the `--turn` arm removed);
+- **two with no revert that makes them fail**, kept as guards: a toast leaving while a menu or
+  a dialog is open (those overlays redraw the window anyway), and the Files pane hidden mid-turn
+  (the shared `keep_group` arrival gives one more frame, then none: nothing of mdview's own to
+  revert; removing `keep_group` fails the chevron tests instead).
+
+The Settings dialog's motion and the resting tips brought their own tests (`motion_tests.rs`): a
+switch slides and rests as a still run draws it; with animations off it changes at once; a frame
+where only the dialog moves redraws the card alone; the list's hover fades in frames of the list
+alone; a tip waits its delay, fades in as it shows, is there at once with animations off, and
+goes at once on leaving. The review's tests, each with the revert it fails under, are:
+- **two switches turned two frames apart**: every clipped frame equals a whole redraw (the
+  changed rows cleared at the start of a frame, or only the last one kept — the first row's knob
+  then stays frozen on screen);
+- opening Settings asks the system for its contrast theme and applies it, and the list's hover
+  fill is then there at once with no frame asked; with the dialog closed `read_motion` asks
+  nothing (the `set_high_contrast` call removed from `open_settings`; the `settings.is_none()`
+  guard removed from `read_motion` — separately);
+- a `--behind` hand-over asks for no focus (the `presence().focus` guard made true); the
+  decision itself (no hand-over, no maximize, no focus) is `Args::presence`'s test (`hand_over`
+  made true again);
+- with motion on, a second confirmation's presence stays 0 until the first has fully lifted
+  (`with_wait_for_lift` removed); under `Policy::Never` both are fully shown on the next frame
+  (the `revive` after a push removed);
+- a move on the same control restarts the tip's wait exactly five milliseconds later (the time
+  given to `pointer_moved_at` ignored, `Instant::now` used instead);
+- `--motion-at` gives at most 10000 ms (the cap removed).
+
+After the second review, five fixes, each failing with its fix reverted:
+- a `--behind` launch **claims the folder** and never hands over or waits, and a busy folder
+  leaves it without a session (the `--behind` filter put back in `admit`, which is the folder
+  step of `run`: its `claim` is then never called — the case the earlier `presence` test could
+  not see); the folder decision itself is `Args::folder`'s test (`hand_over` made true again);
+- **a page with a dropdown keeps the dialog drawn on every frame of a slide** — a choice of four
+  options, or a row `Item::dropdown()` forces to one whatever its count (the
+  `settings_moving && !settings_only` arm of `overlay_changed` removed: the first frame after
+  the change drew nothing and the card froze; `has_dropdown`'s forced case: the forced
+  detection removed);
+- a `--behind` window does not start maximized even where the session left it so (`maximized`
+  without `!behind`: showing it maximized activates it);
+- a test's motion state is the test's, not the machine's (`read_motion` reading
+  `platform::motion_reduced` again: on a machine with animations on, the reduced assertion
+  fails).
+- a change of the system's motion setting is read for both values, from the test's own wish (the
+  test back on `platform::motion_reduced`: on a machine with animations off, the first value
+  fails);
+- a `--behind` launch does not listen for hand-overs (the `Args::listens` gate made true: no
+  port, so a user's file could reach the hidden window).
+
+Workspace: 764 passed, 6 ignored (`mdview`'s own tests: 323 passed, 1 ignored).
+
+### Shots
+
+New with this milestone, looked at (crops at 2x and 10x): `files-turning-light` / `-dark`
+(`--turn wiki --motion-at 67`: the wiki folder's chevron part way round, its rows already
+shown), `files-turned-light` (open at rest); `toast-light` / `-dark` (one toast at rest),
+`toast-rising-light` / `-dark` (50 ms in: paler, a few px below its place),
+`toasts-stacking-light` / `-dark` (retaken after the wait for the lift: `--motion-at 200`, so
+the first has fully lifted at 167 ms and the second is coming in under it, 33 ms into its
+fade), `toasts-stacked-light` (both at rest, 8 px apart), `toasts-short-light` / `-dark`
+(520x220, three confirmations: two fit under the bar, the third is left out);
+`settings-switch-sliding-light` / `-dark` (`--flip-setting 5 --motion-at 67`: the Reading
+page's "Tick task boxes" knob part way across, its fill coming in), `settings-switch-turned-light`
+(the switch at rest); `tip-fading-light` / `-dark` (`--hover 46,63 --motion-at 41`: the Open
+button's tip 41 ms into its 83 ms fade, once the pointer has rested).
+
+Against the pin at `535ad4c`, the whole 189-shot set was run before and after the review's
+changes: every shot byte-identical except `toasts-stacking-light` / `-dark`, changed by the wait
+for the lift (and the 200 ms the shot now asks for). Earlier in the milestone the Settings shots
+changed once with the dialog's motion and the tooltip shots appeared with the resting tips; every
+other shot stayed byte-identical to `main`, the menu fades included.
+
+### Numbers
+
+Release builds, `main` (A, `01f67b2`) against this branch at `4e58bd0` (B: the toasts, pin
+`a3bfca4`; the two commits after it only make the menu's 117 ms the shared constant, the same
+value, so they were not measured again), seven interleaved runs,
+showcase, default window, `--no-session`, scratch `MDVIEW_SETTINGS`/`MDEDIT_SETTINGS`, the
+window moved off screen as soon as it exists. The PC was loaded by other builds all along:
+first frames were four to five times section 9's in both builds. Medians: first frame A 535.5
+ms, B 542.3 ms (ranges 406 to 2129 / 418 to 2895, one slow run each); private memory at 3 s A
+25.03 MiB, B 25.24 MiB; CPU 3 to 6 s A 0 in all seven, B 0 in five, 15.6 in one and 62.5 in
+the run whose first frame took 2.9 s. Six more runs with `MDVIEW_TRACE` (A, B, A, B, A, B):
+no CPU and no frame drawn from 3 s to 6 s in any. Scroll frame (`--scroll-steps 300`)
+medians 0.64 to 0.85 ms in both (one B run with an 842 ms stall, the PC). Before the change,
+seven runs of A alone: first frame median 454 ms, 25.29 MiB, no CPU. `mdview.exe` 9,651,712
+(A) to 9,667,072 bytes (B). Not measured: the frames of a turn or a toast in a real window
+(posted clicks on the Files pane drew nothing in this session's attempt; the tests and shots
+cover the frames, not their cost); Linux, macOS; the owner's look.
+
+The cost of a toast frame, after the review: `MDVIEW_TRACE` on a moving shot (release build,
+1280x800, two confirmations stacking, every frame of 400 ms), which composes as a window does
+but does not copy to a window or present. Each frame redraws the whole Page region (716 device
+rows at scale 1, 1432 at 2) through the overlay signature. Compose per frame: `everything.md`
+at scale 1, 0.27 to 0.53 ms (three runs); `showcase.md` 0.23 to 0.51 ms; `everything.md` at
+scale 2, 1.87 to 3.09 ms (two runs). A chevron turn's frames (the Files region only) 0.13 to
+0.29 ms. All under 4 ms, so the redraw was not narrowed to the toast's bounds; at scale 2 a
+window adds its copy of those rows (about 1 ms for a whole 800-row frame at scale 1 at
+launch), which may bring a frame near 4 ms there. Not measured in a real window: posted mouse
+messages drew no frame in this session.
+
+The review's fixes were not measured again: a frame that only moves the dialog now redraws the
+card's inside (the page list and the rows changed during the slide) instead of the whole window,
+so it cannot be more expensive than the whole-window frame it replaces, but its cost and the
+cost of a toast waiting for the lift were not traced. The numbers above are the branch at
+`4e58bd0`; no new launch, memory or scroll numbers were taken for the three review rounds.
+
+### Not verified, for the owner's look
+
+- **The Settings dialog in motion.** The switch's knob, the segment's slide, the list's hover
+  fades and the clipped card frames were seen only as shots and in tests; the frames' cost and
+  how they read in a real window were not measured.
+- **Tooltips from rest.** The 500 ms and the 83 ms fade are the shared presets; how the wait
+  feels against a real hand was not tried by eye (Windows' own tooltips are the reference).
+- **`--behind` may show above the others once.** Showing the window can raise it, and the
+  Normal-then-`AlwaysOnBottom` re-send is not done (it raises it for a moment). No test window
+  was watched from the owner's side in this session.
+- **The chevron mid-turn at 8 px.** At scale 1 the turned chevron is a few anti-aliased
+  pixels; how it reads in motion has not been seen in a window.
+- Linux and macOS: nothing run.
+
+## Motion, milestone 1: menus fade in (2026-11-25, merged into `main` at `01f67b2`, not released)
 
 The shared crates are pinned at shared `main` `48eb3ce` (was `ef88814`), which carries the
 toolkit's motion (`mdshared_ui::anim`, shared `docs/ANIMATION.md`). The pin move alone changed
@@ -30,7 +804,8 @@ What the pin move did to `Cargo.lock`, plainly:
 - **What moves.** The main menu, the context menus and the Open recent submenu fade in as they
   open (`Menu::draw_in_presence`, 6 px drop; the submenu `draw_in_entering` from its side), by
   `anim::document::MENU`'s curve over 117 ms: the owner tried 167 ms, asked for it "slightly
-  faster", and said of 117 "this is better" (2026-11-25). Closing is instant.
+  faster", and said of 117 "this is better" (2026-11-25); since shared `6ec1dee` that is the
+  shared `document::MENU` itself (milestone 2). Closing is instant.
   `bins/mdv-app/src/motion.rs` is the one place the timings are chosen.
 - **The loop.** One `Animator` on the `App`. `compose` begins and ends the animator's frame (the
   menus' presence is asked there on every frame a menu is open, so a frame that skips the
@@ -93,7 +868,8 @@ byte-identical.
 
 Seven interleaved runs, `main` (A) against this branch (B), showcase, default window,
 `--no-session` and scratch `MDVIEW_SETTINGS`/`MDEDIT_SETTINGS`, the window moved off screen and to
-the bottom as soon as it exists (it still shows for a moment: mdview has no `--behind`); the main
+the bottom as soon as it exists (it still shows for a moment: mdview had no `--behind` then; it
+has one since milestone 2); the main
 menu opened and closed by posted clicks at 3 s. Medians: first frame A 107.9 ms, B 99.5 ms; private
 memory at 3 s A 25.08 MiB, B 25.17 MiB; CPU from 3 s to 6 s after the close A 0 (one run 15.6),
 B 0 in all seven, and no frame drawn then. The fade is 11 frames over about 170 ms, each 3.3 to
@@ -203,7 +979,7 @@ off Windows.
     sent, the settings taken from the environment again, and the look made in `App::new`.
   - `run()` itself is reached by no test (it needs a real event loop). Its look cannot be lost
     alone: the same line is the one that gives the window its proxy, without which no thread
-    can wake it. No window was launched by hand to see it: mdview has no way to start behind
+    can wake it. No window was launched by hand to see it: mdview had no way then to start behind
     the owner's windows.
 - **Not a bug.** E9's title bar: the zoom view's close button sits over the window's own, as
   every dialog's does (`hit_at` gives only the overlay's hits while one is open).
@@ -913,6 +1689,7 @@ document with SVG, math or Mermaid.
 | `--light` / `--dark` | Override the theme |
 | `--zoom <pct>`, `--page-width narrow\|wide\|full`, `--folder <dir>`, `--maximize` | Start-up overrides |
 | `--no-session` | Neither reads nor writes the session and skips the single-instance hand-over. Use it for every test |
+| `--behind` | Opens the window without taking the focus, under every other window, and as its own instance: it never hands its files to a running mdview and ignores `--maximize`. Showing the window can raise it once; see milestone 2's `--behind` section. Use it for every test run that opens a real window (`--scroll-steps`, a measured launch) |
 | `--load-remote` | Load the first document's remote images without the bar (for checks) |
 | `--shot out.png` | Draw one frame of the state the other flags describe, write it, exit. No window |
 | `--size WxH`, `--scale f` | Shot size and device scale |

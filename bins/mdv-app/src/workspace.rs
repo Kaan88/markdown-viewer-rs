@@ -233,6 +233,9 @@ pub struct OutlineEntry<'a> {
 pub struct StatusLine {
     pub text: String,
     pub at: Instant,
+    /// Shown under the toasts still showing ([`Workspace::confirm`]) instead of in their place
+    /// ([`Workspace::set_status`]).
+    pub stack: bool,
 }
 
 /// Something to bring into view once the tab has a layout.
@@ -565,6 +568,8 @@ pub struct Workspace {
     session_path: Option<PathBuf>,
     choice: ThemeChoice,
     system_dark: bool,
+    /// A one-pass paint of the old theme, without changing the persisted choice.
+    pub(crate) paint_theme: Option<(ThemeChoice, bool)>,
     zoom: u16,
     viewport: Option<Viewport>,
     find: Find,
@@ -633,6 +638,7 @@ impl Workspace {
             recents: saved.recent.clone(),
             choice: saved.theme,
             system_dark: false,
+            paint_theme: None,
             zoom: session::clamp_zoom(saved.zoom),
             session: saved,
             session_path,
@@ -2057,7 +2063,7 @@ impl Workspace {
     // ---- theme and zoom ----------------------------------------------------------------------
 
     pub fn theme_choice(&self) -> ThemeChoice {
-        self.choice
+        self.paint_theme.map_or(self.choice, |(choice, _)| choice)
     }
 
     /// Sets System/Light/Dark and saves. The page is laid out again at the next paint.
@@ -2123,7 +2129,11 @@ impl Workspace {
 
     /// The theme in use, from the choice and the last [`set_system_dark`](Self::set_system_dark).
     pub fn theme(&self) -> Theme {
-        self.resolve_theme(self.system_dark)
+        match self.paint_theme {
+            Some((_, true)) => DARK.with_fonts(&self.session.page_font, &self.session.code_font),
+            Some((_, false)) => LIGHT.with_fonts(&self.session.page_font, &self.session.code_font),
+            None => self.resolve_theme(self.system_dark),
+        }
     }
 
     /// Zoom in percent, 60..=250.
@@ -3871,14 +3881,15 @@ impl Workspace {
 
     // ---- status ------------------------------------------------------------------------------
 
-    /// The status text while it is fresh (`strings::TRANSIENT_MS` after it was set).
+    /// The status text while it is fresh (`strings::TRANSIENT_MS` after it was set). The window
+    /// shows it as toasts (`App::sync_toasts`, from the status line); the tests read it here.
+    #[allow(dead_code)] // Workspace API the shell does not call.
     pub fn status(&self, now: Instant) -> Option<&str> {
         let status = self.status.as_ref()?;
         (now.saturating_duration_since(status.at) < transient()).then_some(status.text.as_str())
     }
 
     /// The status line as set, fresh or not.
-    #[allow(dead_code)] // Workspace API the shell does not call yet.
     pub fn status_line(&self) -> Option<&StatusLine> {
         self.status.as_ref()
     }
@@ -3888,8 +3899,19 @@ impl Workspace {
         self.status.as_ref().map(|s| s.at + transient())
     }
 
+    /// A message that takes the place of the toasts showing: a step (a zoom, a width), a
+    /// progress and its result, a refusal.
     pub fn set_status(&mut self, text: &str) {
         self.message(text);
+    }
+
+    /// A one-shot confirmation of its own ("Copied", "Link address copied"): it stacks under
+    /// the toasts still showing instead of taking their place.
+    pub fn confirm(&mut self, text: &str) {
+        self.message(text);
+        if let Some(s) = self.status.as_mut() {
+            s.stack = true;
+        }
     }
 
     pub fn clear_status(&mut self) {
@@ -3910,6 +3932,7 @@ impl Workspace {
         self.status = (!text.is_empty()).then(|| StatusLine {
             text: text.to_string(),
             at: Instant::now(),
+            stack: false,
         });
         self.dirty = true;
     }

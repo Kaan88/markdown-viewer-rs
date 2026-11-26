@@ -50,10 +50,11 @@ impl App {
         show.set_subpixel(platform::subpixel_order());
         self.ui.popup = None;
         self.ui.dialog = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.find_focused = false;
         self.ui.drag = None;
         self.ui.link_hint = None;
+        self.theme_fade = None;
         self.ui.present = Some(show);
         self.present_window();
         self.redraw();
@@ -253,7 +254,7 @@ impl App {
                     || platform::set_clipboard_text(&text)
             })
         {
-            self.ws.set_status("Copied");
+            self.ws.confirm("Copied");
         }
     }
 

@@ -52,6 +52,12 @@ impl App {
     }
 
     pub(super) fn pointer_moved(&mut self, x: f32, y: f32) {
+        self.pointer_moved_at(x, y, Instant::now());
+    }
+
+    /// [`pointer_moved`](Self::pointer_moved) with the time given, so a test counts the
+    /// tooltip's rest from a clock of its own instead of sleeping.
+    pub(super) fn pointer_moved_at(&mut self, x: f32, y: f32, now: Instant) {
         if self.presenting() {
             self.present_pointer(x, y);
             return;
@@ -88,50 +94,10 @@ impl App {
         }
         let edge = self.edge_at(x, y);
         let in_menu = self.ui.popup.as_ref().is_some_and(|p| p.contains(x, y));
-        if let Some(p) = self.ui.popup.as_mut() {
-            // An open submenu is never closed by the move itself, or the pointer could not reach
-            // it: on its way there it crosses the menu's padding, a separator, or the corner of
-            // another row. Off the rows it stays; on another row it stays until the pointer has
-            // rested there for the dwell.
-            let opener = p
-                .sub
-                .as_ref()
-                .and_then(|_| p.menu.items.iter().position(|it| it.id.is_submenu()));
-            let before = p.menu.hover;
-            let on_sub = p.sub.as_ref().is_some_and(|s| s.contains(x, y));
-            if let Some(s) = p.sub.as_mut()
-                && s.pointer(x, y)
-            {
-                self.wants_frame = true;
-            }
-            if on_sub || (p.sub.is_some() && !p.menu.contains(x, y)) {
-                // On the submenu, or off both menus: the parent keeps its highlight on the item
-                // the submenu came from, and nothing is pending.
-                p.dwell = None;
-                p.menu.hover = opener;
-            } else {
-                p.menu.pointer(x, y);
-                match p.menu.hover {
-                    None => {
-                        p.dwell = None;
-                        if opener.is_some() {
-                            p.menu.hover = opener;
-                        }
-                    }
-                    Some(i) => {
-                        // Something happens after a rest here only if it would change what is
-                        // open: a submenu item opens its submenu, any other item closes it.
-                        if p.menu.items[i].id.is_submenu() == p.sub.is_some() {
-                            p.dwell = None;
-                        } else if p.dwell.map(|d| d.0) != Some(i) {
-                            p.dwell = Some((i, Instant::now() + crate::ui::SUBMENU_DWELL));
-                        }
-                    }
-                }
-            }
-            if p.menu.hover != before {
-                self.wants_frame = true;
-            }
+        if let Some(p) = self.ui.popup.as_mut()
+            && p.pointer(x, y, now)
+        {
+            self.wants_frame = true;
         }
         let hit = if edge.is_some() || in_menu {
             None
@@ -140,8 +106,9 @@ impl App {
         };
         if hit != self.ui.hover {
             self.ui.hover = hit;
-            self.update_tip(hit);
         }
+        // On every move: the tip's wait starts again while the pointer moves on its control.
+        self.update_tip(hit, (x, y), now);
         if let Some(d) = self.ui.dialog.as_ref() {
             let row = overlays::dialog_row_at(d, x, y);
             if row != self.ui.dlg_hover_row {
@@ -182,28 +149,21 @@ impl App {
         self.redraw();
     }
 
-    pub(super) fn update_tip(&mut self, hit: Option<Hit>) {
-        if self.ui.tip_blocked.is_some() && self.ui.tip_blocked != hit {
-            self.ui.tip_blocked = None;
+    /// The pointer is at `at` over `hit`: the tooltip waits for it to rest there (the owner's
+    /// rule, "From resting"), shows at once beside one showing, and goes when it leaves.
+    /// The tooltip under the pointer at `now`: its rest is counted from the pointer's last move,
+    /// so a test gives it a clock of its own (`pointer_moved_at`).
+    pub(super) fn update_tip(&mut self, hit: Option<Hit>, at: (f32, f32), now: Instant) {
+        let over = hit.and_then(|h| {
+            Some(mdshared_ui::tooltip::Over {
+                key: h,
+                text: chrome::tooltip(h, &self.ws, self.maximized)?,
+                anchor: self.hit_rect(h).unwrap_or_default(),
+            })
+        });
+        if self.ui.tips.hover_at(now, over, at) {
+            self.wants_frame = true;
         }
-        let text = hit
-            .filter(|h| Some(*h) != self.ui.tip_blocked)
-            .and_then(|h| chrome::tooltip(h, &self.ws, self.maximized));
-        self.ui.tip = match (hit, text) {
-            (Some(h), Some(text)) => {
-                // Moving between neighbouring buttons while a tip shows keeps tips immediate.
-                let shown = self.ui.tip.as_ref().is_some_and(|t| t.shown);
-                let anchor = self.hit_rect(h).unwrap_or_default();
-                Some(Tip {
-                    hit: h,
-                    text,
-                    anchor,
-                    due: Instant::now() + if shown { Duration::ZERO } else { TIP_DELAY },
-                    shown: false,
-                })
-            }
-            _ => None,
-        };
     }
 
     pub(super) fn drag_to(&mut self, drag: Drag, x: f32, y: f32) {
@@ -306,7 +266,7 @@ impl App {
     pub(super) fn scroll_geom(&self, target: Scroller) -> Option<(Rect, f32, f32, f32)> {
         match target {
             Scroller::Page => {
-                let vr = page::viewport(&self.ws, self.areas.page);
+                let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
                 Some((
                     vr,
                     self.ws.total_height(),
@@ -402,7 +362,7 @@ impl App {
             return;
         }
         if self.ui.zoom.is_some() {
-            self.ui.tip = None;
+            self.ui.tips.hide();
             self.ui.card = None;
             self.ui.link_hint = None;
             let (x, y) = self.ui.mouse;
@@ -416,9 +376,8 @@ impl App {
             return;
         }
         let (x, y) = self.ui.mouse;
-        self.ui.tip = None;
+        self.ui.tips.press(self.ui.hover);
         self.ui.card = None;
-        self.ui.tip_blocked = self.ui.hover;
         if let Some(dir) = self.edge_at(x, y) {
             if let Some(w) = &self.window {
                 let _ = w.drag_resize_window(dir);
@@ -567,16 +526,10 @@ impl App {
             self.redraw();
             return;
         }
-        if let Some(p) = &self.ui.popup
+        if let Some(p) = self.ui.popup.as_mut()
             && p.contains(x, y)
         {
-            let on_sub = p.sub.as_ref().is_some_and(|s| s.contains(x, y));
-            let act = if on_sub {
-                p.sub.as_ref().and_then(|s| s.chosen())
-            } else {
-                p.menu.chosen()
-            };
-            if let Some(act) = act {
+            if let mdshared_ui::submenu::Outcome::Chosen(act) = p.click(x, y) {
                 self.choose(act, false);
             }
             self.redraw();
@@ -595,7 +548,7 @@ impl App {
             return;
         }
         let (x, y) = self.ui.mouse;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.card = None;
         if self.ui.dialog.is_some() || self.ui.modal() {
             return;
@@ -647,7 +600,7 @@ impl App {
             return;
         }
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.card = None;
         if back {
             self.ws.go_back();
@@ -707,16 +660,7 @@ impl App {
                 Some(py) => -py / self.scale,
                 None => -notches * PANE_WHEEL,
             };
-            let over_sub = p.sub.as_ref().is_some_and(|s| s.contains(x, y));
-            let menu = match p.sub.as_mut() {
-                Some(s) if over_sub => Some(s),
-                _ => Some(&mut p.menu).filter(|m| m.contains(x, y)),
-            };
-            if let Some(m) = menu.filter(|m| m.scrolls())
-                && m.scroll_by(dy)
-            {
-                let hover = m.pointer(x, y);
-                self.wants_frame |= hover;
+            if p.wheel(x, y, dy) {
                 self.redraw();
             }
             return;
@@ -873,7 +817,7 @@ impl App {
     /// drive it without a winit event.
     pub(super) fn key_named(&mut self, name: KeyName, typed: Option<&str>) {
         let mods = self.mods;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.card = None;
         self.redraw();
 
@@ -924,42 +868,10 @@ impl App {
         }
         // A menu takes the keyboard.
         if let Some(p) = self.ui.popup.as_mut() {
-            p.dwell = None;
-            // With a submenu open the keys go to it; Escape and Left close only the submenu.
-            if let Some(s) = p.sub.as_mut() {
-                match name {
-                    KeyName::Up => s.step(false),
-                    KeyName::Down | KeyName::Tab => s.step(true),
-                    KeyName::Enter | KeyName::Space => {
-                        if let Some(act) = s.chosen() {
-                            self.choose(act, true);
-                        }
-                    }
-                    KeyName::Escape | KeyName::Left => p.sub = None,
-                    _ => {}
-                }
-                return;
-            }
-            match name {
-                KeyName::Up => p.menu.step(false),
-                KeyName::Down | KeyName::Tab => p.menu.step(true),
-                KeyName::Enter | KeyName::Space | KeyName::Right => {
-                    let arrow = name == KeyName::Right;
-                    if let Some(act) = p.menu.chosen()
-                        && (!arrow || act.is_submenu())
-                    {
-                        self.choose(act, true);
-                    }
-                }
-                KeyName::Escape => self.ui.popup = None,
-                // A letter picks the item marked with it, as Enter would (menus that read no
-                // access keys answer None and the key does nothing, as before).
-                KeyName::Char(ch) if !mods.ctrl && !mods.alt => {
-                    if let Some(act) = p.menu.access_key(ch) {
-                        self.choose(act, true);
-                    }
-                }
-                _ => {}
+            match p.key(&name, mods) {
+                Keyed::Chosen(act) => self.choose(act, true),
+                Keyed::Close => self.ui.popup = None,
+                Keyed::Nothing => {}
             }
             return;
         }

@@ -23,15 +23,14 @@ use crate::platform;
 use crate::textfield::EditKey;
 use crate::theme::{self, Palette};
 use crate::ui::{
-    Act, Areas, BarItem, Dialog, DialogKind, Drag, Hit, PAGE_MIN, PANE_MAX, PANE_MIN, Popup,
-    PopupKind, REGIONS, Region, Scroller, Side, Tip, Ui,
+    Act, Areas, BarItem, Dialog, DialogKind, Drag, Hit, Keyed, PAGE_MIN, PANE_MAX, PANE_MIN, Popup,
+    PopupKind, REGIONS, Region, Scroller, Side, Ui,
 };
 use crate::updater;
 use crate::workspace::{Click, LinkOutcome, ThemeChoice, Workspace};
 use mdshared_app::sister::Request;
-use mdshared_ui::anim::Animator;
+use mdshared_ui::anim::{Animator, Id};
 use mdshared_ui::corners::Corners;
-use mdshared_ui::menu::Entrance;
 use mdview_core::commands::CommandId as C;
 use mdview_core::watch::FileWatcher;
 use mdview_render::Bitmap;
@@ -42,13 +41,15 @@ use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalPosition};
+use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{
     ElementState, KeyEvent, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, NamedKey};
-use winit::window::{CursorIcon, ResizeDirection, Theme as WinTheme, Window, WindowId};
+use winit::window::{
+    CursorIcon, ResizeDirection, Theme as WinTheme, Window, WindowId, WindowLevel,
+};
 
 mod cards;
 mod commands;
@@ -76,7 +77,6 @@ const EDITOR: &str = "mdedit";
 /// How long a closing window waits for the editor to be told of the tabs it asked for: the
 /// process ends after it, and its listener with it.
 const EDITOR_CLOSE_WAIT: Duration = Duration::from_millis(500);
-const TIP_DELAY: Duration = Duration::from_millis(500);
 const AUTOSCROLL_TICK: Duration = Duration::from_millis(16);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
 /// While a tab shows the editor's text: how often to ask whether the editor still answers.
@@ -259,6 +259,8 @@ struct App {
     sigs: [u64; 5],
     overlay_sig: u64,
     overlay_bounds: Vec<Rect>,
+    drawn_overlays: DrawnOverlays,
+    drawn_theme_choice: ThemeChoice,
     /// Redraw everything next frame (size, scale or theme changed).
     full: bool,
     /// Something happened that may change what is shown.
@@ -322,8 +324,55 @@ struct App {
     frame_clock: Option<Instant>,
     /// How present the open menu and its submenu are this frame, 0 to 1.
     menu_t: (f32, f32),
+    /// How present the palette is this frame, 0 to 1 (it closes at once, so there is no 0
+    /// while it is open), and this opening of it: a palette opened again fades in again.
+    palette_t: f32,
+    palette_serial: u64,
+    /// How present the Settings dialog is this frame, 0 to 1 (it closes at once, so there is no
+    /// 0 while it is open), and this opening of it: opened again it fades in again.
+    settings_t: f32,
+    #[cfg(test)]
+    settings_snapshot_pixels: usize,
+    settings_serial: u64,
+    /// The frame the window showed before a light/dark change, blended back over each frame of
+    /// the change: the whole window, `4 * w * h` bytes, held only while it fades.
+    theme_fade: Option<mdshared_ui::anim::Snapshot>,
+    /// This light/dark change; a new one starts its own fade.
+    theme_serial: u64,
+    /// How high each notice bar shows this frame: the page is laid out under them.
+    bars: page::Bars,
+    /// Frames composed so far: the first one has the bars the window starts with in place.
+    frames: u64,
+    /// How present the tooltip is this frame, 0 to 1 (0: none shows).
+    tip_t: f32,
+    /// The settings the dialog changed while `motion::SETTINGS` was in flight: each one's row
+    /// is where a switch slides or a segment moves, and all of them are drawn again on the
+    /// frames of it. Cleared when the group settles and when the dialog opens or closes.
+    settings_changed: Vec<u32>,
     /// The system's wish for less motion is watched (from the first frame on).
     motion_watched: bool,
+    /// The toasts on screen and leaving (`crate::motion::toasts`), the status line they were
+    /// last brought up to date with, and this frame's: each one's key, text, presence and lift.
+    toasts: mdshared_ui::anim::stack::Stack<String>,
+    toast_seen: Option<(String, Instant, bool)>,
+    toast_frame: Vec<(u64, String, f32, f32)>,
+    /// A shot part way through a motion: it moves whatever the setting and the system say.
+    forced_motion: bool,
+    /// The system's contrast theme as a test gives it; `None` reads the platform's answer. Only
+    /// the settings dialog ever asks (see `high_contrast`).
+    contrast: Option<bool>,
+    /// How many times the system's contrast theme was read (tests see that a closed Settings
+    /// asks for none).
+    #[cfg(test)]
+    contrast_reads: u32,
+    /// How many hand-overs asked to focus the window (tests see that a `--behind` run asks for
+    /// none). The decision is made whether or not a window is there to raise.
+    #[cfg(test)]
+    hand_overs_focused: u32,
+    /// The system's wish for less motion as a test gives it; `None` reads the platform's answer.
+    /// A test's frames must not depend on the machine's setting.
+    #[cfg(test)]
+    reduced: Option<bool>,
 }
 
 impl App {
@@ -394,6 +443,8 @@ impl App {
             sigs: [0; 5],
             overlay_sig: 0,
             overlay_bounds: Vec::new(),
+            drawn_overlays: DrawnOverlays::default(),
+            drawn_theme_choice: ThemeChoice::System,
             full: true,
             wants_frame: true,
             requested: false,
@@ -427,7 +478,30 @@ impl App {
             still: args_still,
             frame_clock: None,
             menu_t: (1.0, 1.0),
+            palette_t: 1.0,
+            palette_serial: 0,
+            settings_t: 1.0,
+            #[cfg(test)]
+            settings_snapshot_pixels: 0,
+            settings_serial: 0,
+            theme_fade: None,
+            theme_serial: 0,
+            bars: page::Bars::FULL,
+            frames: 0,
             motion_watched: false,
+            tip_t: 0.0,
+            settings_changed: Vec::new(),
+            toasts: crate::motion::toasts(),
+            toast_seen: None,
+            toast_frame: Vec::new(),
+            forced_motion: false,
+            contrast: None,
+            #[cfg(test)]
+            contrast_reads: 0,
+            #[cfg(test)]
+            hand_overs_focused: 0,
+            #[cfg(test)]
+            reduced: None,
         }
     }
 
@@ -548,7 +622,45 @@ impl App {
     fn sync_theme(&mut self) {
         let dark = self.ws.theme().name == mdview_render::DARK.name;
         let pal = if dark { theme::DARK } else { theme::LIGHT };
+        let closed =
+            (self.theme_fade.is_some() || pal != self.pal) && self.drawn_overlays.closed_in(self);
+        if closed && self.theme_fade.is_some() {
+            self.theme_fade = None;
+            self.full = true;
+        }
         if pal != self.pal {
+            // A light/dark change crossfades from the frame the window shows now — still the old
+            // palette's, since every frame draws into this one bitmap. Release any earlier
+            // snapshot before copying it. Slides don't blend; neither does frosted chrome,
+            // whose mark would be decoded against a different palette's key.
+            self.theme_fade = None;
+            let (w, h) = (self.screen.width, self.screen.height);
+            if self.anim.animates()
+                && self.frames > 0
+                && !self.presenting()
+                && self.frost.key().is_none()
+                && !self.screen.pixels.is_empty()
+                && (w, h) == (self.size.0.max(1), self.size.1.max(1))
+                // Four bytes per pixel; keep the snapshot to at most 15.625 MiB.
+                && u64::from(w) * u64::from(h) <= 2560 * 1600
+            {
+                if closed {
+                    // Repaint without the dismissed overlay in the old palette, including the
+                    // document and theme label. This pass is never presented on its own.
+                    self.ws.paint_theme = Some((self.drawn_theme_choice, self.pal.dark));
+                    self.full = true;
+                    self.paint_frame();
+                    self.ws.paint_theme = None;
+                }
+                self.theme_fade = Some(mdshared_ui::anim::Snapshot::take(
+                    &self.screen,
+                    0,
+                    0,
+                    w as i32,
+                    h as i32,
+                ));
+                self.theme_serial += 1;
+            }
             self.pal = pal;
             self.full = true;
             #[cfg(windows)]
@@ -556,6 +668,26 @@ impl App {
                 style(w, dark, Corners::from_setting(self.ws.corners()));
             }
         }
+    }
+
+    /// Blends the frame the window showed before a light/dark change back over this one for the
+    /// length of the fade. Drop the snapshot when the fade ends, the window changes size or
+    /// frost comes on.
+    fn theme_frame(&mut self) {
+        let Some(under) = self.theme_fade.take() else {
+            return;
+        };
+        // Don't ask for progress when there is nothing more to blend: an asked name is a value
+        // in flight. Frost may have just come on in sync_frost, after sync_theme saw it off.
+        if !under.fits(&self.screen) || self.frost.key().is_some() {
+            return;
+        }
+        let t = crate::motion::theme(&mut self.anim, self.theme_serial);
+        if t >= 1.0 {
+            return;
+        }
+        under.crossfade(&mut self.screen, t);
+        self.theme_fade = Some(under);
     }
 
     /// The "Window backdrop" setting: asks the system when the setting or the focus changed and
@@ -724,7 +856,7 @@ impl App {
                 });
                 let crash = (self.ws.crash_report().is_some(), self.ws.stale_offer());
                 // The code box whose copy button shows, and its check mark.
-                let vr = page::viewport(&self.ws, self.areas.page);
+                let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
                 let code = crate::codebtn::spot(&mut self.ws, &self.ui, vr, self.scale)
                     .map(|c| (c.start, self.ui.copied.is_some_and(|(s, _)| s == c.start)));
                 sig((
@@ -751,7 +883,7 @@ impl App {
 
     /// The page viewport in device px, and whether there is an active tab to lay out.
     fn page_device(&self) -> (u32, u32) {
-        let vr = page::viewport(&self.ws, self.areas.page);
+        let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
         let d = |v: f32| (v * self.scale).round() as i32;
         (
             (d(vr.right()) - d(vr.x)).max(0) as u32,
@@ -764,27 +896,156 @@ impl App {
     /// `end_frame`, and the deadline that gives is the timer `timers` waits for.
     fn compose(&mut self) -> (Vec<(i32, i32, i32, i32)>, FrameTimes) {
         let now = self.frame_clock.unwrap_or_else(Instant::now);
-        (self.anim).set_policy(crate::motion::policy(self.still, self.ws.motion()));
+        let policy = crate::motion::policy(self.still, self.ws.motion(), self.forced_motion);
+        self.anim.set_policy(policy);
         self.anim.begin_frame(now);
         // The open menus are asked for on every frame they are open, whatever else the frame
         // draws, so none is forgotten and taken for new on a frame that skips the overlays.
         self.menu_t = match self.ui.popup.as_ref() {
-            Some(p) => (
-                crate::motion::menu(&mut self.anim, p.serial),
-                match p.sub {
-                    Some(_) => crate::motion::submenu(&mut self.anim, p.serial, p.sub_serial),
-                    None => 1.0,
-                },
-            ),
+            Some(p) => p.presence(&mut self.anim),
             None => (1.0, 1.0),
         };
+        // The palette's entrance, asked for on every frame it is open for the same reason.
+        self.palette_t = match self.ui.palette.is_some() {
+            true => crate::motion::palette(&mut self.anim, self.palette_serial),
+            false => 0.0,
+        };
+        // The Settings dialog's entrance, asked for on every frame it is open: the dim and the
+        // card fade in as one thing, and closing is instant.
+        self.settings_t = self.ui.settings.as_ref().map_or(1.0, |f| {
+            crate::motion::settings(
+                &mut self.anim,
+                self.settings_serial,
+                f.menu_rect().is_some(),
+            )
+        });
+        // The notice bars' entrance, asked every frame: a bar that goes is forgotten instead of
+        // playing out, since nothing draws it any more.
+        let (update, crash, stale) = (
+            self.ws.update_bar().is_some(),
+            self.ws.crash_report().is_some(),
+            self.ws.stale_offer() > 0,
+        );
+        self.bars = page::Bars {
+            update: self.bar_t("update", update),
+            crash: self.bar_t("crash", crash),
+            stale: self.bar_t("stale", stale),
+        };
+        self.sync_toasts(now);
         let done = self.compose_frame();
+        self.frames = self.frames.saturating_add(1);
         self.anim_due = self.anim.end_frame();
+        // The rows changed while the settings dialog was sliding are kept for its frames, so a
+        // change that lands a frame or two into a slide is drawn for as long as the first one
+        // moves. Once the group has settled, the next change starts a new list.
+        let settings = Id::new(crate::motion::SETTINGS);
+        if !(self.anim.group_deadlines().iter()).any(|(g, _)| *g == settings) {
+            self.settings_changed.clear();
+        }
         done
+    }
+
+    /// How present notice bar `key` is, `shown` being whether the workspace has it. A bar that
+    /// is there before the window's first frame is in place at once: the frame that shows the
+    /// window must not be a slide, and must not jump when the system's wish for less motion is
+    /// read after it. A bar that arrives later slides in. A bar that goes is forgotten, so a
+    /// later one slides in again.
+    fn bar_t(&mut self, key: &str, shown: bool) -> f32 {
+        if !shown {
+            self.anim.forget(("bar", key));
+            return 0.0;
+        }
+        if self.frames == 0 {
+            // At rest, and *tracked*: a track kept for the frames it is seen, so the next frame
+            // continues from 1 rather than meeting the bar for the first time and sliding it in.
+            self.anim.set(("bar", key), 1.0_f32);
+            return 1.0;
+        }
+        crate::motion::bar(&mut self.anim, key)
+    }
+
+    /// Brings the toasts up to date with the status line at `now`, the frame's time, and asks
+    /// for this frame of them. Asked on every frame, whatever it draws, so none is forgotten and
+    /// taken for new. Each leaves of itself when its time is up; a status cleared sends them
+    /// all away.
+    ///
+    /// A message set by `set_status` takes the place of the toasts showing: the newest shown
+    /// one takes its text at once, keeping its presence and its place (a zoom step under key
+    /// repeat changes in place, with no exit and no entrance), and the others go at once; with
+    /// none shown it comes in as a new toast. One set by `confirm`, a one-shot confirmation,
+    /// comes in under them, or keeps the toast of the same text for longer, bringing it back
+    /// if it is leaving.
+    fn sync_toasts(&mut self, now: Instant) {
+        self.toasts.tick(now);
+        let line = (self.ws.status_line()).map(|s| (s.text.clone(), s.at, s.stack));
+        if line != self.toast_seen {
+            match (&line, self.ws.status_expires()) {
+                // A message already past its time (set long before this frame) is not shown.
+                (Some((text, _, stack)), Some(until)) if until > now => {
+                    self.show_toast(text, until, *stack)
+                }
+                (None, _) => self.toasts.hide_all(),
+                _ => {}
+            }
+            self.toast_seen = line;
+        }
+        self.toast_frame.clear();
+        if self.toasts.is_empty() {
+            return;
+        }
+        // The height of a toast as `Bubble::toast` makes it (the same for every text).
+        let h = mdshared_ui::overlay::TOAST_H;
+        let gap = crate::motion::TOAST_GAP;
+        let shown = (self.toasts).frame(&mut self.anim, crate::motion::TOASTS, |_| h, gap);
+        // The newest first; the stack keeps no more than the most, those leaving included.
+        self.toast_frame = (shown.into_iter())
+            .map(|s| (s.key, s.item.clone(), s.t, s.lift))
+            .collect();
+    }
+
+    /// Shows `text` until `until`: under the others when `stack`, in their place otherwise.
+    fn show_toast(&mut self, text: &str, until: Instant, stack: bool) {
+        if stack {
+            // The shared stack makes a new toast wait for the ones above to lift, and not at all
+            // when the animator does not animate (shared PR 24), so a still frame has it at once.
+            self.toasts.show(text.to_string(), Some(until));
+            return;
+        }
+        let key = self.toasts.replace_newest(text.to_string(), Some(until));
+        let others: Vec<u64> = (self.toasts.current())
+            .map(|(k, _)| k)
+            .filter(|k| *k != key)
+            .collect();
+        for k in others {
+            self.toasts.remove(k);
+        }
     }
 
     fn compose_frame(&mut self) -> (Vec<(i32, i32, i32, i32)>, FrameTimes) {
         self.crash_context();
+        let start = Instant::now();
+        // Text the editor sent since the last frame: one parse, of the newest.
+        self.ws.apply_live();
+        // A diagram view belongs to its tab, revision and palette. Dismiss it before
+        // sync_theme can capture it in the old frame.
+        if let Some(view) = &self.ui.zoom
+            && let Some(origin) = &view.origin
+            && !self.ws.active_tab().is_some_and(|t| {
+                let dark = self.ws.theme().name == mdview_render::DARK.name;
+                origin.is(t.path(), t.revision(), dark)
+            })
+        {
+            self.close_zoom();
+        }
+        self.sync_theme();
+        self.sync_frost();
+        let setup = start.elapsed();
+        let (damage, mut times) = self.paint_frame();
+        times.layout += setup;
+        (damage, times)
+    }
+
+    fn paint_frame(&mut self) -> (Vec<(i32, i32, i32, i32)>, FrameTimes) {
         let mut times = FrameTimes::default();
         let t0 = Instant::now();
         let (pw, ph) = (self.size.0.max(1), self.size.1.max(1));
@@ -792,14 +1053,16 @@ impl App {
             self.screen = Bitmap::new(pw, ph);
             self.full = true;
         }
-        self.sync_theme();
-        self.sync_frost();
-        // Text the editor sent since the last frame: one parse, of the newest.
-        self.ws.apply_live();
+        // A light/dark change changes every pixel: each frame of it is drawn whole.
+        if self.theme_fade.is_some() {
+            self.full = true;
+        }
         // A presentation is the whole frame.
         if self.ui.present.is_some()
             && let Some(done) = self.compose_present()
         {
+            self.drawn_overlays = DrawnOverlays::default();
+            self.drawn_theme_choice = self.ws.theme_choice();
             return done;
         }
         let (w, h) = self.logical();
@@ -808,16 +1071,7 @@ impl App {
             self.areas = areas;
             self.full = true;
         }
-        // A zoom view is a picture of the tab it was opened on: another tab, a new text of it or
-        // another theme under it, and it closes (audit 4, E8). Otherwise it follows the window:
-        // its diagram is kept inside the new area, at the new device scale.
-        if let Some(view) = &self.ui.zoom
-            && let Some(origin) = &view.origin
-            && !(self.ws.active_tab())
-                .is_some_and(|t| origin.is(t.path(), t.revision(), self.pal.dark))
-        {
-            self.close_zoom();
-        }
+        // The view follows the window, keeping its diagram inside the new area and device scale.
         if let Some(view) = self.ui.zoom.as_mut() {
             let area = Rect::new(0.0, 0.0, w, h);
             view.set_scale(area, self.scale);
@@ -862,6 +1116,17 @@ impl App {
         if self.ws.take_dirty() || std::mem::take(&mut self.page_again) {
             dirty[Region::Page.index()] = true;
         }
+        // A chevron turning in the Files pane: the pane is drawn on each frame of the turn,
+        // whenever the frame comes (one a little before the deadline included).
+        let files = Id::new(crate::motion::FILES);
+        if self.anim.group_deadlines().iter().any(|(g, _)| *g == files) {
+            dirty[Region::Files.index()] = true;
+        }
+        // So is the title row while one of its hover fills fades.
+        let title = Id::new(crate::motion::TITLE);
+        if self.anim.group_deadlines().iter().any(|(g, _)| *g == title) {
+            dirty[Region::Title.index()] = true;
+        }
         for r in REGIONS {
             if self.areas.region(r).is_none() {
                 dirty[r.index()] = false;
@@ -870,39 +1135,54 @@ impl App {
         }
 
         // Overlays: lay them out, then redraw every region under them if they or those changed.
-        let now = Instant::now();
         let pal = self.pal;
         let mut bubbles = Vec::new();
         {
             let mut p = Painter::new(&mut self.screen, &mut self.gfx, self.scale);
             let page = self.areas.page;
             if let Some(text) = &self.ui.link_hint {
-                bubbles.push(Bubble::hint(&mut p, text, page));
+                bubbles.push((Bubble::hint(&mut p, text, page), 1.0));
             }
-            if let Some(text) = self.ws.status(now) {
-                bubbles.push(Bubble::toast(&mut p, text, page));
+            // The toasts, each lifted above the ones under it to a whole device pixel (so its
+            // text stays on the grid), at its presence. One that would reach above the page
+            // (a short window) is left out, except the bottom one: a window however short still
+            // shows its one status.
+            for (_, text, t, lift) in &self.toast_frame {
+                let mut b = Bubble::toast(&mut p, text, page);
+                b.rect.y = toast_y(b.rect.y, *lift, self.scale);
+                if *lift > 0.0 && b.rect.y < page.y + crate::motion::TOAST_GAP {
+                    continue;
+                }
+                bubbles.push((b, *t));
             }
-            if let Some(tip) = self.ui.tip.as_ref().filter(|t| t.shown) {
-                bubbles.push(Bubble::tip(&mut p, &tip.text, tip.anchor, w, h));
-            }
+            // The tip fades in as it shows (`motion::TIP`), and goes at once. One name for
+            // every tip: a neighbour's, shown at once while one shows, is there at once.
+            self.tip_t = match self.ui.tips.shown() {
+                Some(tip) => {
+                    let t = crate::motion::tip(&mut self.anim);
+                    bubbles.push((Bubble::tip(&mut p, &tip.text, tip.anchor, w, h), t));
+                    t
+                }
+                None => 0.0,
+            };
             if let Some(popup) = self.ui.popup.as_mut() {
                 let room = menu_room(self.areas.title, w, h);
-                popup.menu.place_in(&mut p, room);
-                if let Some(s) = popup.sub.as_mut() {
-                    s.place_in(&mut p, room);
-                }
+                popup.place_in(&mut p, room);
             }
         }
-        self.toast_until = self.ws.status(now).and(self.ws.status_expires());
+        self.toast_until = self.toasts.deadline();
         let card = self.card_layout(w, h);
-        let mut bounds: Vec<Rect> = bubbles.iter().map(Bubble::bounds).collect();
+        // A toast touches more as it rises and sinks than at rest.
+        let mut bounds: Vec<Rect> = (bubbles.iter())
+            .map(|(b, _)| match b.kind {
+                mdshared_ui::overlay::Kind::Toast => b.presence_bounds(),
+                _ => b.bounds(),
+            })
+            .collect();
         bounds.extend(card.iter().map(crate::preview::Layout::bounds));
         if let Some(popup) = &self.ui.popup {
             // Everything a menu touches as it fades in, its shadow and its drop included.
-            bounds.push(popup.menu.presence_bounds());
-            if let Some(s) = &popup.sub {
-                bounds.push(s.presence_bounds());
-            }
+            bounds.push(popup.presence_bounds());
         }
         if self.ui.dialog.is_some() || self.ui.settings.is_some() {
             bounds.push(Rect::new(0.0, 0.0, w, h));
@@ -911,21 +1191,23 @@ impl App {
             bounds.push(Rect::new(0.0, 0.0, w, h));
         }
         if let Some(p) = self.ui.palette.as_mut() {
-            // The card's place is needed here, to redraw what it covers; drawing lays it out again.
-            let card = p
-                .palette
+            // The card's place is needed here, to redraw what it covers and its shadow; drawing
+            // lays it out again. Its presence bounds are the card, shadow and drop as one.
+            p.palette
                 .layout(Rect::new(0.0, 0.0, w, h), crate::ui::TITLE_H);
-            bounds.push(card.inset(-20.0));
+            bounds.push(p.palette.presence_bounds());
         }
         let osig = sig((
             bubbles
                 .iter()
-                .map(|b| {
+                .map(|(b, t)| {
                     (
                         b.kind,
                         b.text.as_str(),
                         b.rect.x.to_bits(),
                         b.rect.y.to_bits(),
+                        // A toast coming or going is drawn anew on each frame of it.
+                        t.to_bits(),
                     )
                 })
                 .collect::<Vec<_>>(),
@@ -933,12 +1215,8 @@ impl App {
             self.ui.popup.as_ref().map(|p| {
                 (
                     p.kind,
-                    (p.menu.hover, p.menu.scroll().to_bits()),
-                    p.menu.items.len(),
+                    sig(p.state()),
                     p.access,
-                    p.sub
-                        .as_ref()
-                        .map(|s| (s.hover, s.items.len(), s.scroll().to_bits())),
                     // A menu fading in is drawn anew on each frame of it.
                     (self.menu_t.0.to_bits(), self.menu_t.1.to_bits()),
                 )
@@ -960,6 +1238,9 @@ impl App {
             self.ui.modal().then_some((
                 self.ui.overlay_tick,
                 self.ui.palette.is_some().then_some(self.ui.caret_on),
+                // A palette or the settings dialog coming in is drawn anew on each frame of it.
+                self.palette_t.to_bits(),
+                self.settings_t.to_bits(),
             )),
             self.ui
                 .zoom
@@ -970,7 +1251,25 @@ impl App {
                 .is_some()
                 .then_some((self.ui.hover, self.ui.pressed)),
         ));
-        let overlay_changed = osig != self.overlay_sig;
+        // The settings dialog moving (a switch, a segment, a hover fill): drawn on each frame of
+        // it, whenever the frame comes.
+        let settings = Id::new(crate::motion::SETTINGS);
+        let settings_moving = self.ui.settings.is_some()
+            && (self.anim.group_deadlines().iter()).any(|(g, _)| *g == settings);
+        // A frame where only the dialog moves redraws the inside of its card alone (below).
+        // Everything of it that moves lies in the card, unless a page has a dropdown, whose
+        // menu reaches past it: then a frame that leaves the dialog undrawn is not enough.
+        let settings_only = settings_moving
+            && osig == self.overlay_sig
+            && !self.full
+            && !(self.ui.settings.as_ref()).is_some_and(has_dropdown);
+        // A dialog that moves on a card the clipped frame cannot redraw alone (a dropdown's page)
+        // is a change of the overlay on its own: draw it, or it would freeze after its first frame.
+        // A menu's row hover fading is the same: the overlays are drawn on each frame of it.
+        let menus = Id::new(crate::motion::MENUS);
+        let menus_moving = (self.anim.group_deadlines().iter()).any(|(g, _)| *g == menus);
+        let overlay_changed =
+            osig != self.overlay_sig || (settings_moving && !settings_only) || menus_moving;
         self.overlay_sig = osig;
         let mut under: Vec<Rect> = bounds.clone();
         under.extend(self.overlay_bounds.iter().copied());
@@ -982,7 +1281,7 @@ impl App {
             && self.areas.region(Region::Page).is_some()
             && self.ws.active().is_some()
         {
-            let vr = page::viewport(&self.ws, self.areas.page);
+            let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
             let y0 = (vr.y * self.scale).round();
             // A device row to spare on each side, against rounding back and forth.
             let band = Rect::new(
@@ -1029,6 +1328,10 @@ impl App {
         let mut damage = Vec::new();
         // The page rows a draw of an animation's next frame is limited to.
         let mut partial: Option<(u32, u32)> = None;
+        let mut files_drawn = false;
+        let mut title_drawn = false;
+        let mut menus_drawn = false;
+        let mut settings_drawn = false;
         {
             let mut p = Painter::new(&mut self.screen, &mut self.gfx, self.scale);
             // A menu fading in over frosted chrome lets the backdrop through less and less.
@@ -1059,13 +1362,29 @@ impl App {
                 };
                 match r {
                     Region::Title => {
-                        chrome::draw_title(&mut c, &self.ws, &self.ui, rect, maximized)
+                        self.anim.group(crate::motion::TITLE);
+                        chrome::draw_title(
+                            &mut c,
+                            &mut self.anim,
+                            &self.ws,
+                            &self.ui,
+                            rect,
+                            maximized,
+                        );
+                        self.anim.ungroup();
+                        title_drawn = true;
                     }
                     Region::Bar => chrome::draw_bar(&mut c, &self.ws, &mut self.ui, rect),
-                    Region::Files => panes::draw_files(&mut c, &self.ws, &mut self.ui, rect),
+                    Region::Files => {
+                        self.anim.group(crate::motion::FILES);
+                        panes::draw_files(&mut c, &mut self.anim, &self.ws, &mut self.ui, rect);
+                        self.anim.ungroup();
+                        files_drawn = true;
+                    }
                     Region::Outline => panes::draw_outline(&mut c, &self.ws, &mut self.ui, rect),
                     Region::Page => {
-                        times.paint = page::draw_page(&mut c, &mut self.ws, &self.ui, rect)
+                        times.paint =
+                            page::draw_page(&mut c, &mut self.ws, &self.ui, rect, self.bars)
                     }
                 }
                 p.restore(old);
@@ -1106,16 +1425,19 @@ impl App {
                 }
                 if let Some(popup) = self.ui.popup.as_mut() {
                     let room = menu_room(self.areas.title, w, h);
-                    // At rest (1) each is `draw_in`, pixel for pixel.
-                    let (t, ts) = self.menu_t;
-                    popup.menu.draw_in_presence(c.p, &pal, room, t);
-                    if let Some(s) = popup.sub.as_mut() {
-                        let leftward = s.rect().x < popup.menu.rect().x;
-                        s.draw_in_entering(c.p, &pal, room, ts, Entrance::Side { leftward });
-                    }
+                    // At rest (1) each is `draw_in`, pixel for pixel; the hover fill of a row
+                    // fades in on the row the pointer or the keys reach (`draw_in_animated`).
+                    self.anim.group(crate::motion::MENUS);
+                    popup.draw(c.p, &pal, room, self.menu_t, &mut self.anim);
+                    self.anim.ungroup();
+                    menus_drawn = true;
                 }
-                for b in &bubbles {
-                    b.draw(c.p, &pal);
+                for (b, t) in &bubbles {
+                    if *t >= 1.0 {
+                        b.draw(c.p, &pal);
+                    } else {
+                        b.draw_presence(c.p, &pal, *t);
+                    }
                 }
                 if let Some(l) = &card {
                     crate::preview::draw(l, c.p, &pal);
@@ -1123,17 +1445,100 @@ impl App {
                 // Last, over everything.
                 let window = Rect::new(0.0, 0.0, w, h);
                 if let Some(p) = self.ui.palette.as_mut() {
-                    p.palette
-                        .draw(c.p, &pal, window, crate::ui::TITLE_H, self.ui.caret_on);
+                    let caret_on = self.ui.caret_on;
+                    let t = self.palette_t;
+                    if t >= 1.0 {
+                        p.palette
+                            .draw(c.p, &pal, window, crate::ui::TITLE_H, caret_on);
+                    } else {
+                        p.palette
+                            .draw_presence(c.p, &pal, window, crate::ui::TITLE_H, caret_on, t);
+                    }
                 }
                 if let Some(f) = self.ui.settings.as_mut() {
-                    f.draw(c.p, &pal, window, self.ui.caret_on);
+                    let t = self.settings_t;
+                    #[cfg(test)]
+                    {
+                        self.settings_snapshot_pixels = 0;
+                    }
+                    if t <= 0.0 {
+                        // Input still needs the card's geometry on its invisible first frame.
+                        f.layout(c.p, window);
+                    } else {
+                        let bounds = (t < 1.0)
+                            .then(|| mdshared_ui::overlay::dialog_bounds(f.layout(c.p, window)));
+                        let id = crate::motion::SETTINGS;
+                        let mut draw = |p: &mut Painter<'_>| {
+                            self.anim.group(id);
+                            f.draw_animated(p, &pal, window, self.ui.caret_on, &mut self.anim, id);
+                            self.anim.ungroup();
+                        };
+                        if let Some(bounds) = bounds {
+                            let _pixels = fade_settings(c.p, &pal, bounds, t, draw);
+                            #[cfg(test)]
+                            {
+                                self.settings_snapshot_pixels = _pixels;
+                            }
+                        } else {
+                            draw(c.p);
+                        }
+                    }
+                    settings_drawn = true;
                 }
                 // The diagram view covers everything, so it is drawn after them all.
                 if let Some(z) = self.ui.zoom.as_ref() {
                     crate::zoom::draw(&mut c, z, window);
                 }
+            } else if settings_only && let Some(f) = self.ui.settings.as_mut() {
+                // Only the dialog moves, and only where something of it can: the page list (a
+                // hover fill fading) and every row a setting changed while the group was in
+                // flight (a switch's knob, a segment). The card is opaque there, so those parts,
+                // short of its rounded corners, are drawn again alone, over what is there; the
+                // rest is as it was. A card with a dropdown is drawn whole instead (see
+                // `settings_only`).
+                let card = f.rect();
+                // The card's own corner radius (the shared `pages::CARD_RADIUS`, 10): a frame
+                // that redraws the card alone keeps clear of its corners, which blend with the
+                // window under them.
+                let corner = mdshared_ui::settings::pages::CARD_RADIUS;
+                let inner = Rect::new(card.x, card.y + corner, card.w, card.h - 2.0 * corner);
+                let list = Rect::new(inner.x, inner.y, f.page_rect().x - inner.x, inner.h);
+                let rows: Vec<Rect> = (self.settings_changed.iter())
+                    .map(|id| meet(f.row_rect(*id), inner))
+                    .filter(|r| r.w > 0.0 && r.h > 0.0)
+                    .collect();
+                let window = Rect::new(0.0, 0.0, w, h);
+                let id = crate::motion::SETTINGS;
+                for clip in std::iter::once(list).chain(rows) {
+                    if clip.w <= 0.0 || clip.h <= 0.0 {
+                        continue;
+                    }
+                    damage.push(p.dev_rect(clip));
+                    let old = p.clip(clip);
+                    self.anim.group(id);
+                    f.draw_animated(&mut p, &pal, window, self.ui.caret_on, &mut self.anim, id);
+                    self.anim.ungroup();
+                    p.restore(old);
+                    settings_drawn = true;
+                }
             }
+        }
+        // A pane left undrawn keeps its chevrons: a folder clicked on a later frame turns from
+        // where it was drawn, instead of being taken for new (and shown at rest).
+        if !files_drawn {
+            self.anim.keep_group(crate::motion::FILES);
+        }
+        // So does the title row on a frame that leaves it as it was.
+        if !title_drawn {
+            self.anim.keep_group(crate::motion::TITLE);
+        }
+        // So does a hover fill fading in an open menu.
+        if !menus_drawn {
+            self.anim.keep_group(crate::motion::MENUS);
+        }
+        // So does the settings dialog on a frame that leaves it as it was.
+        if self.ui.settings.is_some() && !settings_drawn {
+            self.anim.keep_group(crate::motion::SETTINGS);
         }
         // A partial draw trusted that only those rows of the page changed. If the page's frame
         // says otherwise (something else moved in between), the page is drawn whole next.
@@ -1145,6 +1550,9 @@ impl App {
         }
         // Painting may have settled a jump; that is already on screen.
         self.ws.take_dirty();
+        self.drawn_overlays = DrawnOverlays::of(self);
+        self.drawn_theme_choice = self.ws.theme_choice();
+        self.theme_frame();
         self.full = false;
         times.compose = t1.elapsed().saturating_sub(times.paint);
         times.rows = damage.iter().map(|d| (d.3 - d.1).max(0) as u32).sum();
@@ -1257,6 +1665,11 @@ impl App {
             stage(self.started, "first frame drawn and presented hidden");
             if let Some(w) = &self.window {
                 w.set_visible(true);
+                // Showing a window can raise it. A test run's window keeps the level it was
+                // made with (`AlwaysOnBottom`): setting Normal first, to force the level again
+                // (winit skips a level that has not changed), would raise it for a moment, so
+                // a `--behind` window may show above the others once and is not sent down
+                // afterwards. Nothing else of mdview's raises it.
             }
             stage(self.started, "window shown");
             // The first frame was presented to a hidden window, which shows nothing: send it
@@ -1289,8 +1702,37 @@ impl App {
     /// change of theme and when the watch says it changed.
     fn read_motion(&mut self) {
         if !self.still {
-            self.anim.set_system_reduced(platform::motion_reduced());
+            // A test gives its own wish (`App::reduced`), so its frames do not depend on the
+            // machine's "Animation effects" setting.
+            #[cfg(test)]
+            let reduced = self.reduced.unwrap_or_else(platform::motion_reduced);
+            #[cfg(not(test))]
+            let reduced = platform::motion_reduced();
+            self.anim.set_system_reduced(reduced);
         }
+        // The contrast theme is the settings dialog's alone. With the dialog closed nothing asks
+        // the system: on Linux the read opens a D-Bus connection and may wait half a second,
+        // which must never be on the window's thread (and the shared host treats it as off
+        // there). The dialog asks when it opens and, while it is open, on these events.
+        if self.ui.settings.is_none() {
+            return;
+        }
+        let on = self.high_contrast();
+        if let Some(f) = self.ui.settings.as_mut()
+            && f.set_high_contrast(on)
+        {
+            self.modal_changed();
+        }
+    }
+
+    /// Whether the system's contrast theme is on (never for a still run: a shot or a test
+    /// draws the same everywhere). The settings dialog's highlights then change at once.
+    pub(crate) fn high_contrast(&mut self) -> bool {
+        #[cfg(test)]
+        {
+            self.contrast_reads += 1;
+        }
+        !self.still && self.contrast.unwrap_or_else(platform::system_high_contrast)
     }
 
     fn watch_motion(&mut self) {
@@ -1531,7 +1973,7 @@ impl App {
 
     /// The page viewport (logical) and a logical point in it as device px.
     fn page_point(&self, x: f32, y: f32) -> (Rect, f32, f32) {
-        let vr = page::viewport(&self.ws, self.areas.page);
+        let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
         (vr, (x - vr.x) * self.scale, (y - vr.y) * self.scale)
     }
 
@@ -1563,6 +2005,39 @@ impl App {
         (w.max(1), h.max(1))
     }
 
+    fn resized(&mut self, size: PhysicalSize<u32>) {
+        if let Some(w) = &self.window {
+            let max = w.is_maximized();
+            if max != self.maximized && self.trace {
+                eprintln!("mdview: maximized {max}: {}", {
+                    #[cfg(windows)]
+                    {
+                        frame_report(w)
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        String::new()
+                    }
+                });
+            }
+            self.maximized = max;
+            self.update_shadow(None);
+        }
+        // The window reports the surface; the app lives in the content inside the margin
+        // (the margin in force was just re-read by `update_shadow`).
+        self.size = self.content_size(size.width, size.height);
+        // A minimized window may not compose a frame to release a snapshot that no longer fits.
+        if self
+            .theme_fade
+            .as_ref()
+            .is_some_and(|under| under.bitmap_size() != self.size)
+        {
+            self.theme_fade = None;
+        }
+        self.size_save_due = Some(Instant::now() + SIZE_SAVE_DELAY);
+        self.redraw();
+    }
+
     fn set_cursor(&mut self, c: CursorIcon) {
         if c != self.cursor {
             self.cursor = c;
@@ -1580,8 +2055,140 @@ fn menu_room(title: Rect, w: f32, h: f32) -> Rect {
     Rect::new(0.0, top, w, h - top)
 }
 
+/// Identities of the overlays in the framebuffer, not their hover/scroll/damage state. An
+/// overlay can be closed in many ways between frames, including while opening a replacement.
+#[derive(Default)]
+struct DrawnOverlays {
+    menu: Option<u64>,
+    submenu: Vec<usize>,
+    palette: Option<u64>,
+    dialog: Option<u64>,
+    settings: Option<u64>,
+    dropdown: bool,
+    tip: Option<Hit>,
+    preview: Option<Instant>,
+    hint: Option<u64>,
+    zoom: bool,
+    toasts: [Option<u64>; crate::motion::TOASTS_MAX],
+}
+
+impl DrawnOverlays {
+    fn of(a: &App) -> Self {
+        Self {
+            menu: a.ui.popup.as_ref().map(|p| p.serial),
+            submenu: a
+                .ui
+                .popup
+                .as_ref()
+                .map_or_else(Vec::new, |p| p.submenu_path().to_vec()),
+            palette: a.ui.palette.as_ref().map(|_| a.palette_serial),
+            dialog: a.ui.dialog.as_ref().map(|d| d.serial),
+            settings: a.ui.settings.as_ref().map(|_| a.settings_serial),
+            dropdown: Self::dropdown(a),
+            tip: a.ui.tips.shown().map(|t| t.key),
+            preview: a
+                .ui
+                .card
+                .as_ref()
+                .filter(|c| c.shown && c.content.is_some())
+                .map(|c| c.due),
+            hint: a.ui.link_hint.as_ref().map(sig),
+            zoom: a.ui.zoom.is_some(),
+            toasts: std::array::from_fn(|i| a.toast_frame.get(i).map(|(id, ..)| *id)),
+        }
+    }
+
+    fn closed_in(&self, a: &App) -> bool {
+        fn gone<T: PartialEq>(before: Option<T>, now: Option<T>) -> bool {
+            before.is_some() && before != now
+        }
+        gone(self.menu, a.ui.popup.as_ref().map(|p| p.serial))
+            || (!self.submenu.is_empty()
+                && a.ui
+                    .popup
+                    .as_ref()
+                    .is_none_or(|p| !p.submenu_path().starts_with(&self.submenu)))
+            || gone(
+                self.palette,
+                a.ui.palette.as_ref().map(|_| a.palette_serial),
+            )
+            || gone(self.dialog, a.ui.dialog.as_ref().map(|d| d.serial))
+            || gone(
+                self.settings,
+                a.ui.settings.as_ref().map(|_| a.settings_serial),
+            )
+            || (self.dropdown && !Self::dropdown(a))
+            || gone(self.tip, a.ui.tips.shown().map(|t| t.key))
+            || gone(
+                self.preview,
+                a.ui.card
+                    .as_ref()
+                    .filter(|c| c.shown && c.content.is_some())
+                    .map(|c| c.due),
+            )
+            || gone(self.hint, a.ui.link_hint.as_ref().map(sig))
+            || (self.zoom && a.ui.zoom.is_none())
+            || self
+                .toasts
+                .iter()
+                .flatten()
+                .any(|id| !a.toast_frame.iter().any(|(now, ..)| now == id))
+    }
+
+    fn dropdown(a: &App) -> bool {
+        a.ui.settings
+            .as_ref()
+            .is_some_and(|f| f.menu_rect().is_some())
+    }
+}
+
 fn overlaps(a: Rect, b: Rect) -> bool {
     a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
+}
+
+/// Fade the combined dim and card without copying the whole window. Clip the form to the
+/// card's paint bounds, including its shadow; blend the untouched surroundings in place.
+fn fade_settings(
+    p: &mut Painter<'_>,
+    pal: &Palette,
+    bounds: Rect,
+    t: f32,
+    draw: impl FnOnce(&mut Painter<'_>),
+) -> usize {
+    let under = p.snapshot(bounds);
+    let saved_clip = p.clip(bounds);
+    draw(p);
+    p.restore(saved_clip);
+    p.fade(&under, t);
+    let (x0, y0, x1, y1) = under.rect();
+    // Outside the shadow the only change is black at alpha a. Reducing that dim by the
+    // ratio (1-a*t)/(1-a) would require undoing the rounded full dim. Instead, start with
+    // the unchanged pixel and compute the same blend, including both of shared's roundings.
+    // Match overlay::draw_backdrop, Painter::span and Snapshot's 8-bit mix at the shared pin.
+    let remaining = 256 - if pal.dark { 115 } else { 71 };
+    let t = (t * 256.0).round() as u32;
+    let dim: [u8; 256] = std::array::from_fn(|v| {
+        let v = v as u32;
+        let fully_dimmed = (v * remaining) >> 8;
+        ((v * (256 - t) + fully_dimmed * t + 128) >> 8) as u8
+    });
+    let stride = p.bmp.width as usize * 4;
+    let dim_row = |bytes: &mut [u8]| {
+        for px in bytes.as_chunks_mut::<4>().0 {
+            for ch in &mut px[..3] {
+                *ch = dim[*ch as usize];
+            }
+        }
+    };
+    for (y, row) in p.bmp.pixels.chunks_exact_mut(stride).enumerate() {
+        if (y0 as usize..y1 as usize).contains(&y) {
+            dim_row(&mut row[..x0 as usize * 4]);
+            dim_row(&mut row[x1 as usize * 4..]);
+        } else {
+            dim_row(row);
+        }
+    }
+    (x1 - x0) as usize * (y1 - y0) as usize
 }
 
 #[cfg(windows)]
@@ -1602,6 +2209,27 @@ fn style(w: &Window, dark: bool, corners: Corners) {
     }
 }
 
+/// Whether a saved window place still shows: its title row's first reachable point (60 px in,
+/// 16 px down) must be on one of `monitors`, given as (x, y, width, height) in physical screen
+/// px. A window saved on a monitor that is gone — unplugged, or rearranged so that its place is
+/// on no screen — is not reachable.
+fn position_reachable(x: i32, y: i32, monitors: &[(i32, i32, u32, u32)]) -> bool {
+    monitors.iter().any(|&(mx, my, mw, mh)| {
+        let (px, py) = (x + 60, y + 16);
+        px >= mx && px < mx + mw as i32 && py >= my && py < my + mh as i32
+    })
+}
+
+/// The place a saved window asks for: itself while its title row is on a monitor that is there,
+/// and none otherwise, so the window is created without a position and the system places it —
+/// inside the work area, where a taskbar cannot cover its title row. Shared's
+/// `window_state::restore` would clamp into the work area too, but mdview's session keeps a
+/// physical point and a logical size with no monitor identity or scale, so adopting it would
+/// mean a new session format; see `docs/HANDOFF.md`.
+fn saved_place(x: i32, y: i32, monitors: &[(i32, i32, u32, u32)]) -> Option<(i32, i32)> {
+    position_reachable(x, y, monitors).then_some((x, y))
+}
+
 #[cfg(windows)]
 fn frame_report(w: &Window) -> String {
     hwnd(w).map(platform::frame_report).unwrap_or_default()
@@ -1619,20 +2247,27 @@ impl ApplicationHandler<Wake> for App {
             .with_decorations(false)
             .with_visible(false)
             .with_inner_size(LogicalSize::new(w.max(520) as f64, h.max(360) as f64))
-            .with_maximized(max || self.args.maximize);
+            .with_maximized(self.args.maximized(max));
+        // A test run: shown without the focus and kept under every other window.
+        if self.args.behind {
+            attributes = attributes
+                .with_active(false)
+                .with_window_level(WindowLevel::AlwaysOnBottom);
+        }
         // Back where it was, if a screen still shows that place: the title row's left end has
-        // to be on one, or the window could not be reached.
+        // to be on one, or the window could not be reached. A place on a monitor that is gone
+        // asks for no position at all, so the system opens the window where it opens a new one
+        // (inside the work area, clear of any taskbar).
         if let Some((x, y)) = self.ws.window_position() {
-            let reachable = event_loop.available_monitors().any(|monitor| {
-                let (origin, size) = (monitor.position(), monitor.size());
-                let (px, py) = (x + 60, y + 16);
-                px >= origin.x
-                    && px < origin.x + size.width as i32
-                    && py >= origin.y
-                    && py < origin.y + size.height as i32
-            });
-            if reachable {
-                attributes = attributes.with_position(PhysicalPosition::new(x, y));
+            let monitors: Vec<(i32, i32, u32, u32)> = event_loop
+                .available_monitors()
+                .map(|m| {
+                    let (origin, size) = (m.position(), m.size());
+                    (origin.x, origin.y, size.width, size.height)
+                })
+                .collect();
+            if let Some((px, py)) = saved_place(x, y, &monitors) {
+                attributes = attributes.with_position(PhysicalPosition::new(px, py));
             }
         }
         #[cfg(windows)]
@@ -1743,30 +2378,7 @@ impl ApplicationHandler<Wake> for App {
                     self.ws.set_window_position(position.x, position.y);
                 }
             }
-            WindowEvent::Resized(size) => {
-                if let Some(w) = &self.window {
-                    let max = w.is_maximized();
-                    if max != self.maximized && self.trace {
-                        eprintln!("mdview: maximized {max}: {}", {
-                            #[cfg(windows)]
-                            {
-                                frame_report(w)
-                            }
-                            #[cfg(not(windows))]
-                            {
-                                String::new()
-                            }
-                        });
-                    }
-                    self.maximized = max;
-                    self.update_shadow(None);
-                }
-                // The window reports the surface; the app lives in the content inside the margin
-                // (the margin in force was just re-read by `update_shadow`).
-                self.size = self.content_size(size.width, size.height);
-                self.size_save_due = Some(Instant::now() + SIZE_SAVE_DELAY);
-                self.redraw();
-            }
+            WindowEvent::Resized(size) => self.resized(size),
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.scale = scale_factor as f32;
                 self.update_shadow(None);
@@ -1809,7 +2421,7 @@ impl ApplicationHandler<Wake> for App {
                 }
                 if !focused {
                     self.ui.caret_on = true;
-                    self.ui.tip = None;
+                    self.ui.tips.hide();
                     self.ui.card = None;
                 }
                 self.redraw();
@@ -1840,7 +2452,7 @@ impl ApplicationHandler<Wake> for App {
             WindowEvent::CursorLeft { .. } => {
                 if self.ui.drag.is_none() {
                     self.ui.hover = None;
-                    self.ui.tip = None;
+                    self.ui.tips.hide();
                     self.ui.card = None;
                     self.ui.link_hint = None;
                     self.redraw();
@@ -1968,6 +2580,14 @@ fn shot(mut app: App, path: &Path) -> i32 {
         (lw as f32 * app.scale).round() as u32,
         (lh as f32 * app.scale).round() as u32,
     );
+    // Without an explicit starting theme, simulate the desktop in the opposite theme.
+    // Do this before Settings builds its form, so the Theme row shows System throughout.
+    if app.args.dark.is_none()
+        && let Some(dark) = app.args.theme_flip
+    {
+        app.ws.set_theme_choice(ThemeChoice::System);
+        app.ws.set_system_dark(!dark);
+    }
     // A document mdedit has not saved, as its "Preview in mdview" would hand it over.
     if let Some(text) =
         (app.args.demo_untitled.as_deref()).and_then(|file| std::fs::read_to_string(file).ok())
@@ -1991,7 +2611,7 @@ fn shot(mut app: App, path: &Path) -> i32 {
         Some(ShotMenu::MainEnd) => {
             app.open_popup(PopupKind::Main);
             if let Some(p) = app.ui.popup.as_mut() {
-                p.menu.scroll_to_end();
+                p.root_mut().scroll_to_end();
             }
         }
         Some(ShotMenu::Recent) => app.open_popup(PopupKind::Recent),
@@ -2023,20 +2643,8 @@ fn shot(mut app: App, path: &Path) -> i32 {
     if let Some(ms) = app.args.menu_at
         && app.ui.popup.is_some()
     {
-        app.still = false;
-        let start = Instant::now();
-        app.frame_clock = Some(start);
-        app.compose();
-        // In frames of 16 ms, as a window draws them: one step longer than the animator's 50 ms
-        // would be taken for a stall and cut short. It stops once nothing moves, so no number
-        // of milliseconds, however large, makes a long loop or overflows the clock.
-        let end = Duration::from_millis(ms);
-        let mut at = Duration::ZERO;
-        while at < end && app.anim_due.is_some() {
-            at = (at + Duration::from_millis(16)).min(end);
-            app.frame_clock = Some(start.checked_add(at).unwrap_or(start));
-            app.compose();
-        }
+        let start = start_moving(&mut app);
+        frames_until(&mut app, start, ms);
     }
     match app.args.dialog {
         Some(ShotDialog::About) => app.open_dialog(DialogKind::About),
@@ -2075,6 +2683,30 @@ fn shot(mut app: App, path: &Path) -> i32 {
             p.poll_folder();
         }
     }
+    // A notice bar or a palette part of the way into its own entrance: the clock must start
+    // before its first frame, since a still frame would put it in place at once.
+    let has_bar = app.ws.update_bar().is_some()
+        || app.ws.crash_report().is_some()
+        || app.ws.stale_offer() > 0;
+    let hover = app.args.hover_close;
+    let early = if app.ui.palette.is_some() || has_bar || hover {
+        app.args.motion_at.map(|ms| {
+            if has_bar {
+                restart_bars(&mut app);
+            }
+            let start = start_moving(&mut app);
+            // The pointer on the Close button after the clock has started, so its fill begins
+            // at `start` and the shot has it part way in rather than finished.
+            if hover && let Some(r) = app.hit_rect(Hit::WinClose) {
+                let (x, y) = (r.cx(), r.cy());
+                app.pointer_moved(x, y);
+                app.compose();
+            }
+            (start, ms)
+        })
+    } else {
+        None
+    };
     // The diagram zoom view, at the size and place the arguments ask for.
     if let Some(n) = app.args.zoom_diagram {
         if !app.open_zoom_nth(n) {
@@ -2092,7 +2724,13 @@ fn shot(mut app: App, path: &Path) -> i32 {
         }
         app.compose();
     }
-    if app.ui.dialog.is_some() || app.ui.popup.is_some() || app.ui.modal() {
+    // A dialog or a palette just opened is drawn at rest. The Settings dialog with `--motion-at`
+    // is the exception when its entrance is the motion shot. For a theme flip the dialog should
+    // already be fully open in the old frame that the crossfade starts from.
+    let settings_entrance = app.args.dialog == Some(ShotDialog::Settings)
+        && app.args.motion_at.is_some()
+        && app.args.theme_flip.is_none();
+    if (app.ui.dialog.is_some() || app.ui.popup.is_some() || app.ui.modal()) && !settings_entrance {
         app.compose();
     }
     if let Some((x, y)) = app.args.hover {
@@ -2112,16 +2750,84 @@ fn shot(mut app: App, path: &Path) -> i32 {
                 app.ui.copied = Some((spot.start, Instant::now() + crate::codebtn::COPIED_FOR));
             }
         }
-        if let Some(t) = app.ui.tip.as_mut() {
-            t.shown = true;
+        // The tip waiting under `--hover` shows now (with `--motion-at`, as the motion starts).
+        if app.args.motion_at.is_none() {
+            app.ui.tips.tick(Instant::now() + Duration::from_secs(3600));
         }
         app.show_card_now();
         if let Some(p) = app.ui.popup.as_mut() {
-            p.menu.pointer(x, y);
-            if let Some(s) = p.sub.as_mut() {
-                s.pointer(x, y);
+            p.pointer(x, y, Instant::now());
+        }
+    }
+    // What a shot sets moving: what is on screen now is at rest, then the change comes and
+    // the frames of its motion run up to `--motion-at` (without it the change is at rest).
+    let toasts = app.args.toasts.clone();
+    let (last_toast, earlier) = match toasts.split_last() {
+        Some((last, earlier)) => (Some(last), earlier),
+        None => (None, &[][..]),
+    };
+    // Confirmations, so that they stack.
+    for text in earlier {
+        app.ws.confirm(text);
+        app.compose();
+    }
+    // The row to turn is focused first, its page drawn at rest.
+    let flip = app.args.flip_setting;
+    if let Some(id) = flip {
+        let focused = (app.ui.settings.as_mut()).is_some_and(|f| f.focus_row(id));
+        if !focused {
+            eprintln!("mdview: no setting {id} to turn in the settings dialog");
+            return 2;
+        }
+        app.full = true;
+        app.compose();
+    }
+    let moving = early.or_else(|| app.args.motion_at.map(|ms| (start_moving(&mut app), ms)));
+    if let Some(text) = last_toast {
+        app.ws.confirm(text);
+    }
+    if flip.is_some() {
+        app.key_named(KeyName::Space, None);
+    }
+    // A theme change, made after the clock has started and the frame before it is drawn, so the
+    // frames of its crossfade are the ones shot.
+    if let Some(dark) = app.args.theme_flip {
+        if app.args.dark.is_none() {
+            app.ws.set_system_dark(dark);
+        } else {
+            app.ws.set_theme_choice(match dark {
+                true => ThemeChoice::Dark,
+                false => ThemeChoice::Light,
+            });
+        }
+    }
+    // The tip under `--hover` shows now (with `--motion-at`, as the motion starts). A shot of a
+    // title-row hover is no tip: a window shows none after a few ms on the button, and one ticked
+    // into view would be a half-faded bubble no window has.
+    if app.args.hover.is_some() && moving.is_some() {
+        app.ui.tips.tick(Instant::now() + Duration::from_secs(3600));
+    }
+    if let Some(name) = app.args.turn.clone() {
+        match (app.ui.tree.rows().iter()).position(|r| r.is_dir && r.depth == 0 && r.name == name) {
+            Some(i) => {
+                app.ui.tree.toggle(i);
+            }
+            None => {
+                eprintln!("mdview: no folder {name} in the Files pane");
+                return 2;
             }
         }
+    }
+    if let Some((start, ms)) = moving {
+        frames_until(&mut app, start, ms);
+    }
+    // `--hover-close` without a motion: the pointer rests on the button, drawn at once.
+    if app.args.hover_close
+        && app.args.motion_at.is_none()
+        && let Some(r) = app.hit_rect(Hit::WinClose)
+    {
+        let (x, y) = (r.cx(), r.cy());
+        app.pointer_moved(x, y);
     }
     app.full = true;
     app.compose();
@@ -2135,6 +2841,97 @@ fn shot(mut app: App, path: &Path) -> i32 {
         Err(e) => {
             eprintln!("mdview: could not write {}: {e}", path.display());
             1
+        }
+    }
+}
+
+/// Whether the page of `f` shown has a choice the shared form draws as a dropdown: more than
+/// three options, or a row `Item::dropdown()` forced to one whatever its count (its flag is
+/// private, so the laid-out control says: a segmented row has segment rects and a dropdown has
+/// none). Its menu reaches out of the card, so a frame that redraws the card alone could leave it
+/// behind; the shared form does not say whether one is open. Before the form's first layout
+/// nothing is segmented yet, so the answer is yes and the whole window is drawn: only slower.
+fn has_dropdown(f: &mdshared_ui::settings::pages::Form) -> bool {
+    let Some(page) = f.pages().get(f.page()) else {
+        return false;
+    };
+    (page.items.iter()).any(|it| match it.row() {
+        mdshared_ui::settings::Row::Choice { options, .. } => {
+            options.len() > 3
+                || it
+                    .row()
+                    .id()
+                    .is_none_or(|id| f.segment_rect(id, 0).w <= 0.0)
+        }
+        _ => false,
+    })
+}
+
+/// What two rectangles share (empty, zero wide or high, when nothing).
+fn meet(a: Rect, b: Rect) -> Rect {
+    let (x, y) = (a.x.max(b.x), a.y.max(b.y));
+    let (r, bottom) = (a.right().min(b.right()), a.bottom().min(b.bottom()));
+    Rect::new(x, y, (r - x).max(0.0), (bottom - y).max(0.0))
+}
+
+/// Where a toast whose place at rest is `rest` stands `lift` logical px above it: moved by a
+/// whole number of device pixels at `scale`, so its text stays on the grid it has at rest.
+fn toast_y(rest: f32, lift: f32, scale: f32) -> f32 {
+    rest - (lift * scale).round() / scale
+}
+
+/// A shot from here on moves, as a window does, on a clock set by hand: the frame drawn now is
+/// the start. Returns the start.
+/// Starts the notice bars' entrance again: a shot of one mid-slide needs the clock to start
+/// before their first frame, which a still run has already drawn in place.
+fn restart_bars(app: &mut App) {
+    for key in ["update", "crash", "stale"] {
+        app.anim.forget(("bar", key));
+    }
+}
+
+/// Starts a moving shot's clock and draws its first frame.
+fn start_moving(app: &mut App) -> Instant {
+    app.still = false;
+    app.forced_motion = true;
+    let start = Instant::now();
+    app.frame_clock = Some(start);
+    app.compose();
+    start
+}
+
+/// Draws a moving shot's frames up to `ms` after `start`, in frames of 16 ms, as a window draws
+/// them: one step longer than the animator's 50 ms would be taken for a stall and cut short. It
+/// stops once nothing moves, so no number of milliseconds, however large, makes a long loop or
+/// overflows the clock.
+fn frames_until(app: &mut App, start: Instant, ms: u64) {
+    let end = Duration::from_millis(ms);
+    let mut at = Duration::ZERO;
+    loop {
+        // The frame that starts the motion asks for the next one; the change made since the
+        // last frame is drawn first.
+        if at > Duration::ZERO && app.anim_due.is_none() {
+            break;
+        }
+        at = (at + Duration::from_millis(16)).min(end);
+        app.frame_clock = Some(start.checked_add(at).unwrap_or(start));
+        let (damage, times) = app.compose();
+        // `MDVIEW_TRACE`: what each frame of the motion costs, as a window's trace says it
+        // (without the copy to the window and its present, which a shot does not make).
+        if app.trace {
+            let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+            eprintln!(
+                "mdview: motion frame at {} ms: layout {:.2} paint {:.2} compose {:.2} ms, {} rows in {} rects",
+                at.as_millis(),
+                ms(times.layout),
+                ms(times.paint),
+                ms(times.compose),
+                times.rows,
+                damage.len()
+            );
+        }
+        if at >= end {
+            break;
         }
     }
 }
@@ -2192,6 +2989,73 @@ fn check_update() -> i32 {
     }
 }
 
+/// What the folder step of [`run`] decided: see [`admit`].
+enum Admission {
+    /// Another window took the files: this launch exits at once.
+    Handed,
+    /// The window runs, with the folder's lock when it could be taken (a folder that cannot be
+    /// written has none) and with its session, or without one.
+    Run {
+        lock: Option<std::fs::File>,
+        session: Option<PathBuf>,
+        note: Option<String>,
+    },
+}
+
+/// Claims the settings folder for `args` when the launch has a session, hands the files to a
+/// window already holding it only when [`Args::folder`] says it may, and takes the session away
+/// when the folder is busy. `claim` is `folder_lock::claim`, and a test gives its own so it can
+/// see what the decision was.
+fn admit(
+    args: &Args,
+    session: Option<PathBuf>,
+    claim: impl FnOnce(&Path, Box<dyn FnMut() -> bool>, Duration) -> mdshared_app::folder_lock::Claim,
+) -> Admission {
+    use mdshared_app::folder_lock;
+    let Some(settings) = session.clone().filter(|_| args.shot.is_none()) else {
+        return Admission::Run {
+            lock: None,
+            session,
+            note: None,
+        };
+    };
+    let folder = args.folder();
+    if folder.hand_over {
+        // Started by a restart: the window that started it is still closing; wait it out, or the
+        // hand-over below would go to it and leave no window.
+        mdshared_app::relaunch::wait_for_predecessor(std::env::args().skip(1), &settings);
+    }
+    let forward: Box<dyn FnMut() -> bool> = if folder.hand_over {
+        let requests = args.requests();
+        let files = args.files.clone();
+        let settings = settings.clone();
+        Box::new(move || {
+            if requests.is_empty() {
+                mdview_core::single::forward(&settings, &files)
+            } else {
+                (requests.iter()).all(|r| mdview_core::single::forward_request(&settings, r))
+            }
+        })
+    } else {
+        // Never hands over: a hand-over would raise the window that took it, and a `--behind`
+        // run must not bring any window forward.
+        Box::new(|| false)
+    };
+    match claim(&settings, forward, folder.wait) {
+        folder_lock::Claim::Own(lock) => Admission::Run {
+            lock,
+            session: Some(settings),
+            note: None,
+        },
+        folder_lock::Claim::Handed => Admission::Handed,
+        folder_lock::Claim::Busy => Admission::Run {
+            lock: None,
+            session: None,
+            note: Some(folder_lock::busy_note("mdview")),
+        },
+    }
+}
+
 pub fn run() -> i32 {
     let started = Instant::now();
     let args = Args::parse(std::env::args().skip(1));
@@ -2203,41 +3067,25 @@ pub fn run() -> i32 {
     }
     let explicit = std::env::var_os("MDVIEW_SETTINGS").map(PathBuf::from);
     // A shot never touches the user's session; it may use a scratch one named by MDVIEW_SETTINGS.
-    let mut session = match (args.no_session, args.shot.is_some()) {
+    let session = match (args.no_session, args.shot.is_some()) {
         (true, _) => None,
         (false, true) => explicit,
         (false, false) => explicit.or_else(mdview_core::session::default_settings_path),
     };
     // Held while the window runs: this launch has the settings folder
     // (mdshared_app::folder_lock, shared with mdedit).
-    let mut _folder_lock = None;
-    // Why this window runs without its session, shown once it is up.
-    let mut no_session_note: Option<String> = None;
-    if let Some(settings) = session.clone().filter(|_| args.shot.is_none()) {
-        // Started by a restart: the window that started it is still closing; wait it out, or the
-        // hand-over below would go to it and leave no window.
-        mdshared_app::relaunch::wait_for_predecessor(std::env::args().skip(1), &settings);
-        // A window is already open: hand it the files and quit, before any window work. A launch
-        // that asks for a line, a place or a follow hands each file over with that. One that is
-        // still starting holds the folder and is waited for, not run beside.
-        let requests = args.requests();
-        let forward = || {
-            if requests.is_empty() {
-                mdview_core::single::forward(&settings, &args.files)
-            } else {
-                (requests.iter()).all(|r| mdview_core::single::forward_request(&settings, r))
-            }
-        };
-        use mdshared_app::folder_lock::{self, Claim};
-        match folder_lock::claim(&settings, forward, folder_lock::WAIT) {
-            Claim::Own(lock) => _folder_lock = lock,
-            Claim::Handed => return 0,
-            Claim::Busy => {
-                session = None;
-                no_session_note = Some(folder_lock::busy_note("mdview"));
-            }
-        }
-    }
+    // A `--behind` run is its own instance: it claims the folder but never hands its files to an
+    // mdview already running (whose window would be raised), and a busy folder leaves it without
+    // a session, so it writes neither the port file nor the session (`Args::folder`, `admit`).
+    let admission = admit(&args, session, mdshared_app::folder_lock::claim);
+    let (mut session, _folder_lock, mut no_session_note) = match admission {
+        Admission::Handed => return 0,
+        Admission::Run {
+            lock,
+            session,
+            note,
+        } => (session, lock, note),
+    };
     // A live update is for a window that shows the file already: with none, there is nothing to do.
     if args.follow && args.shot.is_none() {
         return 0;
@@ -2293,7 +3141,9 @@ pub fn run() -> i32 {
     mdshared_ui::open_documents::on_open(move |paths| {
         let _ = p.send_event(Wake::Open(paths));
     });
-    if let Some(settings) = &app.session {
+    if app.args.listens()
+        && let Some(settings) = &app.session
+    {
         let p = proxy.clone();
         app.incoming = mdview_core::single::listen_requests_waking(settings, move || {
             let _ = p.send_event(Wake::Instance);

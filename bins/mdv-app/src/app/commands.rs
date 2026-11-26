@@ -169,12 +169,12 @@ impl App {
                     .strip_prefix(crate::workspace::WIKI_SCHEME)
                     .unwrap_or(&dest);
                 if platform::set_clipboard_text(dest) {
-                    self.ws.set_status("Link address copied");
+                    self.ws.confirm("Link address copied");
                 }
             }
             Act::CopySource(kind, text) => {
                 if platform::set_clipboard_text(&text) {
-                    self.ws.set_status(match kind {
+                    self.ws.confirm(match kind {
                         SourceKind::Formula => "Formula source copied",
                         SourceKind::Diagram => "Diagram source copied",
                     });
@@ -221,7 +221,7 @@ impl App {
     /// The copy button was clicked: the code of the block under the pointer goes to the clipboard
     /// and the button shows a check mark for a moment.
     pub(super) fn copy_code_under_pointer(&mut self) {
-        let vr = page::viewport(&self.ws, self.areas.page);
+        let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
         let Some(spot) = crate::codebtn::spot(&mut self.ws, &self.ui, vr, self.scale) else {
             return;
         };
@@ -237,7 +237,7 @@ impl App {
         match self.ws.code_in_reach() {
             Some(text) => {
                 if crate::codebtn::to_clipboard(&text) {
-                    self.ws.set_status("Code copied");
+                    self.ws.confirm("Code copied");
                 }
             }
             None => self.ws.set_status("No code block in view"),
@@ -252,7 +252,7 @@ impl App {
                 .is_some_and(|html| platform::set_clipboard_html(&html, &text))
                 || platform::set_clipboard_text(&text))
         {
-            self.ws.set_status("Copied");
+            self.ws.confirm("Copied");
         }
     }
 
@@ -261,7 +261,7 @@ impl App {
         match self.ws.selected_markdown() {
             Ok(text) => {
                 if crate::codebtn::to_clipboard(&text) {
-                    self.ws.set_status("Copied");
+                    self.ws.confirm("Copied");
                 }
             }
             Err(message) => self.ws.set_status(message),
@@ -315,7 +315,7 @@ impl App {
             }
             C::CopyFilePath => {
                 if platform::set_clipboard_text(&path.display().to_string()) {
-                    self.ws.set_status("File path copied");
+                    self.ws.confirm("File path copied");
                 }
             }
             C::ShowInFileManager => {
@@ -379,62 +379,32 @@ impl App {
             && p.kind == PopupKind::Main
         {
             // Asked by name, not by the pointer: highlight the item it belongs to.
-            if let Some(i) = p
-                .menu
-                .items
-                .iter()
-                .position(|it| it.id.is_submenu() && it.enabled)
-            {
-                p.menu.hover = Some(i);
-            }
-            self.open_submenu(false);
+            p.open_submenu(false);
             return;
         }
         let (x, y, right) = self.popup_anchor(kind);
-        let menu = match kind {
-            PopupKind::Main => overlays::main_menu(&self.ws, &self.ui, x, y),
-            PopupKind::Recent => overlays::recent_menu(&self.ws, x, y, right),
+        let mut popup = match kind {
+            PopupKind::Main => Popup::main(
+                kind,
+                overlays::main_cascade(&self.ws, &self.ui, Rect::new(x, y, 0.0, 0.0)),
+            ),
+            PopupKind::Recent => Popup::new(kind, overlays::recent_menu(&self.ws, x, y, right)),
             _ => return,
         };
-        let mut popup = Popup::new(kind, menu);
         if self.mods.alt {
             popup.show_access();
         }
         self.ui.popup = Some(popup);
-        self.ui.tip = None;
+        self.ui.tips.hide();
     }
 
     /// Opens the submenu of the highlighted item of the open menu beside that item. `keyboard`
     /// also highlights its first row, so the arrow keys carry on inside it.
     pub(super) fn open_submenu(&mut self, keyboard: bool) {
-        let (w, _) = self.logical();
-        let Some(p) = self.ui.popup.as_mut() else {
-            return;
-        };
-        p.dwell = None;
-        let Some(i) = p.menu.hover.filter(|&i| p.menu.items[i].id.is_submenu()) else {
-            return;
-        };
-        let parent = p.menu.rect();
-        let row_y = parent.y + overlays::menu_row_offset(&p.menu.items, i) - p.menu.scroll();
-        // Beside the item, on the right unless the window has no room there.
-        let room = w - parent.right();
-        let left = room < 420.0 && parent.x > room;
-        let (x, right) = if left {
-            (parent.x + 4.0, true)
-        } else {
-            (parent.right() - 4.0, false)
-        };
-        let mut menu = overlays::recent_menu(&self.ws, x, row_y - 5.0, right);
-        if keyboard {
-            menu.step(true);
+        if let Some(p) = self.ui.popup.as_mut() {
+            p.open_submenu(keyboard);
         }
-        // A submenu that opens fades in; one put in the place of the one showing does not.
-        if p.sub.is_none() {
-            p.sub_serial += 1;
-        }
-        p.sub = Some(menu);
-        self.ui.tip = None;
+        self.ui.tips.hide();
     }
 
     /// What choosing a menu item does: a submenu item opens its submenu and keeps the menus,
@@ -450,7 +420,7 @@ impl App {
 
     pub(super) fn open_dialog(&mut self, kind: DialogKind) {
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.find_focused = false;
         self.ui.dialog = Some(Dialog::new(kind));
         self.ui.dlg_hover_row = None;
@@ -488,7 +458,7 @@ impl App {
         });
         self.ui.zoom = Some(view);
         self.ui.popup = None;
-        self.ui.tip = None;
+        self.ui.tips.hide();
         self.ui.card = None;
         self.ui.link_hint = None;
         self.ui.hover = None;
@@ -916,9 +886,16 @@ impl App {
             self.place(rect, (request.path.clone(), request.doc.clone()));
         }
         let only_following = !requests.is_empty() && requests.iter().all(|r| r.follow);
-        if !only_following && let Some(w) = &self.window {
-            w.set_minimized(false);
-            w.focus_window();
+        // A `--behind` window is never brought forward by a hand-over: no focus, no unminimize.
+        if !only_following && self.args.presence().focus {
+            #[cfg(test)]
+            {
+                self.hand_overs_focused += 1;
+            }
+            if let Some(w) = &self.window {
+                w.set_minimized(false);
+                w.focus_window();
+            }
         }
     }
 
@@ -1331,39 +1308,24 @@ impl App {
                 at(due);
             }
         }
-        // The pointer resting on a submenu item: open it when the dwell is up. Nothing is
-        // scheduled when no menu is open, because the dwell lives in the popup.
-        let dwell = self.ui.popup.as_ref().and_then(|p| p.dwell);
-        if let Some((_, due)) = dwell {
+        // The pointer resting on a submenu item: open it when the dwell is up, or close the
+        // open one. Nothing is scheduled when no menu is open, because the dwell lives in the
+        // popup's cascade.
+        if let Some(due) = self.ui.popup.as_ref().and_then(Popup::deadline) {
             if now >= due {
-                // The pointer rested: on a submenu item its submenu opens, on any other item
-                // the open submenu closes.
-                let opens = self.ui.popup.as_mut().is_some_and(|p| {
-                    let i = p.dwell.take().map(|d| d.0);
-                    let opens =
-                        i.is_some_and(|i| p.menu.items.get(i).is_some_and(|it| it.id.is_submenu()));
-                    if opens {
-                        p.menu.hover = i;
-                    } else {
-                        p.sub = None;
-                    }
-                    opens
-                });
-                if opens {
-                    self.open_submenu(false);
+                if let Some(p) = self.ui.popup.as_mut() {
+                    p.tick(now);
                 }
                 self.wants_frame = true;
             } else {
                 at(due);
             }
         }
-        if let Some(tip) = self.ui.tip.as_mut().filter(|t| !t.shown) {
-            if now >= tip.due {
-                tip.shown = true;
-                self.wants_frame = true;
-            } else {
-                at(tip.due);
-            }
+        if self.ui.tips.tick(now) {
+            self.wants_frame = true;
+        }
+        if let Some(due) = self.ui.tips.deadline() {
+            at(due);
         }
         if let Some((_, until)) = self.ui.copied {
             if now >= until {
@@ -1517,7 +1479,7 @@ impl App {
 
     pub(super) fn autoscroll(&mut self) {
         let (x, y) = self.ui.mouse;
-        let vr = page::viewport(&self.ws, self.areas.page);
+        let vr = page::viewport_bars(&self.ws, self.areas.page, self.bars);
         let beyond = if y < vr.y {
             y - vr.y
         } else if y >= vr.bottom() {

@@ -5,7 +5,7 @@ use crate::preview::{self, Card, Lookup, Target};
 
 /// How long the pointer rests on a footnote or a link before its card shows; the tooltips' own
 /// delay, so every hover helper waits alike.
-const CARD_DELAY: Duration = TIP_DELAY;
+const CARD_DELAY: Duration = crate::motion::TIP_DELAY;
 
 impl App {
     /// The pointer is on `target` (a footnote mark or a link with something to show), or on

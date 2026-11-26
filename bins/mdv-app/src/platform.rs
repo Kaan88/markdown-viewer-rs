@@ -3,6 +3,21 @@
 pub use mdshared_ui::platform::*;
 use std::path::{Path, PathBuf};
 
+/// Whether the system's contrast theme is on. Only the settings dialog asks, and only while it
+/// is open (`App::high_contrast`). On Linux it is false, as the shared host has it: the shared
+/// read opens a D-Bus connection and may wait half a second, which must not happen on the
+/// window's thread.
+pub fn system_high_contrast() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        false
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        mdshared_ui::platform::system_high_contrast()
+    }
+}
+
 /// Whether the system shows animations (Windows: Settings, Accessibility, Visual effects,
 /// "Animation effects"). When it does not, animated images stay on their first frame.
 #[cfg(windows)]
