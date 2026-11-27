@@ -11,6 +11,18 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Release 1.2.1 (2026-11-27)
+
+The toolkit pin moves from `7fd559f` to `48eedb8`, the toolkit's main after its full review
+(#61 to #67), on the owner's word: "make a new release against the latest shared." Released
+together with mdedit 1.6.1, because the single-instance hand-over is now authenticated and an
+old copy gets nothing. `Cargo.lock` gains no package: `mdshared-app` gains a direct edge to
+`libc` (unix) and `mdshared-text` one to `skrifa`, both already in the lock. The AppImage's
+`AppRun` links to `usr/bin/mdview`, as the toolkit's Linux self-update requires. See
+[the 1.2.1 release notes](release-notes/1.2.1.md).
+Not verified for 1.2.1: the real AppImage updater check (toolkit AI1), a hand-over between real
+1.2.0 and 1.2.1 windows, the Windows installer, and the Linux and macOS packages by hand.
+
 ## Release 1.2.0 (2026-11-27)
 
 Prepared on `f/renderer` for the coordinator to merge and tag after CI. This
@@ -31,7 +43,7 @@ the Linux and macOS packages by hand, or a successful hosted Mac update.
 190 of 195 shots and in the 8 goldens. The owner approved it: "text rendering is great on other
 apps, mark it fine."
 
-All toolkit dependencies resolve at `7fd559f`. The five local crates under `crates/`
+All toolkit dependencies resolve at `48eedb8` (1.2.1; `7fd559f` in 1.2.0). The five local crates under `crates/`
 (`core`, `render`, `engine`, `engine-proto`, `preview`) have been removed. The viewer
 and bench alias the shared Markdown crates; preview still enables `server` and speaks
 `MDVPREVIEW7`. Viewer-owned commands, files/session, reading positions, preview text,

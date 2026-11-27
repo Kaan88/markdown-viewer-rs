@@ -4,7 +4,7 @@ members = ["bins/mdv-bench", "bins/mdv-app"]
 exclude = ["spikes", "tests/engine-fixture"]
 
 [workspace.package]
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 publish = false
 

@@ -5,8 +5,8 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-mdview-core = { package = "mdshared-md-core", git = "https://github.com/Kaan88/markdown-shared-rs", rev = "7fd559f" }
-mdview-render = { package = "mdshared-md-render", git = "https://github.com/Kaan88/markdown-shared-rs", rev = "7fd559f" }
+mdview-core = { package = "mdshared-md-core", git = "https://github.com/Kaan88/markdown-shared-rs", rev = "48eedb886610709fa7b6732fdeb5c2197de55d31" }
+mdview-render = { package = "mdshared-md-render", git = "https://github.com/Kaan88/markdown-shared-rs", rev = "48eedb886610709fa7b6732fdeb5c2197de55d31" }
 
 [dev-dependencies]
-mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "7fd559f" }
+mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "48eedb886610709fa7b6732fdeb5c2197de55d31" }

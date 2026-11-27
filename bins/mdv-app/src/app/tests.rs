@@ -1462,45 +1462,10 @@ fn a_behind_launch_claims_the_folder_and_only_an_ordinary_one_hands_over() {
     let dir = std::env::temp_dir().join(format!("mdview-admit-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let settings = dir.join("settings.ini");
-    // A window that would take a hand-over: a live listener on the port beside the settings, and
-    // the lock the single-instance check looks for. A forward that ran would therefore succeed,
-    // which is what a `--behind` launch must never do.
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::fs::write(mdview::single::port_file(&settings), port.to_string()).unwrap();
-    #[cfg(windows)]
-    let lock = {
-        use std::os::windows::fs::OpenOptionsExt;
-        // shared's `single::lock_file` is private: the lock is the file the single-instance check
-        // opens with no sharing, beside the settings.
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .share_mode(0)
-            .open(settings.with_file_name("instance.lock"))
-            .unwrap()
-    };
-    listener.set_nonblocking(true).unwrap();
-    let server = std::thread::spawn(move || {
-        use std::io::{BufRead, BufReader, Write};
-        // Long enough for a forward that should not happen to arrive and be answered.
-        let end = Instant::now() + Duration::from_millis(500);
-        while Instant::now() < end {
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    // Read the message up to its empty line before answering, as a listener does,
-                    // so the forward does not see a reset with bytes unread.
-                    let mut reader = BufReader::new(&stream);
-                    let lines = (&mut reader).lines().map_while(Result::ok);
-                    let _body: Vec<String> = lines.take_while(|l| !l.is_empty()).collect();
-                    let _ = (&stream).write_all(b"ok\n");
-                    return;
-                }
-                Err(_) => std::thread::sleep(Duration::from_millis(5)),
-            }
-        }
-    });
+    // A window that would take a hand-over: a real listener beside the settings, which proves
+    // itself as the toolkit's authenticated hand-over requires. A forward that ran would therefore
+    // succeed, which is what a `--behind` launch must never do.
+    let incoming = mdview::single::listen_requests_waking(&settings, || {}).unwrap();
     let mut args = Args {
         behind: true,
         ..Args::default()
@@ -1528,7 +1493,9 @@ fn a_behind_launch_claims_the_folder_and_only_an_ordinary_one_hands_over() {
         }
         Admission::Handed => panic!("a --behind run handed over"),
     }
-    server.join().unwrap();
+    // Long enough for a forward that should not have happened to arrive.
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(incoming.try_recv().is_err(), "the window was sent nothing");
     // A folder another window holds: no session, so neither its port file nor it is written.
     let out = admit(&args, Some(settings.clone()), |_, _, _| Claim::Busy);
     match out {
@@ -1546,8 +1513,7 @@ fn a_behind_launch_claims_the_folder_and_only_an_ordinary_one_hands_over() {
         Claim::Handed
     });
     assert!(matches!(out, Admission::Handed));
-    #[cfg(windows)]
-    drop(lock);
+    drop(incoming);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
