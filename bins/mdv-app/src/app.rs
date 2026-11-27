@@ -2423,6 +2423,7 @@ impl ApplicationHandler<Wake> for App {
                     self.ui.caret_on = true;
                     self.ui.tips.hide();
                     self.ui.card = None;
+                    self.end_held();
                 }
                 self.redraw();
             }

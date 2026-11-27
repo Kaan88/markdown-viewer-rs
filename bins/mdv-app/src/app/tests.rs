@@ -165,6 +165,49 @@ fn splitter_drag_resizes_within_limits() {
     assert_eq!(a.areas.files.unwrap().w, PANE_MAX);
 }
 
+/// winit sends no release when the window loses the mouse capture mid-drag (Alt+Tab on
+/// Windows): losing the focus lets the splitter go where it was, kept as a release keeps it, so
+/// the first plain move after coming back resizes nothing.
+#[test]
+fn losing_the_focus_ends_a_splitter_drag() {
+    let mut a = app(&["linked.md"]);
+    let w0 = a.areas.files.unwrap().w;
+    let s = rect(&a, Hit::Splitter(Side::Files));
+    a.pointer_moved(s.cx(), s.cy());
+    a.left_press();
+    a.pointer_moved(s.cx() + 50.0, s.cy());
+    a.end_held();
+    a.compose();
+    assert!(a.ui.drag.is_none());
+    assert_eq!(a.areas.files.unwrap().w, w0 + 50.0);
+    assert_eq!(a.ws.pane_widths().0, Some((w0 + 50.0) as u32));
+    a.pointer_moved(s.cx() + 150.0, s.cy());
+    a.compose();
+    assert_eq!(a.areas.files.unwrap().w, w0 + 50.0);
+}
+
+/// The same for a selection being dragged on the page: it stays as it was, and moving the
+/// pointer afterwards does not extend it.
+#[test]
+fn losing_the_focus_ends_a_selection_drag_on_the_page() {
+    let mut a = app(&["showcase.md"]);
+    let p = a.areas.page;
+    let (x, y) = (p.x + p.w * 0.3, p.y + 60.0);
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.pointer_moved(x + 40.0, y + 40.0);
+    a.compose();
+    let held = a.ws.selected_text();
+    assert!(held.is_some(), "the drag selected something");
+    a.end_held();
+    assert!(a.ui.drag.is_none());
+    assert!(!a.ws.is_pressing());
+    a.pointer_moved(x + 40.0, y + 200.0);
+    a.compose();
+    assert_eq!(a.ws.selected_text(), held);
+    assert!(a.ui.autoscroll_due.is_none());
+}
+
 #[test]
 fn find_box_types_searches_and_escape_clears() {
     let mut a = app(&["showcase.md"]);

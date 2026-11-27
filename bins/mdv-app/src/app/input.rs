@@ -543,6 +543,25 @@ impl App {
         }
     }
 
+    /// The window lost the focus: whatever the left button held is let go, and nothing acts.
+    /// winit sends no release when the window loses the mouse capture (on Windows, Alt+Tab or a
+    /// dialog during a drag), so without this the next plain move after coming back still
+    /// dragged. A pane keeps the width it was dragged to, as a release keeps it; a press on the
+    /// page or a slide follows no link; a pressed button is not clicked.
+    pub(super) fn end_held(&mut self) {
+        self.ui.autoscroll_due = None;
+        self.ui.pressed = None;
+        self.ws.pointer_cancel();
+        if let Some(show) = self.ui.present.as_mut() {
+            show.cancel_press();
+        }
+        if let Some(Drag::Splitter { .. }) = self.ui.drag.take() {
+            let panes = &self.ui.panes;
+            self.ws
+                .set_pane_widths(panes.files_w as u32, panes.outline_w as u32);
+        }
+    }
+
     pub(super) fn right_press(&mut self) {
         if self.presenting() || self.ui.zoom.is_some() {
             return;

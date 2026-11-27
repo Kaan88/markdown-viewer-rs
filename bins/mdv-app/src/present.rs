@@ -506,6 +506,12 @@ impl Show {
         self.press.is_some()
     }
 
+    /// The press is let go without a release (the window lost the focus with the button down):
+    /// nothing is followed or advanced, and a selection already dragged out stays.
+    pub fn cancel_press(&mut self) {
+        self.press = None;
+    }
+
     /// The left button came up.
     pub fn release(&mut self) -> Release {
         let Some(press) = self.press.take() else {
