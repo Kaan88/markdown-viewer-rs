@@ -1,6 +1,7 @@
 //! Pointer, wheel and keyboard input: turning winit events into hover, drags, clicks and keys.
 
 use super::*;
+use crate::textfield::FieldHit;
 
 impl App {
     // ---- pointer -------------------------------------------------------------------------------
@@ -245,11 +246,15 @@ impl App {
                 }
             }
             Drag::FindSelect => {
-                if let Some(frame) = self.hit_rect(Hit::Find) {
-                    let (area, _) = chrome::find_parts(frame, !self.ui.find.is_empty());
-                    let stops = self.stops();
-                    self.ui.find.drag(x - area.x, &stops);
-                    self.caret_reset();
+                if let Some(hit) = self.find_hit() {
+                    let now = Instant::now();
+                    let field = &mut self.ui.find;
+                    if self
+                        .find_pointer
+                        .pointer_move(field, &mut self.gfx, hit, (x, y), now)
+                    {
+                        self.caret_reset();
+                    }
                 }
             }
             Drag::Zoom { last } => {
@@ -415,6 +420,10 @@ impl App {
             self.ui.outline_focus = None;
         }
         let clicks = self.click_count(x, y);
+        // A press anywhere else ends the find box's run of clicks.
+        if hit != Hit::Find {
+            self.find_pointer.cancel();
+        }
         self.redraw();
         match hit {
             Hit::Backdrop => self.close_dialog(),
@@ -470,17 +479,22 @@ impl App {
             }
             Hit::Find => {
                 self.ui.find_focused = true;
-                let Some(frame) = self.hit_rect(Hit::Find) else {
+                let Some(hit) = self.find_hit() else {
                     return;
                 };
-                let (area, _) = chrome::find_parts(frame, !self.ui.find.is_empty());
-                let stops = self.stops();
-                if clicks == 2 {
-                    self.ui.find.select_word_at(x - area.x, &stops);
-                } else if clicks == 3 {
-                    self.ui.find.select_all();
-                } else {
-                    self.ui.find.press(x - area.x, &stops, self.mods.shift);
+                // The shared field's pointer counts the clicks (a word, then all of it) and
+                // extends with Shift. A press in the box around the text, on the magnifier or
+                // past the end, is taken at the nearest edge of the text, as before.
+                let r = hit.area;
+                let at = (
+                    x.clamp(r.x, (r.right() - 0.5).max(r.x)),
+                    y.clamp(r.y, (r.bottom() - 0.5).max(r.y)),
+                );
+                let field = &mut self.ui.find;
+                if self
+                    .find_pointer
+                    .press(field, &mut self.gfx, hit, at, self.mods, Instant::now())
+                {
                     self.ui.drag = Some(Drag::FindSelect);
                 }
                 self.caret_reset();
@@ -523,6 +537,9 @@ impl App {
                 let click = self.ws.pointer_release();
                 self.handle_click(click);
             }
+            if drag == Drag::FindSelect {
+                self.find_pointer.release();
+            }
             self.redraw();
             return;
         }
@@ -552,6 +569,7 @@ impl App {
         self.ui.autoscroll_due = None;
         self.ui.pressed = None;
         self.ws.pointer_cancel();
+        self.find_pointer.cancel();
         if let Some(show) = self.ui.present.as_mut() {
             show.cancel_press();
         }
@@ -596,6 +614,7 @@ impl App {
             }
             Some(Hit::Find | Hit::FindClear) => {
                 // The box takes the focus and keeps its selection, so Cut and Copy act on it.
+                self.find_pointer.cancel();
                 self.ui.find_focused = true;
                 self.caret_reset();
                 let find = &self.ui.find;
@@ -754,9 +773,30 @@ impl App {
 
     // ---- keyboard ------------------------------------------------------------------------------
 
-    pub(super) fn stops(&mut self) -> Vec<f32> {
-        let mut p = Painter::new(&mut self.screen, &mut self.gfx, self.scale);
-        p.caret_stops(Face::Ui, 13.0, self.ui.find.text())
+    /// Where the find box's text is drawn, as `chrome::draw_find` draws it: for its pointer.
+    pub(super) fn find_hit(&self) -> Option<FieldHit> {
+        let frame = self.hit_rect(Hit::Find)?;
+        let (area, _) = chrome::find_parts(frame, !self.ui.find.is_empty());
+        Some(FieldHit {
+            area,
+            face: Face::Ui,
+            size: 13.0,
+            scale: self.scale,
+        })
+    }
+
+    /// The find box's selection is held past one of its ends: its text scrolls on while the
+    /// pointer rests there. With the box gone the drag ends, so the timer stops.
+    pub(super) fn find_tick(&mut self, now: Instant) {
+        let Some(hit) = self.find_hit() else {
+            self.find_pointer.release();
+            return;
+        };
+        let field = &mut self.ui.find;
+        if self.find_pointer.tick(field, &mut self.gfx, hit, now) {
+            self.caret_reset();
+            self.wants_frame = true;
+        }
     }
 
     pub(super) fn caret_reset(&mut self) {

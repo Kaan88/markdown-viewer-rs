@@ -1448,6 +1448,15 @@ impl App {
                 at(d);
             }
         }
+        // The find box's selection held past one of its ends: its text scrolls on.
+        if let Some(due) = self.find_pointer.deadline() {
+            if now >= due {
+                self.find_tick(now);
+            }
+            if let Some(d) = self.find_pointer.deadline() {
+                at(d);
+            }
+        }
         if let Some(due) = self.size_save_due {
             if now >= due {
                 self.size_save_due = None;
