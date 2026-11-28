@@ -88,6 +88,9 @@ pub struct Args {
     pub present_overview: bool,
     /// `--present-select`: with `--present`, the text of the slide selected (for shots).
     pub present_select: bool,
+    /// `--field-menu`: the edit menu of the box that has the keys, the palette's or the list of
+    /// slides', opened as Shift+F10 opens it (for shots).
+    pub field_menu: bool,
     /// Load the first document's remote images without showing the bar (for checks).
     pub load_remote: bool,
     /// Show the update bar at this stage (`available`, `installing` or `installed`) with a
@@ -270,6 +273,7 @@ impl Args {
                 }
                 "--present-overview" => out.present_overview = true,
                 "--present-select" => out.present_select = true,
+                "--field-menu" => out.field_menu = true,
                 "--load-remote" => out.load_remote = true,
                 "--update-bar" => out.update_bar = value(&a),
                 "--zoom-diagram" => {
@@ -502,6 +506,8 @@ mod tests {
         assert_eq!(a.palette.as_deref(), Some(">zoom"));
         assert_eq!(parse("--outline-focus 3").outline_focus, Some(3));
         let p = parse("--present 2 --present-overview --present-select");
+        assert!(!p.field_menu);
+        assert!(parse("--palette x --field-menu").field_menu);
         assert!(p.present_overview && p.present_select && p.present == Some(2));
         assert_eq!(a.dialog, Some(ShotDialog::Settings));
         let a = parse("--dialog settings --settings-section reading");

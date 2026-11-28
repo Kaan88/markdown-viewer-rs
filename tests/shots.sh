@@ -179,6 +179,9 @@ rm -rf "$brief"
 # The command palette: tabs and recent files, commands by prefix, headings by prefix.
 shot palette-empty-light --light --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
 shot palette-empty-dark --dark --palette "" "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
+# The query box's edit menu (Shift+F10), over the card and past it.
+shot palette-field-menu-light --light --palette "heading" --field-menu "$fx/showcase.md"
+shot palette-field-menu-dark --dark --palette "heading" --field-menu "$fx/showcase.md"
 # 41 ms into its fade-in (about half there, a few px below its place); --motion-at starts the
 # clock before its first frame, which a still run would draw in place at once.
 shot palette-rising-light --light --palette "" --motion-at 41 "$fx/showcase.md" "$fx/tables.md" "$fx/math.md"
@@ -311,6 +314,8 @@ shot present-small-light --light --size 700x500 --present 2 "$fx/slides.md"
 shot present-large-dark --dark --size 1920x1080 --present 2 "$fx/slides.md"
 shot present-scale-150 --light --scale 1.5 --present 3 "$fx/slides.md"
 shot present-overview-dark --dark --present 3 --present-overview "$fx/slides.md"
+shot present-overview-menu-light --light --present 3 --present-overview --field-menu "$fx/slides.md"
+shot present-overview-menu-dark --dark --present 3 --present-overview --field-menu "$fx/slides.md"
 shot present-select-light --light --present 2 --present-select "$fx/slides.md"
 
 # The render gaps: markup in a wiki-link label and embeds, `<br clear>`, a table beside a float.

@@ -11,6 +11,23 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
+## Release 1.2.2 (2026-11-28)
+
+The toolkit pin moves from `48eedb8` to `84c0fc8`, with the toolkit's `FieldInput` (#68) and the
+cancel of a lost press (#69), on the owner's word: "merge the prs for both apps and make another
+point release", after the toolkit's PRs. Released with mdedit 1.6.2. In it: PR #10 (a lost focus
+ends every drag; the find box on `textfield::Pointer`) and PR #11 (CLAUDE.md, using the toolkit).
+The toolkit deprecates the palette's `press` and `pointer_move`, so the command palette
+(`app/modal.rs`) and the list of slides (`present.rs`) move to its pointer route
+(`pointer_press`, `pointer_motion`, `pointer_release`, `secondary_press`, `key_with_menu`, with
+`text_deadline` and `tick_text` in `App::timers`): their boxes take the run of clicks, the drag
+past an end and the edit menu (right press or Shift+F10). `App::end_held` also calls the palette's,
+the list's and Settings' `cancel`. While the palette's edit menu is open the whole window is under
+it in the overlay bounds: the toolkit gives no bounds for the menu. `Cargo.lock` gains no
+package. Tests: `app/toolkit_routes_tests.rs`. See
+[the 1.2.2 release notes](release-notes/1.2.2.md). Not verified: by hand in a real window; the
+Windows installer and the Linux and macOS packages by hand.
+
 ## Release 1.2.1 (2026-11-27)
 
 The toolkit pin moves from `7fd559f` to `48eedb8`, the toolkit's main after its full review
@@ -43,7 +60,7 @@ the Linux and macOS packages by hand, or a successful hosted Mac update.
 190 of 195 shots and in the 8 goldens. The owner approved it: "text rendering is great on other
 apps, mark it fine."
 
-All toolkit dependencies resolve at `48eedb8` (1.2.1; `7fd559f` in 1.2.0). The five local crates under `crates/`
+All toolkit dependencies resolve at `84c0fc8` (1.2.2; `48eedb8` in 1.2.1, `7fd559f` in 1.2.0). The five local crates under `crates/`
 (`core`, `render`, `engine`, `engine-proto`, `preview`) have been removed. The viewer
 and bench alias the shared Markdown crates; preview still enables `server` and speaks
 `MDVPREVIEW7`. Viewer-owned commands, files/session, reading positions, preview text,

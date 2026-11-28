@@ -3,10 +3,10 @@
 ; build-installer.ps1 builds the release exes first; this script reads them from target\release.
 ; Written for Inno Setup 6.3+/7. Compiled with Inno Setup 7.1.1 (2026-11-10 in the VM, 2026-11-11 on
 ; the Windows PC).
-; Build:  ISCC.exe /DAppVersion=1.2.1 mdview.iss   (see build-installer.ps1)
+; Build:  ISCC.exe /DAppVersion=1.2.2 mdview.iss   (see build-installer.ps1)
 
 #ifndef AppVersion
-  #define AppVersion "1.2.1"
+  #define AppVersion "1.2.2"
 #endif
 ; Numeric a.b.c.0 for the exe version resource (strips any -prerelease suffix).
 #define Dash Pos("-", AppVersion)

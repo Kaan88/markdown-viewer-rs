@@ -7,7 +7,7 @@
 //! and never above [`MAX_ZOOM`]. A slide shorter than the window is centred; a taller one scrolls.
 //! The window's page is not touched, so leaving shows the reader exactly where they were.
 
-use crate::gfx::{Face, Painter, Rect, mix};
+use crate::gfx::{Face, Gfx, Painter, Rect, mix};
 use crate::panes::{draw_scrollbar, scrollbar};
 use crate::theme::Palette;
 use mdshared_ui::keys::{KeyName, Mods};
@@ -663,37 +663,86 @@ impl Show {
 
     /// A key while the overview is open: Up and Down move, Enter goes to the slide, Escape closes
     /// the list, anything typed narrows it.
-    pub fn overview_key(&mut self, name: &KeyName, mods: Mods, typed: Option<&str>) -> Overview {
+    pub fn overview_key(
+        &mut self,
+        name: &KeyName,
+        mods: Mods,
+        typed: Option<&str>,
+        gfx: &mut Gfx,
+    ) -> Overview {
         let Some(list) = self.overview.as_mut() else {
             return Overview::Closed;
         };
-        let out = list.key(name, mods, typed);
+        // On the pointer route the box's edit menu takes the keys first; Shift+F10 opens it.
+        let out = list.key_with_menu(name, mods, typed, gfx);
         self.overview_outcome(out)
     }
 
-    /// The pointer moved, `x, y` in logical px.
-    pub fn overview_move(&mut self, x: f32, y: f32) {
+    /// The pointer moved, `x, y` in logical px: the box's drag goes on, its edit menu lights a
+    /// row, the list follows the pointer. The cursor the box wants there, if any.
+    pub fn overview_move(
+        &mut self,
+        x: f32,
+        y: f32,
+        gfx: &mut Gfx,
+    ) -> Option<mdshared_ui::cursor::Cursor> {
+        let list = self.overview.as_mut()?;
+        if list.pointer_motion((x, y), Instant::now(), gfx) {
+            self.overview_rev = self.overview_rev.wrapping_add(1);
+        }
+        list.cursor_at((x, y))
+    }
+
+    /// A press: the box counts its own clicks (a word, then all of it) and extends with Shift.
+    pub fn overview_press(&mut self, x: f32, y: f32, mods: Mods, gfx: &mut Gfx) -> Overview {
+        let Some(list) = self.overview.as_mut() else {
+            return Overview::Closed;
+        };
+        let out = list.pointer_press((x, y), mods, 1, Instant::now(), gfx);
+        self.overview_outcome(out)
+    }
+
+    pub fn overview_release(&mut self, x: f32, y: f32, gfx: &mut Gfx) -> Overview {
+        let Some(list) = self.overview.as_mut() else {
+            return Overview::Closed;
+        };
+        let out = list.pointer_release((x, y), Instant::now(), gfx);
+        self.overview_outcome(out)
+    }
+
+    /// A right press: on the box it opens the box's edit menu; outside the list it closes it.
+    pub fn overview_right_press(&mut self, x: f32, y: f32, gfx: &mut Gfx) -> Overview {
+        let Some(list) = self.overview.as_mut() else {
+            return Overview::Closed;
+        };
+        let out = list.secondary_press((x, y), Instant::now(), gfx);
+        self.overview_outcome(out)
+    }
+
+    /// When the box's drag held past an end, or its edit menu's submenu delay, is due.
+    pub fn overview_deadline(&self) -> Option<Instant> {
+        self.overview.as_ref()?.text_deadline()
+    }
+
+    /// Does what was due at `now`; true when the list is to be drawn again.
+    pub fn overview_tick(&mut self, now: Instant, gfx: &mut Gfx) -> bool {
+        let moved = self
+            .overview
+            .as_mut()
+            .is_some_and(|list| list.tick_text(now, gfx));
+        if moved {
+            self.overview_rev = self.overview_rev.wrapping_add(1);
+        }
+        moved
+    }
+
+    /// The window lost the press: a row pressed is not chosen, a drag in the box ends.
+    pub fn overview_cancel(&mut self) {
         if let Some(list) = self.overview.as_mut()
-            && list.pointer_move(x, y)
+            && list.cancel()
         {
             self.overview_rev = self.overview_rev.wrapping_add(1);
         }
-    }
-
-    pub fn overview_press(&mut self, x: f32, y: f32, mods: Mods) -> Overview {
-        let Some(list) = self.overview.as_mut() else {
-            return Overview::Closed;
-        };
-        let out = list.press(x, y, mods, 1);
-        self.overview_outcome(out)
-    }
-
-    pub fn overview_release(&mut self, x: f32, y: f32) -> Overview {
-        let Some(list) = self.overview.as_mut() else {
-            return Overview::Closed;
-        };
-        let out = list.release(x, y);
-        self.overview_outcome(out)
     }
 
     /// The wheel, `dy` logical px towards the end.
@@ -704,6 +753,18 @@ impl Show {
         {
             self.overview_rev = self.overview_rev.wrapping_add(1);
         }
+    }
+
+    /// The overview's box, for tests.
+    #[cfg(test)]
+    pub fn overview_field(&self) -> Option<Rect> {
+        Some(self.overview.as_ref()?.field_rect())
+    }
+
+    /// Whether the overview box's edit menu is open, for tests.
+    #[cfg(test)]
+    pub fn overview_menu_open(&self) -> bool {
+        self.overview.as_ref().is_some_and(|l| l.edit_menu_open())
     }
 
     /// The slide number (0-based) the overview's row is on, for tests.

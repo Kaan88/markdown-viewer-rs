@@ -107,7 +107,7 @@ impl App {
                 self.command(id);
                 return;
             }
-            let out = show.overview_key(&name, mods, typed);
+            let out = show.overview_key(&name, mods, typed, &mut self.gfx);
             self.overview_done(out, now);
             return;
         }
@@ -158,7 +158,7 @@ impl App {
     }
 
     /// What the list of slides did: a chosen slide shows the counter, a closed list is gone.
-    fn overview_done(&mut self, out: Overview, now: Instant) {
+    pub(super) fn overview_done(&mut self, out: Overview, now: Instant) {
         if out == Overview::Went
             && let Some(show) = self.ui.present.as_mut()
         {
@@ -175,7 +175,7 @@ impl App {
             return;
         };
         if show.overview_open() {
-            let out = show.overview_press(x, y, mods);
+            let out = show.overview_press(x, y, mods, &mut self.gfx);
             self.overview_done(out, Instant::now());
         } else {
             show.press_at(x * scale, y * scale);
@@ -190,7 +190,7 @@ impl App {
             return;
         };
         if show.overview_open() {
-            let out = show.overview_release(x, y);
+            let out = show.overview_release(x, y, &mut self.gfx);
             self.overview_done(out, now);
             return;
         }
@@ -289,8 +289,8 @@ impl App {
             return;
         };
         if show.overview_open() {
-            show.overview_move(x, y);
-            self.set_cursor(CursorIcon::Default);
+            let cursor = show.overview_move(x, y, &mut self.gfx).map(|c| c.icon());
+            self.set_cursor(cursor.unwrap_or(CursorIcon::Default));
             self.redraw();
             return;
         }

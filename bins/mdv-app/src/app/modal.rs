@@ -164,7 +164,9 @@ impl App {
         let mods = self.mods;
         let opener = keys::command_for(&name, mods);
         if let Some(p) = self.ui.palette.as_mut() {
-            match p.palette.key(&name, mods, typed) {
+            // On the pointer route the query box's edit menu takes the keys first, and Shift+F10
+            // opens it at the caret.
+            match p.palette.key_with_menu(&name, mods, typed, &mut self.gfx) {
                 Pick::Unused => {
                     if opener == Some(C::CommandPalette) {
                         self.close_palette();
@@ -186,13 +188,19 @@ impl App {
     }
 
     pub(super) fn modal_pointer(&mut self, x: f32, y: f32) {
-        let moved = match (self.ui.palette.as_mut(), self.ui.settings.as_mut()) {
-            (Some(p), _) => p.palette.pointer_move(x, y),
-            (_, Some(f)) => f.pointer_move(x, y),
-            _ => false,
+        let now = Instant::now();
+        let (moved, cursor) = match (self.ui.palette.as_mut(), self.ui.settings.as_mut()) {
+            // The query box's drag goes on (its text scrolls past an end), and its edit menu
+            // lights a row.
+            (Some(p), _) => (
+                p.palette.pointer_motion((x, y), now, &mut self.gfx),
+                p.palette.cursor_at((x, y)).map(|c| c.icon()),
+            ),
+            (_, Some(f)) => (f.pointer_move(x, y), None),
+            _ => (false, None),
         };
         let edge = self.edge_at(x, y).map(CursorIcon::from);
-        self.set_cursor(edge.unwrap_or(CursorIcon::Default));
+        self.set_cursor(cursor.or(edge).unwrap_or(CursorIcon::Default));
         if moved {
             self.modal_changed();
         }
@@ -202,7 +210,11 @@ impl App {
         let (x, y) = self.ui.mouse;
         let (mods, clicks) = (self.mods, clicks.min(2) as u8);
         if let Some(p) = self.ui.palette.as_mut() {
-            let out = p.palette.press(x, y, mods, clicks);
+            // The query box counts its own clicks (a word, then all of it), takes a press in
+            // its padding or on the magnifier, and extends with Shift; `clicks` goes to the rows.
+            let out = p
+                .palette
+                .pointer_press((x, y), mods, clicks, Instant::now(), &mut self.gfx);
             self.palette_outcome(out);
         } else if let Some(f) = self.ui.settings.as_mut() {
             let out = f.press(x, y, mods, clicks);
@@ -214,11 +226,45 @@ impl App {
     pub(super) fn modal_release(&mut self) {
         let (x, y) = self.ui.mouse;
         if let Some(p) = self.ui.palette.as_mut() {
-            let out = p.palette.release(x, y);
+            let out = p
+                .palette
+                .pointer_release((x, y), Instant::now(), &mut self.gfx);
             self.palette_outcome(out);
         } else if let Some(f) = self.ui.settings.as_mut() {
             let out = f.release(x, y);
             self.settings_outcome(out);
+        }
+    }
+
+    /// A right press on the palette: on the query box it opens the box's edit menu; outside
+    /// the card it closes the palette, as a left press does.
+    pub(super) fn palette_right_press(&mut self) {
+        let (x, y) = self.ui.mouse;
+        if let Some(p) = self.ui.palette.as_mut() {
+            let out = p
+                .palette
+                .secondary_press((x, y), Instant::now(), &mut self.gfx);
+            self.palette_outcome(out);
+        }
+        self.caret_reset();
+    }
+
+    /// The query box's drag held past one of its ends scrolls its text on, and its edit menu's
+    /// submenu delay ends: when that is due.
+    pub(super) fn palette_text_deadline(&self) -> Option<Instant> {
+        self.ui.palette.as_ref()?.palette.text_deadline()
+    }
+
+    pub(super) fn palette_text_tick(&mut self, now: Instant) {
+        let moved = self
+            .ui
+            .palette
+            .as_mut()
+            .is_some_and(|p| p.palette.tick_text(now, &mut self.gfx));
+        if moved {
+            self.caret_reset();
+            self.modal_changed();
+            self.wants_frame = true;
         }
     }
 
@@ -297,7 +343,7 @@ impl App {
         self.redraw();
     }
 
-    fn settings_outcome(&mut self, out: Form) {
+    pub(super) fn settings_outcome(&mut self, out: Form) {
         match out {
             Form::None | Form::Unused => {}
             Form::Redraw => self.modal_changed(),

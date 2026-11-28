@@ -572,6 +572,18 @@ impl App {
         self.find_pointer.cancel();
         if let Some(show) = self.ui.present.as_mut() {
             show.cancel_press();
+            show.overview_cancel();
+        }
+        // The toolkit's own screens: a press on them chooses nothing, and a drag in their text
+        // fields ends with the selection kept.
+        if let Some(p) = self.ui.palette.as_mut()
+            && p.palette.cancel()
+        {
+            self.modal_changed();
+        }
+        if let Some(f) = self.ui.settings.as_mut() {
+            let out = f.cancel();
+            self.settings_outcome(out);
         }
         if let Some(Drag::Splitter { .. }) = self.ui.drag.take() {
             let panes = &self.ui.panes;
@@ -581,12 +593,25 @@ impl App {
     }
 
     pub(super) fn right_press(&mut self) {
+        // The list of slides: its box's edit menu.
+        if let Some(show) = self.ui.present.as_mut()
+            && show.overview_open()
+        {
+            let (x, y) = self.ui.mouse;
+            let out = show.overview_right_press(x, y, &mut self.gfx);
+            self.overview_done(out, Instant::now());
+            return;
+        }
         if self.presenting() || self.ui.zoom.is_some() {
             return;
         }
         let (x, y) = self.ui.mouse;
         self.ui.tips.hide();
         self.ui.card = None;
+        if self.ui.palette.is_some() {
+            self.palette_right_press();
+            return;
+        }
         if self.ui.dialog.is_some() || self.ui.modal() {
             return;
         }

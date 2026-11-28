@@ -3716,11 +3716,11 @@ fn the_overview_is_drawn_over_the_slide_and_a_click_on_a_row_goes_there() {
     assert_ne!(plain, a.screen.pixels, "the list is on screen");
     // The pointer over the fourth row selects it, a click chooses it.
     let row = {
-        let show = a.ui.present.as_mut().unwrap();
+        let (show, gfx) = (a.ui.present.as_mut().unwrap(), &mut a.gfx);
         (100..700)
             .step_by(4)
             .find_map(|y| {
-                show.overview_move(640.0, y as f32);
+                show.overview_move(640.0, y as f32, gfx);
                 (show.overview_selected() == Some(3)).then_some(y as f32)
             })
             .expect("a row for slide 4")

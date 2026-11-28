@@ -68,6 +68,8 @@ mod motion_tests;
 mod slides;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod toolkit_routes_tests;
 
 /// Over a vertical scrollbar at the window's right edge the east resize band is only this wide
 /// (px), so the thumb, which starts 3 px in, can be grabbed.
@@ -1201,6 +1203,11 @@ impl App {
             // lays it out again. Its presence bounds are the card, shadow and drop as one.
             p.palette
                 .layout(Rect::new(0.0, 0.0, w, h), crate::ui::TITLE_H);
+            // The query box's edit menu can reach past the card, and the toolkit gives no
+            // bounds for it: while it is open, everything is under the palette.
+            if p.palette.edit_menu_open() {
+                bounds.push(Rect::new(0.0, 0.0, w, h));
+            }
             bounds.push(p.palette.presence_bounds());
         }
         let osig = sig((
@@ -2689,6 +2696,17 @@ fn shot(mut app: App, path: &Path) -> i32 {
             }
             p.poll_folder();
         }
+    }
+    // `--field-menu`: the edit menu of the box that has the keys (the palette's, or the list of
+    // slides'), opened by Shift+F10 as a person would, on the box as last drawn.
+    if app.args.field_menu {
+        app.compose();
+        app.mods = Mods {
+            shift: true,
+            ..Mods::default()
+        };
+        app.key_named(KeyName::F(10), None);
+        app.mods = Mods::default();
     }
     // A notice bar or a palette part of the way into its own entrance: the clock must start
     // before its first frame, since a still frame would put it in place at once.

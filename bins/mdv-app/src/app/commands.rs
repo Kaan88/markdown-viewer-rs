@@ -1448,6 +1448,28 @@ impl App {
                 at(d);
             }
         }
+        // The palette's query box and the list of slides' box: a drag held past an end, or the
+        // edit menu's submenu delay.
+        if let Some(due) = self.palette_text_deadline() {
+            if now >= due {
+                self.palette_text_tick(now);
+            }
+            if let Some(d) = self.palette_text_deadline() {
+                at(d);
+            }
+        }
+        let overview_due = self.ui.present.as_ref().and_then(|s| s.overview_deadline());
+        if let Some(due) = overview_due {
+            if now >= due
+                && let Some(show) = self.ui.present.as_mut()
+                && show.overview_tick(now, &mut self.gfx)
+            {
+                self.wants_frame = true;
+            }
+            if let Some(d) = self.ui.present.as_ref().and_then(|s| s.overview_deadline()) {
+                at(d);
+            }
+        }
         // The find box's selection held past one of its ends: its text scrolls on.
         if let Some(due) = self.find_pointer.deadline() {
             if now >= due {
