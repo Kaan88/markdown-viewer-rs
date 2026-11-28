@@ -40,6 +40,7 @@ fn click(app: &mut App, hit: Hit) {
     app.left_release();
     // Clicks in tests are far apart in intent: never count them as a double click.
     app.ui.last_press = None;
+    app.find_pointer.cancel();
     app.compose();
 }
 
@@ -163,6 +164,134 @@ fn splitter_drag_resizes_within_limits() {
     a.left_release();
     a.compose();
     assert_eq!(a.areas.files.unwrap().w, PANE_MAX);
+}
+
+/// winit sends no release when the window loses the mouse capture mid-drag (Alt+Tab on
+/// Windows): losing the focus lets the splitter go where it was, kept as a release keeps it, so
+/// the first plain move after coming back resizes nothing.
+#[test]
+fn losing_the_focus_ends_a_splitter_drag() {
+    let mut a = app(&["linked.md"]);
+    let w0 = a.areas.files.unwrap().w;
+    let s = rect(&a, Hit::Splitter(Side::Files));
+    a.pointer_moved(s.cx(), s.cy());
+    a.left_press();
+    a.pointer_moved(s.cx() + 50.0, s.cy());
+    a.end_held();
+    a.compose();
+    assert!(a.ui.drag.is_none());
+    assert_eq!(a.areas.files.unwrap().w, w0 + 50.0);
+    assert_eq!(a.ws.pane_widths().0, Some((w0 + 50.0) as u32));
+    a.pointer_moved(s.cx() + 150.0, s.cy());
+    a.compose();
+    assert_eq!(a.areas.files.unwrap().w, w0 + 50.0);
+}
+
+/// The same for a selection being dragged on the page: it stays as it was, and moving the
+/// pointer afterwards does not extend it.
+#[test]
+fn losing_the_focus_ends_a_selection_drag_on_the_page() {
+    let mut a = app(&["showcase.md"]);
+    let p = a.areas.page;
+    let (x, y) = (p.x + p.w * 0.3, p.y + 60.0);
+    a.pointer_moved(x, y);
+    a.left_press();
+    a.pointer_moved(x + 40.0, y + 40.0);
+    a.compose();
+    let held = a.ws.selected_text();
+    assert!(held.is_some(), "the drag selected something");
+    a.end_held();
+    assert!(a.ui.drag.is_none());
+    assert!(!a.ws.is_pressing());
+    a.pointer_moved(x + 40.0, y + 200.0);
+    a.compose();
+    assert_eq!(a.ws.selected_text(), held);
+    assert!(a.ui.autoscroll_due.is_none());
+}
+
+/// Logical x of the caret stop before character `i` of the find box's text.
+fn find_stop(a: &mut App, i: usize) -> f32 {
+    let area = a.find_hit().expect("the find box").area;
+    let text = a.ui.find.text().to_string();
+    let mut p = Painter::new(&mut a.screen, &mut a.gfx, a.scale);
+    area.x + p.caret_stops(Face::Ui, 13.0, &text)[i]
+}
+
+/// A double click in the find box takes a word and a triple click all of it; a press on the
+/// magnifier or in the box's border, beside the text, is taken at the nearest end of the text;
+/// Shift extends from the caret.
+#[test]
+fn the_find_box_takes_multi_clicks_shift_and_presses_beside_its_text() {
+    let mut a = app(&["linked.md"]);
+    click(&mut a, Hit::Find);
+    a.ui.find.set_text("alpha beta");
+    a.compose();
+    let r = rect(&a, Hit::Find);
+    let in_beta = (find_stop(&mut a, 7) + find_stop(&mut a, 8)) / 2.0;
+    a.pointer_moved(in_beta, r.cy());
+    a.left_press();
+    a.left_release();
+    assert!(!a.ui.find.has_selection());
+    a.left_press();
+    a.left_release();
+    assert_eq!(a.ui.find.selected_text(), "beta");
+    a.left_press();
+    a.left_release();
+    assert_eq!(a.ui.find.selected_text(), "alpha beta");
+    // The magnifier, left of the text: the caret goes to the start.
+    click(&mut a, Hit::Find);
+    a.pointer_moved(r.x + 12.0, r.cy());
+    a.left_press();
+    a.left_release();
+    assert_eq!(a.ui.find.caret(), (0, 0));
+    // Shift and a press in the border over "beta": from the start to there.
+    a.find_pointer.cancel();
+    a.mods.shift = true;
+    let x = find_stop(&mut a, 6);
+    a.pointer_moved(x, r.y + 0.5);
+    a.left_press();
+    a.left_release();
+    a.mods.shift = false;
+    assert_eq!(a.ui.find.selected_text(), "alpha ");
+}
+
+/// The find box's selection dragged past its right end goes on with the text, a step each time
+/// the timer comes while the pointer rests there, until the end of the text is selected; letting
+/// go stops the timer.
+#[test]
+fn a_selection_dragged_past_the_find_boxs_end_scrolls_on_at_rest() {
+    let mut a = app(&["linked.md"]);
+    click(&mut a, Hit::Find);
+    let long = "word ".repeat(60);
+    a.ui.find.set_text(long.trim_end());
+    key(&mut a, KeyName::Home, None);
+    let r = rect(&a, Hit::Find);
+    let x = find_stop(&mut a, 0);
+    a.pointer_moved(x, r.cy());
+    a.left_press();
+    assert_eq!(a.ui.drag, Some(Drag::FindSelect));
+    a.pointer_moved(r.right() + 30.0, r.cy());
+    assert!(a.ui.find.selected_text().len() < long.trim_end().len());
+    // The loop is woken for it.
+    let first = a
+        .find_pointer
+        .deadline()
+        .expect("the scroll waits for its timer");
+    let before = first - Duration::from_millis(1);
+    assert!(a.timers(before).is_some_and(|t| t <= first));
+    let mut now = before;
+    let mut steps = 0;
+    while let Some(due) = a.find_pointer.deadline() {
+        now = now.max(due);
+        a.timers(now);
+        steps += 1;
+        assert!(steps < 2000, "the scroll ends");
+    }
+    assert!(steps > 0, "the timer scrolled the text");
+    assert_eq!(a.ui.find.selected_text(), long.trim_end());
+    a.left_release();
+    assert!(a.ui.drag.is_none());
+    assert!(a.find_pointer.deadline().is_none());
 }
 
 #[test]

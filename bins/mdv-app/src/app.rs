@@ -280,6 +280,8 @@ struct App {
     control_click: bool,
     /// A trackpad pinch on its way to the next zoom step.
     pinch: mdshared_ui::window::PinchZoom,
+    /// The mouse in the find box: clicks, drags and the scroll past its ends (`find_hit`).
+    find_pointer: crate::textfield::Pointer,
     cursor: CursorIcon,
     last_title: String,
     /// The active file, to follow it in the Files tree when it changes.
@@ -455,6 +457,10 @@ impl App {
             mods: Mods::default(),
             control_click: false,
             pinch: Default::default(),
+            find_pointer: crate::textfield::Pointer::new(
+                platform::double_click_time(),
+                (CLICK_SLOP, CLICK_SLOP),
+            ),
             cursor: CursorIcon::Default,
             last_title: String::new(),
             last_active: None,
@@ -2423,6 +2429,7 @@ impl ApplicationHandler<Wake> for App {
                     self.ui.caret_on = true;
                     self.ui.tips.hide();
                     self.ui.card = None;
+                    self.end_held();
                 }
                 self.redraw();
             }
