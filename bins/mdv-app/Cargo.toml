@@ -20,7 +20,7 @@ mdshared-fetch = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "
 mdshared-app = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "84c0fc8ffe66d7b083a33d488d3f5905bf84e3b1" }
 mdshared-ui = { git = "https://github.com/Kaan88/markdown-shared-rs", rev = "84c0fc8ffe66d7b083a33d488d3f5905bf84e3b1", features = ["client-margin"] }
 pulldown-cmark = { version = "=0.13.6", default-features = false }
-parley = "=0.12.0"
+parley = "=0.13.0"
 # Views softbuffer's u32 pixels as bytes, so presenting is a row memcpy.
 bytemuck = "1.25"
 
