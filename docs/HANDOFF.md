@@ -11,7 +11,12 @@ that last changed this file is the state it describes; check `git log --oneline 
 
 ---
 
-## Release 1.2.2 (2026-11-28)
+## Release 1.2.2 (2026-11-28, released)
+
+mdview 1.2.2 is released: tag `v1.2.2` at `cf22524`, `ci` green on that commit, the release
+workflow passed, and it is the latest release on GitHub; released with mdedit 1.6.2 on the
+owner's word ("make a release"). Measured against 1.2.1 on the published zips: no change
+(`docs/measurements/2026-11-28-1.2.2-against-1.2.1.md`).
 
 The toolkit pin moves from `48eedb8` to `84c0fc8`, with the toolkit's `FieldInput` (#68) and the
 cancel of a lost press (#69), on the owner's word: "merge the prs for both apps and make another
